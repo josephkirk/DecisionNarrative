@@ -1,0 +1,35 @@
+{
+  "completeTurnWithNpcSimulation": {
+    "warmMaxMs": 3.4275,
+    "warmP50Ms": 3.1382,
+    "warmP95Ms": 3.3154
+  },
+  "engine": "storylet-engine",
+  "host": {
+    "arch": "x86_64",
+    "availableParallelism": 32,
+    "os": "windows",
+    "processorIdentifier": "AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD"
+  },
+  "mode": "release",
+  "notes": [
+    "Measures deterministic eligibility, role binding, scoring, and sorting; no encoder or trained ranker is included.",
+    "Complete-turn measurement includes full candidate evaluation, one player wait, and all configured NPC rule evaluations/actions.",
+    "Measure encoder and trained-ranker performance separately on the selected model hardware; this harness reports CPU-side Rust runtime costs."
+  ],
+  "schemaVersion": 1,
+  "selection": {
+    "coldMs": 1.8887,
+    "warmMaxMs": 1.9543,
+    "warmP50Ms": 1.6804999999999999,
+    "warmP95Ms": 1.8393000000000002
+  },
+  "workload": {
+    "iterations": 100,
+    "locations": 20,
+    "npcActors": 100,
+    "npcRulesPerTurn": 100,
+    "storage": "in-memory",
+    "storyletDefinitions": 10000
+  }
+}

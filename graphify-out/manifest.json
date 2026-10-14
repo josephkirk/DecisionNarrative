@@ -1,0 +1,2258 @@
+{
+  "package.json": {
+    "mtime": 1791943013.0587883,
+    "seen": 1791943059.4401224,
+    "ast_hash": "88cfc3047a6bcafe4b077ed5de4611f3",
+    "semantic_hash": ""
+  },
+  "tsconfig.json": {
+    "mtime": 1791925119.6094904,
+    "seen": 1791925145.8064046,
+    "ast_hash": "d5d429d3b013d9193979f376825bac6e",
+    "semantic_hash": ""
+  },
+  ".agents/skills/story-maintenance/scripts/package.json": {
+    "mtime": 1791818808.3205516,
+    "seen": 1791916918.1486027,
+    "ast_hash": "d0707362e90f00edd12435e9d3b9d71c",
+    "semantic_hash": ""
+  },
+  ".agents/skills/story-maintenance/scripts/story.js": {
+    "mtime": 1791818808.3245506,
+    "seen": 1791916918.1486068,
+    "ast_hash": "e21cc54fb49d9ccf92e6d3a1df91f391",
+    "semantic_hash": ""
+  },
+  ".claude/skills/story-maintenance/scripts/package.json": {
+    "mtime": 1791818808.3205516,
+    "seen": 1791916918.1486087,
+    "ast_hash": "d0707362e90f00edd12435e9d3b9d71c",
+    "semantic_hash": ""
+  },
+  ".claude/skills/story-maintenance/scripts/story.js": {
+    "mtime": 1791818808.3245506,
+    "seen": 1791916918.1486106,
+    "ast_hash": "e21cc54fb49d9ccf92e6d3a1df91f391",
+    "semantic_hash": ""
+  },
+  "autoresearch.sh": {
+    "mtime": 1791850903.7833192,
+    "seen": 1791916918.148612,
+    "ast_hash": "04e9c1806997d6c028d30967dc736fce",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/Cargo.toml": {
+    "mtime": 1791925558.908711,
+    "seen": 1791925687.6192348,
+    "ast_hash": "509cd3e40f3e69286e7c28d771cd2036",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/examples/native_host.c": {
+    "mtime": 1791860101.6411636,
+    "seen": 1791916918.1486192,
+    "ast_hash": "a77ccf43cd71850439b31662c3f7ba2f",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/include/storylet_engine.h": {
+    "mtime": 1791925040.0466065,
+    "seen": 1791925145.8063118,
+    "ast_hash": "100800c45e8eb748c46d676013353725",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/src/bin/host.rs": {
+    "mtime": 1791919496.9323883,
+    "seen": 1791919756.9545922,
+    "ast_hash": "4df3a1df284192bcf2c137d1de7fd72a",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/src/ffi.rs": {
+    "mtime": 1791925004.842916,
+    "seen": 1791925145.8063145,
+    "ast_hash": "9556d87223a63ad38b075896e3d71d59",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/src/lib.rs": {
+    "mtime": 1791922216.7451174,
+    "seen": 1791922967.8159902,
+    "ast_hash": "b9c4d80ad1c0c2bc7a75bdb830044f21",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/src/project.rs": {
+    "mtime": 1791915596.5225568,
+    "seen": 1791916918.148626,
+    "ast_hash": "67161c9d08fc1df249124b5e80bf21dd",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/src/runtime.rs": {
+    "mtime": 1791927233.655195,
+    "seen": 1791943059.4400897,
+    "ast_hash": "a925c4138c3c409896be37529b63e1f5",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/src/simulation.rs": {
+    "mtime": 1791915345.9323585,
+    "seen": 1791916918.1486282,
+    "ast_hash": "27ade077071e3ea7b23f87f18a3b7854",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/src/storylets.rs": {
+    "mtime": 1791917007.455565,
+    "seen": 1791917652.6928196,
+    "ast_hash": "33cdb48b4aec7c809621e1f6baa4c4ee",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/tests/autonomous_simulation.rs": {
+    "mtime": 1791915345.9393592,
+    "seen": 1791916918.1486309,
+    "ast_hash": "e54be4f837c24bfa3217d7658a450090",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/tests/ffi_abi.rs": {
+    "mtime": 1791925004.860916,
+    "seen": 1791925145.8063216,
+    "ast_hash": "99908566824114c5e824cd297accffaf",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/tests/host_protocol.rs": {
+    "mtime": 1791917877.0696995,
+    "seen": 1791918128.401778,
+    "ast_hash": "bc724483b208f71aabdb4bebfb74c957",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/tests/project_bundle.rs": {
+    "mtime": 1791859986.5953772,
+    "seen": 1791916918.148634,
+    "ast_hash": "0a0edb38cad0ef9dd534680e6d434e32",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/tests/runtime_session.rs": {
+    "mtime": 1791927233.6731935,
+    "seen": 1791943059.4400976,
+    "ast_hash": "5a569923acb92cc437d42ff30c9d19a0",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/tests/storylet_lifecycle.rs": {
+    "mtime": 1791916982.2008605,
+    "seen": 1791917652.6928272,
+    "ast_hash": "79fd3dfbc4621a5eb89b62b5e93a7ca7",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/tests/storylet_selection.rs": {
+    "mtime": 1791945067.276852,
+    "seen": 1791945795.2434652,
+    "ast_hash": "5a3f93cdb5fb3ddd5b9615843142297f",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/tests/world_transactions.rs": {
+    "mtime": 1791945279.5043585,
+    "seen": 1791945795.2434664,
+    "ast_hash": "c81234b98036401d942408818914ce73",
+    "semantic_hash": ""
+  },
+  "scripts/build.ts": {
+    "mtime": 1791921704.2786744,
+    "seen": 1791922967.8160205,
+    "ast_hash": "6f3c688005ad520ccf5dbc1bff571c7c",
+    "semantic_hash": ""
+  },
+  "skills-lock.json": {
+    "mtime": 1791818835.90354,
+    "seen": 1791916918.148647,
+    "ast_hash": "4013b68f6f10697e53d90835aa1b15ce",
+    "semantic_hash": ""
+  },
+  "src-tauri/Cargo.toml": {
+    "mtime": 1791820454.9741218,
+    "seen": 1791916918.1486483,
+    "ast_hash": "33ae915b3e73c8bcbb3e31a85dd69cb5",
+    "semantic_hash": ""
+  },
+  "src-tauri/build.rs": {
+    "mtime": 1791820454.9741218,
+    "seen": 1791916918.1486495,
+    "ast_hash": "8e6c89bd412b755ef41bd9bb191f2e31",
+    "semantic_hash": ""
+  },
+  "src-tauri/capabilities/default.json": {
+    "mtime": 1791820454.9751215,
+    "seen": 1791916918.1486504,
+    "ast_hash": "dcc896286d4c8d8fe9df24827d50d027",
+    "semantic_hash": ""
+  },
+  "src-tauri/src/commands.rs": {
+    "mtime": 1791820559.1332834,
+    "seen": 1791916918.1486516,
+    "ast_hash": "80383bcecd75b1e246bed383c6a0758b",
+    "semantic_hash": ""
+  },
+  "src-tauri/src/lib.rs": {
+    "mtime": 1791820566.1930637,
+    "seen": 1791916918.1486537,
+    "ast_hash": "7dad2384815e3e6c352d0544162a0b1a",
+    "semantic_hash": ""
+  },
+  "src-tauri/src/main.rs": {
+    "mtime": 1791820454.9873767,
+    "seen": 1791916918.1486547,
+    "ast_hash": "a8e64e9b6bd150703cbc12bc0d188f24",
+    "semantic_hash": ""
+  },
+  "src-tauri/tauri.conf.json": {
+    "mtime": 1791943013.0593095,
+    "seen": 1791943059.4401326,
+    "ast_hash": "5ad6f1a43917d5f9e36b49eb221d54c1",
+    "semantic_hash": ""
+  },
+  "src/agents/UnslopStoryletPipeline.ts": {
+    "mtime": 1791925916.026892,
+    "seen": 1791925964.467102,
+    "ast_hash": "c47c7204fda715d5ad78ce73b9db25f4",
+    "semantic_hash": ""
+  },
+  "src/db/repository.ts": {
+    "mtime": 1791922019.3807921,
+    "seen": 1791922967.8160522,
+    "ast_hash": "45392114c846fe53ba39c0b8258c68db",
+    "semantic_hash": ""
+  },
+  "src/db/schema.ts": {
+    "mtime": 1791922019.3807921,
+    "seen": 1791922967.8160539,
+    "ast_hash": "6fe1c743466d0cd4ee354948527e3f87",
+    "semantic_hash": ""
+  },
+  "src/engine/RustRuntimeClient.ts": {
+    "mtime": 1791927179.5740972,
+    "seen": 1791943059.4401405,
+    "ast_hash": "b4819d0231132b35cd2e2fc373b889d0",
+    "semantic_hash": ""
+  },
+  "src/web/client.ts": {
+    "mtime": 1791921701.5791814,
+    "seen": 1791922967.8160832,
+    "ast_hash": "3c811df115f3f5155c268bd9e03ca50f",
+    "semantic_hash": ""
+  },
+  "src/web/designer.ts": {
+    "mtime": 1791926754.6446786,
+    "seen": 1791926810.323662,
+    "ast_hash": "cfa2ad61d5e9edfa7274dea5cacf19bf",
+    "semantic_hash": ""
+  },
+  "src/web/playtestApi.ts": {
+    "mtime": 1791925460.4923573,
+    "seen": 1791925484.9794335,
+    "ast_hash": "dae9205bca4c065167e9015f57d9ca1c",
+    "semantic_hash": ""
+  },
+  "src/web/server.ts": {
+    "mtime": 1791924682.366169,
+    "seen": 1791924731.3650074,
+    "ast_hash": "d8a37a39feda1051a8c3f67381a79c31",
+    "semantic_hash": ""
+  },
+  "src/web/workspaceProject.ts": {
+    "mtime": 1791920610.5892017,
+    "seen": 1791921106.4306588,
+    "ast_hash": "8091a3ba82dd58c2ffc2ff099d4afd39",
+    "semantic_hash": ""
+  },
+  "tests/web/playtest-api.test.ts": {
+    "mtime": 1791927255.8439922,
+    "seen": 1791943059.4401515,
+    "ast_hash": "5760f143154f95dd520325ed29f31d9b",
+    "semantic_hash": ""
+  },
+  "tests/web/rust-runtime-client.test.ts": {
+    "mtime": 1791924114.2927997,
+    "seen": 1791924150.849234,
+    "ast_hash": "f3800475b4f122da9c2ac3bf6f43e9a9",
+    "semantic_hash": ""
+  },
+  "tests/web/workspace-project.test.ts": {
+    "mtime": 1791920024.4079268,
+    "seen": 1791920130.1254199,
+    "ast_hash": "62d5315704f3a7a2e254195e740b3a99",
+    "semantic_hash": ""
+  },
+  ".agents/skills/adaptation/SKILL.md": {
+    "mtime": 1791818808.275459,
+    "seen": 1791916918.1487017,
+    "ast_hash": "b2364858d844ba622026e314b4af1e07",
+    "semantic_hash": ""
+  },
+  ".agents/skills/adaptation/references/audiobook.md": {
+    "mtime": 1791818808.275459,
+    "seen": 1791916918.1487026,
+    "ast_hash": "a28e705352b60335bdda88788672e1ad",
+    "semantic_hash": ""
+  },
+  ".agents/skills/adaptation/references/comics-script.md": {
+    "mtime": 1791818808.2764592,
+    "seen": 1791916918.148704,
+    "ast_hash": "a4c8c670a0a718389756e3c5ba382716",
+    "semantic_hash": ""
+  },
+  ".agents/skills/adaptation/references/fountain.md": {
+    "mtime": 1791818808.2764592,
+    "seen": 1791916918.1487052,
+    "ast_hash": "6bfc4c6dc61f26b5ea001b1dcdf032dc",
+    "semantic_hash": ""
+  },
+  ".agents/skills/adaptation/references/interactive-fiction.md": {
+    "mtime": 1791818808.2774591,
+    "seen": 1791916918.1487062,
+    "ast_hash": "cc8d3131d10ef7d6feac38b5b49c485a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/adaptation/references/picture-book.md": {
+    "mtime": 1791818808.2774591,
+    "seen": 1791916918.1487074,
+    "ast_hash": "a4f75f1d10874b8499a4ae15d67c0a2e",
+    "semantic_hash": ""
+  },
+  ".agents/skills/adaptation/references/translation.md": {
+    "mtime": 1791818808.2774591,
+    "seen": 1791916918.148708,
+    "ast_hash": "7e9b81bbb21717247488523b53d808cf",
+    "semantic_hash": ""
+  },
+  ".agents/skills/chapter-writing/SKILL.md": {
+    "mtime": 1791818808.2784586,
+    "seen": 1791916918.148709,
+    "ast_hash": "09d856427fb87b37281c679502f0bda7",
+    "semantic_hash": ""
+  },
+  ".agents/skills/chapter-writing/references/chapter-template.md": {
+    "mtime": 1791818808.2784586,
+    "seen": 1791916918.1487105,
+    "ast_hash": "39c8265a89953e13b41c6b0b089fc616",
+    "semantic_hash": ""
+  },
+  ".agents/skills/chapter-writing/references/scene-template.md": {
+    "mtime": 1791818808.2784586,
+    "seen": 1791916918.1487114,
+    "ast_hash": "c697e965da38afa1c0e0a2c532bf5faa",
+    "semantic_hash": ""
+  },
+  ".agents/skills/chapter-writing/references/writing-guidelines.md": {
+    "mtime": 1791818808.2794592,
+    "seen": 1791916918.1487124,
+    "ast_hash": "d8d1877e1eaa7706cf9313bd2d3c9d57",
+    "semantic_hash": ""
+  },
+  ".agents/skills/character-management/SKILL.md": {
+    "mtime": 1791818808.2794592,
+    "seen": 1791916918.148715,
+    "ast_hash": "14b94169c2a4c0d95dc74ec334b6442a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/character-management/references/character-template.md": {
+    "mtime": 1791818808.2794592,
+    "seen": 1791916918.1487162,
+    "ast_hash": "3f22496d409908840fd0f61a2d34a62a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/character-management/references/ensemble-cast.md": {
+    "mtime": 1791818808.2804587,
+    "seen": 1791916918.1487174,
+    "ast_hash": "2a7cfaea4fc453433b8e0e63a9e63f91",
+    "semantic_hash": ""
+  },
+  ".agents/skills/character-management/references/relationship-types.md": {
+    "mtime": 1791818808.2804587,
+    "seen": 1791916918.1487184,
+    "ast_hash": "efbdd183a92ecf33b4c92df57e2f5346",
+    "semantic_hash": ""
+  },
+  ".agents/skills/character-management/references/supporting-characters.md": {
+    "mtime": 1791818808.2804587,
+    "seen": 1791916918.1487198,
+    "ast_hash": "c228f18011e9d07f50adc58e5e8788d3",
+    "semantic_hash": ""
+  },
+  ".agents/skills/discovery-drafting/SKILL.md": {
+    "mtime": 1791818808.2925515,
+    "seen": 1791916918.1487212,
+    "ast_hash": "13a11a7fe6f1ea579df842be1880e511",
+    "semantic_hash": ""
+  },
+  ".agents/skills/discovery-drafting/references/dead-ends.md": {
+    "mtime": 1791818808.2925515,
+    "seen": 1791916918.1487222,
+    "ast_hash": "222294b11847befb3ada9bae2b032535",
+    "semantic_hash": ""
+  },
+  ".agents/skills/discovery-drafting/references/drafting-cadence.md": {
+    "mtime": 1791818808.2925515,
+    "seen": 1791916918.1487236,
+    "ast_hash": "d9bf052ab50a60fe1a0fe3b150002cb6",
+    "semantic_hash": ""
+  },
+  ".agents/skills/discovery-drafting/references/reconcile-loop.md": {
+    "mtime": 1791818808.29355,
+    "seen": 1791916918.1487248,
+    "ast_hash": "e6c1b3637c9e88f084cda1baae7eaf7b",
+    "semantic_hash": ""
+  },
+  ".agents/skills/discovery-drafting/references/story-kernel.md": {
+    "mtime": 1791818808.29355,
+    "seen": 1791916918.148726,
+    "ast_hash": "5f720c9902204f6fcf94507657003466",
+    "semantic_hash": ""
+  },
+  ".agents/skills/editorial-review/SKILL.md": {
+    "mtime": 1791818808.29355,
+    "seen": 1791916918.1487267,
+    "ast_hash": "a603e6d454599a02097c29beef67347e",
+    "semantic_hash": ""
+  },
+  ".agents/skills/editorial-review/references/collaboration.md": {
+    "mtime": 1791818808.2945495,
+    "seen": 1791916918.148728,
+    "ast_hash": "8ad6f38eba40add1ccbea59b5940fe06",
+    "semantic_hash": ""
+  },
+  ".agents/skills/editorial-review/references/editor-rounds.md": {
+    "mtime": 1791818808.2945495,
+    "seen": 1791916918.148729,
+    "ast_hash": "55f24e7ab7a741f5d12435041d8e2e7e",
+    "semantic_hash": ""
+  },
+  ".agents/skills/editorial-review/references/real-people-and-permissions.md": {
+    "mtime": 1791818808.2945495,
+    "seen": 1791916918.14873,
+    "ast_hash": "02ca3ffe7c6e2ebbbfa2831c799972c5",
+    "semantic_hash": ""
+  },
+  ".agents/skills/editorial-review/references/sensitivity-reader-brief.md": {
+    "mtime": 1791818808.2955508,
+    "seen": 1791916918.1487312,
+    "ast_hash": "a31d3e0830f82ef01ffd7ab63ce15185",
+    "semantic_hash": ""
+  },
+  ".agents/skills/feedback-triage/SKILL.md": {
+    "mtime": 1791818808.2955508,
+    "seen": 1791916918.1487322,
+    "ast_hash": "d92790c29be7cbc1c5e4056e6e8ea394",
+    "semantic_hash": ""
+  },
+  ".agents/skills/feedback-triage/references/feedback-template.md": {
+    "mtime": 1791818808.2955508,
+    "seen": 1791916918.1487331,
+    "ast_hash": "a42eb665141019f912892b3598fad83c",
+    "semantic_hash": ""
+  },
+  ".agents/skills/feedback-triage/references/synthesis-template.md": {
+    "mtime": 1791818808.296551,
+    "seen": 1791916918.148734,
+    "ast_hash": "3482e133f5a5f995e59eaa7dfc2edd81",
+    "semantic_hash": ""
+  },
+  ".agents/skills/genre-craft/SKILL.md": {
+    "mtime": 1791818808.296551,
+    "seen": 1791916918.1487355,
+    "ast_hash": "1784b0b4b59368bcc66b70380d875872",
+    "semantic_hash": ""
+  },
+  ".agents/skills/genre-craft/references/comedy.md": {
+    "mtime": 1791818808.2975495,
+    "seen": 1791916918.1487365,
+    "ast_hash": "dc7fa3c60a0f7282c6febdb160eb09b7",
+    "semantic_hash": ""
+  },
+  ".agents/skills/genre-craft/references/fantasy.md": {
+    "mtime": 1791818808.2975495,
+    "seen": 1791916918.1487374,
+    "ast_hash": "06f9ab3d58b1364fd8e4858ef105103a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/genre-craft/references/historical.md": {
+    "mtime": 1791818808.2975495,
+    "seen": 1791916918.148739,
+    "ast_hash": "0f4ebbb85f815891c18f636c48f1f685",
+    "semantic_hash": ""
+  },
+  ".agents/skills/genre-craft/references/horror.md": {
+    "mtime": 1791818808.2975495,
+    "seen": 1791916918.1487398,
+    "ast_hash": "9c519f92ecb5545816c41213dccf8e61",
+    "semantic_hash": ""
+  },
+  ".agents/skills/genre-craft/references/mg-ya.md": {
+    "mtime": 1791818808.2985497,
+    "seen": 1791916918.1487408,
+    "ast_hash": "15caffdf7232fc0c01442bdb12f19583",
+    "semantic_hash": ""
+  },
+  ".agents/skills/genre-craft/references/mystery-fair-play.md": {
+    "mtime": 1791818808.2985497,
+    "seen": 1791916918.148742,
+    "ast_hash": "018af21d878c4352c25d6c5a46d15cbd",
+    "semantic_hash": ""
+  },
+  ".agents/skills/genre-craft/references/romance-beats.md": {
+    "mtime": 1791818808.2985497,
+    "seen": 1791916918.1487434,
+    "ast_hash": "92f9a7a6b02466e6b02a96213c509a9e",
+    "semantic_hash": ""
+  },
+  ".agents/skills/genre-craft/references/scifi-pipeline.md": {
+    "mtime": 1791818808.2995503,
+    "seen": 1791916918.148744,
+    "ast_hash": "66d14890c9ed8e74f0afd559b1e3e92c",
+    "semantic_hash": ""
+  },
+  ".agents/skills/genre-craft/references/serial-episodic.md": {
+    "mtime": 1791818808.2995503,
+    "seen": 1791916918.1487453,
+    "ast_hash": "bac9a7052058263eceff1ce7a541c1c5",
+    "semantic_hash": ""
+  },
+  ".agents/skills/genre-craft/references/thriller.md": {
+    "mtime": 1791818808.2995503,
+    "seen": 1791916918.1487463,
+    "ast_hash": "15996d50d60dd4cb7181264f3619603c",
+    "semantic_hash": ""
+  },
+  ".agents/skills/interactive-fiction/SKILL.md": {
+    "mtime": 1791818808.3005493,
+    "seen": 1791916918.1487477,
+    "ast_hash": "3866c922e79496c6cfccdddb9b7bfd22",
+    "semantic_hash": ""
+  },
+  ".agents/skills/interactive-fiction/references/choice-graph.md": {
+    "mtime": 1791818808.3005493,
+    "seen": 1791916918.1487496,
+    "ast_hash": "e6077f107674de7aa66e3c292f0d457d",
+    "semantic_hash": ""
+  },
+  ".agents/skills/interactive-fiction/references/path-continuity.md": {
+    "mtime": 1791818808.3005493,
+    "seen": 1791916918.1487515,
+    "ast_hash": "37ca81e365a81cf48d8597482d0c9fb2",
+    "semantic_hash": ""
+  },
+  ".agents/skills/line-editing/SKILL.md": {
+    "mtime": 1791818808.30155,
+    "seen": 1791916918.1487534,
+    "ast_hash": "a13b7b75261b6e95829c933d6a70fee1",
+    "semantic_hash": ""
+  },
+  ".agents/skills/line-editing/references/copyedit-checklist.md": {
+    "mtime": 1791818808.30155,
+    "seen": 1791916918.1487553,
+    "ast_hash": "bcab833d3f84d013f52a34ff6dee946a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/line-editing/references/edit-note-format.md": {
+    "mtime": 1791818808.30155,
+    "seen": 1791916918.1487565,
+    "ast_hash": "d191dc3342983d2c5f51519879c88e0a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/line-editing/references/language-conventions.md": {
+    "mtime": 1791818808.3025498,
+    "seen": 1791916918.1487575,
+    "ast_hash": "9d78204f61a06a28814f3426663037e7",
+    "semantic_hash": ""
+  },
+  ".agents/skills/line-editing/references/line-edit-checklist.md": {
+    "mtime": 1791818808.3025498,
+    "seen": 1791916918.1487582,
+    "ast_hash": "60b9ad8f2e84783871df98ed448adcb8",
+    "semantic_hash": ""
+  },
+  ".agents/skills/line-editing/references/read-aloud-guide.md": {
+    "mtime": 1791818808.3025498,
+    "seen": 1791916918.1487594,
+    "ast_hash": "ae742621c4d041411789e4e82aa80747",
+    "semantic_hash": ""
+  },
+  ".agents/skills/plot-structure/SKILL.md": {
+    "mtime": 1791818808.3035495,
+    "seen": 1791916918.1487603,
+    "ast_hash": "8c13317f6d94cd8cf3102b855984862a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/plot-structure/references/arc-template.md": {
+    "mtime": 1791818808.3035495,
+    "seen": 1791916918.1487613,
+    "ast_hash": "0562cbdbbe547bf3f012e4135b198a4a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/plot-structure/references/mice-quotient.md": {
+    "mtime": 1791818808.3035495,
+    "seen": 1791916918.1487625,
+    "ast_hash": "1d186ba8303eef7e9986a7b4c22e832a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/plot-structure/references/outlining-ladder.md": {
+    "mtime": 1791818808.3035495,
+    "seen": 1791916918.1487634,
+    "ast_hash": "61575adc9005f1a831d7e9c7d1ed5028",
+    "semantic_hash": ""
+  },
+  ".agents/skills/plot-structure/references/promise-template.md": {
+    "mtime": 1791818808.3035495,
+    "seen": 1791916918.1487644,
+    "ast_hash": "a285074373a93be8613ebcedf098d39e",
+    "semantic_hash": ""
+  },
+  ".agents/skills/plot-structure/references/question-template.md": {
+    "mtime": 1791818808.30455,
+    "seen": 1791916918.148765,
+    "ast_hash": "20912dbc5e47ec48510d034d13ed8fb3",
+    "semantic_hash": ""
+  },
+  ".agents/skills/plot-structure/references/short-story-form.md": {
+    "mtime": 1791818808.30455,
+    "seen": 1791916918.1487665,
+    "ast_hash": "d23a2f3867e362c391d8464d2125d5bd",
+    "semantic_hash": ""
+  },
+  ".agents/skills/plot-structure/references/snowflake.md": {
+    "mtime": 1791818808.30455,
+    "seen": 1791916918.1487675,
+    "ast_hash": "1be449e36be4d171245e23047b621cfb",
+    "semantic_hash": ""
+  },
+  ".agents/skills/plot-structure/references/structure-models.md": {
+    "mtime": 1791818808.30555,
+    "seen": 1791916918.1487684,
+    "ast_hash": "13a45b38b7dcf9833d3b4e42618b20ea",
+    "semantic_hash": ""
+  },
+  ".agents/skills/premise-workshop/SKILL.md": {
+    "mtime": 1791818808.30555,
+    "seen": 1791916918.1487696,
+    "ast_hash": "4483739c00ad443cdfbad368416cac89",
+    "semantic_hash": ""
+  },
+  ".agents/skills/premise-workshop/references/form-choice.md": {
+    "mtime": 1791818808.30555,
+    "seen": 1791916918.1487706,
+    "ast_hash": "90646ad7a4f7554dcb45e3e3d08b20f3",
+    "semantic_hash": ""
+  },
+  ".agents/skills/premise-workshop/references/premise-tests.md": {
+    "mtime": 1791818808.30655,
+    "seen": 1791916918.1487715,
+    "ast_hash": "661c42e860ab152d7b6a3d91eca0d3d9",
+    "semantic_hash": ""
+  },
+  ".agents/skills/premise-workshop/references/title-and-comps.md": {
+    "mtime": 1791818808.30655,
+    "seen": 1791916918.1487727,
+    "ast_hash": "bd8661606ba5af6f13560ba380b1722e",
+    "semantic_hash": ""
+  },
+  ".agents/skills/premise-workshop/references/what-if-generation.md": {
+    "mtime": 1791818808.30655,
+    "seen": 1791916918.1487737,
+    "ast_hash": "a7881fdde4a417f3f5bd59d0cc5e18e8",
+    "semantic_hash": ""
+  },
+  ".agents/skills/publishing/SKILL.md": {
+    "mtime": 1791818808.30755,
+    "seen": 1791916918.1487749,
+    "ast_hash": "7348425d8429e2d0452eb5dd8890ed31",
+    "semantic_hash": ""
+  },
+  ".agents/skills/publishing/references/contract-red-flags.md": {
+    "mtime": 1791818808.30755,
+    "seen": 1791916918.1487756,
+    "ast_hash": "f4b5922703ae04e19aed74740234ffba",
+    "semantic_hash": ""
+  },
+  ".agents/skills/publishing/references/copyright-page.md": {
+    "mtime": 1791818808.30755,
+    "seen": 1791916918.1487768,
+    "ast_hash": "03a33186ab790f6cb31ee8e7816271dc",
+    "semantic_hash": ""
+  },
+  ".agents/skills/publishing/references/launch-plan.md": {
+    "mtime": 1791818808.3085496,
+    "seen": 1791916918.1487777,
+    "ast_hash": "e9cfe324f751e9549239f08c378ffeb2",
+    "semantic_hash": ""
+  },
+  ".agents/skills/publishing/references/metadata-checklist.md": {
+    "mtime": 1791818808.3085496,
+    "seen": 1791916918.1487787,
+    "ast_hash": "0650c3bba2aef531be8dda00da228d26",
+    "semantic_hash": ""
+  },
+  ".agents/skills/publishing/references/print-interior.md": {
+    "mtime": 1791818808.3085496,
+    "seen": 1791916918.1487799,
+    "ast_hash": "53e2e622391dd5585b15f04cb9f8b2e4",
+    "semantic_hash": ""
+  },
+  ".agents/skills/publishing/references/rights-one-sheet.md": {
+    "mtime": 1791818808.309549,
+    "seen": 1791916918.1487808,
+    "ast_hash": "044e5bf9b8933253387df4ede37a8c2d",
+    "semantic_hash": ""
+  },
+  ".agents/skills/reader-panel/SKILL.md": {
+    "mtime": 1791818808.309549,
+    "seen": 1791916918.1487818,
+    "ast_hash": "8039826fb84edabecf5e5c17bf415baf",
+    "semantic_hash": ""
+  },
+  ".agents/skills/reader-panel/references/continuity-reader.md": {
+    "mtime": 1791818808.309549,
+    "seen": 1791916918.1487827,
+    "ast_hash": "8e3db780147b580d049a22a951ab8b42",
+    "semantic_hash": ""
+  },
+  ".agents/skills/reader-panel/references/first-page-reader.md": {
+    "mtime": 1791818808.3105512,
+    "seen": 1791916918.148784,
+    "ast_hash": "db309c2f89d37152d11846121687607b",
+    "semantic_hash": ""
+  },
+  ".agents/skills/reader-panel/references/genre-reader.md": {
+    "mtime": 1791818808.3105512,
+    "seen": 1791916918.1487846,
+    "ast_hash": "3fe4f25dec91815e12d8d6373638b8e9",
+    "semantic_hash": ""
+  },
+  ".agents/skills/reader-panel/references/line-editor.md": {
+    "mtime": 1791818808.3105512,
+    "seen": 1791916918.1487858,
+    "ast_hash": "5a422be85ebfb77174b00447a2888f3a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/reader-panel/references/sensitivity-reader.md": {
+    "mtime": 1791818808.3105512,
+    "seen": 1791916918.148787,
+    "ast_hash": "0037ad3762d8471ed836f2738bb5e1d5",
+    "semantic_hash": ""
+  },
+  ".agents/skills/research/SKILL.md": {
+    "mtime": 1791818808.3115497,
+    "seen": 1791916918.148788,
+    "ast_hash": "9d3ac3173c2a2658fe3b1d3f1f34dfdf",
+    "semantic_hash": ""
+  },
+  ".agents/skills/research/references/interviews-and-site-visits.md": {
+    "mtime": 1791818808.3115497,
+    "seen": 1791916918.148789,
+    "ast_hash": "3cad9bcb636822f7f1dcdff487eb2720",
+    "semantic_hash": ""
+  },
+  ".agents/skills/research/references/research-practice.md": {
+    "mtime": 1791818808.3115497,
+    "seen": 1791916918.1487904,
+    "ast_hash": "01190e3ba5100fea433b2c7bd3402ebf",
+    "semantic_hash": ""
+  },
+  ".agents/skills/revision-continuity/SKILL.md": {
+    "mtime": 1791818808.3125525,
+    "seen": 1791916918.148791,
+    "ast_hash": "51c9606a97bd084cbe6f52cc0bc4915a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/revision-continuity/references/pass-checklists.md": {
+    "mtime": 1791818808.3125525,
+    "seen": 1791916918.148792,
+    "ast_hash": "3fdaa6a946fe6e0fa75d28ef44c00796",
+    "semantic_hash": ""
+  },
+  ".agents/skills/scene-craft/SKILL.md": {
+    "mtime": 1791818808.3135493,
+    "seen": 1791916918.148793,
+    "ast_hash": "0c5cb1c8738464f8e2fb2d483b7897e2",
+    "semantic_hash": ""
+  },
+  ".agents/skills/scene-craft/references/deep-pov.md": {
+    "mtime": 1791818808.3135493,
+    "seen": 1791916918.1487942,
+    "ast_hash": "887a3dfd4c3988a32592d499933461fb",
+    "semantic_hash": ""
+  },
+  ".agents/skills/scene-craft/references/dialogue-subtext.md": {
+    "mtime": 1791818808.3135493,
+    "seen": 1791916918.1487951,
+    "ast_hash": "e32903e28d1e03b0cd8ccc659fe8a341",
+    "semantic_hash": ""
+  },
+  ".agents/skills/scene-craft/references/exposition.md": {
+    "mtime": 1791818808.3135493,
+    "seen": 1791916918.148796,
+    "ast_hash": "efe8aa40de06f9159f022fe1992e5fdd",
+    "semantic_hash": ""
+  },
+  ".agents/skills/scene-craft/references/flashbacks-time.md": {
+    "mtime": 1791818808.31455,
+    "seen": 1791916918.148797,
+    "ast_hash": "be760663c53705c608b7cd41e1490756",
+    "semantic_hash": ""
+  },
+  ".agents/skills/scene-craft/references/openings.md": {
+    "mtime": 1791818808.31455,
+    "seen": 1791916918.148798,
+    "ast_hash": "e7a19783fa0997e4f13ad37557d3980f",
+    "semantic_hash": ""
+  },
+  ".agents/skills/scene-craft/references/scene-cards.md": {
+    "mtime": 1791818808.31455,
+    "seen": 1791916918.148799,
+    "ast_hash": "6aed724187556d9cf9f530a5e3190128",
+    "semantic_hash": ""
+  },
+  ".agents/skills/scene-craft/references/scene-sequel.md": {
+    "mtime": 1791818808.3155508,
+    "seen": 1791916918.1488,
+    "ast_hash": "9e352ef529a250dd1ced20b2fd7a0dec",
+    "semantic_hash": ""
+  },
+  ".agents/skills/scene-craft/references/try-fail.md": {
+    "mtime": 1791818808.3155508,
+    "seen": 1791916918.1488008,
+    "ast_hash": "c4b67e31f0006ca98337b3357bd40f87",
+    "semantic_hash": ""
+  },
+  ".agents/skills/series-continuity/SKILL.md": {
+    "mtime": 1791818808.31655,
+    "seen": 1791916918.1488018,
+    "ast_hash": "869ee798b998ac8edd8256558c18986e",
+    "semantic_hash": ""
+  },
+  ".agents/skills/series-continuity/references/series-bible.md": {
+    "mtime": 1791818808.31655,
+    "seen": 1791916918.1488028,
+    "ast_hash": "af8970760edb42dbd07ba348c826f09b",
+    "semantic_hash": ""
+  },
+  ".agents/skills/story-init/SKILL.md": {
+    "mtime": 1791818808.31655,
+    "seen": 1791916918.148804,
+    "ast_hash": "256ec984d8b4d74f9695a62e00d4a95e",
+    "semantic_hash": ""
+  },
+  ".agents/skills/story-init/references/manual-setup.md": {
+    "mtime": 1791818808.317551,
+    "seen": 1791916918.148805,
+    "ast_hash": "15e0a0a1d31f263e03e63c98f8000bbb",
+    "semantic_hash": ""
+  },
+  ".agents/skills/story-init/references/title-logline.md": {
+    "mtime": 1791818808.317551,
+    "seen": 1791916918.1488059,
+    "ast_hash": "e8cafe008df3a3845670f072f4a96bbf",
+    "semantic_hash": ""
+  },
+  ".agents/skills/story-maintenance/SKILL.md": {
+    "mtime": 1791818808.3185494,
+    "seen": 1791916918.1488068,
+    "ast_hash": "a5342ab2a8ac005f1081427ae3ef1002",
+    "semantic_hash": ""
+  },
+  ".agents/skills/story-maintenance/references/builds.md": {
+    "mtime": 1791818808.3185494,
+    "seen": 1791916918.14881,
+    "ast_hash": "420b7635d1ccf1cfaa09ccdf533ff825",
+    "semantic_hash": ""
+  },
+  ".agents/skills/story-maintenance/references/commands.md": {
+    "mtime": 1791818808.3185494,
+    "seen": 1791916918.148811,
+    "ast_hash": "d087ea9f7a57ef6a6da6130f250287fd",
+    "semantic_hash": ""
+  },
+  ".agents/skills/story-maintenance/references/continuity-checks.md": {
+    "mtime": 1791818808.3195505,
+    "seen": 1791916918.148812,
+    "ast_hash": "4b09531353a61c5b73e1aa80808a619a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/story-maintenance/references/conventions.md": {
+    "mtime": 1791818808.3195505,
+    "seen": 1791916918.1488128,
+    "ast_hash": "4f9229d04edd6f6170dc4e2bad4bb794",
+    "semantic_hash": ""
+  },
+  ".agents/skills/story-maintenance/references/editing-commands.md": {
+    "mtime": 1791818808.3195505,
+    "seen": 1791916918.148814,
+    "ast_hash": "fa8c354c669163fa7ecbe477f81bb2bd",
+    "semantic_hash": ""
+  },
+  ".agents/skills/submission/SKILL.md": {
+    "mtime": 1791818808.3245506,
+    "seen": 1791916918.1488152,
+    "ast_hash": "e6609100add05aa950e9d2785e894a43",
+    "semantic_hash": ""
+  },
+  ".agents/skills/submission/references/blurb.md": {
+    "mtime": 1791818808.3245506,
+    "seen": 1791916918.1488159,
+    "ast_hash": "22d1e915e091d227011decd6bc0f102d",
+    "semantic_hash": ""
+  },
+  ".agents/skills/submission/references/comp-titles.md": {
+    "mtime": 1791818808.3257444,
+    "seen": 1791916918.148817,
+    "ast_hash": "4609a3f7a5c6ad69970fdf5c6f73324a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/submission/references/query-letter.md": {
+    "mtime": 1791818808.3257444,
+    "seen": 1791916918.148818,
+    "ast_hash": "7b12baf80007b26f23db225af846f15d",
+    "semantic_hash": ""
+  },
+  ".agents/skills/submission/references/short-fiction-markets.md": {
+    "mtime": 1791818808.3257444,
+    "seen": 1791916918.1488192,
+    "ast_hash": "0e2e76a7e127fa907841f8bd8cf64ed3",
+    "semantic_hash": ""
+  },
+  ".agents/skills/submission/references/tracker-template.md": {
+    "mtime": 1791818808.3257444,
+    "seen": 1791916918.1488202,
+    "ast_hash": "cfe15f9dc1ba4e02a5a68f2bd5ae5ed7",
+    "semantic_hash": ""
+  },
+  ".agents/skills/submission/references/word-count-norms.md": {
+    "mtime": 1791818808.3267496,
+    "seen": 1791916918.1488209,
+    "ast_hash": "b2216a899fdfcc57bae29d63fd32cbb9",
+    "semantic_hash": ""
+  },
+  ".agents/skills/theme-craft/SKILL.md": {
+    "mtime": 1791818808.3267496,
+    "seen": 1791916918.1488218,
+    "ast_hash": "43731a73b64afa29fc935e0992e16986",
+    "semantic_hash": ""
+  },
+  ".agents/skills/theme-craft/references/antagonist-design.md": {
+    "mtime": 1791818808.3277504,
+    "seen": 1791916918.1488228,
+    "ast_hash": "bcd5fb9e346b2cc64a495eb32740cafd",
+    "semantic_hash": ""
+  },
+  ".agents/skills/theme-craft/references/controlling-idea.md": {
+    "mtime": 1791818808.3277504,
+    "seen": 1791916918.1488237,
+    "ast_hash": "d2388693ad1954627f19d0a85f0c6370",
+    "semantic_hash": ""
+  },
+  ".agents/skills/theme-craft/references/lie-truth.md": {
+    "mtime": 1791818808.3277504,
+    "seen": 1791916918.1488247,
+    "ast_hash": "50e15ca06df314ba02f38d2a9e936585",
+    "semantic_hash": ""
+  },
+  ".agents/skills/theme-craft/references/motif-symbolism.md": {
+    "mtime": 1791818808.3277504,
+    "seen": 1791916918.1488256,
+    "ast_hash": "dd2126222dfc33a2f5db22e78d0da601",
+    "semantic_hash": ""
+  },
+  ".agents/skills/theme-craft/references/theme-audit.md": {
+    "mtime": 1791818808.3287506,
+    "seen": 1791916918.1488266,
+    "ast_hash": "97b256c1d0aacdc27aed46a6b502fa39",
+    "semantic_hash": ""
+  },
+  ".agents/skills/verse-craft/SKILL.md": {
+    "mtime": 1791818808.3287506,
+    "seen": 1791916918.1488273,
+    "ast_hash": "cb44ce31cb82bcecb5b2d29fd35e1ab1",
+    "semantic_hash": ""
+  },
+  ".agents/skills/verse-craft/references/forms.md": {
+    "mtime": 1791818808.3297505,
+    "seen": 1791916918.1488285,
+    "ast_hash": "ff906c7b21b8f3e97677f3ff41362865",
+    "semantic_hash": ""
+  },
+  ".agents/skills/verse-craft/references/meter-and-scansion.md": {
+    "mtime": 1791818808.3297505,
+    "seen": 1791916918.1488295,
+    "ast_hash": "afdcb5da5cfc8711f26f4ba1ca1cd16a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/verse-craft/references/rhyme.md": {
+    "mtime": 1791818808.3297505,
+    "seen": 1791916918.1488304,
+    "ast_hash": "93337bd9e4cca1e4a239a5e84ab80de9",
+    "semantic_hash": ""
+  },
+  ".agents/skills/voice-style/SKILL.md": {
+    "mtime": 1791818808.33075,
+    "seen": 1791916918.1488318,
+    "ast_hash": "ee5514615e72ed27cf985854e0b50a77",
+    "semantic_hash": ""
+  },
+  ".agents/skills/voice-style/references/prose-checks.md": {
+    "mtime": 1791818808.33075,
+    "seen": 1791916918.148833,
+    "ast_hash": "334bf034b42ef3bb53a151cd3fbc3c1c",
+    "semantic_hash": ""
+  },
+  ".agents/skills/voice-style/references/style-sheet-guide.md": {
+    "mtime": 1791818808.33075,
+    "seen": 1791916918.1488342,
+    "ast_hash": "01130412c4c17e3906104d2ab22fcd0d",
+    "semantic_hash": ""
+  },
+  ".agents/skills/worldbuilding/SKILL.md": {
+    "mtime": 1791818808.33175,
+    "seen": 1791916918.1488354,
+    "ast_hash": "979748d7051a861d2f3e2ca4f7ada550",
+    "semantic_hash": ""
+  },
+  ".agents/skills/worldbuilding/references/artifact-template.md": {
+    "mtime": 1791818808.33175,
+    "seen": 1791916918.1488364,
+    "ast_hash": "74353f516f3cefba28fb64281797d0a4",
+    "semantic_hash": ""
+  },
+  ".agents/skills/worldbuilding/references/calendars.md": {
+    "mtime": 1791818808.33175,
+    "seen": 1791916918.1488373,
+    "ast_hash": "cc730096f48911ab1617a4f87b2375d8",
+    "semantic_hash": ""
+  },
+  ".agents/skills/worldbuilding/references/economy-logistics.md": {
+    "mtime": 1791818808.33175,
+    "seen": 1791916918.1488383,
+    "ast_hash": "cc5015d8ddffb13fbf1f162294cf5308",
+    "semantic_hash": ""
+  },
+  ".agents/skills/worldbuilding/references/faction-template.md": {
+    "mtime": 1791818808.33275,
+    "seen": 1791916918.1488397,
+    "ast_hash": "d6f56451a7a5d9dcc54afcd4e6009065",
+    "semantic_hash": ""
+  },
+  ".agents/skills/worldbuilding/references/location-template.md": {
+    "mtime": 1791818808.33275,
+    "seen": 1791916918.1488407,
+    "ast_hash": "f4281101541a1b1dbf56a76766bac0dc",
+    "semantic_hash": ""
+  },
+  ".agents/skills/worldbuilding/references/maps-and-routes.md": {
+    "mtime": 1791818808.33275,
+    "seen": 1791916918.1488414,
+    "ast_hash": "46eebb23e7746798f69f86fd1015ef64",
+    "semantic_hash": ""
+  },
+  ".agents/skills/worldbuilding/references/naming-languages.md": {
+    "mtime": 1791818808.33375,
+    "seen": 1791916918.1488428,
+    "ast_hash": "b7bec253dec9857a0607a5061483a8dd",
+    "semantic_hash": ""
+  },
+  ".agents/skills/worldbuilding/references/system-template.md": {
+    "mtime": 1791818808.33375,
+    "seen": 1791916918.1488438,
+    "ast_hash": "5ac6dd41798eb3a40f2e4da63d604637",
+    "semantic_hash": ""
+  },
+  ".agents/skills/worldbuilding/references/world-element-types.md": {
+    "mtime": 1791818808.33375,
+    "seen": 1791916918.1488447,
+    "ast_hash": "2017d6eb8a06c338a87c4cdd82d0a708",
+    "semantic_hash": ""
+  },
+  ".claude/skills/adaptation/SKILL.md": {
+    "mtime": 1791818808.275459,
+    "seen": 1791916918.148846,
+    "ast_hash": "b2364858d844ba622026e314b4af1e07",
+    "semantic_hash": ""
+  },
+  ".claude/skills/adaptation/references/audiobook.md": {
+    "mtime": 1791818808.275459,
+    "seen": 1791916918.148847,
+    "ast_hash": "a28e705352b60335bdda88788672e1ad",
+    "semantic_hash": ""
+  },
+  ".claude/skills/adaptation/references/comics-script.md": {
+    "mtime": 1791818808.2764592,
+    "seen": 1791916918.1488478,
+    "ast_hash": "a4c8c670a0a718389756e3c5ba382716",
+    "semantic_hash": ""
+  },
+  ".claude/skills/adaptation/references/fountain.md": {
+    "mtime": 1791818808.2764592,
+    "seen": 1791916918.148849,
+    "ast_hash": "6bfc4c6dc61f26b5ea001b1dcdf032dc",
+    "semantic_hash": ""
+  },
+  ".claude/skills/adaptation/references/interactive-fiction.md": {
+    "mtime": 1791818808.2774591,
+    "seen": 1791916918.14885,
+    "ast_hash": "cc8d3131d10ef7d6feac38b5b49c485a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/adaptation/references/picture-book.md": {
+    "mtime": 1791818808.2774591,
+    "seen": 1791916918.1488512,
+    "ast_hash": "a4f75f1d10874b8499a4ae15d67c0a2e",
+    "semantic_hash": ""
+  },
+  ".claude/skills/adaptation/references/translation.md": {
+    "mtime": 1791818808.2774591,
+    "seen": 1791916918.148852,
+    "ast_hash": "7e9b81bbb21717247488523b53d808cf",
+    "semantic_hash": ""
+  },
+  ".claude/skills/chapter-writing/SKILL.md": {
+    "mtime": 1791818808.2784586,
+    "seen": 1791916918.1488533,
+    "ast_hash": "09d856427fb87b37281c679502f0bda7",
+    "semantic_hash": ""
+  },
+  ".claude/skills/chapter-writing/references/chapter-template.md": {
+    "mtime": 1791818808.2784586,
+    "seen": 1791916918.1488543,
+    "ast_hash": "39c8265a89953e13b41c6b0b089fc616",
+    "semantic_hash": ""
+  },
+  ".claude/skills/chapter-writing/references/scene-template.md": {
+    "mtime": 1791818808.2784586,
+    "seen": 1791916918.1488552,
+    "ast_hash": "c697e965da38afa1c0e0a2c532bf5faa",
+    "semantic_hash": ""
+  },
+  ".claude/skills/chapter-writing/references/writing-guidelines.md": {
+    "mtime": 1791818808.2794592,
+    "seen": 1791916918.1488564,
+    "ast_hash": "d8d1877e1eaa7706cf9313bd2d3c9d57",
+    "semantic_hash": ""
+  },
+  ".claude/skills/character-management/SKILL.md": {
+    "mtime": 1791818808.2794592,
+    "seen": 1791916918.1488574,
+    "ast_hash": "14b94169c2a4c0d95dc74ec334b6442a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/character-management/references/character-template.md": {
+    "mtime": 1791818808.2794592,
+    "seen": 1791916918.1488585,
+    "ast_hash": "3f22496d409908840fd0f61a2d34a62a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/character-management/references/ensemble-cast.md": {
+    "mtime": 1791818808.2804587,
+    "seen": 1791916918.14886,
+    "ast_hash": "2a7cfaea4fc453433b8e0e63a9e63f91",
+    "semantic_hash": ""
+  },
+  ".claude/skills/character-management/references/relationship-types.md": {
+    "mtime": 1791818808.2804587,
+    "seen": 1791916918.148861,
+    "ast_hash": "efbdd183a92ecf33b4c92df57e2f5346",
+    "semantic_hash": ""
+  },
+  ".claude/skills/character-management/references/supporting-characters.md": {
+    "mtime": 1791818808.2804587,
+    "seen": 1791916918.148862,
+    "ast_hash": "c228f18011e9d07f50adc58e5e8788d3",
+    "semantic_hash": ""
+  },
+  ".claude/skills/discovery-drafting/SKILL.md": {
+    "mtime": 1791818808.2925515,
+    "seen": 1791916918.148863,
+    "ast_hash": "13a11a7fe6f1ea579df842be1880e511",
+    "semantic_hash": ""
+  },
+  ".claude/skills/discovery-drafting/references/dead-ends.md": {
+    "mtime": 1791818808.2925515,
+    "seen": 1791916918.1488643,
+    "ast_hash": "222294b11847befb3ada9bae2b032535",
+    "semantic_hash": ""
+  },
+  ".claude/skills/discovery-drafting/references/drafting-cadence.md": {
+    "mtime": 1791818808.2925515,
+    "seen": 1791916918.1488652,
+    "ast_hash": "d9bf052ab50a60fe1a0fe3b150002cb6",
+    "semantic_hash": ""
+  },
+  ".claude/skills/discovery-drafting/references/reconcile-loop.md": {
+    "mtime": 1791818808.29355,
+    "seen": 1791916918.1488664,
+    "ast_hash": "e6c1b3637c9e88f084cda1baae7eaf7b",
+    "semantic_hash": ""
+  },
+  ".claude/skills/discovery-drafting/references/story-kernel.md": {
+    "mtime": 1791818808.29355,
+    "seen": 1791916918.1488671,
+    "ast_hash": "5f720c9902204f6fcf94507657003466",
+    "semantic_hash": ""
+  },
+  ".claude/skills/editorial-review/SKILL.md": {
+    "mtime": 1791818808.29355,
+    "seen": 1791916918.148868,
+    "ast_hash": "a603e6d454599a02097c29beef67347e",
+    "semantic_hash": ""
+  },
+  ".claude/skills/editorial-review/references/collaboration.md": {
+    "mtime": 1791818808.2945495,
+    "seen": 1791916918.148869,
+    "ast_hash": "8ad6f38eba40add1ccbea59b5940fe06",
+    "semantic_hash": ""
+  },
+  ".claude/skills/editorial-review/references/editor-rounds.md": {
+    "mtime": 1791818808.2945495,
+    "seen": 1791916918.1488702,
+    "ast_hash": "55f24e7ab7a741f5d12435041d8e2e7e",
+    "semantic_hash": ""
+  },
+  ".claude/skills/editorial-review/references/real-people-and-permissions.md": {
+    "mtime": 1791818808.2945495,
+    "seen": 1791916918.1488714,
+    "ast_hash": "02ca3ffe7c6e2ebbbfa2831c799972c5",
+    "semantic_hash": ""
+  },
+  ".claude/skills/editorial-review/references/sensitivity-reader-brief.md": {
+    "mtime": 1791818808.2955508,
+    "seen": 1791916918.1488724,
+    "ast_hash": "a31d3e0830f82ef01ffd7ab63ce15185",
+    "semantic_hash": ""
+  },
+  ".claude/skills/feedback-triage/SKILL.md": {
+    "mtime": 1791818808.2955508,
+    "seen": 1791916918.1488738,
+    "ast_hash": "d92790c29be7cbc1c5e4056e6e8ea394",
+    "semantic_hash": ""
+  },
+  ".claude/skills/feedback-triage/references/feedback-template.md": {
+    "mtime": 1791818808.2955508,
+    "seen": 1791916918.1488748,
+    "ast_hash": "a42eb665141019f912892b3598fad83c",
+    "semantic_hash": ""
+  },
+  ".claude/skills/feedback-triage/references/synthesis-template.md": {
+    "mtime": 1791818808.296551,
+    "seen": 1791916918.1488757,
+    "ast_hash": "3482e133f5a5f995e59eaa7dfc2edd81",
+    "semantic_hash": ""
+  },
+  ".claude/skills/genre-craft/SKILL.md": {
+    "mtime": 1791818808.296551,
+    "seen": 1791916918.148877,
+    "ast_hash": "1784b0b4b59368bcc66b70380d875872",
+    "semantic_hash": ""
+  },
+  ".claude/skills/genre-craft/references/comedy.md": {
+    "mtime": 1791818808.2975495,
+    "seen": 1791916918.148878,
+    "ast_hash": "dc7fa3c60a0f7282c6febdb160eb09b7",
+    "semantic_hash": ""
+  },
+  ".claude/skills/genre-craft/references/fantasy.md": {
+    "mtime": 1791818808.2975495,
+    "seen": 1791916918.148879,
+    "ast_hash": "06f9ab3d58b1364fd8e4858ef105103a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/genre-craft/references/historical.md": {
+    "mtime": 1791818808.2975495,
+    "seen": 1791916918.1488798,
+    "ast_hash": "0f4ebbb85f815891c18f636c48f1f685",
+    "semantic_hash": ""
+  },
+  ".claude/skills/genre-craft/references/horror.md": {
+    "mtime": 1791818808.2975495,
+    "seen": 1791916918.1488812,
+    "ast_hash": "9c519f92ecb5545816c41213dccf8e61",
+    "semantic_hash": ""
+  },
+  ".claude/skills/genre-craft/references/mg-ya.md": {
+    "mtime": 1791818808.2985497,
+    "seen": 1791916918.1488822,
+    "ast_hash": "15caffdf7232fc0c01442bdb12f19583",
+    "semantic_hash": ""
+  },
+  ".claude/skills/genre-craft/references/mystery-fair-play.md": {
+    "mtime": 1791818808.2985497,
+    "seen": 1791916918.148883,
+    "ast_hash": "018af21d878c4352c25d6c5a46d15cbd",
+    "semantic_hash": ""
+  },
+  ".claude/skills/genre-craft/references/romance-beats.md": {
+    "mtime": 1791818808.2985497,
+    "seen": 1791916918.1488843,
+    "ast_hash": "92f9a7a6b02466e6b02a96213c509a9e",
+    "semantic_hash": ""
+  },
+  ".claude/skills/genre-craft/references/scifi-pipeline.md": {
+    "mtime": 1791818808.2995503,
+    "seen": 1791916918.1488853,
+    "ast_hash": "66d14890c9ed8e74f0afd559b1e3e92c",
+    "semantic_hash": ""
+  },
+  ".claude/skills/genre-craft/references/serial-episodic.md": {
+    "mtime": 1791818808.2995503,
+    "seen": 1791916918.1488864,
+    "ast_hash": "bac9a7052058263eceff1ce7a541c1c5",
+    "semantic_hash": ""
+  },
+  ".claude/skills/genre-craft/references/thriller.md": {
+    "mtime": 1791818808.2995503,
+    "seen": 1791916918.1488874,
+    "ast_hash": "15996d50d60dd4cb7181264f3619603c",
+    "semantic_hash": ""
+  },
+  ".claude/skills/interactive-fiction/SKILL.md": {
+    "mtime": 1791818808.3005493,
+    "seen": 1791916918.1488883,
+    "ast_hash": "3866c922e79496c6cfccdddb9b7bfd22",
+    "semantic_hash": ""
+  },
+  ".claude/skills/interactive-fiction/references/choice-graph.md": {
+    "mtime": 1791818808.3005493,
+    "seen": 1791916918.1488895,
+    "ast_hash": "e6077f107674de7aa66e3c292f0d457d",
+    "semantic_hash": ""
+  },
+  ".claude/skills/interactive-fiction/references/path-continuity.md": {
+    "mtime": 1791818808.3005493,
+    "seen": 1791916918.1488907,
+    "ast_hash": "37ca81e365a81cf48d8597482d0c9fb2",
+    "semantic_hash": ""
+  },
+  ".claude/skills/line-editing/SKILL.md": {
+    "mtime": 1791818808.30155,
+    "seen": 1791916918.1488914,
+    "ast_hash": "a13b7b75261b6e95829c933d6a70fee1",
+    "semantic_hash": ""
+  },
+  ".claude/skills/line-editing/references/copyedit-checklist.md": {
+    "mtime": 1791818808.30155,
+    "seen": 1791916918.1488924,
+    "ast_hash": "bcab833d3f84d013f52a34ff6dee946a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/line-editing/references/edit-note-format.md": {
+    "mtime": 1791818808.30155,
+    "seen": 1791916918.1488934,
+    "ast_hash": "d191dc3342983d2c5f51519879c88e0a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/line-editing/references/language-conventions.md": {
+    "mtime": 1791818808.3025498,
+    "seen": 1791916918.1488945,
+    "ast_hash": "9d78204f61a06a28814f3426663037e7",
+    "semantic_hash": ""
+  },
+  ".claude/skills/line-editing/references/line-edit-checklist.md": {
+    "mtime": 1791818808.3025498,
+    "seen": 1791916918.1488955,
+    "ast_hash": "60b9ad8f2e84783871df98ed448adcb8",
+    "semantic_hash": ""
+  },
+  ".claude/skills/line-editing/references/read-aloud-guide.md": {
+    "mtime": 1791818808.3025498,
+    "seen": 1791916918.1488965,
+    "ast_hash": "ae742621c4d041411789e4e82aa80747",
+    "semantic_hash": ""
+  },
+  ".claude/skills/plot-structure/SKILL.md": {
+    "mtime": 1791818808.3035495,
+    "seen": 1791916918.1488976,
+    "ast_hash": "8c13317f6d94cd8cf3102b855984862a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/plot-structure/references/arc-template.md": {
+    "mtime": 1791818808.3035495,
+    "seen": 1791916918.1488986,
+    "ast_hash": "0562cbdbbe547bf3f012e4135b198a4a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/plot-structure/references/mice-quotient.md": {
+    "mtime": 1791818808.3035495,
+    "seen": 1791916918.1488996,
+    "ast_hash": "1d186ba8303eef7e9986a7b4c22e832a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/plot-structure/references/outlining-ladder.md": {
+    "mtime": 1791818808.3035495,
+    "seen": 1791916918.1489005,
+    "ast_hash": "61575adc9005f1a831d7e9c7d1ed5028",
+    "semantic_hash": ""
+  },
+  ".claude/skills/plot-structure/references/promise-template.md": {
+    "mtime": 1791818808.3035495,
+    "seen": 1791916918.1489017,
+    "ast_hash": "a285074373a93be8613ebcedf098d39e",
+    "semantic_hash": ""
+  },
+  ".claude/skills/plot-structure/references/question-template.md": {
+    "mtime": 1791818808.30455,
+    "seen": 1791916918.148903,
+    "ast_hash": "20912dbc5e47ec48510d034d13ed8fb3",
+    "semantic_hash": ""
+  },
+  ".claude/skills/plot-structure/references/short-story-form.md": {
+    "mtime": 1791818808.30455,
+    "seen": 1791916918.1489038,
+    "ast_hash": "d23a2f3867e362c391d8464d2125d5bd",
+    "semantic_hash": ""
+  },
+  ".claude/skills/plot-structure/references/snowflake.md": {
+    "mtime": 1791818808.30455,
+    "seen": 1791916918.148905,
+    "ast_hash": "1be449e36be4d171245e23047b621cfb",
+    "semantic_hash": ""
+  },
+  ".claude/skills/plot-structure/references/structure-models.md": {
+    "mtime": 1791818808.30555,
+    "seen": 1791916918.148906,
+    "ast_hash": "13a45b38b7dcf9833d3b4e42618b20ea",
+    "semantic_hash": ""
+  },
+  ".claude/skills/premise-workshop/SKILL.md": {
+    "mtime": 1791818808.30555,
+    "seen": 1791916918.1489072,
+    "ast_hash": "4483739c00ad443cdfbad368416cac89",
+    "semantic_hash": ""
+  },
+  ".claude/skills/premise-workshop/references/form-choice.md": {
+    "mtime": 1791818808.30555,
+    "seen": 1791916918.1489084,
+    "ast_hash": "90646ad7a4f7554dcb45e3e3d08b20f3",
+    "semantic_hash": ""
+  },
+  ".claude/skills/premise-workshop/references/premise-tests.md": {
+    "mtime": 1791818808.30655,
+    "seen": 1791916918.1489093,
+    "ast_hash": "661c42e860ab152d7b6a3d91eca0d3d9",
+    "semantic_hash": ""
+  },
+  ".claude/skills/premise-workshop/references/title-and-comps.md": {
+    "mtime": 1791818808.30655,
+    "seen": 1791916918.1489103,
+    "ast_hash": "bd8661606ba5af6f13560ba380b1722e",
+    "semantic_hash": ""
+  },
+  ".claude/skills/premise-workshop/references/what-if-generation.md": {
+    "mtime": 1791818808.30655,
+    "seen": 1791916918.1489115,
+    "ast_hash": "a7881fdde4a417f3f5bd59d0cc5e18e8",
+    "semantic_hash": ""
+  },
+  ".claude/skills/publishing/SKILL.md": {
+    "mtime": 1791818808.30755,
+    "seen": 1791916918.1489124,
+    "ast_hash": "7348425d8429e2d0452eb5dd8890ed31",
+    "semantic_hash": ""
+  },
+  ".claude/skills/publishing/references/contract-red-flags.md": {
+    "mtime": 1791818808.30755,
+    "seen": 1791916918.1489134,
+    "ast_hash": "f4b5922703ae04e19aed74740234ffba",
+    "semantic_hash": ""
+  },
+  ".claude/skills/publishing/references/copyright-page.md": {
+    "mtime": 1791818808.30755,
+    "seen": 1791916918.1489143,
+    "ast_hash": "03a33186ab790f6cb31ee8e7816271dc",
+    "semantic_hash": ""
+  },
+  ".claude/skills/publishing/references/launch-plan.md": {
+    "mtime": 1791818808.3085496,
+    "seen": 1791916918.1489158,
+    "ast_hash": "e9cfe324f751e9549239f08c378ffeb2",
+    "semantic_hash": ""
+  },
+  ".claude/skills/publishing/references/metadata-checklist.md": {
+    "mtime": 1791818808.3085496,
+    "seen": 1791916918.1489167,
+    "ast_hash": "0650c3bba2aef531be8dda00da228d26",
+    "semantic_hash": ""
+  },
+  ".claude/skills/publishing/references/print-interior.md": {
+    "mtime": 1791818808.3085496,
+    "seen": 1791916918.148918,
+    "ast_hash": "53e2e622391dd5585b15f04cb9f8b2e4",
+    "semantic_hash": ""
+  },
+  ".claude/skills/publishing/references/rights-one-sheet.md": {
+    "mtime": 1791818808.309549,
+    "seen": 1791916918.148919,
+    "ast_hash": "044e5bf9b8933253387df4ede37a8c2d",
+    "semantic_hash": ""
+  },
+  ".claude/skills/reader-panel/SKILL.md": {
+    "mtime": 1791818808.309549,
+    "seen": 1791916918.14892,
+    "ast_hash": "8039826fb84edabecf5e5c17bf415baf",
+    "semantic_hash": ""
+  },
+  ".claude/skills/reader-panel/references/continuity-reader.md": {
+    "mtime": 1791818808.309549,
+    "seen": 1791916918.148921,
+    "ast_hash": "8e3db780147b580d049a22a951ab8b42",
+    "semantic_hash": ""
+  },
+  ".claude/skills/reader-panel/references/first-page-reader.md": {
+    "mtime": 1791818808.3105512,
+    "seen": 1791916918.1489227,
+    "ast_hash": "db309c2f89d37152d11846121687607b",
+    "semantic_hash": ""
+  },
+  ".claude/skills/reader-panel/references/genre-reader.md": {
+    "mtime": 1791818808.3105512,
+    "seen": 1791916918.1489236,
+    "ast_hash": "3fe4f25dec91815e12d8d6373638b8e9",
+    "semantic_hash": ""
+  },
+  ".claude/skills/reader-panel/references/line-editor.md": {
+    "mtime": 1791818808.3105512,
+    "seen": 1791916918.1489246,
+    "ast_hash": "5a422be85ebfb77174b00447a2888f3a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/reader-panel/references/sensitivity-reader.md": {
+    "mtime": 1791818808.3105512,
+    "seen": 1791916918.1489258,
+    "ast_hash": "0037ad3762d8471ed836f2738bb5e1d5",
+    "semantic_hash": ""
+  },
+  ".claude/skills/research/SKILL.md": {
+    "mtime": 1791818808.3115497,
+    "seen": 1791916918.148927,
+    "ast_hash": "9d3ac3173c2a2658fe3b1d3f1f34dfdf",
+    "semantic_hash": ""
+  },
+  ".claude/skills/research/references/interviews-and-site-visits.md": {
+    "mtime": 1791818808.3115497,
+    "seen": 1791916918.148928,
+    "ast_hash": "3cad9bcb636822f7f1dcdff487eb2720",
+    "semantic_hash": ""
+  },
+  ".claude/skills/research/references/research-practice.md": {
+    "mtime": 1791818808.3115497,
+    "seen": 1791916918.148929,
+    "ast_hash": "01190e3ba5100fea433b2c7bd3402ebf",
+    "semantic_hash": ""
+  },
+  ".claude/skills/revision-continuity/SKILL.md": {
+    "mtime": 1791818808.3125525,
+    "seen": 1791916918.1489298,
+    "ast_hash": "51c9606a97bd084cbe6f52cc0bc4915a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/revision-continuity/references/pass-checklists.md": {
+    "mtime": 1791818808.3125525,
+    "seen": 1791916918.148931,
+    "ast_hash": "3fdaa6a946fe6e0fa75d28ef44c00796",
+    "semantic_hash": ""
+  },
+  ".claude/skills/scene-craft/SKILL.md": {
+    "mtime": 1791818808.3135493,
+    "seen": 1791916918.148932,
+    "ast_hash": "0c5cb1c8738464f8e2fb2d483b7897e2",
+    "semantic_hash": ""
+  },
+  ".claude/skills/scene-craft/references/deep-pov.md": {
+    "mtime": 1791818808.3135493,
+    "seen": 1791916918.1489332,
+    "ast_hash": "887a3dfd4c3988a32592d499933461fb",
+    "semantic_hash": ""
+  },
+  ".claude/skills/scene-craft/references/dialogue-subtext.md": {
+    "mtime": 1791818808.3135493,
+    "seen": 1791916918.1489344,
+    "ast_hash": "e32903e28d1e03b0cd8ccc659fe8a341",
+    "semantic_hash": ""
+  },
+  ".claude/skills/scene-craft/references/exposition.md": {
+    "mtime": 1791818808.3135493,
+    "seen": 1791916918.1489353,
+    "ast_hash": "efe8aa40de06f9159f022fe1992e5fdd",
+    "semantic_hash": ""
+  },
+  ".claude/skills/scene-craft/references/flashbacks-time.md": {
+    "mtime": 1791818808.31455,
+    "seen": 1791916918.1489363,
+    "ast_hash": "be760663c53705c608b7cd41e1490756",
+    "semantic_hash": ""
+  },
+  ".claude/skills/scene-craft/references/openings.md": {
+    "mtime": 1791818808.31455,
+    "seen": 1791916918.1489375,
+    "ast_hash": "e7a19783fa0997e4f13ad37557d3980f",
+    "semantic_hash": ""
+  },
+  ".claude/skills/scene-craft/references/scene-cards.md": {
+    "mtime": 1791818808.31455,
+    "seen": 1791916918.1489384,
+    "ast_hash": "6aed724187556d9cf9f530a5e3190128",
+    "semantic_hash": ""
+  },
+  ".claude/skills/scene-craft/references/scene-sequel.md": {
+    "mtime": 1791818808.3155508,
+    "seen": 1791916918.1489396,
+    "ast_hash": "9e352ef529a250dd1ced20b2fd7a0dec",
+    "semantic_hash": ""
+  },
+  ".claude/skills/scene-craft/references/try-fail.md": {
+    "mtime": 1791818808.3155508,
+    "seen": 1791916918.1489408,
+    "ast_hash": "c4b67e31f0006ca98337b3357bd40f87",
+    "semantic_hash": ""
+  },
+  ".claude/skills/series-continuity/SKILL.md": {
+    "mtime": 1791818808.31655,
+    "seen": 1791916918.148942,
+    "ast_hash": "869ee798b998ac8edd8256558c18986e",
+    "semantic_hash": ""
+  },
+  ".claude/skills/series-continuity/references/series-bible.md": {
+    "mtime": 1791818808.31655,
+    "seen": 1791916918.1489432,
+    "ast_hash": "af8970760edb42dbd07ba348c826f09b",
+    "semantic_hash": ""
+  },
+  ".claude/skills/story-init/SKILL.md": {
+    "mtime": 1791818808.31655,
+    "seen": 1791916918.1489441,
+    "ast_hash": "256ec984d8b4d74f9695a62e00d4a95e",
+    "semantic_hash": ""
+  },
+  ".claude/skills/story-init/references/manual-setup.md": {
+    "mtime": 1791818808.317551,
+    "seen": 1791916918.148945,
+    "ast_hash": "15e0a0a1d31f263e03e63c98f8000bbb",
+    "semantic_hash": ""
+  },
+  ".claude/skills/story-init/references/title-logline.md": {
+    "mtime": 1791818808.317551,
+    "seen": 1791916918.1489463,
+    "ast_hash": "e8cafe008df3a3845670f072f4a96bbf",
+    "semantic_hash": ""
+  },
+  ".claude/skills/story-maintenance/SKILL.md": {
+    "mtime": 1791818808.3185494,
+    "seen": 1791916918.1489472,
+    "ast_hash": "a5342ab2a8ac005f1081427ae3ef1002",
+    "semantic_hash": ""
+  },
+  ".claude/skills/story-maintenance/references/builds.md": {
+    "mtime": 1791818808.3185494,
+    "seen": 1791916918.1489484,
+    "ast_hash": "420b7635d1ccf1cfaa09ccdf533ff825",
+    "semantic_hash": ""
+  },
+  ".claude/skills/story-maintenance/references/commands.md": {
+    "mtime": 1791818808.3185494,
+    "seen": 1791916918.1489496,
+    "ast_hash": "d087ea9f7a57ef6a6da6130f250287fd",
+    "semantic_hash": ""
+  },
+  ".claude/skills/story-maintenance/references/continuity-checks.md": {
+    "mtime": 1791818808.3195505,
+    "seen": 1791916918.1489506,
+    "ast_hash": "4b09531353a61c5b73e1aa80808a619a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/story-maintenance/references/conventions.md": {
+    "mtime": 1791818808.3195505,
+    "seen": 1791916918.1489518,
+    "ast_hash": "4f9229d04edd6f6170dc4e2bad4bb794",
+    "semantic_hash": ""
+  },
+  ".claude/skills/story-maintenance/references/editing-commands.md": {
+    "mtime": 1791818808.3195505,
+    "seen": 1791916918.1489527,
+    "ast_hash": "fa8c354c669163fa7ecbe477f81bb2bd",
+    "semantic_hash": ""
+  },
+  ".claude/skills/submission/SKILL.md": {
+    "mtime": 1791818808.3245506,
+    "seen": 1791916918.1489544,
+    "ast_hash": "e6609100add05aa950e9d2785e894a43",
+    "semantic_hash": ""
+  },
+  ".claude/skills/submission/references/blurb.md": {
+    "mtime": 1791818808.3245506,
+    "seen": 1791916918.148955,
+    "ast_hash": "22d1e915e091d227011decd6bc0f102d",
+    "semantic_hash": ""
+  },
+  ".claude/skills/submission/references/comp-titles.md": {
+    "mtime": 1791818808.3257444,
+    "seen": 1791916918.148956,
+    "ast_hash": "4609a3f7a5c6ad69970fdf5c6f73324a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/submission/references/query-letter.md": {
+    "mtime": 1791818808.3257444,
+    "seen": 1791916918.1489573,
+    "ast_hash": "7b12baf80007b26f23db225af846f15d",
+    "semantic_hash": ""
+  },
+  ".claude/skills/submission/references/short-fiction-markets.md": {
+    "mtime": 1791818808.3257444,
+    "seen": 1791916918.1489582,
+    "ast_hash": "0e2e76a7e127fa907841f8bd8cf64ed3",
+    "semantic_hash": ""
+  },
+  ".claude/skills/submission/references/tracker-template.md": {
+    "mtime": 1791818808.3257444,
+    "seen": 1791916918.1489594,
+    "ast_hash": "cfe15f9dc1ba4e02a5a68f2bd5ae5ed7",
+    "semantic_hash": ""
+  },
+  ".claude/skills/submission/references/word-count-norms.md": {
+    "mtime": 1791818808.3267496,
+    "seen": 1791916918.1489606,
+    "ast_hash": "b2216a899fdfcc57bae29d63fd32cbb9",
+    "semantic_hash": ""
+  },
+  ".claude/skills/theme-craft/SKILL.md": {
+    "mtime": 1791818808.3267496,
+    "seen": 1791916918.1489615,
+    "ast_hash": "43731a73b64afa29fc935e0992e16986",
+    "semantic_hash": ""
+  },
+  ".claude/skills/theme-craft/references/antagonist-design.md": {
+    "mtime": 1791818808.3277504,
+    "seen": 1791916918.1489627,
+    "ast_hash": "bcd5fb9e346b2cc64a495eb32740cafd",
+    "semantic_hash": ""
+  },
+  ".claude/skills/theme-craft/references/controlling-idea.md": {
+    "mtime": 1791818808.3277504,
+    "seen": 1791916918.1489637,
+    "ast_hash": "d2388693ad1954627f19d0a85f0c6370",
+    "semantic_hash": ""
+  },
+  ".claude/skills/theme-craft/references/lie-truth.md": {
+    "mtime": 1791818808.3277504,
+    "seen": 1791916918.1489646,
+    "ast_hash": "50e15ca06df314ba02f38d2a9e936585",
+    "semantic_hash": ""
+  },
+  ".claude/skills/theme-craft/references/motif-symbolism.md": {
+    "mtime": 1791818808.3277504,
+    "seen": 1791916918.1489656,
+    "ast_hash": "dd2126222dfc33a2f5db22e78d0da601",
+    "semantic_hash": ""
+  },
+  ".claude/skills/theme-craft/references/theme-audit.md": {
+    "mtime": 1791818808.3287506,
+    "seen": 1791916918.148967,
+    "ast_hash": "97b256c1d0aacdc27aed46a6b502fa39",
+    "semantic_hash": ""
+  },
+  ".claude/skills/verse-craft/SKILL.md": {
+    "mtime": 1791818808.3287506,
+    "seen": 1791916918.1489677,
+    "ast_hash": "cb44ce31cb82bcecb5b2d29fd35e1ab1",
+    "semantic_hash": ""
+  },
+  ".claude/skills/verse-craft/references/forms.md": {
+    "mtime": 1791818808.3297505,
+    "seen": 1791916918.1489687,
+    "ast_hash": "ff906c7b21b8f3e97677f3ff41362865",
+    "semantic_hash": ""
+  },
+  ".claude/skills/verse-craft/references/meter-and-scansion.md": {
+    "mtime": 1791818808.3297505,
+    "seen": 1791916918.14897,
+    "ast_hash": "afdcb5da5cfc8711f26f4ba1ca1cd16a",
+    "semantic_hash": ""
+  },
+  ".claude/skills/verse-craft/references/rhyme.md": {
+    "mtime": 1791818808.3297505,
+    "seen": 1791916918.148971,
+    "ast_hash": "93337bd9e4cca1e4a239a5e84ab80de9",
+    "semantic_hash": ""
+  },
+  ".claude/skills/voice-style/SKILL.md": {
+    "mtime": 1791818808.33075,
+    "seen": 1791916918.1489723,
+    "ast_hash": "ee5514615e72ed27cf985854e0b50a77",
+    "semantic_hash": ""
+  },
+  ".claude/skills/voice-style/references/prose-checks.md": {
+    "mtime": 1791818808.33075,
+    "seen": 1791916918.1489732,
+    "ast_hash": "334bf034b42ef3bb53a151cd3fbc3c1c",
+    "semantic_hash": ""
+  },
+  ".claude/skills/voice-style/references/style-sheet-guide.md": {
+    "mtime": 1791818808.33075,
+    "seen": 1791916918.1489747,
+    "ast_hash": "01130412c4c17e3906104d2ab22fcd0d",
+    "semantic_hash": ""
+  },
+  ".claude/skills/worldbuilding/SKILL.md": {
+    "mtime": 1791818808.33175,
+    "seen": 1791916918.1489756,
+    "ast_hash": "979748d7051a861d2f3e2ca4f7ada550",
+    "semantic_hash": ""
+  },
+  ".claude/skills/worldbuilding/references/artifact-template.md": {
+    "mtime": 1791818808.33175,
+    "seen": 1791916918.1489766,
+    "ast_hash": "74353f516f3cefba28fb64281797d0a4",
+    "semantic_hash": ""
+  },
+  ".claude/skills/worldbuilding/references/calendars.md": {
+    "mtime": 1791818808.33175,
+    "seen": 1791916918.148978,
+    "ast_hash": "cc730096f48911ab1617a4f87b2375d8",
+    "semantic_hash": ""
+  },
+  ".claude/skills/worldbuilding/references/economy-logistics.md": {
+    "mtime": 1791818808.33175,
+    "seen": 1791916918.1489787,
+    "ast_hash": "cc5015d8ddffb13fbf1f162294cf5308",
+    "semantic_hash": ""
+  },
+  ".claude/skills/worldbuilding/references/faction-template.md": {
+    "mtime": 1791818808.33275,
+    "seen": 1791916918.1489797,
+    "ast_hash": "d6f56451a7a5d9dcc54afcd4e6009065",
+    "semantic_hash": ""
+  },
+  ".claude/skills/worldbuilding/references/location-template.md": {
+    "mtime": 1791818808.33275,
+    "seen": 1791916918.148981,
+    "ast_hash": "f4281101541a1b1dbf56a76766bac0dc",
+    "semantic_hash": ""
+  },
+  ".claude/skills/worldbuilding/references/maps-and-routes.md": {
+    "mtime": 1791818808.33275,
+    "seen": 1791916918.148982,
+    "ast_hash": "46eebb23e7746798f69f86fd1015ef64",
+    "semantic_hash": ""
+  },
+  ".claude/skills/worldbuilding/references/naming-languages.md": {
+    "mtime": 1791818808.33375,
+    "seen": 1791916918.148983,
+    "ast_hash": "b7bec253dec9857a0607a5061483a8dd",
+    "semantic_hash": ""
+  },
+  ".claude/skills/worldbuilding/references/system-template.md": {
+    "mtime": 1791818808.33375,
+    "seen": 1791916918.148984,
+    "ast_hash": "5ac6dd41798eb3a40f2e4da63d604637",
+    "semantic_hash": ""
+  },
+  ".claude/skills/worldbuilding/references/world-element-types.md": {
+    "mtime": 1791818808.33375,
+    "seen": 1791916918.1489854,
+    "ast_hash": "2017d6eb8a06c338a87c4cdd82d0a708",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1791770177.2252564,
+    "seen": 1791916918.1489863,
+    "ast_hash": "ff0fb013b6ce1e25ee653ce46f563d49",
+    "semantic_hash": ""
+  },
+  "public/index.html": {
+    "mtime": 1791945307.783913,
+    "seen": 1791945795.2438462,
+    "ast_hash": "3d737053989e6b300ac809082817b20a",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/128x128.png": {
+    "mtime": 1791820454.9751215,
+    "seen": 1791916918.1490145,
+    "ast_hash": "3a0071e4ad670fad0329d3a5e83d0bf9",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/128x128@2x.png": {
+    "mtime": 1791820454.9751215,
+    "seen": 1791916918.1490157,
+    "ast_hash": "eab2be12c5f8aeaf104a4695dd9171df",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/32x32.png": {
+    "mtime": 1791820454.9751215,
+    "seen": 1791916918.1490166,
+    "ast_hash": "faf8ee6541b945b98db35239b8a75715",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/Square107x107Logo.png": {
+    "mtime": 1791820454.9761214,
+    "seen": 1791916918.1490176,
+    "ast_hash": "d4bc38359e2c01daa08354c55fa4df7c",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/Square142x142Logo.png": {
+    "mtime": 1791820454.9761214,
+    "seen": 1791916918.1490185,
+    "ast_hash": "1e9c0358705085439e5c989fcbd6e988",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/Square150x150Logo.png": {
+    "mtime": 1791820454.9852345,
+    "seen": 1791916918.1490195,
+    "ast_hash": "084d20bce8096367fc694dfdf72c8ac5",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/Square284x284Logo.png": {
+    "mtime": 1791820454.9852345,
+    "seen": 1791916918.1490207,
+    "ast_hash": "6a936fe84398f24b7a63a36bddfd58d7",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/Square30x30Logo.png": {
+    "mtime": 1791820454.9852345,
+    "seen": 1791916918.1490216,
+    "ast_hash": "011e9cb456309157a9fc78c978248e00",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/Square310x310Logo.png": {
+    "mtime": 1791820454.9852345,
+    "seen": 1791916918.149023,
+    "ast_hash": "832231852e8e683e6aa2b690d194bdd2",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/Square44x44Logo.png": {
+    "mtime": 1791820454.9852345,
+    "seen": 1791916918.1490238,
+    "ast_hash": "a06297a35014e770cc33756fafa3b3a8",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/Square71x71Logo.png": {
+    "mtime": 1791820454.9852345,
+    "seen": 1791916918.149025,
+    "ast_hash": "a3c80a0af688359094aa685881570eed",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/Square89x89Logo.png": {
+    "mtime": 1791820454.9863768,
+    "seen": 1791916918.1490257,
+    "ast_hash": "9f91ee8e1c1232ebde61c64d7923038f",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/StoreLogo.png": {
+    "mtime": 1791820454.9863768,
+    "seen": 1791916918.1490269,
+    "ast_hash": "387b412d411bbd532dd3302d3948bf0e",
+    "semantic_hash": ""
+  },
+  "src-tauri/icons/icon.png": {
+    "mtime": 1791820454.9873767,
+    "seen": 1791916918.149028,
+    "ast_hash": "9fdc4367276aafdd2c05ac214e9553c7",
+    "semantic_hash": ""
+  },
+  "tests/web/npc-behavior-repository.test.ts": {
+    "mtime": 1791917530.6200578,
+    "seen": 1791917652.6928792,
+    "ast_hash": "228acf12f5ca329aab495c2368f8eef3",
+    "semantic_hash": ""
+  },
+  "tests/web/storylet-approval.test.ts": {
+    "mtime": 1791917721.8052552,
+    "seen": 1791918128.4018366,
+    "ast_hash": "f7f9b452931479b9078c634ac7873787",
+    "semantic_hash": ""
+  },
+  "src/agents/GenerationWorkflow.ts": {
+    "mtime": 1791922742.588402,
+    "seen": 1791922967.816039,
+    "ast_hash": "30531162d57529a1a957ea6546244be7",
+    "semantic_hash": ""
+  },
+  "tests/web/generation-workflow.test.ts": {
+    "mtime": 1791925937.4298582,
+    "seen": 1791925964.467133,
+    "ast_hash": "a39f4e13be911db1a19eb4d1d518a9d1",
+    "semantic_hash": ""
+  },
+  "tests/web/scenario-repository.test.ts": {
+    "mtime": 1791920029.2785892,
+    "seen": 1791920130.1254165,
+    "ast_hash": "1ee61f29fdc38848cb99a2d5065053e7",
+    "semantic_hash": ""
+  },
+  "tests/web/workspace-http-smoke.test.ts": {
+    "mtime": 1791942971.8787007,
+    "seen": 1791943059.4401586,
+    "ast_hash": "1c83561e9f89982b8a6268e71a448a11",
+    "semantic_hash": ""
+  },
+  "src/web/projectBundle.ts": {
+    "mtime": 1791921151.5481706,
+    "seen": 1791921280.8791697,
+    "ast_hash": "8fc546fcad0726c0a053e460537c9179",
+    "semantic_hash": ""
+  },
+  "tests/web/project-bundle.test.ts": {
+    "mtime": 1791920916.4186683,
+    "seen": 1791921106.4306698,
+    "ast_hash": "59c8c0d9165b0abf04655b47f8331163",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine-service/Cargo.toml": {
+    "mtime": 1791925290.167029,
+    "seen": 1791925484.9793553,
+    "ast_hash": "610ba8877117c0733521fae373968be7",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine-service/src/bin/service.rs": {
+    "mtime": 1791922233.776398,
+    "seen": 1791922967.815973,
+    "ast_hash": "bd9bae57f8f64513e001b3c2df05699d",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine-service/src/lib.rs": {
+    "mtime": 1791922233.7774,
+    "seen": 1791922967.8159747,
+    "ast_hash": "d017ea1bf9ff3820bc0d52b658a3b133",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine-service/src/service.rs": {
+    "mtime": 1791925443.9910028,
+    "seen": 1791925484.9793594,
+    "ast_hash": "51f80e0cc124e0ee8c06db7d609a0c04",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine-service/tests/local_service.rs": {
+    "mtime": 1791925632.7454493,
+    "seen": 1791925687.6192334,
+    "ast_hash": "a46f040522d96e7feb2a6aa0c4608290",
+    "semantic_hash": ""
+  },
+  "src/agents/StoryCraftResources.ts": {
+    "mtime": 1791922758.5956223,
+    "seen": 1791922967.8160412,
+    "ast_hash": "97cb7fc875d934c4a5d0f11020214bda",
+    "semantic_hash": ""
+  },
+  "tests/web/story-craft-resources.test.ts": {
+    "mtime": 1791942971.879734,
+    "seen": 1791943059.4401555,
+    "ast_hash": "f28b459cf5c08a4f4ab8ccaeb83ca2b9",
+    "semantic_hash": ""
+  },
+  "model/__init__.py": {
+    "mtime": 1791923103.0722096,
+    "seen": 1791924150.8491733,
+    "ast_hash": "d81be107665073c0c8299f37bba35313",
+    "semantic_hash": ""
+  },
+  "model/embedding_protocol.py": {
+    "mtime": 1791923180.988897,
+    "seen": 1791924150.8491745,
+    "ast_hash": "0fdfa86d84c6fc4c7e10a6273de9e9f2",
+    "semantic_hash": ""
+  },
+  "model/embedding_service.py": {
+    "mtime": 1791927173.875765,
+    "seen": 1791943059.4401097,
+    "ast_hash": "24a25bdea32724dd544a7880f226e142",
+    "semantic_hash": ""
+  },
+  "model/pyproject.toml": {
+    "mtime": 1791926106.4104018,
+    "seen": 1791926239.49233,
+    "ast_hash": "316d748f0d86561569cb1d67f4da73e0",
+    "semantic_hash": ""
+  },
+  "model/ranking-example.schema.json": {
+    "mtime": 1791926965.8562577,
+    "seen": 1791943059.440112,
+    "ast_hash": "335b05d2eed752bf3ce9245b95e11914",
+    "semantic_hash": ""
+  },
+  "model/smoke_embedding_service.py": {
+    "mtime": 1791923924.3626237,
+    "seen": 1791924150.8491778,
+    "ast_hash": "5b04b79b345313800e08345ec5957c8b",
+    "semantic_hash": ""
+  },
+  "model/storylet_rank_data.py": {
+    "mtime": 1791926970.5411673,
+    "seen": 1791943059.4401164,
+    "ast_hash": "8a6938b84edbe6b7c774cd24805400ef",
+    "semantic_hash": ""
+  },
+  "model/tests/test_embedding_protocol.py": {
+    "mtime": 1791923191.0101025,
+    "seen": 1791924150.8491795,
+    "ast_hash": "63704bf51142ef4336a173b4b7f9ffc9",
+    "semantic_hash": ""
+  },
+  "model/tests/test_embedding_service.py": {
+    "mtime": 1791927198.561196,
+    "seen": 1791943059.4401186,
+    "ast_hash": "8dca6a08b5e7319c75005253f94de991",
+    "semantic_hash": ""
+  },
+  "model/tests/test_storylet_rank_data.py": {
+    "mtime": 1791926965.8562577,
+    "seen": 1791943059.4401202,
+    "ast_hash": "e2edb4783ac3b2d6850473a1ca6a60bb",
+    "semantic_hash": ""
+  },
+  "model/train_embedding_ranker.py": {
+    "mtime": 1791927190.3032782,
+    "seen": 1791943059.4401214,
+    "ast_hash": "e6619b05ee8ba9fdd1cf2f2fcb1a5dc9",
+    "semantic_hash": ""
+  },
+  "model/README.md": {
+    "mtime": 1791927267.3486936,
+    "seen": 1791943059.4404092,
+    "ast_hash": "0816c4a9c6c3a9d89a6990aaffbbeffc",
+    "semantic_hash": ""
+  },
+  "scripts/smoke-semantic-director.ts": {
+    "mtime": 1791924343.6943438,
+    "seen": 1791924467.052731,
+    "ast_hash": "1fc614413f6ebc35f039e7b3346d2e49",
+    "semantic_hash": ""
+  },
+  "src/web/semanticDirector.ts": {
+    "mtime": 1791927187.2938983,
+    "seen": 1791943059.4401462,
+    "ast_hash": "74287a353da0b1921bd0cc24976b9a93",
+    "semantic_hash": ""
+  },
+  "examples/native-host-dotnet/NativeHost.csproj": {
+    "mtime": 1791924955.0262861,
+    "seen": 1791925145.806329,
+    "ast_hash": "2fba6ec6fd1fda20eee8dba473fc0630",
+    "semantic_hash": ""
+  },
+  "examples/native-host-dotnet/Program.cs": {
+    "mtime": 1791924975.8592103,
+    "seen": 1791925145.8063302,
+    "ast_hash": "032871c0e5f76e5a184ce43bf6250fb2",
+    "semantic_hash": ""
+  },
+  "examples/native-host/main.cpp": {
+    "mtime": 1791924936.5332103,
+    "seen": 1791925145.806331,
+    "ast_hash": "7966eac0024d19e7efac2da74b407ebc",
+    "semantic_hash": ""
+  },
+  "examples/native-host/storylet-project.json": {
+    "mtime": 1791924936.5172083,
+    "seen": 1791925145.8063319,
+    "ast_hash": "6bc5a137d4b09efb872a7219d389022f",
+    "semantic_hash": ""
+  },
+  "scripts/run-native-host.ps1": {
+    "mtime": 1791924955.0455017,
+    "seen": 1791925145.8063493,
+    "ast_hash": "26604b0b4b74f644a6ee4b35d2de1309",
+    "semantic_hash": ""
+  },
+  "examples/native-host/CMakeLists.txt": {
+    "mtime": 1791924936.525211,
+    "seen": 1791925145.8066366,
+    "ast_hash": "7d7a4f8786e1db93a82160deece181e7",
+    "semantic_hash": ""
+  },
+  "examples/native-host/README.md": {
+    "mtime": 1791925045.0993352,
+    "seen": 1791925145.8066373,
+    "ast_hash": "4edb7dfd9b13440eee8db03a16e499f1",
+    "semantic_hash": ""
+  },
+  "crates/storylet-engine/src/bin/benchmark.rs": {
+    "mtime": 1791925597.9888432,
+    "seen": 1791925687.619239,
+    "ast_hash": "fabe55060809ba2e49286b919bd7cfb9",
+    "semantic_hash": ""
+  },
+  "docs/benchmarks/rust-runtime-2026-10-14.json": {
+    "mtime": 1791945668.0392842,
+    "seen": 1791945795.2434683,
+    "ast_hash": "5998fdb8b9b62670dc3cc348a28bb769",
+    "semantic_hash": ""
+  },
+  "docs/benchmarks/README.md": {
+    "mtime": 1791945665.5132766,
+    "seen": 1791945795.24383,
+    "ast_hash": "bffd655e48a8030419385c2d9de09ee5",
+    "semantic_hash": ""
+  },
+  "src/agents/UnslopAudit.ts": {
+    "mtime": 1791925916.026892,
+    "seen": 1791925964.4671001,
+    "ast_hash": "446fdf3d1bf2e8e0bd469f9fb3da92bf",
+    "semantic_hash": ""
+  },
+  "tests/web/unslop-audit.test.ts": {
+    "mtime": 1791925916.027891,
+    "seen": 1791925964.4671407,
+    "ast_hash": "adb364c374a974f44661bc69c7b84b05",
+    "semantic_hash": ""
+  },
+  "model/ranking_head.py": {
+    "mtime": 1791927138.3846042,
+    "seen": 1791943059.4401133,
+    "ast_hash": "cfd87c4804e4cee7ae562d23b0f9d101",
+    "semantic_hash": ""
+  },
+  "model/tests/test_ranking_head.py": {
+    "mtime": 1791927021.1802373,
+    "seen": 1791943059.4401193,
+    "ast_hash": "7e78a42e0290fae077137bd138cecc0f",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1791945610.914638,
+    "seen": 1791945795.2438223,
+    "ast_hash": "3da2e5f163176d1c37815532b324a044",
+    "semantic_hash": ""
+  },
+  "docs/HANDOFF.md": {
+    "mtime": 1791945661.996512,
+    "seen": 1791945795.2438262,
+    "ast_hash": "cc7c85b8d7f1d00a1b1f669b511e4ab9",
+    "semantic_hash": ""
+  },
+  "docs/README.md": {
+    "mtime": 1791945632.7953117,
+    "seen": 1791945795.2438283,
+    "ast_hash": "b438452f6d1a6a76c24dec469de8c6fb",
+    "semantic_hash": ""
+  },
+  "docs/design/Storylet.md": {
+    "mtime": 1791819340.416555,
+    "seen": 1791945795.2438319,
+    "ast_hash": "962cd8f7aa3bb7d2839a65fc629cd301",
+    "semantic_hash": ""
+  },
+  "docs/design/social-simulation.md": {
+    "mtime": 1791945614.0310457,
+    "seen": 1791945795.243833,
+    "ast_hash": "d73bf0256463c4194f6a10f2295e0b49",
+    "semantic_hash": ""
+  },
+  "docs/design/storylet-studio.md": {
+    "mtime": 1791945698.2588644,
+    "seen": 1791945795.2438347,
+    "ast_hash": "20d248fbf93ac0fec7caa20554e78f03",
+    "semantic_hash": ""
+  },
+  "docs/design/tropes.md": {
+    "mtime": 1789887053.5269132,
+    "seen": 1791945795.2438362,
+    "ast_hash": "33b761ace412a9f87a02aaf711c77666",
+    "semantic_hash": ""
+  },
+  "docs/design/unslop-style-guide-sf.md": {
+    "mtime": 1789887059.8879669,
+    "seen": 1791945795.243837,
+    "ast_hash": "b9fd6674de189696e1421a7f643271cd",
+    "semantic_hash": ""
+  },
+  "docs/guides/storylet-authoring.md": {
+    "mtime": 1791926279.4971645,
+    "seen": 1791945795.2438383,
+    "ast_hash": "18be92d332d40a7700026b4bff404240",
+    "semantic_hash": ""
+  }
+}

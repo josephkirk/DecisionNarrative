@@ -1,0 +1,33 @@
+node_modules/
+dist/
+*.log
+data/*.db*
+*.tsbuildinfo
+
+# Rust / Cargo build artifacts (root workspace, crates, and Tauri)
+/target/
+/crates/*/target/
+/src-tauri/target/
+**/target/
+**/*.rs.bk
+*.profraw
+*.profdata
+
+# Python model training and local inference
+model/.venv/
+model/output/
+__pycache__/
+*.py[cod]
+unsloth_compiled_cache/
+
+# Native sample build outputs
+examples/native-host-dotnet/bin/
+examples/native-host-dotnet/obj/
+
+# Generated Graphify cache and visualizations; source graph/manifest can be reviewed separately
+graphify-out/cache/
+graphify-out/cache/stat-index.json
+graphify-out/.graphify_labels*
+graphify-out/graph.html
+graphify-out/GRAPH_REPORT.md
+graphify-out/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/

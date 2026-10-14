@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "skills": {
+    "adaptation": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "19dac5e89c0e1167f927637263e76216dc3d90a17b72282c5866fdd2dacb3497"
+    },
+    "chapter-writing": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "4ae8b062e8f3615eea2a2429eebb977d5d4b71854376967c9130ffd8a1848f7d"
+    },
+    "character-management": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "3fbb284c85bddc1311806331553921bf7fe477ad8cbf2c7ba4b276ae37143980"
+    },
+    "discovery-drafting": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "20e6130cf9bcd136b5d7396f2aeb30ca6a029f24aec25aa9f76b1ab3365b517c"
+    },
+    "editorial-review": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "eca58391541da0df6187e6af8a380204b76a2d12be524121adbb6cd60828baa5"
+    },
+    "feedback-triage": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "db91a86f60bb7d6f0e8d7f0ba3b0f980a1eee25cfbadd724f70956f677fd779a"
+    },
+    "genre-craft": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "a6ac440166a6d9361611ecc193c653ef5b4f30b433b3a1e045d5f9780fd1603b"
+    },
+    "interactive-fiction": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "3336005d3f5dafc944c0a117ec4b36c579d0dd8959b3122e7fda9feb75ac8b56"
+    },
+    "line-editing": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "d71964924ef75935e3d94199584e2d4039f6569495226c241efa02373ce34477"
+    },
+    "plot-structure": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "92246fc60813b6aea61b878fd3e0ceedf3d968cc7b6019f22c59b5e3f09e9289"
+    },
+    "premise-workshop": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "e159c22a9a4fb3b5f3fdd07b1bb162802b08959e568191fbc6c569b9e7f21b1d"
+    },
+    "publishing": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "79519f915a818247929c0c7213317ac417e663ec7f755b4387743ae4e7dc0f59"
+    },
+    "reader-panel": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "9c73a2c15149776dfe2b7eb9a6806a1f6d1a95b997bc774ac14704cf860c88ee"
+    },
+    "research": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "0a1f9adad98faccf5c422e898088bf0850b452898d503df9903ef149463f854a"
+    },
+    "revision-continuity": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "2b1722c3b1cef6114a486b30a14f854ad5f9fb2a707fbcd3afd3bb3beb00fcce"
+    },
+    "scene-craft": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "702c00a321cff24206733f8b6cf8c5aeaac0ce67e5546241573031fe07fc9b28"
+    },
+    "series-continuity": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "0b667bbed3ceca9a9d814923635420d776d5b866688c670f9eec39049461f658"
+    },
+    "story-init": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "3a18c1168e567b0c7e2ea55db4010f42264bb83be5be9c626f942101b5dbfbeb"
+    },
+    "story-maintenance": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "33602e31c9168060c750de49a0ae5cd0641561e5e3ee10f142d7bbc4fc1c8a30"
+    },
+    "submission": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "d44031589761d3b2218991c93b7c4f26ac3392af8b9dde194f067caf3e80f35d"
+    },
+    "theme-craft": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "04521bfecd1b97c9272d4b489731a189929a87a62d4e6d71037d88b7e8ca4571"
+    },
+    "verse-craft": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "a518e6af5c06ee5bdc75e85c74f70fbba29ec0fae919b249b9bf7c1f28410ec5"
+    },
+    "voice-style": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "1a4813c68d347fc5efd2a69c9e09ade12c33dde46f44f82f24fb2f181fab3565"
+    },
+    "worldbuilding": {
+      "source": "./temp_story_skills",
+      "sourceType": "local",
+      "computedHash": "561e066a865207a5009290105e8f2dc1fa55543e3d92dc941c4bc74f552d5d11"
+    }
+  }
+}

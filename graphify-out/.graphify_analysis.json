@@ -1,0 +1,245 @@
+{
+  "communities": {
+    "0": [
+      "tsconfig",
+      "tsconfig_compileroptions",
+      "tsconfig_compileroptions_allowimportingtsextensions",
+      "tsconfig_compileroptions_allowjs",
+      "tsconfig_compileroptions_allowsyntheticdefaultimports",
+      "tsconfig_compileroptions_composite",
+      "tsconfig_compileroptions_downleveliteration",
+      "tsconfig_compileroptions_forceconsistentcasinginfilenames",
+      "tsconfig_compileroptions_jsx",
+      "tsconfig_compileroptions_lib",
+      "tsconfig_compileroptions_module",
+      "tsconfig_compileroptions_moduledetection",
+      "tsconfig_compileroptions_moduleresolution",
+      "tsconfig_compileroptions_noemit",
+      "tsconfig_compileroptions_skiplibcheck",
+      "tsconfig_compileroptions_strict",
+      "tsconfig_compileroptions_target",
+      "tsconfig_compileroptions_types",
+      "tsconfig_include"
+    ],
+    "1": [
+      "argparse",
+      "bench_decision_latency",
+      "bench_decision_latency_benchmark_heuristic",
+      "bench_decision_latency_benchmark_neural_adapter",
+      "bench_decision_latency_py_any",
+      "bench_decision_latency_rationale_1",
+      "bench_decision_latency_rationale_21",
+      "bench_decision_latency_run_real_heuristic_decision",
+      "statistics",
+      "sys",
+      "time",
+      "train_unsloth_jev",
+      "train_unsloth_jev_rationale_1",
+      "train_unsloth_jev_train_unsloth",
+      "train_unsloth_jev_train_unsloth_formatting_func",
+      "train_unsloth_jev_validate_dataset_only",
+      "typing"
+    ],
+    "2": [
+      "generate_dataset",
+      "generate_dataset_main",
+      "generate_dataset_make_advisor_evaluation_sample",
+      "generate_dataset_make_npc_reaction_sample",
+      "generate_dataset_make_storylet_selection_sample",
+      "generate_dataset_py_any",
+      "generate_dataset_rationale_1",
+      "generate_dataset_validate_unslop",
+      "json",
+      "os",
+      "random",
+      "re"
+    ],
+    "3": [
+      "package",
+      "package_description",
+      "package_devdependencies",
+      "package_devdependencies_types_node",
+      "package_name",
+      "package_scripts",
+      "package_scripts_bench",
+      "package_scripts_play",
+      "package_scripts_test",
+      "package_type",
+      "package_version",
+      "ref_types_node"
+    ],
+    "4": [
+      "src_types_index",
+      "src_types_index_advisorreview",
+      "src_types_index_continuityrecord",
+      "src_types_index_enforcementstate",
+      "src_types_index_permit",
+      "src_types_index_permittype",
+      "src_types_index_residencyrecord",
+      "src_types_index_serviceentitlement",
+      "src_types_index_statusaxes",
+      "src_types_index_storyletchoice"
+    ],
+    "5": [
+      "src_simulation_investigation_createdefaultclues",
+      "src_simulation_knowledgegraph_createdefaultknowledge",
+      "src_simulation_worldstate",
+      "src_simulation_worldstate_advanceshift",
+      "src_simulation_worldstate_createinitialcontext",
+      "src_simulation_worldstate_transferresource",
+      "src_types_index_locationid",
+      "src_types_index_shiftname",
+      "src_types_index_simevent"
+    ],
+    "6": [
+      "src_engine_jevdecisionengine",
+      "src_engine_jevdecisionengine_decisioncandidate",
+      "src_engine_jevdecisionengine_jevdecisionengine",
+      "src_engine_jevdecisionengine_jevdecisionengine_evaluatenpcreaction",
+      "src_engine_jevdecisionengine_jevdecisionengine_evaluatestoryletselection",
+      "src_types_index_jevdecision",
+      "src_types_index_storylet"
+    ],
+    "7": [
+      "src_simulation_socialgraph",
+      "src_simulation_socialgraph_createdefaultrelationships",
+      "src_simulation_socialgraph_getrelationship",
+      "src_simulation_socialgraph_key",
+      "src_simulation_socialgraph_recordsocialimpact",
+      "src_types_index_relationship",
+      "src_types_index_relationshipmemory"
+    ],
+    "8": [
+      "src_simulation_investigation",
+      "src_simulation_investigation_verifyclue",
+      "src_types_index_clueitem",
+      "src_types_index_gamecontext"
+    ],
+    "9": [
+      "src_simulation_knowledgegraph",
+      "src_simulation_knowledgegraph_propagateknowledge",
+      "src_simulation_knowledgegraph_registerknowledgepacket",
+      "src_types_index_knowledgepacket"
+    ],
+    "10": [
+      "src_simulation_population",
+      "src_simulation_population_createdefaultcivilians",
+      "src_types_index_civilian"
+    ]
+  },
+  "cohesion": {
+    "0": 0.10526315789473684,
+    "1": 0.15441176470588236,
+    "2": 0.42424242424242425,
+    "3": 0.16666666666666666,
+    "4": 0.2,
+    "5": 0.2777777777777778,
+    "6": 0.42857142857142855,
+    "7": 0.42857142857142855,
+    "8": 0.5,
+    "9": 0.5,
+    "10": 0.6666666666666666
+  },
+  "gods": [
+    {
+      "id": "tsconfig_compileroptions",
+      "label": "compilerOptions",
+      "degree": 17
+    },
+    {
+      "id": "generate_dataset_main",
+      "label": "main()",
+      "degree": 7
+    },
+    {
+      "id": "generate_dataset_make_storylet_selection_sample",
+      "label": "make_storylet_selection_sample()",
+      "degree": 6
+    },
+    {
+      "id": "generate_dataset_make_npc_reaction_sample",
+      "label": "make_npc_reaction_sample()",
+      "degree": 6
+    },
+    {
+      "id": "generate_dataset_make_advisor_evaluation_sample",
+      "label": "make_advisor_evaluation_sample()",
+      "degree": 6
+    },
+    {
+      "id": "src_simulation_worldstate_createinitialcontext",
+      "label": "createInitialContext()",
+      "degree": 5
+    },
+    {
+      "id": "src_types_index_gamecontext",
+      "label": "GameContext",
+      "degree": 5
+    },
+    {
+      "id": "train_unsloth_jev_train_unsloth",
+      "label": "train_unsloth()",
+      "degree": 5
+    },
+    {
+      "id": "bench_decision_latency_run_real_heuristic_decision",
+      "label": "run_real_heuristic_decision()",
+      "degree": 4
+    },
+    {
+      "id": "generate_dataset_validate_unslop",
+      "label": "validate_unslop()",
+      "degree": 4
+    }
+  ],
+  "surprises": [
+    {
+      "source": "createInitialContext()",
+      "target": "createDefaultCivilians()",
+      "source_files": [
+        "src/simulation/WorldState.ts",
+        "src/simulation/Population.ts"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "bridges separate communities"
+    },
+    {
+      "source": "createInitialContext()",
+      "target": "createDefaultRelationships()",
+      "source_files": [
+        "src/simulation/WorldState.ts",
+        "src/simulation/SocialGraph.ts"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "bridges separate communities"
+    },
+    {
+      "source": "createInitialContext()",
+      "target": "createDefaultClues()",
+      "source_files": [
+        "src/simulation/WorldState.ts",
+        "src/simulation/Investigation.ts"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "cross-file semantic connection"
+    },
+    {
+      "source": "createInitialContext()",
+      "target": "createDefaultKnowledge()",
+      "source_files": [
+        "src/simulation/WorldState.ts",
+        "src/simulation/KnowledgeGraph.ts"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "cross-file semantic connection"
+    }
+  ],
+  "tokens": {
+    "input": 0,
+    "output": 0
+  }
+}

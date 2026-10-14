@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Storylet ranking preference example",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["example_id", "scenario_family", "split", "label_source", "provenance", "query", "positive", "negative", "positive_features", "negative_features"],
+  "properties": {
+    "example_id": { "type": "string", "minLength": 1 },
+    "scenario_family": { "type": "string", "minLength": 1 },
+    "split": { "enum": ["train", "validation", "held_out"] },
+    "label_source": { "enum": ["human_reviewed", "rule_synthetic", "strata_synthetic"] },
+    "provenance": { "type": "string", "minLength": 1 },
+    "query": { "type": "string", "minLength": 1, "description": "Narrative context and optional explicit ranking features rendered as text" },
+    "positive": { "type": "string", "minLength": 1, "description": "Eligible storylet summary preferred for this context" },
+    "negative": { "type": "string", "minLength": 1, "description": "Eligible hard-negative storylet summary" },
+    "positive_features": { "$ref": "#/$defs/candidateFeatures" },
+    "negative_features": { "$ref": "#/$defs/candidateFeatures" }
+  },
+  "$defs": {
+    "candidateFeatures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["semantic_relevance", "urgency", "pacing_arc_alignment", "novelty", "waiting_time", "goal_progress", "role_binding_quality", "predicted_consequence_alignment", "no_action"],
+      "properties": {
+        "semantic_relevance": { "type": "number", "minimum": 0, "maximum": 1, "description": "Recomputed from the pinned encoder for each training run" },
+        "urgency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "pacing_arc_alignment": { "type": "number", "minimum": 0, "maximum": 1 },
+        "novelty": { "type": "number", "minimum": 0, "maximum": 1 },
+        "waiting_time": { "type": "number", "minimum": 0, "maximum": 1 },
+        "goal_progress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "role_binding_quality": { "type": "number", "minimum": 0, "maximum": 1 },
+        "predicted_consequence_alignment": { "type": "number", "minimum": 0, "maximum": 1 },
+        "no_action": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}
