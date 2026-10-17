@@ -3,6 +3,9 @@ import { onMounted, ref, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useStoryletEditorViewModel } from "../view-models/storyletEditor.ts";
 import { studioState } from "../state.ts";
+import { extractTwineLinks } from "../twineUtils.ts";
+import NarrativeGraphCanvas from "../components/NarrativeGraphCanvas.vue";
+import { buildGraphFromStorylet, compileGraphToStorylet, type NarrativeGraph } from "../narrativeGraphTypes.ts";
 
 const route = useRoute();
 const router = useRouter();
@@ -33,6 +36,25 @@ onMounted(async () => {
   }
 });
 
+
+const editorMode = ref<"script" | "graph">("script");
+const currentGraph = ref<NarrativeGraph>({ nodes: [], edges: [] });
+
+function switchToGraphMode() {
+  currentGraph.value = buildGraphFromStorylet(draft);
+  editorMode.value = "graph";
+}
+
+function switchToScriptMode() {
+  compileGraphToStorylet(currentGraph.value, draft);
+  editorMode.value = "script";
+}
+
+function handleGraphUpdate(updated: NarrativeGraph) {
+  currentGraph.value = updated;
+  compileGraphToStorylet(updated, draft);
+}
+
 const isDirty = computed(() => {
   return JSON.stringify(draft) !== lastSavedSnapshot.value;
 });
@@ -62,6 +84,30 @@ async function handleApprove() {
   const ok = await approveStorylet();
   if (ok) {
     lastSavedSnapshot.value = JSON.stringify(draft);
+  }
+}
+
+
+const detectedTwineLinks = computed(() => {
+  const text = (draft.content.sceneOpening || "") + " " + (draft.content.text_template || "");
+  return extractTwineLinks(text);
+});
+
+function syncTwineLinksToChoices() {
+  const links = detectedTwineLinks.value;
+  if (!links.length) return;
+
+  for (const l of links) {
+    const existing = draft.choices.find(c => c.label === l.display || c.divert_target === l.target);
+    if (!existing) {
+      draft.choices.push({
+        choice_id: `choice_${draft.choices.length + 1}`,
+        label: l.display,
+        systemVerb: "ACT",
+        effects: {},
+        divert_target: l.target,
+      });
+    }
   }
 }
 
@@ -149,7 +195,26 @@ const auditFindings = computed(() => {
       </div>
 
       <div class="toolbar-right">
-        <div class="tab-nav">
+        
+        <!-- Script vs Node Graph Mode Toggle -->
+        <div style="display:flex; gap:2px; background:var(--bg-input); padding:3px; border-radius:8px; border:1px solid var(--border-subtle); margin-right:8px;">
+          <button
+            :class="['tab-btn', editorMode === 'script' ? 'active' : '']"
+            style="font-size:11px; padding:3px 8px;"
+            @click="switchToScriptMode"
+          >
+            Script
+          </button>
+          <button
+            :class="['tab-btn', editorMode === 'graph' ? 'active' : '']"
+            style="font-size:11px; padding:3px 8px;"
+            @click="switchToGraphMode"
+          >
+            Narrative Graph
+          </button>
+        </div>
+
+        <div v-if="editorMode === 'script'" class="tab-nav">
           <button
             :class="['tab-btn', activeTab === 'content' ? 'active' : '']"
             @click="activeTab = 'content'"
@@ -184,7 +249,17 @@ const auditFindings = computed(() => {
       </div>
     </header>
 
-    <div class="editor-body">
+    
+    <!-- GRAPH CANVAS VIEW -->
+    <div v-if="editorMode === 'graph'" style="flex:1; overflow:hidden;">
+      <NarrativeGraphCanvas
+        :initial-graph="currentGraph"
+        @update-graph="handleGraphUpdate"
+      />
+    </div>
+
+    <!-- SCRIPT PROSE VIEW -->
+    <div v-else class="editor-body">
       <!-- CONTENT TAB -->
       <div v-if="activeTab === 'content'">
         <div class="form-group">
@@ -228,6 +303,22 @@ const auditFindings = computed(() => {
             placeholder="Fallback scene text..."
           ></textarea>
         </div>
+
+        <!-- Twine Links Detection Bar -->
+        <div v-if="detectedTwineLinks.length > 0" style="margin-top:12px; padding:10px 14px; background:var(--accent-subtle); border:1px solid var(--accent); border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <strong style="font-size:12px; color:var(--accent);">Detected {{ detectedTwineLinks.length }} Twine Link{{ detectedTwineLinks.length === 1 ? '' : 's' }}:</strong>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+              <span v-for="(l, i) in detectedTwineLinks" :key="i" class="badge" style="background:var(--bg-card);">
+                {{ l.display }} → {{ l.target }}
+              </span>
+            </div>
+          </div>
+          <button class="btn btn-primary" style="font-size:11px; padding:4px 10px;" @click="syncTwineLinksToChoices">
+            Sync to Choices
+          </button>
+        </div>
+
       </div>
 
       <!-- LOGIC & CHOICES TAB -->

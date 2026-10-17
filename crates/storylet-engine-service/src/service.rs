@@ -24,10 +24,13 @@ use crate::projection::project_workspace;
 use crate::scenario::resolve_scenario_start;
 use crate::store::Store;
 
+use crate::ai_generators::AiGeneratorService;
+
 #[derive(Clone)]
 pub struct StudioService {
     inner: Arc<Mutex<StudioInner>>,
     pub generation: Arc<GenerationService>,
+    pub ai: Arc<AiGeneratorService>,
     pub updates: broadcast::Sender<SessionChange>,
     pub embedding_url: String,
     pub resource_root: PathBuf,
@@ -111,9 +114,14 @@ impl StudioService {
         let res_root = resource_root.into();
         let gen_service = GenerationService::new(res_root.clone(), strata_url, strata_model);
 
+        let litellm_url = std::env::var("LITELLM_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:4000/v1".into());
+        let comfyui_url = std::env::var("COMFYUI_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8188".into());
+        let ai = Arc::new(AiGeneratorService::new(litellm_url, comfyui_url));
+
         Ok(Self {
             inner: Arc::new(Mutex::new(StudioInner { store, runtime })),
             generation: Arc::new(gen_service),
+            ai,
             updates,
             embedding_url: embedding_url.into(),
             resource_root: res_root,

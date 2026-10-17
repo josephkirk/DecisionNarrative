@@ -13,3 +13,6 @@ pub mod mcp;
 
 pub use service::StudioService;
 pub use http::build_router;
+pub mod twee;
+pub mod narrative_graph;
+pub mod ai_generators;

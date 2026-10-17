@@ -78,6 +78,8 @@ export interface StoryletRecord {
   approved_revision?: number | null;
   title: string;
   ending: boolean;
+  position?: [number, number];
+  size?: [number, number];
   location?: string | null;
   group_tag?: string | null;
   cluster_type: "linear" | "player_controlled_passage" | "wheel" | "aftermath";

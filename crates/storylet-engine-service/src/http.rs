@@ -41,6 +41,8 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
         .route("/api/v2/project-bundle/validate", post(validate_bundle))
         .route("/api/v1/project-bundle/validate", post(validate_bundle))
         .route("/api/v2/project-bundle/import", post(import_bundle))
+        .route("/api/v2/twine/export", get(export_twine))
+        .route("/api/v2/twine/import", post(import_twine))
         .route("/api/v1/project-bundle/import", post(import_bundle))
 
         // Library query
@@ -87,6 +89,10 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
         .route("/api/v2/generation-jobs/{id}/events", get(gen_job_stream))
         .route("/api/v1/generation-jobs/{id}/events", get(gen_job_stream))
         .route("/api/v2/craft-resources", get(list_craft_resources))
+        .route("/api/v2/generation/litellm", post(generate_litellm))
+        .route("/api/v2/generation/comfyui/prompt", post(queue_comfyui_prompt))
+        .route("/api/v2/generation/comfyui/history/{id}", get(get_comfyui_history))
+        .route("/api/v2/generation/comfyui/view", get(view_comfyui_image))
         .route("/api/v1/craft-resources", get(list_craft_resources))
 
         // Playtest sessions
@@ -164,6 +170,95 @@ async fn patch_project_meta(
         Ok(m) => (StatusCode::OK, Json(json!(m))).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
     }
+}
+
+#[derive(Deserialize)]
+struct TwineExportQuery {
+    #[serde(default = "default_twine_format")]
+    pub format: String, // "twee" | "html"
+}
+fn default_twine_format() -> String { "twee".into() }
+
+async fn export_twine(
+    State(s): State<StudioService>,
+    Query(q): Query<TwineExportQuery>,
+) -> Response {
+    let meta = match s.get_project_metadata().await {
+        Ok(m) => m,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+    };
+
+    let storylets = match s.list_content("storylets").await {
+        Ok(val) => {
+            let list: Vec<crate::contracts::StoryletRecord> = serde_json::from_value(val).unwrap_or_default();
+            list
+        }
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+    };
+
+    let story = crate::twee::storylets_to_twee_story(&meta.name, &storylets);
+    let safe_title = meta.name.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "_");
+
+    if q.format.eq_ignore_ascii_case("html") {
+        let html = crate::twee::serialize_twine_2_html(&story);
+        let disp = format!("attachment; filename=\"{safe_title}.html\"");
+        let mut resp = Response::new(Body::from(html));
+        resp.headers_mut().insert(header::CONTENT_TYPE, "text/html; charset=utf-8".parse().unwrap());
+        resp.headers_mut().insert(header::CONTENT_DISPOSITION, disp.parse().unwrap());
+        resp
+    } else {
+        let twee_text = crate::twee::serialize_twee_3(&story);
+        let disp = format!("attachment; filename=\"{safe_title}.twee\"");
+        let mut resp = Response::new(Body::from(twee_text));
+        resp.headers_mut().insert(header::CONTENT_TYPE, "text/plain; charset=utf-8".parse().unwrap());
+        resp.headers_mut().insert(header::CONTENT_DISPOSITION, disp.parse().unwrap());
+        resp
+    }
+}
+
+async fn import_twine(
+    State(s): State<StudioService>,
+    bytes: axum::body::Bytes,
+) -> Response {
+    let text = match String::from_utf8(bytes.to_vec()) {
+        Ok(t) => t,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("Invalid UTF-8: {e}") }))).into_response(),
+    };
+
+    let story_res = if text.contains("<tw-storydata") {
+        crate::twee::parse_twine_2_html(&text)
+    } else if let Ok(json_val) = serde_json::from_str::<Value>(&text) {
+        if let Some(c) = json_val.get("content").and_then(|v| v.as_str()) {
+            if c.contains("<tw-storydata") {
+                crate::twee::parse_twine_2_html(c)
+            } else {
+                crate::twee::parse_twee_3(c)
+            }
+        } else {
+            crate::twee::parse_twee_3(&text)
+        }
+    } else {
+        crate::twee::parse_twee_3(&text)
+    };
+
+    let story = match story_res {
+        Ok(st) => st,
+        Err(err) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("Failed to parse Twine/Twee content: {err}") }))).into_response(),
+    };
+
+    let storylets = crate::twee::twee_story_to_storylets(&story);
+    let count = storylets.len();
+
+    for st in &storylets {
+        let val = json!(st);
+        let _ = s.save_content_item("storylets", &val).await;
+    }
+
+    (StatusCode::OK, Json(json!({
+        "success": true,
+        "imported_count": count,
+        "storylets": storylets
+    }))).into_response()
 }
 
 async fn export_bundle(State(service): State<StudioService>) -> Response {
@@ -474,6 +569,58 @@ async fn create_playtest(
             };
             (code, Json(json!({ "error": e }))).into_response()
         }
+    }
+}
+
+async fn generate_litellm(
+    State(s): State<StudioService>,
+    Json(body): Json<crate::ai_generators::LiteLlmRequest>,
+) -> Response {
+    match s.ai.generate_text(&body).await {
+        Ok(res) => (StatusCode::OK, Json(json!(res))).into_response(),
+        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+async fn queue_comfyui_prompt(
+    State(s): State<StudioService>,
+    Json(body): Json<crate::ai_generators::ComfyPromptRequest>,
+) -> Response {
+    match s.ai.queue_comfy_prompt(&body).await {
+        Ok(res) => (StatusCode::OK, Json(json!(res))).into_response(),
+        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+async fn get_comfyui_history(
+    State(s): State<StudioService>,
+    Path(id): Path<String>,
+) -> Response {
+    match s.ai.get_comfy_history(&id).await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct ComfyViewQuery {
+    pub filename: String,
+    pub subfolder: Option<String>,
+    #[serde(rename = "type")]
+    pub folder_type: Option<String>,
+}
+
+async fn view_comfyui_image(
+    State(s): State<StudioService>,
+    Query(q): Query<ComfyViewQuery>,
+) -> Response {
+    match s.ai.get_comfy_image(&q.filename, q.subfolder.as_deref(), q.folder_type.as_deref()).await {
+        Ok(bytes) => {
+            let mut resp = Response::new(Body::from(bytes));
+            resp.headers_mut().insert(header::CONTENT_TYPE, "image/png".parse().unwrap());
+            resp
+        }
+        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
     }
 }
 

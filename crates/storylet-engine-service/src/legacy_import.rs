@@ -262,6 +262,8 @@ pub fn maybe_import_legacy_database(
                     revision: rev as u64,
                     approved_revision: None, // User selected: Require fresh approval!
                     ending: ending_int != 0,
+                    position: None,
+                    size: None,
                 })
             })
             .map_err(|e| e.to_string())?;

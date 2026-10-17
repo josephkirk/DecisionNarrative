@@ -128,6 +128,10 @@ pub struct StoryletRecord {
     #[serde(default)]
     pub ending: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[i32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<[i32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_tag: Option<String>,

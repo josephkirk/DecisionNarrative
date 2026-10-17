@@ -286,6 +286,8 @@ impl GenerationService {
             approved_revision: None,
             title,
             ending: false,
+            position: None,
+            size: None,
             location: req_loc,
             group_tag: Some("generated".into()),
             cluster_type,
