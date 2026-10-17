@@ -30,7 +30,7 @@ fn eligible_npc_rule_commits_a_causal_event_without_advancing_an_extra_turn() {
             effects: vec![],
             caused_by: vec![],
             advance_turn: true,
-                terminal: false,
+            terminal: false,
         },
     )
     .unwrap()

@@ -1,20 +1,20 @@
 //! Axum HTTP router and request handlers for Storylet Studio.
 
-use std::path::PathBuf;
 use axum::{
+    Json, Router,
     body::Body,
     extract::{Path, Query, State},
-    http::{header, Method, StatusCode},
+    http::{Method, StatusCode, header},
     response::{
-        sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
+        sse::{Event, KeepAlive, Sse},
     },
     routing::{delete, get, post, put},
-    Json, Router,
 };
-use serde::Deserialize;
-use serde_json::{json, Value};
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::path::PathBuf;
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 
@@ -24,7 +24,14 @@ use crate::service::StudioService;
 pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers(Any);
 
     let mut router = Router::new()
@@ -32,10 +39,15 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
         .route("/health", get(health))
         .route("/api/health", get(health))
         .route("/api/v2/authoring-options", get(get_authoring_options))
-
         // Project metadata & bundles
-        .route("/api/v2/project", get(get_project_meta).patch(patch_project_meta))
-        .route("/api/v1/project", get(get_project_meta).patch(patch_project_meta))
+        .route(
+            "/api/v2/project",
+            get(get_project_meta).patch(patch_project_meta),
+        )
+        .route(
+            "/api/v1/project",
+            get(get_project_meta).patch(patch_project_meta),
+        )
         .route("/api/v2/project-bundle", get(export_bundle))
         .route("/api/v1/project-bundle", get(export_bundle))
         .route("/api/v2/project-bundle/validate", post(validate_bundle))
@@ -44,15 +56,18 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
         .route("/api/v2/twine/export", get(export_twine))
         .route("/api/v2/twine/import", post(import_twine))
         .route("/api/v1/project-bundle/import", post(import_bundle))
-
         // Library query
         .route("/api/v2/library", get(query_library))
-
         // Content CRUD
-        .route("/api/v2/content/{entity}", get(list_content).post(save_content))
-        .route("/api/v2/content/{entity}/{id}", get(get_content).put(update_content).delete(delete_content))
+        .route(
+            "/api/v2/content/{entity}",
+            get(list_content).post(save_content),
+        )
+        .route(
+            "/api/v2/content/{entity}/{id}",
+            get(get_content).put(update_content).delete(delete_content),
+        )
         .route("/api/v2/storylets/{id}/approve", post(approve_storylet))
-
         // Direct legacy aliases
         .route("/api/qualities", get(list_qualities).post(save_quality))
         .route("/api/qualities/{id}", delete(delete_quality))
@@ -60,61 +75,124 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
         .route("/api/characters/{id}", delete(delete_character))
         .route("/api/locations", get(list_locations).post(save_location))
         .route("/api/locations/{id}", delete(delete_location))
-        .route("/api/npc-behaviors", get(list_npc_behaviors).post(save_npc_behavior))
+        .route(
+            "/api/npc-behaviors",
+            get(list_npc_behaviors).post(save_npc_behavior),
+        )
         .route("/api/npc-behaviors/{id}", delete(delete_npc_behavior))
         .route("/api/storylets", get(list_storylets).post(save_storylet))
         .route("/api/storylets/{id}", delete(delete_storylet))
         .route("/api/storylets/{id}/approve", post(approve_storylet))
         .route("/api/events", get(list_events).post(save_event))
         .route("/api/events/{id}", delete(delete_event))
-
         // Scenarios
         .route("/api/v2/scenarios", get(list_scenarios).post(save_scenario))
         .route("/api/v1/scenarios", get(list_scenarios).post(save_scenario))
-        .route("/api/v2/scenarios/{id}", get(get_scenario).put(save_scenario_with_id).delete(delete_scenario))
-        .route("/api/v1/scenarios/{id}", get(get_scenario).put(save_scenario_with_id).delete(delete_scenario))
+        .route(
+            "/api/v2/scenarios/{id}",
+            get(get_scenario)
+                .put(save_scenario_with_id)
+                .delete(delete_scenario),
+        )
+        .route(
+            "/api/v1/scenarios/{id}",
+            get(get_scenario)
+                .put(save_scenario_with_id)
+                .delete(delete_scenario),
+        )
         .route("/api/v2/scenarios/preview", post(preview_scenario))
-
         // Generation
-        .route("/api/v2/generation-jobs", get(list_gen_jobs).post(create_gen_job))
-        .route("/api/v1/generation-jobs", get(list_gen_jobs).post(create_gen_job))
-        .route("/api/v2/generation-jobs/{id}", get(get_gen_job).delete(delete_gen_job))
-        .route("/api/v1/generation-jobs/{id}", get(get_gen_job).delete(delete_gen_job))
-        .route("/api/v2/generation-jobs/{id}/advance", post(advance_gen_job))
-        .route("/api/v1/generation-jobs/{id}/advance", post(advance_gen_job))
-        .route("/api/v2/generation-jobs/{id}/stages/{stage}", put(edit_gen_stage))
-        .route("/api/v1/generation-jobs/{id}/stages/{stage}", put(edit_gen_stage))
+        .route(
+            "/api/v2/generation-jobs",
+            get(list_gen_jobs).post(create_gen_job),
+        )
+        .route(
+            "/api/v1/generation-jobs",
+            get(list_gen_jobs).post(create_gen_job),
+        )
+        .route(
+            "/api/v2/generation-jobs/{id}",
+            get(get_gen_job).delete(delete_gen_job),
+        )
+        .route(
+            "/api/v1/generation-jobs/{id}",
+            get(get_gen_job).delete(delete_gen_job),
+        )
+        .route(
+            "/api/v2/generation-jobs/{id}/advance",
+            post(advance_gen_job),
+        )
+        .route(
+            "/api/v1/generation-jobs/{id}/advance",
+            post(advance_gen_job),
+        )
+        .route(
+            "/api/v2/generation-jobs/{id}/stages/{stage}",
+            put(edit_gen_stage),
+        )
+        .route(
+            "/api/v1/generation-jobs/{id}/stages/{stage}",
+            put(edit_gen_stage),
+        )
         .route("/api/v2/generation-jobs/{id}/draft", post(save_gen_draft))
         .route("/api/v1/generation-jobs/{id}/draft", post(save_gen_draft))
         .route("/api/v2/generation-jobs/{id}/events", get(gen_job_stream))
         .route("/api/v1/generation-jobs/{id}/events", get(gen_job_stream))
         .route("/api/v2/craft-resources", get(list_craft_resources))
         .route("/api/v2/generation/litellm", post(generate_litellm))
-        .route("/api/v2/generation/comfyui/prompt", post(queue_comfyui_prompt))
-        .route("/api/v2/generation/comfyui/history/{id}", get(get_comfyui_history))
+        .route(
+            "/api/v2/generation/comfyui/prompt",
+            post(queue_comfyui_prompt),
+        )
+        .route(
+            "/api/v2/generation/comfyui/history/{id}",
+            get(get_comfyui_history),
+        )
         .route("/api/v2/generation/comfyui/view", get(view_comfyui_image))
+        .route("/api/v2/audio/inspect", get(inspect_audio_file))
         .route("/api/v1/craft-resources", get(list_craft_resources))
-
         // Playtest sessions
-        .route("/api/v1/playtests/from-workspace", post(create_playtest_from_workspace))
-        .route("/api/v1/playtests", get(list_playtests).post(create_playtest))
-        .route("/api/v1/playtests/{id}", get(get_playtest_snapshot).delete(delete_playtest))
-        .route("/api/v1/playtests/{id}/commands", post(apply_playtest_command))
-        .route("/api/v1/playtests/{id}/choices", post(apply_playtest_choice))
+        .route(
+            "/api/v1/playtests/from-workspace",
+            post(create_playtest_from_workspace),
+        )
+        .route(
+            "/api/v1/playtests",
+            get(list_playtests).post(create_playtest),
+        )
+        .route(
+            "/api/v1/playtests/{id}",
+            get(get_playtest_snapshot).delete(delete_playtest),
+        )
+        .route(
+            "/api/v1/playtests/{id}/commands",
+            post(apply_playtest_command),
+        )
+        .route(
+            "/api/v1/playtests/{id}/choices",
+            post(apply_playtest_choice),
+        )
         .route("/api/v1/playtests/{id}/director", get(evaluate_director))
-        .route("/api/v1/playtests/{id}/director/decision", post(apply_director_decision))
-        .route("/api/v1/playtests/{id}/director/semantic-rank", post(apply_semantic_rank))
-        .route("/api/v1/playtests/{id}/director/rank", post(rank_local_encoder))
+        .route(
+            "/api/v1/playtests/{id}/director/decision",
+            post(apply_director_decision),
+        )
+        .route(
+            "/api/v1/playtests/{id}/director/semantic-rank",
+            post(apply_semantic_rank),
+        )
+        .route(
+            "/api/v1/playtests/{id}/director/rank",
+            post(rank_local_encoder),
+        )
         .route("/api/v1/playtests/{id}/events", get(get_playtest_events))
         .route("/api/v1/playtests/{id}/stream", get(playtest_stream))
         .route("/api/v1/playtests/{id}/fork", post(fork_playtest))
         .route("/api/v1/playtests/{id}/export", get(export_playtest))
         .route("/api/v1/playtests/restore", post(restore_playtest))
         .route("/api/v1/playtests/{id}/restore", post(restore_playtest))
-
         // MCP JSON-RPC
         .route("/mcp", post(handle_http_mcp))
-
         .layer(cors)
         .with_state(service);
 
@@ -134,12 +212,19 @@ async fn index_handler() -> Response {
         Err(_) => std::fs::read_to_string("public/index.html").unwrap_or_default(),
     };
     let mut resp = Response::new(Body::from(content));
-    resp.headers_mut().insert(header::CONTENT_TYPE, "text/html; charset=utf-8".parse().unwrap());
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        "text/html; charset=utf-8".parse().unwrap(),
+    );
     resp
 }
 
 async fn health() -> Response {
-    (StatusCode::OK, Json(json!({ "status": "ok", "service": "storylet-studio-rust" }))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({ "status": "ok", "service": "storylet-studio-rust" })),
+    )
+        .into_response()
 }
 
 async fn get_authoring_options(State(service): State<StudioService>) -> Response {
@@ -149,7 +234,11 @@ async fn get_authoring_options(State(service): State<StudioService>) -> Response
 async fn get_project_meta(State(service): State<StudioService>) -> Response {
     match service.get_project_metadata().await {
         Ok(m) => (StatusCode::OK, Json(json!(m))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -164,7 +253,13 @@ async fn patch_project_meta(
 ) -> Response {
     let payload: PatchProjectName = match serde_json::from_slice(&bytes) {
         Ok(p) => p,
-        Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Request body must be valid JSON" }))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Request body must be valid JSON" })),
+            )
+                .into_response();
+        }
     };
     match service.update_project_name(&payload.name).await {
         Ok(m) => (StatusCode::OK, Json(json!(m))).into_response(),
@@ -177,7 +272,9 @@ struct TwineExportQuery {
     #[serde(default = "default_twine_format")]
     pub format: String, // "twee" | "html"
 }
-fn default_twine_format() -> String { "twee".into() }
+fn default_twine_format() -> String {
+    "twee".into()
+}
 
 async fn export_twine(
     State(s): State<StudioService>,
@@ -185,44 +282,71 @@ async fn export_twine(
 ) -> Response {
     let meta = match s.get_project_metadata().await {
         Ok(m) => m,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e })),
+            )
+                .into_response();
+        }
     };
 
     let storylets = match s.list_content("storylets").await {
         Ok(val) => {
-            let list: Vec<crate::contracts::StoryletRecord> = serde_json::from_value(val).unwrap_or_default();
+            let list: Vec<crate::contracts::StoryletRecord> =
+                serde_json::from_value(val).unwrap_or_default();
             list
         }
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e })),
+            )
+                .into_response();
+        }
     };
 
     let story = crate::twee::storylets_to_twee_story(&meta.name, &storylets);
-    let safe_title = meta.name.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "_");
+    let safe_title = meta
+        .name
+        .to_lowercase()
+        .replace(|c: char| !c.is_alphanumeric(), "_");
 
     if q.format.eq_ignore_ascii_case("html") {
         let html = crate::twee::serialize_twine_2_html(&story);
         let disp = format!("attachment; filename=\"{safe_title}.html\"");
         let mut resp = Response::new(Body::from(html));
-        resp.headers_mut().insert(header::CONTENT_TYPE, "text/html; charset=utf-8".parse().unwrap());
-        resp.headers_mut().insert(header::CONTENT_DISPOSITION, disp.parse().unwrap());
+        resp.headers_mut().insert(
+            header::CONTENT_TYPE,
+            "text/html; charset=utf-8".parse().unwrap(),
+        );
+        resp.headers_mut()
+            .insert(header::CONTENT_DISPOSITION, disp.parse().unwrap());
         resp
     } else {
         let twee_text = crate::twee::serialize_twee_3(&story);
         let disp = format!("attachment; filename=\"{safe_title}.twee\"");
         let mut resp = Response::new(Body::from(twee_text));
-        resp.headers_mut().insert(header::CONTENT_TYPE, "text/plain; charset=utf-8".parse().unwrap());
-        resp.headers_mut().insert(header::CONTENT_DISPOSITION, disp.parse().unwrap());
+        resp.headers_mut().insert(
+            header::CONTENT_TYPE,
+            "text/plain; charset=utf-8".parse().unwrap(),
+        );
+        resp.headers_mut()
+            .insert(header::CONTENT_DISPOSITION, disp.parse().unwrap());
         resp
     }
 }
 
-async fn import_twine(
-    State(s): State<StudioService>,
-    bytes: axum::body::Bytes,
-) -> Response {
+async fn import_twine(State(s): State<StudioService>, bytes: axum::body::Bytes) -> Response {
     let text = match String::from_utf8(bytes.to_vec()) {
         Ok(t) => t,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("Invalid UTF-8: {e}") }))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("Invalid UTF-8: {e}") })),
+            )
+                .into_response();
+        }
     };
 
     let story_res = if text.contains("<tw-storydata") {
@@ -243,7 +367,13 @@ async fn import_twine(
 
     let story = match story_res {
         Ok(st) => st,
-        Err(err) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("Failed to parse Twine/Twee content: {err}") }))).into_response(),
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("Failed to parse Twine/Twee content: {err}") })),
+            )
+                .into_response();
+        }
     };
 
     let storylets = crate::twee::twee_story_to_storylets(&story);
@@ -254,24 +384,43 @@ async fn import_twine(
         let _ = s.save_content_item("storylets", &val).await;
     }
 
-    (StatusCode::OK, Json(json!({
-        "success": true,
-        "imported_count": count,
-        "storylets": storylets
-    }))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({
+            "success": true,
+            "imported_count": count,
+            "storylets": storylets
+        })),
+    )
+        .into_response()
 }
 
 async fn export_bundle(State(service): State<StudioService>) -> Response {
     match service.export_project_bundle().await {
         Ok(bundle) => {
-            let filename = format!("{}.storylet.json", bundle.project.name.to_lowercase().replace(' ', "-"));
+            let filename = format!(
+                "{}.storylet.json",
+                bundle.project.name.to_lowercase().replace(' ', "-")
+            );
             let body = serde_json::to_string_pretty(&bundle).unwrap_or_default();
             let mut resp = Response::new(Body::from(body));
-            resp.headers_mut().insert(header::CONTENT_TYPE, "application/json; charset=utf-8".parse().unwrap());
-            resp.headers_mut().insert(header::CONTENT_DISPOSITION, format!("attachment; filename=\"{filename}\"").parse().unwrap());
+            resp.headers_mut().insert(
+                header::CONTENT_TYPE,
+                "application/json; charset=utf-8".parse().unwrap(),
+            );
+            resp.headers_mut().insert(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\"")
+                    .parse()
+                    .unwrap(),
+            );
             resp
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -288,11 +437,25 @@ async fn validate_bundle(
 ) -> Response {
     let payload: BundlePayload = match serde_json::from_slice(&bytes) {
         Ok(p) => p,
-        Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Request body must be a JSON object" }))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Request body must be a JSON object" })),
+            )
+                .into_response();
+        }
     };
     match service.validate_bundle(&payload.bundle).await {
-        Ok(issues) => (StatusCode::OK, Json(json!({ "valid": issues.is_empty(), "issues": issues }))).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "valid": false, "issues": [e] }))).into_response(),
+        Ok(issues) => (
+            StatusCode::OK,
+            Json(json!({ "valid": issues.is_empty(), "issues": issues })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "valid": false, "issues": [e] })),
+        )
+            .into_response(),
     }
 }
 
@@ -301,11 +464,23 @@ async fn import_bundle(
     Json(payload): Json<BundlePayload>,
 ) -> Response {
     if payload.confirm_replace != Some(true) {
-        return (StatusCode::CONFLICT, Json(json!({ "error": "Explicit confirmReplace=true is required" }))).into_response();
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "Explicit confirmReplace=true is required" })),
+        )
+            .into_response();
     }
     match service.import_bundle(&payload.bundle).await {
-        Ok(_) => (StatusCode::OK, Json(json!({ "success": true, "message": "Project replaced successfully" }))).into_response(),
-        Err(e) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": e }))).into_response(),
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "message": "Project replaced successfully" })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -315,7 +490,11 @@ async fn query_library(
 ) -> Response {
     match service.query_library(&query).await {
         Ok(p) => (StatusCode::OK, Json(json!(p))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -326,7 +505,11 @@ async fn list_content(
 ) -> Response {
     match service.list_content(&entity).await {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -368,7 +551,11 @@ async fn delete_content(
 ) -> Response {
     match service.delete_content_item(&entity, &id).await {
         Ok(deleted) => (StatusCode::OK, Json(json!({ "deleted": deleted }))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -390,39 +577,89 @@ async fn approve_storylet(
 }
 
 // Aliases
-async fn list_qualities(State(s): State<StudioService>) -> Response { list_content(State(s), Path("qualities".into())).await }
-async fn save_quality(State(s): State<StudioService>, Json(p): Json<Value>) -> Response { save_content(State(s), Path("qualities".into()), Json(p)).await }
-async fn delete_quality(State(s): State<StudioService>, Path(id): Path<String>) -> Response { delete_content(State(s), Path(("qualities".into(), id))).await }
+async fn list_qualities(State(s): State<StudioService>) -> Response {
+    list_content(State(s), Path("qualities".into())).await
+}
+async fn save_quality(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
+    save_content(State(s), Path("qualities".into()), Json(p)).await
+}
+async fn delete_quality(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
+    delete_content(State(s), Path(("qualities".into(), id))).await
+}
 
-async fn list_characters(State(s): State<StudioService>) -> Response { list_content(State(s), Path("characters".into())).await }
-async fn save_character(State(s): State<StudioService>, Json(p): Json<Value>) -> Response { save_content(State(s), Path("characters".into()), Json(p)).await }
-async fn delete_character(State(s): State<StudioService>, Path(id): Path<String>) -> Response { delete_content(State(s), Path(("characters".into(), id))).await }
+async fn list_characters(State(s): State<StudioService>) -> Response {
+    list_content(State(s), Path("characters".into())).await
+}
+async fn save_character(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
+    save_content(State(s), Path("characters".into()), Json(p)).await
+}
+async fn delete_character(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
+    delete_content(State(s), Path(("characters".into(), id))).await
+}
 
-async fn list_locations(State(s): State<StudioService>) -> Response { list_content(State(s), Path("locations".into())).await }
-async fn save_location(State(s): State<StudioService>, Json(p): Json<Value>) -> Response { save_content(State(s), Path("locations".into()), Json(p)).await }
-async fn delete_location(State(s): State<StudioService>, Path(id): Path<String>) -> Response { delete_content(State(s), Path(("locations".into(), id))).await }
+async fn list_locations(State(s): State<StudioService>) -> Response {
+    list_content(State(s), Path("locations".into())).await
+}
+async fn save_location(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
+    save_content(State(s), Path("locations".into()), Json(p)).await
+}
+async fn delete_location(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
+    delete_content(State(s), Path(("locations".into(), id))).await
+}
 
-async fn list_npc_behaviors(State(s): State<StudioService>) -> Response { list_content(State(s), Path("npc_behaviors".into())).await }
-async fn save_npc_behavior(State(s): State<StudioService>, Json(p): Json<Value>) -> Response { save_content(State(s), Path("npc_behaviors".into()), Json(p)).await }
-async fn delete_npc_behavior(State(s): State<StudioService>, Path(id): Path<String>) -> Response { delete_content(State(s), Path(("npc_behaviors".into(), id))).await }
+async fn list_npc_behaviors(State(s): State<StudioService>) -> Response {
+    list_content(State(s), Path("npc_behaviors".into())).await
+}
+async fn save_npc_behavior(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
+    save_content(State(s), Path("npc_behaviors".into()), Json(p)).await
+}
+async fn delete_npc_behavior(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
+    delete_content(State(s), Path(("npc_behaviors".into(), id))).await
+}
 
-async fn list_storylets(State(s): State<StudioService>) -> Response { list_content(State(s), Path("storylets".into())).await }
-async fn save_storylet(State(s): State<StudioService>, Json(p): Json<Value>) -> Response { save_content(State(s), Path("storylets".into()), Json(p)).await }
-async fn delete_storylet(State(s): State<StudioService>, Path(id): Path<String>) -> Response { delete_content(State(s), Path(("storylets".into(), id))).await }
+async fn list_storylets(State(s): State<StudioService>) -> Response {
+    list_content(State(s), Path("storylets".into())).await
+}
+async fn save_storylet(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
+    save_content(State(s), Path("storylets".into()), Json(p)).await
+}
+async fn delete_storylet(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
+    delete_content(State(s), Path(("storylets".into(), id))).await
+}
 
-async fn list_events(State(s): State<StudioService>) -> Response { list_content(State(s), Path("events".into())).await }
-async fn save_event(State(s): State<StudioService>, Json(p): Json<Value>) -> Response { save_content(State(s), Path("events".into()), Json(p)).await }
-async fn delete_event(State(s): State<StudioService>, Path(id): Path<String>) -> Response { delete_content(State(s), Path(("events".into(), id))).await }
+async fn list_events(State(s): State<StudioService>) -> Response {
+    list_content(State(s), Path("events".into())).await
+}
+async fn save_event(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
+    save_content(State(s), Path("events".into()), Json(p)).await
+}
+async fn delete_event(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
+    delete_content(State(s), Path(("events".into(), id))).await
+}
 
 // Scenarios
-async fn list_scenarios(State(s): State<StudioService>) -> Response { list_content(State(s), Path("scenarios".into())).await }
-async fn get_scenario(State(s): State<StudioService>, Path(id): Path<String>) -> Response { get_content(State(s), Path(("scenarios".into(), id))).await }
-async fn save_scenario(State(s): State<StudioService>, Json(p): Json<Value>) -> Response { save_content(State(s), Path("scenarios".into()), Json(p)).await }
-async fn save_scenario_with_id(State(s): State<StudioService>, Path(id): Path<String>, Json(mut p): Json<Value>) -> Response {
-    if let Some(obj) = p.as_object_mut() { obj.insert("id".into(), Value::String(id)); }
+async fn list_scenarios(State(s): State<StudioService>) -> Response {
+    list_content(State(s), Path("scenarios".into())).await
+}
+async fn get_scenario(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
+    get_content(State(s), Path(("scenarios".into(), id))).await
+}
+async fn save_scenario(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
     save_content(State(s), Path("scenarios".into()), Json(p)).await
 }
-async fn delete_scenario(State(s): State<StudioService>, Path(id): Path<String>) -> Response { delete_content(State(s), Path(("scenarios".into(), id))).await }
+async fn save_scenario_with_id(
+    State(s): State<StudioService>,
+    Path(id): Path<String>,
+    Json(mut p): Json<Value>,
+) -> Response {
+    if let Some(obj) = p.as_object_mut() {
+        obj.insert("id".into(), Value::String(id));
+    }
+    save_content(State(s), Path("scenarios".into()), Json(p)).await
+}
+async fn delete_scenario(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
+    delete_content(State(s), Path(("scenarios".into(), id))).await
+}
 
 async fn preview_scenario(
     State(service): State<StudioService>,
@@ -438,7 +675,11 @@ async fn preview_scenario(
 async fn list_gen_jobs(State(s): State<StudioService>) -> Response {
     match s.list_generation_jobs().await {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -485,29 +726,30 @@ async fn edit_gen_stage(
     Path((id, stage)): Path<(String, String)>,
     Json(b): Json<EditStageBody>,
 ) -> Response {
-    match s.edit_generation_stage(&id, &stage, b.expected_revision, b.artifact).await {
+    match s
+        .edit_generation_stage(&id, &stage, b.expected_revision, b.artifact)
+        .await
+    {
         Ok(job) => (StatusCode::OK, Json(json!(job))).into_response(),
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
     }
 }
 
-async fn save_gen_draft(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-) -> Response {
+async fn save_gen_draft(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
     match s.save_generation_draft(&id).await {
         Ok(st) => (StatusCode::OK, Json(json!(st))).into_response(),
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
     }
 }
 
-async fn delete_gen_job(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-) -> Response {
+async fn delete_gen_job(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
     match s.delete_generation_job(&id).await {
         Ok(del) => (StatusCode::OK, Json(json!({ "deleted": del }))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -532,7 +774,11 @@ async fn gen_job_stream(
 async fn list_craft_resources(State(s): State<StudioService>) -> Response {
     match s.list_craft_resources().await {
         Ok(list) => (StatusCode::OK, Json(json!({ "resources": list }))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -558,8 +804,13 @@ async fn create_playtest(
     State(s): State<StudioService>,
     Json(body): Json<CreatePlaytestBody>,
 ) -> Response {
-    let session_id = body.session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    match s.create_playtest_session(&session_id, body.project, &body.scenario_id).await {
+    let session_id = body
+        .session_id
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    match s
+        .create_playtest_session(&session_id, body.project, &body.scenario_id)
+        .await
+    {
         Ok(data) => (StatusCode::CREATED, Json(data)).into_response(),
         Err(e) => {
             let code = if e.contains("already exists") || e.contains("cannot be reused") {
@@ -592,10 +843,7 @@ async fn queue_comfyui_prompt(
     }
 }
 
-async fn get_comfyui_history(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-) -> Response {
+async fn get_comfyui_history(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
     match s.ai.get_comfy_history(&id).await {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
@@ -610,14 +858,158 @@ struct ComfyViewQuery {
     pub folder_type: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AudioInspectQuery {
+    pub path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AudioInspectResponse {
+    pub path: String,
+    pub exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f64>,
+}
+
+fn inspect_wav_duration(path: &std::path::Path) -> Option<f64> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = std::fs::File::open(path).ok()?;
+    let file_len = file.metadata().ok()?.len();
+    let mut header = [0_u8; 12];
+    file.read_exact(&mut header).ok()?;
+    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
+        return None;
+    }
+    let riff_end = 8_u64.checked_add(u32::from_le_bytes(header[4..8].try_into().ok()?) as u64)?;
+    if riff_end < 12 || riff_end > file_len {
+        return None;
+    }
+
+    let mut byte_rate = None;
+    let mut data_size = None;
+    while file.stream_position().ok()? + 8 <= riff_end {
+        let mut chunk = [0_u8; 8];
+        file.read_exact(&mut chunk).ok()?;
+        let chunk_size = u32::from_le_bytes(chunk[4..8].try_into().ok()?) as u64;
+        let payload_start = file.stream_position().ok()?;
+        let payload_end = payload_start.checked_add(chunk_size + chunk_size % 2)?;
+        if payload_end > riff_end {
+            return None;
+        }
+
+        if &chunk[0..4] == b"fmt " {
+            if chunk_size < 16 {
+                return None;
+            }
+            let mut format = [0_u8; 16];
+            file.read_exact(&mut format).ok()?;
+            byte_rate = Some(u32::from_le_bytes(format[8..12].try_into().ok()?) as u64);
+        } else if &chunk[0..4] == b"data" {
+            data_size = Some(chunk_size);
+        }
+        file.seek(SeekFrom::Start(payload_end)).ok()?;
+        if byte_rate.is_some() && data_size.is_some() {
+            break;
+        }
+    }
+
+    let rate = byte_rate?;
+    if rate == 0 {
+        return None;
+    }
+    Some(((data_size? as f64 / rate as f64) * 10.0).round() / 10.0)
+}
+
+#[cfg(test)]
+mod audio_inspect_tests {
+    use super::inspect_wav_duration;
+    use std::io::Write;
+
+    #[test]
+    fn reports_duration_from_wav_byte_rate_and_data_size() {
+        let path =
+            std::env::temp_dir().join(format!("storylet-audio-{}.wav", uuid::Uuid::new_v4()));
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&8036_u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&8000_u32.to_le_bytes());
+        wav.extend_from_slice(&8000_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&8_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&8000_u32.to_le_bytes());
+        wav.extend(std::iter::repeat_n(0, 8000));
+        {
+            let mut file = std::fs::File::create(&path).unwrap();
+            file.write_all(&wav).unwrap();
+        }
+
+        assert_eq!(inspect_wav_duration(&path), Some(1.0));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn rejects_non_wav_files() {
+        let path =
+            std::env::temp_dir().join(format!("storylet-audio-{}.mp3", uuid::Uuid::new_v4()));
+        std::fs::write(&path, b"not a wave file").unwrap();
+        assert_eq!(inspect_wav_duration(&path), None);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+async fn inspect_audio_file(Query(q): Query<AudioInspectQuery>) -> impl IntoResponse {
+    let clean_path = q.path.trim();
+    let p = std::path::Path::new(clean_path);
+    if p.exists() && p.is_file() {
+        let size = std::fs::metadata(p).ok().map(|meta| meta.len());
+        let duration = inspect_wav_duration(p);
+        (
+            StatusCode::OK,
+            Json(AudioInspectResponse {
+                path: clean_path.to_string(),
+                exists: true,
+                size,
+                duration,
+            }),
+        )
+    } else {
+        (
+            StatusCode::OK,
+            Json(AudioInspectResponse {
+                path: clean_path.to_string(),
+                exists: false,
+                size: None,
+                duration: None,
+            }),
+        )
+    }
+}
+
 async fn view_comfyui_image(
     State(s): State<StudioService>,
     Query(q): Query<ComfyViewQuery>,
 ) -> Response {
-    match s.ai.get_comfy_image(&q.filename, q.subfolder.as_deref(), q.folder_type.as_deref()).await {
+    match s
+        .ai
+        .get_comfy_image(
+            &q.filename,
+            q.subfolder.as_deref(),
+            q.folder_type.as_deref(),
+        )
+        .await
+    {
         Ok(bytes) => {
             let mut resp = Response::new(Body::from(bytes));
-            resp.headers_mut().insert(header::CONTENT_TYPE, "image/png".parse().unwrap());
+            resp.headers_mut()
+                .insert(header::CONTENT_TYPE, "image/png".parse().unwrap());
             resp
         }
         Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
@@ -628,43 +1020,57 @@ async fn create_playtest_from_workspace(
     State(s): State<StudioService>,
     Json(req): Json<WorkspacePlaytestRequest>,
 ) -> Response {
-    match s.create_playtest_from_workspace(req.start_location_id.as_deref(), req.scenario_id.as_deref()).await {
+    match s
+        .create_playtest_from_workspace(
+            req.start_location_id.as_deref(),
+            req.scenario_id.as_deref(),
+        )
+        .await
+    {
         Ok(data) => (StatusCode::CREATED, Json(data)).into_response(),
-        Err(e) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
 async fn list_playtests(State(s): State<StudioService>) -> Response {
     match s.list_playtest_sessions().await {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
-async fn get_playtest_snapshot(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-) -> Response {
+async fn get_playtest_snapshot(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
     match s.get_playtest_snapshot(&id).await {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
     }
 }
 
-async fn delete_playtest(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-) -> Response {
+async fn delete_playtest(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
     match s.delete_playtest(&id).await {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum CommandPayload {
-    Wrapped { command: storylet_engine::WorldCommand },
+    Wrapped {
+        command: storylet_engine::WorldCommand,
+    },
     Direct(storylet_engine::WorldCommand),
 }
 
@@ -675,7 +1081,13 @@ async fn apply_playtest_command(
 ) -> Response {
     let payload: CommandPayload = match serde_json::from_slice(&bytes) {
         Ok(p) => p,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("Invalid command JSON: {e}") }))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("Invalid command JSON: {e}") })),
+            )
+                .into_response();
+        }
     };
 
     let cmd = match payload {
@@ -685,7 +1097,13 @@ async fn apply_playtest_command(
 
     let cmd_val = match serde_json::to_value(&cmd) {
         Ok(v) => v,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
     };
 
     match s.apply_playtest_command(&id, &cmd_val).await {
@@ -722,7 +1140,16 @@ async fn apply_playtest_choice(
     Path(id): Path<String>,
     Json(b): Json<ChoiceBody>,
 ) -> Response {
-    match s.apply_playtest_choice(&id, &b.storylet_id, &b.choice_id, b.expected_revision, &b.idempotency_key).await {
+    match s
+        .apply_playtest_choice(
+            &id,
+            &b.storylet_id,
+            &b.choice_id,
+            b.expected_revision,
+            &b.idempotency_key,
+        )
+        .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
     }
@@ -733,7 +1160,9 @@ struct DirectorQuery {
     #[serde(rename = "targetTensionSlope", default = "default_slope")]
     pub target_tension_slope: f64,
 }
-fn default_slope() -> f64 { 0.15 }
+fn default_slope() -> f64 {
+    0.15
+}
 
 #[derive(Deserialize)]
 struct DecisionBody {
@@ -747,9 +1176,16 @@ async fn apply_director_decision(
     Path(id): Path<String>,
     Json(body): Json<DecisionBody>,
 ) -> Response {
-    match s.apply_director_decision(&id, body.target_tension_slope, body.decision).await {
+    match s
+        .apply_director_decision(&id, body.target_tension_slope, body.decision)
+        .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -758,9 +1194,16 @@ async fn evaluate_director(
     Path(id): Path<String>,
     Query(q): Query<DirectorQuery>,
 ) -> Response {
-    match s.evaluate_playtest_director(&id, q.target_tension_slope).await {
+    match s
+        .evaluate_playtest_director(&id, q.target_tension_slope)
+        .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -769,26 +1212,31 @@ async fn rank_local_encoder(
     Path(id): Path<String>,
     Query(q): Query<DirectorQuery>,
 ) -> Response {
-    match s.rank_playtest_with_local_encoder(&id, q.target_tension_slope).await {
+    match s
+        .rank_playtest_with_local_encoder(&id, q.target_tension_slope)
+        .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
-async fn get_playtest_events(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-) -> Response {
+async fn get_playtest_events(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
     match s.get_playtest_events(&id).await {
         Ok(data) => (StatusCode::OK, Json(json!({ "events": data }))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
-async fn playtest_stream(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-) -> Response {
+async fn playtest_stream(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
     let initial_snapshot = match s.get_playtest_snapshot(&id).await {
         Ok(snap) => snap,
         Err(e) => return (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
@@ -804,7 +1252,8 @@ async fn playtest_stream(
         if let Ok(change) = item {
             if change.session_id == target_id {
                 let data = serde_json::to_string(&change.snapshot).unwrap_or_default();
-                let ev: Result<Event, std::convert::Infallible> = Ok(Event::default().event("playtest.updated").data(data));
+                let ev: Result<Event, std::convert::Infallible> =
+                    Ok(Event::default().event("playtest.updated").data(data));
                 return Some(ev);
             }
         }
@@ -812,7 +1261,9 @@ async fn playtest_stream(
     });
 
     let combined = tokio_stream::once(initial).chain(stream);
-    Sse::new(combined).keep_alive(KeepAlive::default()).into_response()
+    Sse::new(combined)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -828,17 +1279,17 @@ async fn fork_playtest(
     Path(id): Path<String>,
     Json(b): Json<ForkBody>,
 ) -> Response {
-    match s.fork_playtest(&id, b.branch_session_id.as_deref(), &b.event_id).await {
+    match s
+        .fork_playtest(&id, b.branch_session_id.as_deref(), &b.event_id)
+        .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
     }
 }
 
 // HTTP MCP
-async fn export_playtest(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-) -> Response {
+async fn export_playtest(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
     match s.export_playtest_session(&id).await {
         Ok(state) => (StatusCode::OK, Json(json!(state))).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
@@ -848,17 +1299,22 @@ async fn export_playtest(
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum RestoreBody {
-    Wrapped { state: storylet_engine::RuntimeSessionState },
+    Wrapped {
+        state: storylet_engine::RuntimeSessionState,
+    },
     Direct(storylet_engine::RuntimeSessionState),
 }
 
-async fn restore_playtest(
-    State(s): State<StudioService>,
-    bytes: axum::body::Bytes,
-) -> Response {
+async fn restore_playtest(State(s): State<StudioService>, bytes: axum::body::Bytes) -> Response {
     let body: RestoreBody = match serde_json::from_slice(&bytes) {
         Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
     };
 
     let state = match body {
@@ -868,7 +1324,11 @@ async fn restore_playtest(
 
     match s.restore_playtest_session(state).await {
         Ok(data) => (StatusCode::CREATED, Json(data)).into_response(),
-        Err(e) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -884,16 +1344,20 @@ async fn apply_semantic_rank(
     Path(id): Path<String>,
     Json(body): Json<SemanticRankBody>,
 ) -> Response {
-    match s.apply_semantic_rank(&id, body.target_tension_slope, body.request).await {
+    match s
+        .apply_semantic_rank(&id, body.target_tension_slope, body.request)
+        .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
-async fn handle_http_mcp(
-    State(s): State<StudioService>,
-    Json(msg): Json<Value>,
-) -> Response {
+async fn handle_http_mcp(State(s): State<StudioService>, Json(msg): Json<Value>) -> Response {
     if let Some(resp) = crate::mcp::handle_mcp_message(&s, &msg).await {
         (StatusCode::OK, Json(resp)).into_response()
     } else {

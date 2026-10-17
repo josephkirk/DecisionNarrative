@@ -438,7 +438,7 @@ const server = Bun.serve({
         locations: repo.listLocations(),
         characters: repo.listCharacters(),
         storylets: [{ ...draft, approved_revision: draft.revision }],
-      }, draft.location || repo.listLocations()[0]?.id);
+      }, repo.listLocations()[0]?.id);
       const blockingIssues = validation.issues.filter((issue) => issue.startsWith(`storylets.${id}.`));
       if (blockingIssues.length) {
         return jsonResponse({ error: "Storylet needs correction before approval", issues: blockingIssues }, 422);

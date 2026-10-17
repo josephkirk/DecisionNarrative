@@ -174,6 +174,7 @@ async function createPassageAt(x: number, y: number) {
     approved_revision: null,
     title: `Passage ${nextIdx}`,
     ending: false,
+    location_tags: [],
     cluster_type: "player_controlled_passage",
     urgency_weight: 50,
     repeatability: "always",
@@ -293,7 +294,7 @@ function resetZoom() { zoom.value = 1.0; panX.value = 100; panY.value = 100; }
         </p>
 
         <div class="passage-tile-footer">
-          <span v-if="st.location" style="font-size:10px; color:var(--text-dim);">📍 {{ st.location }}</span>
+          <span v-if="st.location_tags?.length" style="font-size:10px; color:var(--text-dim);">📍 {{ st.location_tags.join(", ") }}</span>
           <span style="font-size:10px; color:var(--text-dim); margin-left:auto;">
             {{ st.choices.length }} links
           </span>

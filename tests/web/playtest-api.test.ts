@@ -184,8 +184,8 @@ test("local encoder reranks only eligible project storylets and revalidates the 
     const built = buildWorkspaceProject({
       qualities: [],
       locations: [
-        { id: "archive", name: "Archive", description: "A records room", connected_zones: ["station"] },
-        { id: "station", name: "Station", description: "A distant platform", connected_zones: ["archive"] },
+        { id: "archive", name: "Archive", description: "A records room", tags: ["records"], connected_zones: ["station"] },
+        { id: "station", name: "Station", description: "A distant platform", tags: ["platform"], connected_zones: ["archive"] },
       ],
       characters: [],
       storylets: ["receipt", "weather", "remote"].map((name) => ({
@@ -193,7 +193,7 @@ test("local encoder reranks only eligible project storylets and revalidates the 
         revision: 1,
         approved_revision: 1,
         title: name === "receipt" ? "Find the receipt" : "Discuss the weather",
-        location: name === "remote" ? "station" : "archive",
+        location_tags: name === "remote" ? ["platform"] : ["records"],
         cluster_type: "player_controlled_passage" as const,
         urgency_weight: 50,
         repeatability: "always" as const,
@@ -354,11 +354,11 @@ test("designer-created storylet candidates execute their authored choice effects
   runtimes.push(runtime);
   const built = buildWorkspaceProject({
     qualities: [{ name: "clue.receipt", type: "tool", value: 0, description: "Receipt clue" }],
-    locations: [{ id: "archive", name: "Archive", description: "A reading room", connected_zones: [] }],
+    locations: [{ id: "archive", name: "Archive", description: "A reading room", tags: ["archive"], connected_zones: [] }],
     characters: [{ id: "clerk", name: "Clerk", role: "Clerk", home_location: "archive", current_location: "archive", status_axes: {}, needs: {}, agenda: "", red_line: "" }],
     storylets: [{
       revision: 1, approved_revision: 1,
-      id: "read-receipt", title: "Read the Receipt", location: "archive", cluster_type: "player_controlled_passage",
+      id: "read-receipt", title: "Read the Receipt", location_tags: ["archive"], cluster_type: "player_controlled_passage",
       urgency_weight: 50, repeatability: "always", cooldown_turns: 0,
       parameters: [{ param_name: "clerk", query: "character.role == 'Clerk'" }],
       preconditions: { all_of: [{ variable: "clue.receipt", op: "eq", value: 0 }] },

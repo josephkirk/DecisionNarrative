@@ -1,9 +1,10 @@
-use storylet_engine_service::twee::{
-    extract_twine_links, parse_twee_3, parse_twine_2_html, serialize_twee_3,
-    serialize_twine_2_html, storylets_to_twee_story, twee_story_to_storylets, TweeStory,
-    TweePassage,
+use storylet_engine_service::contracts::{
+    StoryletChoiceRecord, StoryletContentRecord, StoryletRecord,
 };
-use storylet_engine_service::contracts::{StoryletRecord, StoryletContentRecord, StoryletChoiceRecord};
+use storylet_engine_service::twee::{
+    TweePassage, TweeStory, extract_twine_links, parse_twee_3, parse_twine_2_html,
+    serialize_twee_3, serialize_twine_2_html, storylets_to_twee_story, twee_story_to_storylets,
+};
 
 #[test]
 fn test_twine_link_extraction() {

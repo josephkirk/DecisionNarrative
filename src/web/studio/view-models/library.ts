@@ -11,13 +11,13 @@ export function useLibraryViewModel() {
     page: 1,
     page_size: 60,
     total_pages: 1,
-    available_locations: [],
+    available_location_tags: [],
   });
 
   const filters = reactive({
     q: "",
     status: "all",
-    location_id: "",
+    location_tag: "",
     ending: "all",
     sort: "title",
     page: 1,
@@ -42,7 +42,7 @@ export function useLibraryViewModel() {
   function resetFilters() {
     filters.q = "";
     filters.status = "all";
-    filters.location_id = "";
+    filters.location_tag = "";
     filters.ending = "all";
     filters.sort = "title";
     filters.page = 1;

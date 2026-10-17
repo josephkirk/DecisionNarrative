@@ -2,6 +2,8 @@ pub mod audit;
 pub mod resources;
 pub mod workflow;
 
-pub use audit::{audit_unslop_compliance, summarize_unslop_violations, UnslopAuditResult, UnslopSummary};
+pub use audit::{
+    UnslopAuditResult, UnslopSummary, audit_unslop_compliance, summarize_unslop_violations,
+};
 pub use resources::{CraftRegistry, StoryCraftResourceReference};
-pub use workflow::{get_stage_descriptors, GenerationService, GENERATION_STAGES};
+pub use workflow::{GENERATION_STAGES, GenerationService, get_stage_descriptors};

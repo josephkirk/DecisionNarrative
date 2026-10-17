@@ -8,7 +8,7 @@ The platform couples a host-independent Rust decision core with a unified local 
 
 - **Narrative Core (`crates/storylet-engine`)**: Host-independent Rust library with zero I/O dependencies. Owns deterministic world state, precondition matching, role resolution, choices, and causal history. Exports a C ABI for native embedding (Unreal / Unity / Godot / .NET).
 - **Unified Local Service (`crates/storylet-engine-service`)**: Axum, Tokio, and rusqlite service providing single-store SQLite persistence, REST endpoints, Server-Sent Events (SSE) live streams, and stdio/HTTP Model Context Protocol (MCP) server.
-- **Authoring Studio (`src/web`)**: Vue 3 (Composition API) + Vite + Vue Router application. Card-grid storylet deck library, full-width storylet editor with live unslop prose audit, Story Codex (qualities, characters, locations, NPC rules, events), and starting condition scenarios.
+- **Authoring Studio (`src/web`)**: Vue 3 (Composition API) + Vite + Vue Router application. Card-grid storylet deck library, graph-only storylet editor with a contextual property inspector, inline tag editing, Tag Manager reference counts, Story Codex (qualities, characters, locations, NPC rules, events), and starting condition scenarios. Storylet preconditions combine quality checks with visited-location IDs/tags and met-character IDs/roles; each enabled category is required, while location and character choices are alternatives within their category.
 - **Drama Director & Ranking (`model/`)**: Deterministic priority/urgency selection with optional local embedding ranking (EmbeddingGemma 2 via Python service).
 
 ## Requirements
@@ -28,9 +28,9 @@ bun run build
 bun run play
 ```
 
-Open `http://127.0.0.1:3000` in your browser (e.g. Microsoft Edge, Chrome, Safari).
+Open `http://127.0.0.1:3001` in your browser (e.g. Microsoft Edge, Chrome, Safari). `bun run play` uses a fresh SQLite database at `data/storylet_studio_clean.db`; the default database and legacy imports remain untouched.
 
-Authoring records use a unified SQLite database at `data/storylet_studio_v2.db` by default. Set `STORYLET_STUDIO_DB_PATH` to choose another path or `:memory:` for isolated testing. On first launch, the service automatically imports existing project records from legacy databases if present, importing storylets as drafts requiring fresh designer approval.
+The service defaults to `data/storylet_studio_v2.db` when started directly, and imports existing project records from legacy databases on first launch. Set `STORYLET_STUDIO_DB_PATH` to choose another path or `:memory:` for isolated testing.
 
 ## Environment configuration
 
@@ -61,9 +61,11 @@ uv run --project model --no-sync python -m unittest discover -s model/tests -v
 
 ## Authoring and Starting Scenarios
 
-- **Storylet Library**: Browsable card grid with responsive columns (60 cards per page), search by title/text/group tag, status filters (Approved/Draft), location filters, and ending badges. Clicking any card replaces the grid with a focused, full-width editor.
+- **Storylet Library**: Browsable card grid with responsive columns (60 cards per page), search by title/text/group tag, status filters (Approved/Draft), location-tag filters, and ending badges. Storylets target location tags; they are eligible anywhere the current location shares at least one tag. Clicking any card opens the full-width graph editor.
+- **Storylet Graph Editor**: Authors edit the graph canvas and inspect storylet metadata, dialogue sections, ordered lines or idle actions, role/tag/audio metadata, local variables, and node-specific rules. Go To Location nodes move the player to a selected project location and must be directly targeted by a Choice branch. Graph validation runs before draft save and approval; valid graphs require exactly one Start and one End, with every node on a complete Start-to-End path. Variable and condition nodes select global or storylet-local scope; right-click adds or deletes graph items, and Alt-drag cuts wires.
 - **Starting Scenarios**: Scenarios configure only starting conditions (player start location policy, initial qualities overrides, actor population and location policies, and random seed). Scenarios do not lock in plot arcs, storylet deck membership, or run length. All approved storylets in the project remain eligible during playtest based on dynamic world preconditions and role availability.
-- **Story Codex**: Central world bible managing Qualities (currencies, metrics, tools, territory, menaces), Characters (roles, agendas, red lines), Locations (connectivity, coordinates), NPC Behaviors (autonomous rules), and Project Events (canon and world events).
+- **Tag Manager**: Browse role, location, emotion, and action tags by category, inspect reference counts, and open each referencing entity.
+- **Story Codex**: Central world bible managing Qualities (currencies, metrics, tools, territory, menaces), Characters (roles, agendas, red lines), Locations (tags, connectivity, coordinates), NPC Behaviors (autonomous rules), and Project Events (canon and world events).
 - **Playtest & Director**: Live playthrough view with current location, active scene prose, and choices. Contextual inspector exposes world qualities, candidate eligibility and rejection reasons, local encoder ranking, and causal event history with branch forking.
 - **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v2) with transactional validation before replacement.
 

@@ -54,7 +54,7 @@ function storyletDocument(id: string, project: Awaited<ReturnType<RustRuntimeCli
   return [
     `Scene: ${storylet.title ?? id}.`,
     `Summary: ${storylet.summary ?? ""}.`,
-    `Location: ${storylet.location_id ?? "anywhere"}.`,
+    `Location tags: ${Array.isArray(storylet.location_tags) && storylet.location_tags.length ? storylet.location_tags.join(", ") : "anywhere"}.`,
     `Roles: ${roles}.`,
     `Opening: ${storylet.content?.opening ?? ""}.`,
     `Choices: ${choices}.`,

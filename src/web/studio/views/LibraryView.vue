@@ -110,10 +110,10 @@ async function handleRefresh() {
           <option value="draft">Drafts</option>
         </select>
 
-        <select v-model="filters.location_id" class="form-select" style="width: 140px;" @change="loadLibrary">
-          <option value="">All Locations</option>
-          <option v-for="loc in result.available_locations" :key="loc" :value="loc">
-            {{ loc }}
+        <select v-model="filters.location_tag" class="form-select" style="width: 160px;" @change="loadLibrary">
+          <option value="">All Location Tags</option>
+          <option v-for="tag in result.available_location_tags" :key="tag" :value="tag">
+            {{ tag }}
           </option>
         </select>
 
@@ -165,7 +165,7 @@ async function handleRefresh() {
             </div>
 
             <div class="card-footer">
-              <span>📍 {{ item.location ?? "Any location" }}</span>
+              <span>📍 {{ item.location_tags.length ? item.location_tags.join(", ") : "Any location" }}</span>
               <div style="display:flex; align-items:center; gap:8px;">
                 <span>{{ item.choice_count }} choices</span>
                 <button

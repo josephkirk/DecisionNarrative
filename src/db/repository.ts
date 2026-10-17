@@ -26,7 +26,8 @@ export interface StoryletRecord {
   approved_revision?: number | null;
   title: string;
   ending?: boolean;
-  location?: string;
+  graph?: unknown;
+  location_tags: string[];
   group_tag?: string;
   cluster_type: "linear" | "player_controlled_passage" | "wheel" | "aftermath";
   urgency_weight: number;
@@ -66,6 +67,7 @@ export interface LocationRecord {
   id: string;
   name: string;
   description: string;
+  tags: string[];
   connected_zones?: string[];
   environmental_params?: Record<string, unknown>;
   devices?: Record<string, unknown>;
@@ -301,11 +303,12 @@ export class StoryletRepository {
   // --- Locations ---
   public saveLocation(loc: LocationRecord): void {
     const stmt = this.db.prepare(`
-      INSERT INTO locations (id, name, description, connected_zones, environmental_params, devices, created_at)
-      VALUES ($id, $name, $description, $connected_zones, $environmental_params, $devices, $created_at)
+      INSERT INTO locations (id, name, description, tags, connected_zones, environmental_params, devices, created_at)
+      VALUES ($id, $name, $description, $tags, $connected_zones, $environmental_params, $devices, $created_at)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
+        tags = excluded.tags,
         connected_zones = excluded.connected_zones,
         environmental_params = excluded.environmental_params,
         devices = excluded.devices;
@@ -314,6 +317,7 @@ export class StoryletRepository {
       $id: loc.id,
       $name: loc.name,
       $description: loc.description,
+      $tags: JSON.stringify(loc.tags ?? []),
       $connected_zones: JSON.stringify(loc.connected_zones ?? []),
       $environmental_params: JSON.stringify(loc.environmental_params ?? {}),
       $devices: JSON.stringify(loc.devices ?? {}),
@@ -329,6 +333,7 @@ export class StoryletRepository {
       id: row.id,
       name: row.name,
       description: row.description,
+      tags: JSON.parse(row.tags ?? "[]"),
       connected_zones: JSON.parse(row.connected_zones),
       environmental_params: JSON.parse(row.environmental_params),
       devices: JSON.parse(row.devices),
@@ -342,6 +347,7 @@ export class StoryletRepository {
       id: row.id,
       name: row.name,
       description: row.description,
+      tags: JSON.parse(row.tags ?? "[]"),
       connected_zones: JSON.parse(row.connected_zones),
       environmental_params: JSON.parse(row.environmental_params),
       devices: JSON.parse(row.devices),
@@ -552,17 +558,17 @@ export class StoryletRepository {
     const revision = existing ? Number(existing.revision) + 1 : 1;
     const stmt = this.db.prepare(`
       INSERT INTO storylets (
-        id, title, location, group_tag, cluster_type, urgency_weight,
+        id, title, location_tags, group_tag, cluster_type, urgency_weight,
         repeatability, cooldown_turns, parameters, preconditions, content,
-        choices, effects, created_at, revision, approved_revision, ending
+        choices, effects, created_at, revision, approved_revision, ending, graph
       ) VALUES (
-        $id, $title, $location, $group_tag, $cluster_type, $urgency_weight,
+        $id, $title, $location_tags, $group_tag, $cluster_type, $urgency_weight,
         $repeatability, $cooldown_turns, $parameters, $preconditions, $content,
-        $choices, $effects, $created_at, $revision, NULL, $ending
+        $choices, $effects, $created_at, $revision, NULL, $ending, $graph
       )
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
-        location = excluded.location,
+        location_tags = excluded.location_tags,
         group_tag = excluded.group_tag,
         cluster_type = excluded.cluster_type,
         urgency_weight = excluded.urgency_weight,
@@ -574,13 +580,14 @@ export class StoryletRepository {
         choices = excluded.choices,
         effects = excluded.effects,
         ending = excluded.ending,
+        graph = excluded.graph,
         revision = excluded.revision,
         approved_revision = NULL;
     `);
     stmt.run({
       $id: st.id,
       $title: st.title,
-      $location: st.location ?? null,
+      $location_tags: JSON.stringify(st.location_tags ?? []),
       $group_tag: st.group_tag ?? null,
       $cluster_type: st.cluster_type,
       $urgency_weight: st.urgency_weight,
@@ -594,6 +601,7 @@ export class StoryletRepository {
       $created_at: st.created_at ?? Date.now(),
       $revision: revision,
       $ending: st.ending === true ? 1 : 0,
+      $graph: st.graph == null ? null : JSON.stringify(st.graph),
     });
     this.bumpProjectRevision();
     this.storyletsCache = null;
@@ -640,8 +648,9 @@ export class StoryletRepository {
       revision: row.revision,
       approved_revision: row.approved_revision,
       ending: row.ending === 1,
+      graph: row.graph == null ? undefined : JSON.parse(row.graph),
       title: row.title,
-      location: row.location,
+      location_tags: JSON.parse(row.location_tags ?? "[]"),
       group_tag: row.group_tag,
       cluster_type: row.cluster_type,
       urgency_weight: row.urgency_weight,

@@ -434,7 +434,11 @@ impl StoryletRuntime {
     ) -> Result<RuntimeEvaluation, RuntimeError> {
         let session = self.session(session_id)?;
         if session.world.is_terminal() {
-            return Ok(RuntimeEvaluation { candidates: Vec::new(), selected: None, decision: None });
+            return Ok(RuntimeEvaluation {
+                candidates: Vec::new(),
+                selected: None,
+                decision: None,
+            });
         }
         let definitions: Vec<_> = session
             .storylet_ids
@@ -734,7 +738,12 @@ impl StoryletRuntime {
                     session_id: session_id.to_owned(),
                 })?;
 
-        if session.world.is_terminal() && !session.world.applied_commands.contains_key(&command.idempotency_key) {
+        if session.world.is_terminal()
+            && !session
+                .world
+                .applied_commands
+                .contains_key(&command.idempotency_key)
+        {
             return Err(RuntimeError::Engine(EngineError::SessionEnded));
         }
         validate_command_references(&session.project, &command)?;
@@ -760,7 +769,12 @@ impl StoryletRuntime {
             NpcSimulationReport::default()
         };
         if player.event.advanced_turn && !player.duplicate && !player.event.terminal {
-            fire_scenario_events(&session.project, &session.scenario_id, &mut world, &player.event.id)?;
+            fire_scenario_events(
+                &session.project,
+                &session.scenario_id,
+                &mut world,
+                &player.event.id,
+            )?;
         }
         session.world = world.clone();
         Ok(RuntimeCommandResult { player, npc, world })
@@ -887,19 +901,24 @@ impl StoryletRuntime {
             NpcSimulationReport::default()
         } else {
             advance_npcs(
-            &mut world,
-            &session
-                .project
-                .npc_behaviors
-                .values()
-                .cloned()
-                .collect::<Vec<_>>(),
-            64,
-            &[event_id],
-        )?
+                &mut world,
+                &session
+                    .project
+                    .npc_behaviors
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                64,
+                &[event_id],
+            )?
         };
         if player.event.advanced_turn && !player.duplicate && !player.event.terminal {
-            fire_scenario_events(&session.project, &session.scenario_id, &mut world, &player.event.id)?;
+            fire_scenario_events(
+                &session.project,
+                &session.scenario_id,
+                &mut world,
+                &player.event.id,
+            )?;
         }
         session.world = world.clone();
         session.director = director;
@@ -922,35 +941,87 @@ fn fire_scenario_events(
     parent_event_id: &str,
 ) -> Result<(), RuntimeError> {
     let Some(scenario) = project.scenarios.get(scenario_id) else {
-        return Err(RuntimeError::InvalidSessionState("scenario event schedule is missing".into()));
+        return Err(RuntimeError::InvalidSessionState(
+            "scenario event schedule is missing".into(),
+        ));
     };
     for event_id in &scenario.event_ids {
         let Some(definition) = project.events.get(event_id) else {
-            return Err(RuntimeError::InvalidSessionState(format!("scenario event '{}' is missing", event_id)));
+            return Err(RuntimeError::InvalidSessionState(format!(
+                "scenario event '{}' is missing",
+                event_id
+            )));
         };
-        if world.turn < definition.delay_turns { continue; }
-        if !definition.repeatable && world.events.iter().any(|event| event.action == format!("event:{}:{}", event_kind(definition.event_type), definition.id)) { continue; }
-        let triggered = definition.trigger.all_of.iter().all(|predicate| crate::storylets::predicate_matches(predicate, world))
-            && (definition.trigger.any_of.is_empty() || definition.trigger.any_of.iter().any(|predicate| crate::storylets::predicate_matches(predicate, world)));
-        if !triggered { continue; }
-        let action = format!("event:{}:{}", event_kind(definition.event_type), definition.id);
-        let idempotency_key = if definition.repeatable { format!("scenario-event:{}:{}:turn:{}", event_kind(definition.event_type), definition.id, world.turn) } else { format!("scenario-event:{}:{}", event_kind(definition.event_type), definition.id) };
-        apply_command(world, WorldCommand {
-            idempotency_key,
-            expected_revision: world.revision,
-            actor_id: "world".into(),
-            action,
-            effects: definition.effects.clone(),
-            caused_by: vec![parent_event_id.to_owned()],
-            advance_turn: false,
-            terminal: false,
-        })?;
+        if world.turn < definition.delay_turns {
+            continue;
+        }
+        if !definition.repeatable
+            && world.events.iter().any(|event| {
+                event.action
+                    == format!(
+                        "event:{}:{}",
+                        event_kind(definition.event_type),
+                        definition.id
+                    )
+            })
+        {
+            continue;
+        }
+        let triggered = definition
+            .trigger
+            .all_of
+            .iter()
+            .all(|predicate| crate::storylets::predicate_matches(predicate, world))
+            && (definition.trigger.any_of.is_empty()
+                || definition
+                    .trigger
+                    .any_of
+                    .iter()
+                    .any(|predicate| crate::storylets::predicate_matches(predicate, world)));
+        if !triggered {
+            continue;
+        }
+        let action = format!(
+            "event:{}:{}",
+            event_kind(definition.event_type),
+            definition.id
+        );
+        let idempotency_key = if definition.repeatable {
+            format!(
+                "scenario-event:{}:{}:turn:{}",
+                event_kind(definition.event_type),
+                definition.id,
+                world.turn
+            )
+        } else {
+            format!(
+                "scenario-event:{}:{}",
+                event_kind(definition.event_type),
+                definition.id
+            )
+        };
+        apply_command(
+            world,
+            WorldCommand {
+                idempotency_key,
+                expected_revision: world.revision,
+                actor_id: "world".into(),
+                action,
+                effects: definition.effects.clone(),
+                caused_by: vec![parent_event_id.to_owned()],
+                advance_turn: false,
+                terminal: false,
+            },
+        )?;
     }
     Ok(())
 }
 
 fn event_kind(event_type: crate::EventType) -> &'static str {
-    match event_type { crate::EventType::Canon => "canon", crate::EventType::World => "world" }
+    match event_type {
+        crate::EventType::Canon => "canon",
+        crate::EventType::World => "world",
+    }
 }
 
 fn normalized_embedding(values: &[f64], dimensions: usize) -> Result<Vec<f64>, RuntimeError> {

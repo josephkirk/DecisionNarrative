@@ -19,12 +19,40 @@ pub struct UnslopSummary {
 }
 
 const BANNED_WORDS: &[&str] = &[
-    "delve", "tapestry", "landscape", "pivotal", "foster", "underscore", "testament",
-    "enhance", "crucial", "intricate", "leverage", "robust", "streamline", "harness",
-    "utilize", "multifaceted", "resonate", "catalyze", "quietly", "deeply", "fundamentally",
-    "remarkably", "arguably", "subtly", "serves as", "stands as", "crucible", "nexus",
-    "bruised silence", "think of it as", "imagine a world where", "here's the kicker",
-    "let's break this down", "let's unpack",
+    "delve",
+    "tapestry",
+    "landscape",
+    "pivotal",
+    "foster",
+    "underscore",
+    "testament",
+    "enhance",
+    "crucial",
+    "intricate",
+    "leverage",
+    "robust",
+    "streamline",
+    "harness",
+    "utilize",
+    "multifaceted",
+    "resonate",
+    "catalyze",
+    "quietly",
+    "deeply",
+    "fundamentally",
+    "remarkably",
+    "arguably",
+    "subtly",
+    "serves as",
+    "stands as",
+    "crucible",
+    "nexus",
+    "bruised silence",
+    "think of it as",
+    "imagine a world where",
+    "here's the kicker",
+    "let's break this down",
+    "let's unpack",
 ];
 
 pub fn audit_unslop_compliance(text: &str) -> UnslopAuditResult {
@@ -76,8 +104,16 @@ pub fn audit_unslop_compliance(text: &str) -> UnslopAuditResult {
         if sentence_lengths.len() >= 2 {
             let n = sentence_lengths.len() as f64;
             let mean = sentence_lengths.iter().sum::<f64>() / n;
-            let variance = sentence_lengths.iter().map(|&len| (len - mean).powi(2)).sum::<f64>() / n;
-            let cv = if mean == 0.0 { 0.0 } else { variance.sqrt() / mean };
+            let variance = sentence_lengths
+                .iter()
+                .map(|&len| (len - mean).powi(2))
+                .sum::<f64>()
+                / n;
+            let cv = if mean == 0.0 {
+                0.0
+            } else {
+                variance.sqrt() / mean
+            };
             if cv < 0.35 {
                 violations.push(format!("sentence_length_cv_below_0.35: {cv:.3}"));
             }
@@ -93,9 +129,21 @@ pub fn audit_unslop_compliance(text: &str) -> UnslopAuditResult {
 
 pub fn summarize_unslop_violations(violations: &[String]) -> UnslopSummary {
     UnslopSummary {
-        negative_parallelism: violations.iter().filter(|v| v.contains("negative_parallelism")).count(),
-        countdowns: violations.iter().filter(|v| v.contains("dramatic_countdown")).count(),
-        self_answered_questions: violations.iter().filter(|v| v.contains("self_answered_question")).count(),
-        buzzwords: violations.iter().filter(|v| v.starts_with("banned_word:")).count(),
+        negative_parallelism: violations
+            .iter()
+            .filter(|v| v.contains("negative_parallelism"))
+            .count(),
+        countdowns: violations
+            .iter()
+            .filter(|v| v.contains("dramatic_countdown"))
+            .count(),
+        self_answered_questions: violations
+            .iter()
+            .filter(|v| v.contains("self_answered_question"))
+            .count(),
+        buzzwords: violations
+            .iter()
+            .filter(|v| v.starts_with("banned_word:"))
+            .count(),
     }
 }

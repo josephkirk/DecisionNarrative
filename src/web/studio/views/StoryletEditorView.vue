@@ -1,472 +1,151 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useStoryletEditorViewModel } from "../view-models/storyletEditor.ts";
-import { studioState } from "../state.ts";
-import { extractTwineLinks } from "../twineUtils.ts";
 import NarrativeGraphCanvas from "../components/NarrativeGraphCanvas.vue";
-import { buildGraphFromStorylet, compileGraphToStorylet, type NarrativeGraph } from "../narrativeGraphTypes.ts";
+import PropertyInspector from "../components/PropertyInspector.vue";
+import { StudioApi } from "../api.ts";
+import type { CharacterRecord, LocationRecord, QualityRecord, StoryletRecord } from "../contracts.ts";
+import { buildGraphFromStorylet, compileGraphToStorylet, validateNarrativeGraph, type NarrativeGraph } from "../narrativeGraphTypes.ts";
+import { notify, studioState } from "../state.ts";
 
 const route = useRoute();
 const router = useRouter();
 const storyletId = typeof route.params.id === "string" ? route.params.id : undefined;
-
-const {
-  activeTab,
-  loading,
-  isNew,
-  draft,
-  isApproved,
-  loadStorylet,
-  saveDraft,
-  approveStorylet,
-  addChoice,
-  removeChoice,
-  addRoleParameter,
-  removeRoleParameter,
-} = useStoryletEditorViewModel(storyletId);
-const lastSavedSnapshot = ref<string>("");
+const { loading, isNew, draft, isApproved, loadStorylet, saveDraft, approveStorylet } = useStoryletEditorViewModel(storyletId);
+const currentGraph = ref<NarrativeGraph>({ nodes: [], edges: [], local_variables: [] });
+const selectedNodeId = ref<string | null>(null);
+const selectedNode = computed(() => currentGraph.value.nodes.find((node) => node.id === selectedNodeId.value) ?? null);
+const availableStorylets = ref<StoryletRecord[]>([]);
+const graphReady = ref(false);
+const lastSavedSnapshot = ref("");
 
 onMounted(async () => {
-  if (storyletId) {
-    await loadStorylet(storyletId);
-    lastSavedSnapshot.value = JSON.stringify(draft);
-  } else {
-    lastSavedSnapshot.value = JSON.stringify(draft);
+  const loads: Promise<unknown>[] = [
+    StudioApi.listContent<StoryletRecord>("storylets").then((items) => { availableStorylets.value = items; }).catch(() => { availableStorylets.value = []; }),
+    StudioApi.listContent<CharacterRecord>("characters").then((items) => { studioState.characters = items; }).catch(() => { studioState.characters = []; }),
+    StudioApi.listContent<LocationRecord>("locations").then((items) => { studioState.locations = items; }).catch(() => { studioState.locations = []; }),
+    StudioApi.listContent<QualityRecord>("qualities").then((items) => { studioState.qualities = items; }).catch(() => { studioState.qualities = []; }),
+  ];
+  if (storyletId) loads.push(loadStorylet(storyletId));
+  await Promise.all(loads);
+  currentGraph.value = buildGraphFromStorylet(draft);
+  compileGraphToStorylet(currentGraph.value, draft);
+  lastSavedSnapshot.value = JSON.stringify(draft);
+  const requestedNode = route.query.node;
+  if (typeof requestedNode === "string" && currentGraph.value.nodes.some((node) => node.id === requestedNode)) selectedNodeId.value = requestedNode;
+  graphReady.value = true;
+  const requestedItem = route.query.item;
+  if (typeof requestedItem === "string") {
+    await nextTick();
+    const element = [...document.querySelectorAll<HTMLElement>("[data-tag-item-id]")].find((item) => item.dataset.tagItemId === requestedItem);
+    element?.scrollIntoView({ block: "center", behavior: "smooth" });
+    element?.querySelector<HTMLElement>("input, textarea, select")?.focus({ preventScroll: true });
   }
 });
 
+const isDirty = computed(() => JSON.stringify(draft) !== lastSavedSnapshot.value);
+const canApprove = computed(() => !isDirty.value && !isApproved.value && !isNew.value);
 
-const editorMode = ref<"script" | "graph">("script");
-const currentGraph = ref<NarrativeGraph>({ nodes: [], edges: [] });
-
-function switchToGraphMode() {
-  currentGraph.value = buildGraphFromStorylet(draft);
-  editorMode.value = "graph";
+function handleGraphUpdate(graph: NarrativeGraph) {
+  currentGraph.value = graph;
+  compileGraphToStorylet(graph, draft);
+  if (selectedNodeId.value && !graph.nodes.some((node) => node.id === selectedNodeId.value)) {
+    selectedNodeId.value = null;
+  }
 }
 
-function switchToScriptMode() {
-  compileGraphToStorylet(currentGraph.value, draft);
-  editorMode.value = "script";
+function handleStoryletUpdate() {
+  draft.graph = currentGraph.value;
 }
 
-function handleGraphUpdate(updated: NarrativeGraph) {
-  currentGraph.value = updated;
-  compileGraphToStorylet(updated, draft);
+function handleSelectNode(nodeId: string | null) {
+  selectedNodeId.value = nodeId;
 }
-
-const isDirty = computed(() => {
-  return JSON.stringify(draft) !== lastSavedSnapshot.value;
-});
-
-const canApprove = computed(() => {
-  return !isDirty.value && !isApproved.value && !isNew.value;
-});
 
 function goBack() {
-  if (isDirty.value) {
-    if (!window.confirm("You have unsaved changes. Leave anyway?")) return;
-  }
+  if (isDirty.value && !window.confirm("You have unsaved changes. Leave anyway?")) return;
   router.push("/storylets");
 }
 
 async function handleSave() {
-  const ok = await saveDraft();
-  if (ok) {
+  const graphIssues = validateNarrativeGraph(currentGraph.value);
+  if (graphIssues.length) { notify(graphIssues.join(" "), "error"); return; }
+  const wasNew = isNew.value;
+  compileGraphToStorylet(currentGraph.value, draft);
+  if (await saveDraft()) {
     lastSavedSnapshot.value = JSON.stringify(draft);
-    if (isNew.value) {
-      router.replace(`/storylets/${draft.id}/edit`);
-    }
+    if (wasNew) router.replace("/storylets/" + draft.id + "/edit");
   }
 }
 
 async function handleApprove() {
-  const ok = await approveStorylet();
-  if (ok) {
-    lastSavedSnapshot.value = JSON.stringify(draft);
-  }
+  const graphIssues = validateNarrativeGraph(currentGraph.value);
+  if (graphIssues.length) { notify(graphIssues.join(" "), "error"); return; }
+  compileGraphToStorylet(currentGraph.value, draft);
+  if (await approveStorylet()) lastSavedSnapshot.value = JSON.stringify(draft);
 }
 
-
-const detectedTwineLinks = computed(() => {
-  const text = (draft.content.sceneOpening || "") + " " + (draft.content.text_template || "");
-  return extractTwineLinks(text);
-});
-
-function syncTwineLinksToChoices() {
-  const links = detectedTwineLinks.value;
-  if (!links.length) return;
-
-  for (const l of links) {
-    const existing = draft.choices.find(c => c.label === l.display || c.divert_target === l.target);
-    if (!existing) {
-      draft.choices.push({
-        choice_id: `choice_${draft.choices.length + 1}`,
-        label: l.display,
-        systemVerb: "ACT",
-        effects: {},
-        divert_target: l.target,
-      });
-    }
-  }
+function deleteSelectedNode(nodeId: string) {
+  currentGraph.value = {
+    ...currentGraph.value,
+    nodes: currentGraph.value.nodes.filter((node) => node.id !== nodeId),
+    edges: currentGraph.value.edges.filter((edge) => edge.from_node !== nodeId && edge.to_node !== nodeId),
+  };
+  selectedNodeId.value = null;
+  handleGraphUpdate(currentGraph.value);
 }
-
-// Precondition helpers
-function addPrecondition(kind: "all_of" | "any_of") {
-  if (!draft.preconditions) draft.preconditions = {};
-  if (!draft.preconditions[kind]) draft.preconditions[kind] = [];
-  draft.preconditions[kind]!.push({
-    variable: studioState.qualities[0]?.name || "clue",
-    op: "gte",
-    value: 1,
-  });
-}
-
-function removePrecondition(kind: "all_of" | "any_of", idx: number) {
-  draft.preconditions[kind]?.splice(idx, 1);
-}
-
-// Choice helpers
-function addChoiceCondition(choiceIdx: number) {
-  if (!draft.choices[choiceIdx].conditions) draft.choices[choiceIdx].conditions = [];
-  draft.choices[choiceIdx].conditions!.push({
-    variable: studioState.qualities[0]?.name || "clue",
-    op: "gte",
-    value: 1,
-  });
-}
-
-function removeChoiceCondition(choiceIdx: number, condIdx: number) {
-  draft.choices[choiceIdx].conditions?.splice(condIdx, 1);
-}
-
-function updateChoiceEffect(choiceIdx: number, qKey: string, valStr: string) {
-  if (!valStr.trim()) {
-    delete draft.choices[choiceIdx].effects[qKey];
-  } else {
-    const num = Number(valStr);
-    draft.choices[choiceIdx].effects[qKey] = isNaN(num) ? valStr : num;
-  }
-}
-
-function updateStoryletEffect(qKey: string, valStr: string) {
-  if (!valStr.trim()) {
-    delete draft.effects[qKey];
-  } else {
-    const num = Number(valStr);
-    draft.effects[qKey] = isNaN(num) ? valStr : num;
-  }
-}
-
-// Client-side Unslop Audit Scan
-const auditFindings = computed(() => {
-  const text = (draft.content.sceneOpening || "") + " " + (draft.content.text_template || "");
-  const findings: string[] = [];
-  const lower = text.toLowerCase();
-
-  const banned = ["delve", "tapestry", "landscape", "pivotal", "foster", "underscore", "testament", "crucial", "intricate", "robust", "harness", "quietly", "deeply", "bruised silence"];
-  for (const w of banned) {
-    if (lower.includes(w)) findings.push(`Banned buzzword detected: '${w}'`);
-  }
-  if (text.includes("—")) findings.push("Em-dash (—) pattern detected");
-  if (/nots+[^.—\-]+[-—]s*it's/i.test(text)) findings.push("Negative parallelism detected ('not X - it's Y')");
-  if (/nots+[^.—\-]+.s*nots+[^.—\-]+.s*justs+/i.test(text)) findings.push("Dramatic countdown pattern detected");
-
-  return findings;
-});
 </script>
 
 <template>
   <div class="full-editor">
     <header class="editor-toolbar">
       <div class="toolbar-left">
-        <button class="btn btn-secondary" @click="goBack">
-          ← Back to Storylets
-        </button>
-        <span style="font-size:14px; font-weight:600;">
-          {{ draft.title || "Untitled Storylet" }}
-        </span>
-        <span :class="['badge', isApproved ? 'approved' : '']">
-          {{ isApproved ? 'Approved' : 'Draft' }} · v{{ draft.revision }}
-        </span>
-        <span v-if="isDirty" class="badge" style="background:rgba(255,149,0,0.18); color:var(--status-warning);">
-          Unsaved Edits
-        </span>
+        <button class="btn btn-secondary" @click="goBack">← Back to Storylets</button>
+        <span class="storylet-title">{{ draft.title || "Untitled Storylet" }}</span>
+        <span :class="['badge', isApproved ? 'approved' : '']">{{ isApproved ? "Approved" : "Draft" }} · v{{ draft.revision }}</span>
+        <span v-if="isDirty" class="badge unsaved">Unsaved Edits</span>
       </div>
-
       <div class="toolbar-right">
-        
-        <!-- Script vs Node Graph Mode Toggle -->
-        <div style="display:flex; gap:2px; background:var(--bg-input); padding:3px; border-radius:8px; border:1px solid var(--border-subtle); margin-right:8px;">
-          <button
-            :class="['tab-btn', editorMode === 'script' ? 'active' : '']"
-            style="font-size:11px; padding:3px 8px;"
-            @click="switchToScriptMode"
-          >
-            Script
-          </button>
-          <button
-            :class="['tab-btn', editorMode === 'graph' ? 'active' : '']"
-            style="font-size:11px; padding:3px 8px;"
-            @click="switchToGraphMode"
-          >
-            Narrative Graph
-          </button>
-        </div>
-
-        <div v-if="editorMode === 'script'" class="tab-nav">
-          <button
-            :class="['tab-btn', activeTab === 'content' ? 'active' : '']"
-            @click="activeTab = 'content'"
-          >
-            Scene Content
-          </button>
-          <button
-            :class="['tab-btn', activeTab === 'logic' ? 'active' : '']"
-            @click="activeTab = 'logic'"
-          >
-            Preconditions & Choices
-          </button>
-          <button
-            :class="['tab-btn', activeTab === 'review' ? 'active' : '']"
-            @click="activeTab = 'review'"
-          >
-            Pacing & Style Audit
-          </button>
-        </div>
-
-        <button class="btn btn-secondary" @click="handleSave">
-          Save Draft
-        </button>
-        <button
-          class="btn btn-primary"
-          :disabled="!canApprove"
-          :title="isDirty ? 'Save draft before approving' : 'Approve current revision'"
-          @click="handleApprove"
-        >
-          Approve Revision
-        </button>
+        <button class="btn btn-secondary" :disabled="loading" @click="handleSave">Save Draft</button>
+        <button class="btn btn-primary" :disabled="!canApprove" :title="isDirty ? 'Save draft before approving' : 'Approve current revision'" @click="handleApprove">Approve Revision</button>
       </div>
     </header>
 
-    
-    <!-- GRAPH CANVAS VIEW -->
-    <div v-if="editorMode === 'graph'" style="flex:1; overflow:hidden;">
+    <div v-if="loading || !graphReady" class="loading-state">Loading storylet…</div>
+    <main v-else class="graph-editor-layout">
       <NarrativeGraphCanvas
+        class="graph-editor-canvas"
         :initial-graph="currentGraph"
+        :selected-node-id="selectedNodeId"
         @update-graph="handleGraphUpdate"
+        @select-node="handleSelectNode"
       />
-    </div>
-
-    <!-- SCRIPT PROSE VIEW -->
-    <div v-else class="editor-body">
-      <!-- CONTENT TAB -->
-      <div v-if="activeTab === 'content'">
-        <div class="form-group">
-          <label class="form-label">Scene Title</label>
-          <input v-model="draft.title" class="form-input" placeholder="e.g. A Damp Ticket at the Counter" />
-        </div>
-
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-          <div class="form-group">
-            <label class="form-label">Location Constraint</label>
-            <select v-model="draft.location" class="form-select">
-              <option :value="null">Any Location</option>
-              <option v-for="l in studioState.locations" :key="l.id" :value="l.id">
-                {{ l.name }}
-              </option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Group Tag</label>
-            <input v-model="draft.group_tag" class="form-input" placeholder="e.g. act1, investigation" />
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Scene Opening / Prose</label>
-          <textarea
-            v-model="draft.content.sceneOpening"
-            class="form-textarea"
-            style="min-height:160px; font-family:var(--font-serif);"
-            placeholder="Describe the moment the player arrives or the conflict unfolds..."
-          ></textarea>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Text Template (Fallback)</label>
-          <textarea
-            v-model="draft.content.text_template"
-            class="form-textarea"
-            style="min-height:80px;"
-            placeholder="Fallback scene text..."
-          ></textarea>
-        </div>
-
-        <!-- Twine Links Detection Bar -->
-        <div v-if="detectedTwineLinks.length > 0" style="margin-top:12px; padding:10px 14px; background:var(--accent-subtle); border:1px solid var(--accent); border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <strong style="font-size:12px; color:var(--accent);">Detected {{ detectedTwineLinks.length }} Twine Link{{ detectedTwineLinks.length === 1 ? '' : 's' }}:</strong>
-            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
-              <span v-for="(l, i) in detectedTwineLinks" :key="i" class="badge" style="background:var(--bg-card);">
-                {{ l.display }} → {{ l.target }}
-              </span>
-            </div>
-          </div>
-          <button class="btn btn-primary" style="font-size:11px; padding:4px 10px;" @click="syncTwineLinksToChoices">
-            Sync to Choices
-          </button>
-        </div>
-
-      </div>
-
-      <!-- LOGIC & CHOICES TAB -->
-      <div v-else-if="activeTab === 'logic'">
-        <!-- Preconditions -->
-        <div style="padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px; margin-bottom:20px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h3 style="font-size:13px; font-weight:700;">PRECONDITION PREDICATES (ALL OF)</h3>
-            <button class="btn btn-secondary" style="font-size:11px;" @click="addPrecondition('all_of')">+ Add Condition</button>
-          </div>
-
-          <div v-if="!draft.preconditions.all_of?.length" style="font-size:12px; color:var(--text-muted);">
-            No preconditions required. This storylet can trigger whenever roles match.
-          </div>
-
-          <div v-for="(pred, pIdx) in draft.preconditions.all_of ?? []" :key="pIdx" style="display:flex; gap:10px; margin-bottom:8px; align-items:center;">
-            <select v-model="pred.variable" class="form-select" style="flex:1;">
-              <option value="location">Current Location</option>
-              <option v-for="q in studioState.qualities" :key="q.name" :value="q.name">{{ q.name }}</option>
-            </select>
-            <select v-model="pred.op" class="form-select" style="width:110px;">
-              <option value="eq">== (Equal)</option>
-              <option value="neq">!= (Not Equal)</option>
-              <option value="gt">> (Greater)</option>
-              <option value="gte">>= (At Least)</option>
-              <option value="lt">< (Less)</option>
-              <option value="lte"><= (At Most)</option>
-            </select>
-            <input v-model="pred.value" class="form-input" style="width:120px;" placeholder="Value" />
-            <button class="btn" style="color:var(--status-danger);" @click="removePrecondition('all_of', pIdx)">✕</button>
-          </div>
-        </div>
-
-        <!-- Role Parameters -->
-        <div style="padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px; margin-bottom:20px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h3 style="font-size:13px; font-weight:700;">REQUIRED ACTOR ROLES</h3>
-            <button class="btn btn-secondary" style="font-size:11px;" @click="addRoleParameter">+ Add Role</button>
-          </div>
-
-          <div v-for="(param, idx) in draft.parameters" :key="idx" style="display:flex; gap:10px; margin-bottom:8px;">
-            <input v-model="param.param_name" class="form-input" placeholder="Param name (e.g. witness)" style="width:180px;" />
-            <input v-model="param.query" class="form-input" placeholder='role == "witness"' style="flex:1;" />
-            <button class="btn" style="color:var(--status-danger);" @click="removeRoleParameter(idx)">✕</button>
-          </div>
-        </div>
-
-        <!-- Choices with Effects & Conditions -->
-        <div style="padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-            <h3 style="font-size:13px; font-weight:700;">PLAYER CHOICES</h3>
-            <button class="btn btn-secondary" style="font-size:11px;" @click="addChoice">+ Add Choice</button>
-          </div>
-
-          <div v-for="(choice, cIdx) in draft.choices" :key="choice.choice_id" style="padding:14px; background:var(--bg-input); border:1px solid var(--border-subtle); border-radius:10px; margin-bottom:12px;">
-            <div style="display:flex; gap:10px; margin-bottom:8px; align-items:center;">
-              <span style="font-weight:700; font-size:12px;">Choice #{{ cIdx + 1 }}</span>
-              <input v-model="choice.label" class="form-input" placeholder="Choice label text" style="flex:1;" />
-              <button class="btn" style="color:var(--status-danger);" @click="removeChoice(cIdx)">✕</button>
-            </div>
-
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
-              <div>
-                <label class="form-label">System Verb</label>
-                <input v-model="choice.systemVerb" class="form-input" placeholder="e.g. investigate, flee" />
-              </div>
-              <div>
-                <label class="form-label">Divert Target Storylet ID (Optional)</label>
-                <input v-model="choice.divert_target" class="form-input" placeholder="e.g. stl_aftermath" />
-              </div>
-            </div>
-
-            <!-- Choice Effects -->
-            <div>
-              <label class="form-label">Choice Quality Effects (Delta or Set Value)</label>
-              <div style="display:flex; flex-wrap:wrap; gap:8px;">
-                <div v-for="q in studioState.qualities" :key="q.name" style="padding:4px 8px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
-                  <span>{{ q.name }}:</span>
-                  <input
-                    :value="choice.effects[q.name] ?? ''"
-                    style="width:50px; margin-left:4px; padding:2px 4px; border:1px solid var(--border-subtle); border-radius:4px;"
-                    placeholder="—"
-                    @input="updateChoiceEffect(cIdx, q.name, ($event.target as HTMLInputElement).value)"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- REVIEW & PACING TAB -->
-      <div v-else-if="activeTab === 'review'">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
-          <div class="form-group">
-            <label class="form-label">Cluster Type</label>
-            <select v-model="draft.cluster_type" class="form-select">
-              <option value="player_controlled_passage">Player-Controlled Passage (Hub)</option>
-              <option value="linear">Linear Progression (Climax)</option>
-              <option value="wheel">Wheel / Deck (Randomized)</option>
-              <option value="aftermath">Aftermath / Accelerator</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Repeatability</label>
-            <select v-model="draft.repeatability" class="form-select">
-              <option value="always">Always</option>
-              <option value="once_ever">Once Ever</option>
-              <option value="cooldown">Cooldown Turns</option>
-              <option value="persistent">Persistent</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Urgency Weight (0 - 100)</label>
-            <input v-model.number="draft.urgency_weight" type="number" class="form-input" min="0" max="100" />
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Cooldown Turns</label>
-            <input v-model.number="draft.cooldown_turns" type="number" class="form-input" min="0" />
-          </div>
-        </div>
-
-        <div class="form-group" style="margin-bottom:20px;">
-          <label style="display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer;">
-            <input v-model="draft.ending" type="checkbox" style="width:16px; height:16px;" />
-            <span>Designated Terminal Ending (Playtest terminates when reached)</span>
-          </label>
-        </div>
-
-        <!-- Live Prose Audit Scan -->
-        <div style="padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px;">
-          <h3 style="font-size:13px; font-weight:700; margin-bottom:8px;">UNSLOP PROSE AUDIT SCAN</h3>
-          <div v-if="auditFindings.length === 0" style="color:var(--status-success); font-size:12px;">
-            ✓ Clean prose: No banned buzzwords, em-dash clauses, or dramatic countdowns flagged.
-          </div>
-          <div v-else>
-            <div style="color:var(--status-warning); font-size:12px; margin-bottom:6px;">
-              {{ auditFindings.length }} Style Finding{{ auditFindings.length === 1 ? '' : 's' }}:
-            </div>
-            <ul style="margin-left:18px; font-size:12px; color:var(--text-muted);">
-              <li v-for="(f, i) in auditFindings" :key="i">{{ f }}</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
+      <PropertyInspector
+        :storylet="draft"
+        :storylets="availableStorylets"
+        :graph="currentGraph"
+        :selected-node="selectedNode"
+        @update-storylet="handleStoryletUpdate"
+        @update-graph="handleGraphUpdate"
+        @delete-node="deleteSelectedNode"
+      />
+    </main>
   </div>
 </template>
+
+<style scoped>
+.full-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; background: var(--bg-app); }
+.editor-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 8px 16px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); }
+.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 10px; }
+.storylet-title { font-size: 14px; font-weight: 600; }
+.unsaved { background: rgba(255, 149, 0, 0.18); color: var(--status-warning); }
+.graph-editor-layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.graph-editor-canvas { flex: 1; min-width: 0; }
+.loading-state { display: grid; flex: 1; place-items: center; color: var(--text-muted); }
+@media (max-width: 760px) {
+  .editor-toolbar { align-items: flex-start; }
+  .toolbar-left { flex-wrap: wrap; }
+  :deep(.property-inspector-panel) { width: min(340px, 44vw); }
+}
+</style>

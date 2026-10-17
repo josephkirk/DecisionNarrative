@@ -1,7 +1,9 @@
 //! Single SQLite store implementation for DecisionNarrative Storylet Studio.
 
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::path::Path;
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+
+use crate::narrative_graph::NarrativeGraph;
 
 use crate::contracts::{
     CharacterRecord, EventRecord, GenerationJobRecord, LibraryPageResult, LibraryQuery,
@@ -86,15 +88,19 @@ impl Store {
              CREATE TABLE IF NOT EXISTS store_metadata (
                  key TEXT PRIMARY KEY,
                  value TEXT NOT NULL
-             );"
+             );",
         )?;
 
         // Ensure default project metadata exists
-        let exists: bool = self.conn.query_row(
-            "SELECT 1 FROM project_metadata WHERE singleton = 1",
-            [],
-            |_| Ok(true),
-        ).optional()?.unwrap_or(false);
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM project_metadata WHERE singleton = 1",
+                [],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
 
         if !exists {
             self.conn.execute(
@@ -145,18 +151,24 @@ impl Store {
 
     // --- Generic Content Records ---
 
-    pub fn get_content_json(&self, entity: &str, id: &str) -> Result<Option<String>, rusqlite::Error> {
-        self.conn.query_row(
-            "SELECT data_json FROM content_records WHERE entity = ?1 AND id = ?2",
-            params![entity, id],
-            |row| row.get(0),
-        ).optional()
+    pub fn get_content_json(
+        &self,
+        entity: &str,
+        id: &str,
+    ) -> Result<Option<String>, rusqlite::Error> {
+        self.conn
+            .query_row(
+                "SELECT data_json FROM content_records WHERE entity = ?1 AND id = ?2",
+                params![entity, id],
+                |row| row.get(0),
+            )
+            .optional()
     }
 
     pub fn list_content_json(&self, entity: &str) -> Result<Vec<String>, rusqlite::Error> {
-        let mut stmt = self.conn.prepare(
-            "SELECT data_json FROM content_records WHERE entity = ?1 ORDER BY id",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT data_json FROM content_records WHERE entity = ?1 ORDER BY id")?;
         let rows = stmt.query_map(params![entity], |row| row.get::<_, String>(0))?;
         rows.collect()
     }
@@ -199,69 +211,96 @@ impl Store {
 
     pub fn list_qualities(&self) -> Result<Vec<QualityRecord>, rusqlite::Error> {
         let json_list = self.list_content_json("qualities")?;
-        Ok(json_list.into_iter().filter_map(|s| serde_json::from_str(&s).ok()).collect())
+        Ok(json_list
+            .into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect())
     }
 
     pub fn save_quality(&self, q: &QualityRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(q).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let json = serde_json::to_string(q)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.save_content("qualities", &q.name, &json, 1, None)
     }
 
     pub fn list_characters(&self) -> Result<Vec<CharacterRecord>, rusqlite::Error> {
         let json_list = self.list_content_json("characters")?;
-        Ok(json_list.into_iter().filter_map(|s| serde_json::from_str(&s).ok()).collect())
+        Ok(json_list
+            .into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect())
     }
 
     pub fn save_character(&self, c: &CharacterRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(c).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let json = serde_json::to_string(c)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.save_content("characters", &c.id, &json, 1, None)
     }
 
     pub fn list_locations(&self) -> Result<Vec<LocationRecord>, rusqlite::Error> {
         let json_list = self.list_content_json("locations")?;
-        Ok(json_list.into_iter().filter_map(|s| serde_json::from_str(&s).ok()).collect())
+        Ok(json_list
+            .into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect())
     }
 
     pub fn save_location(&self, l: &LocationRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(l).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let json = serde_json::to_string(l)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.save_content("locations", &l.id, &json, 1, None)
     }
 
     pub fn list_npc_behaviors(&self) -> Result<Vec<NpcBehaviorRecord>, rusqlite::Error> {
         let json_list = self.list_content_json("npc_behaviors")?;
-        let mut list: Vec<NpcBehaviorRecord> = json_list.into_iter().filter_map(|s| serde_json::from_str(&s).ok()).collect();
+        let mut list: Vec<NpcBehaviorRecord> = json_list
+            .into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect();
         list.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
         Ok(list)
     }
 
     pub fn save_npc_behavior(&self, b: &NpcBehaviorRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(b).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let json = serde_json::to_string(b)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.save_content("npc_behaviors", &b.id, &json, 1, None)
     }
 
     pub fn list_events(&self) -> Result<Vec<EventRecord>, rusqlite::Error> {
         let json_list = self.list_content_json("events")?;
-        Ok(json_list.into_iter().filter_map(|s| serde_json::from_str(&s).ok()).collect())
+        Ok(json_list
+            .into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect())
     }
 
     pub fn save_event(&self, e: &EventRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(e).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let json = serde_json::to_string(e)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.save_content("events", &e.id, &json, 1, None)
     }
 
     pub fn list_scenarios(&self) -> Result<Vec<ScenarioRecord>, rusqlite::Error> {
         let json_list = self.list_content_json("scenarios")?;
-        Ok(json_list.into_iter().filter_map(|s| serde_json::from_str(&s).ok()).collect())
+        Ok(json_list
+            .into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect())
     }
 
     pub fn save_scenario(&self, s: &ScenarioRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(s).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let json = serde_json::to_string(s)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.save_content("scenarios", &s.id, &json, 1, None)
     }
 
     pub fn list_storylets(&self) -> Result<Vec<StoryletRecord>, rusqlite::Error> {
         let json_list = self.list_content_json("storylets")?;
-        Ok(json_list.into_iter().filter_map(|s| serde_json::from_str(&s).ok()).collect())
+        Ok(json_list
+            .into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect())
     }
 
     pub fn get_storylet(&self, id: &str) -> Result<Option<StoryletRecord>, rusqlite::Error> {
@@ -270,11 +309,22 @@ impl Store {
     }
 
     pub fn save_storylet(&self, st: &StoryletRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(st).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-        self.save_content("storylets", &st.id, &json, st.revision, st.approved_revision)
+        let json = serde_json::to_string(st)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        self.save_content(
+            "storylets",
+            &st.id,
+            &json,
+            st.revision,
+            st.approved_revision,
+        )
     }
 
-    pub fn approve_storylet(&self, id: &str, expected_revision: u64) -> Result<Option<StoryletRecord>, String> {
+    pub fn approve_storylet(
+        &self,
+        id: &str,
+        expected_revision: u64,
+    ) -> Result<Option<StoryletRecord>, String> {
         let Some(mut st) = self.get_storylet(id).map_err(|e| e.to_string())? else {
             return Ok(None);
         };
@@ -284,6 +334,12 @@ impl Store {
                 st.revision, expected_revision
             ));
         }
+        let graph = match st.graph.clone() {
+            Some(value) => serde_json::from_value::<NarrativeGraph>(value)
+                .map_err(|error| format!("Invalid storylet graph: {error}"))?,
+            None => NarrativeGraph::from_storylet(&st),
+        };
+        graph.validate().map_err(|issues| issues.join(" "))?;
         st.approved_revision = Some(expected_revision);
         self.save_storylet(&st).map_err(|e| e.to_string())?;
         Ok(Some(st))
@@ -291,22 +347,33 @@ impl Store {
 
     // --- Library Paged Query ---
 
-    pub fn query_library(&self, query: &LibraryQuery) -> Result<LibraryPageResult, rusqlite::Error> {
+    pub fn query_library(
+        &self,
+        query: &LibraryQuery,
+    ) -> Result<LibraryPageResult, rusqlite::Error> {
         let all_storylets = self.list_storylets()?;
-        let mut available_locations_set = std::collections::BTreeSet::new();
-        for st in &all_storylets {
-            if let Some(ref loc) = st.location {
-                if !loc.trim().is_empty() {
-                    available_locations_set.insert(loc.clone());
-                }
-            }
-        }
-        let available_locations: Vec<String> = available_locations_set.into_iter().collect();
+        let available_location_tags: Vec<String> = all_storylets
+            .iter()
+            .flat_map(|st| st.location_tags.iter().cloned())
+            .filter(|tag| !tag.trim().is_empty())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
 
         let q_needle = query.q.as_deref().unwrap_or("").trim().to_lowercase();
-        let status_filter = query.status.as_deref().unwrap_or("all").trim().to_lowercase();
-        let location_filter = query.location_id.as_deref().unwrap_or("").trim();
-        let ending_filter = query.ending.as_deref().unwrap_or("all").trim().to_lowercase();
+        let status_filter = query
+            .status
+            .as_deref()
+            .unwrap_or("all")
+            .trim()
+            .to_lowercase();
+        let location_tag_filter = query.location_tag.as_deref().unwrap_or("").trim();
+        let ending_filter = query
+            .ending
+            .as_deref()
+            .unwrap_or("all")
+            .trim()
+            .to_lowercase();
 
         let mut filtered: Vec<&StoryletRecord> = all_storylets
             .iter()
@@ -314,8 +381,19 @@ impl Store {
                 if !q_needle.is_empty() {
                     let title_match = st.title.to_lowercase().contains(&q_needle);
                     let text_match = st.content.text_template.to_lowercase().contains(&q_needle)
-                        || st.content.scene_opening.as_deref().unwrap_or("").to_lowercase().contains(&q_needle);
-                    let tag_match = st.group_tag.as_deref().unwrap_or("").to_lowercase().contains(&q_needle);
+                        || st
+                            .content
+                            .scene_opening
+                            .as_deref()
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .contains(&q_needle);
+                    let tag_match = st
+                        .group_tag
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&q_needle);
                     if !title_match && !text_match && !tag_match {
                         return false;
                     }
@@ -329,8 +407,12 @@ impl Store {
                         return false;
                     }
                 }
-                if !location_filter.is_empty() && location_filter != "all" {
-                    if st.location.as_deref().unwrap_or("") != location_filter {
+                if !location_tag_filter.is_empty() && location_tag_filter != "all" {
+                    if !st
+                        .location_tags
+                        .iter()
+                        .any(|tag| tag == location_tag_filter)
+                    {
                         return false;
                     }
                 }
@@ -349,14 +431,27 @@ impl Store {
 
         let sort_mode = query.sort.as_deref().unwrap_or("title");
         if sort_mode == "created_desc" {
-            filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.id.cmp(&b.id)));
+            filtered.sort_by(|a, b| {
+                b.created_at
+                    .cmp(&a.created_at)
+                    .then_with(|| a.id.cmp(&b.id))
+            });
         } else {
-            filtered.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
+            filtered.sort_by(|a, b| {
+                a.title
+                    .to_lowercase()
+                    .cmp(&b.title.to_lowercase())
+                    .then_with(|| a.id.cmp(&b.id))
+            });
         }
 
         let total = filtered.len();
         let page_size = query.page_size.unwrap_or(60).clamp(1, 100);
-        let total_pages = if total == 0 { 1 } else { (total + page_size - 1) / page_size };
+        let total_pages = if total == 0 {
+            1
+        } else {
+            (total + page_size - 1) / page_size
+        };
         let page = query.page.unwrap_or(1).clamp(1, total_pages);
         let start = (page - 1) * page_size;
         let paged: Vec<LibrarySummaryItem> = filtered
@@ -364,14 +459,24 @@ impl Store {
             .skip(start)
             .take(page_size)
             .map(|st| {
-                let text = st.content.scene_opening.as_deref().unwrap_or(&st.content.text_template);
-                let excerpt = text.lines().next().unwrap_or("").chars().take(140).collect::<String>();
+                let text = st
+                    .content
+                    .scene_opening
+                    .as_deref()
+                    .unwrap_or(&st.content.text_template);
+                let excerpt = text
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .take(140)
+                    .collect::<String>();
                 let role_tags = st.parameters.iter().map(|p| p.query.clone()).collect();
                 LibrarySummaryItem {
                     id: st.id.clone(),
                     title: st.title.clone(),
                     excerpt,
-                    location: st.location.clone(),
+                    location_tags: st.location_tags.clone(),
                     role_tags,
                     choice_count: st.choices.len(),
                     revision: st.revision,
@@ -388,16 +493,16 @@ impl Store {
             page,
             page_size,
             total_pages,
-            available_locations,
+            available_location_tags,
         })
     }
 
     // --- Generation Jobs ---
 
     pub fn list_generation_jobs(&self) -> Result<Vec<GenerationJobRecord>, rusqlite::Error> {
-        let mut stmt = self.conn.prepare(
-            "SELECT job_json FROM generation_jobs ORDER BY updated_at DESC",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT job_json FROM generation_jobs ORDER BY updated_at DESC")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let list: Vec<GenerationJobRecord> = rows
             .filter_map(|r| r.ok())
@@ -406,17 +511,24 @@ impl Store {
         Ok(list)
     }
 
-    pub fn get_generation_job(&self, id: &str) -> Result<Option<GenerationJobRecord>, rusqlite::Error> {
-        let json_opt: Option<String> = self.conn.query_row(
-            "SELECT job_json FROM generation_jobs WHERE id = ?1",
-            params![id],
-            |row| row.get(0),
-        ).optional()?;
+    pub fn get_generation_job(
+        &self,
+        id: &str,
+    ) -> Result<Option<GenerationJobRecord>, rusqlite::Error> {
+        let json_opt: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT job_json FROM generation_jobs WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
         Ok(json_opt.and_then(|s| serde_json::from_str(&s).ok()))
     }
 
     pub fn save_generation_job(&self, job: &GenerationJobRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(job).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let json = serde_json::to_string(job)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.conn.execute(
             "INSERT INTO generation_jobs (id, revision, status, job_json, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5)
@@ -425,20 +537,34 @@ impl Store {
                  status = excluded.status,
                  job_json = excluded.job_json,
                  updated_at = excluded.updated_at",
-            params![job.id, job.revision as i64, job.status, json, job.updated_at],
+            params![
+                job.id,
+                job.revision as i64,
+                job.status,
+                json,
+                job.updated_at
+            ],
         )?;
         Ok(())
     }
 
     pub fn delete_generation_job(&self, id: &str) -> Result<bool, rusqlite::Error> {
-        let count = self.conn.execute("DELETE FROM generation_jobs WHERE id = ?1", params![id])?;
+        let count = self
+            .conn
+            .execute("DELETE FROM generation_jobs WHERE id = ?1", params![id])?;
         Ok(count > 0)
     }
 
     // --- Transactional Project Content Replacement ---
 
-    pub fn replace_project_content(&mut self, meta: &ProjectMetadata, content: &ProjectBundleContent) -> Result<(), rusqlite::Error> {
-        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    pub fn replace_project_content(
+        &mut self,
+        meta: &ProjectMetadata,
+        content: &ProjectBundleContent,
+    ) -> Result<(), rusqlite::Error> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM content_records", [])?;
         tx.execute("DELETE FROM generation_jobs", [])?;
 

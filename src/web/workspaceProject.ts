@@ -11,6 +11,7 @@ import type {
   ScenarioEventRecord,
 } from "../db/repository.ts";
 import type { RustProjectBundle } from "../engine/RustRuntimeClient.ts";
+import { buildGraphFromStorylet, validateNarrativeGraph } from "./studio/narrativeGraphTypes.ts";
 
 interface WorkspaceRecords {
   qualities: QualityRecord[];
@@ -121,7 +122,7 @@ function mapEffects(
 }
 
 function mapRoleQuery(query: string): string | null {
-  const match = query.trim().match(/^(?:character\.)?role\s*==\s*(['"])(.*?)\1$/i);
+  const match = query.trim().match(/^(?:(?:character\.)?role|character_role)\s*==\s*(['"])(.*?)\1$/i);
   return match?.[2]?.trim() || null;
 }
 
@@ -401,6 +402,7 @@ export function buildWorkspaceProject(
       id: location.id,
       name: location.name,
       description: location.description,
+      tags: location.tags ?? [],
       connected_locations: (location.connected_zones ?? []).filter((id) => locationIds.has(id)),
       map_position: position,
     }];
@@ -422,6 +424,9 @@ export function buildWorkspaceProject(
   for (const storylet of storylets) {
     if (storylet.revision == null || storylet.approved_revision !== storylet.revision) continue;
     const path = `storylets.${storylet.id}`;
+    for (const issue of validateNarrativeGraph(buildGraphFromStorylet(storylet))) {
+      issues.push(`${path}.graph: ${issue}`);
+    }
     const roles: Array<{ role: string }> = [];
     for (const parameter of storylet.parameters ?? []) {
       const role = mapRoleQuery(parameter.query);
@@ -455,7 +460,7 @@ export function buildWorkspaceProject(
       summary: storylet.content.text_template,
       approved: true,
       ending: storylet.ending === true,
-      location_id: storylet.location || null,
+      location_tags: storylet.location_tags ?? [],
       urgency_weight: storylet.urgency_weight,
       cluster_type: storylet.cluster_type,
       repeatability,

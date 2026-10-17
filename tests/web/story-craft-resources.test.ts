@@ -37,7 +37,7 @@ test("generation records the exact craft sources and injects their scene guidanc
     });
   };
   const request: GenerationJobRequest = {
-    location: "Records Room",
+    locationTags: ["Records Room"],
     clusterType: "linear",
     characterRoles: ["detective"],
     triggerPreconditions: [],

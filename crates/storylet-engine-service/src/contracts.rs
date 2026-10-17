@@ -1,8 +1,8 @@
 //! Authored contracts and API payloads for Storylet Studio.
 
-use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectMetadata {
@@ -51,6 +51,8 @@ pub struct LocationRecord {
     pub id: String,
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connected_zones: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -96,7 +98,11 @@ pub struct StoryletContentRecord {
     pub text_template: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker_id: Option<String>,
-    #[serde(default, rename = "sceneOpening", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "sceneOpening",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub scene_opening: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialogue_quips: Option<Vec<Value>>,
@@ -106,14 +112,22 @@ pub struct StoryletContentRecord {
 pub struct StoryletChoiceRecord {
     pub choice_id: String,
     pub label: String,
-    #[serde(default, rename = "systemVerb", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "systemVerb",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub system_verb: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditions: Option<Vec<Value>>,
     pub effects: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub divert_target: Option<String>,
-    #[serde(default, rename = "advisorPreview", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "advisorPreview",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub advisor_preview: Option<Value>,
 }
 
@@ -131,8 +145,8 @@ pub struct StoryletRecord {
     pub position: Option<[i32; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<[i32; 2]>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub location: Option<String>,
+    #[serde(default)]
+    pub location_tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_tag: Option<String>,
     #[serde(default = "default_cluster_type")]
@@ -152,13 +166,25 @@ pub struct StoryletRecord {
     pub choices: Vec<StoryletChoiceRecord>,
     #[serde(default)]
     pub effects: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_variables: Option<Vec<crate::narrative_graph::LocalVariableDefinition>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph: Option<Value>,
     pub created_at: i64,
 }
 
-fn default_revision() -> u64 { 1 }
-fn default_cluster_type() -> String { "player_controlled_passage".into() }
-fn default_urgency() -> f64 { 50.0 }
-fn default_repeatability() -> String { "always".into() }
+fn default_revision() -> u64 {
+    1
+}
+fn default_cluster_type() -> String {
+    "player_controlled_passage".into()
+}
+fn default_urgency() -> f64 {
+    50.0
+}
+fn default_repeatability() -> String {
+    "always".into()
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StartLocationPolicy {
@@ -260,7 +286,7 @@ pub struct LibrarySummaryItem {
     pub id: String,
     pub title: String,
     pub excerpt: String,
-    pub location: Option<String>,
+    pub location_tags: Vec<String>,
     pub role_tags: Vec<String>,
     pub choice_count: usize,
     pub revision: u64,
@@ -273,7 +299,7 @@ pub struct LibrarySummaryItem {
 pub struct LibraryQuery {
     pub q: Option<String>,
     pub status: Option<String>, // "all" | "draft" | "approved"
-    pub location_id: Option<String>,
+    pub location_tag: Option<String>,
     pub ending: Option<String>, // "all" | "ending" | "non-ending"
     pub sort: Option<String>,   // "title" | "created_desc"
     pub page: Option<usize>,
@@ -287,7 +313,7 @@ pub struct LibraryPageResult {
     pub page: usize,
     pub page_size: usize,
     pub total_pages: usize,
-    pub available_locations: Vec<String>,
+    pub available_location_tags: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

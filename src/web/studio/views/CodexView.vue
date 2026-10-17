@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { onMounted, computed, ref } from "vue";
+import { onMounted, computed, ref, watch } from "vue";
+import { useRoute } from "vue-router";
+import TagEditor from "../components/TagEditor.vue";
+
 import { useCodexViewModel } from "../view-models/codex.ts";
 import { CODEX_CATEGORIES } from "../definitions.ts";
 import { studioState } from "../state.ts";
+import { StudioApi } from "../api.ts";
+import type { StoryletRecord } from "../contracts.ts";
+import { buildTagIndex, uniqueTagNames } from "../tagData.ts";
 
 const {
   activeCategory,
@@ -14,10 +20,33 @@ const {
   deleteItem,
 } = useCodexViewModel();
 const editingItem = ref<any>(null);
+const route = useRoute();
+const availableStorylets = ref<StoryletRecord[]>([]);
+const tagIndex = computed(() => buildTagIndex({ characters: studioState.characters, locations: studioState.locations, storylets: availableStorylets.value }));
+const characterRoleOptions = computed(() => uniqueTagNames(tagIndex.value.filter((tag) => tag.kind === "role").map((tag) => tag.name)));
+const locationTagOptions = computed(() => uniqueTagNames(tagIndex.value.filter((tag) => tag.kind === "location").map((tag) => tag.name)));
 
-onMounted(() => {
-  loadAll();
+function openRequestedEntity() {
+  const category = route.query.category;
+  const id = route.query.id;
+  if (typeof category !== "string" || typeof id !== "string") return;
+  const codexCategory = CODEX_CATEGORIES.find((item) => item.id === category);
+  if (!codexCategory) return;
+  activeCategory.value = codexCategory.id as any;
+  const source = category === "characters" ? studioState.characters : category === "locations" ? studioState.locations : [];
+  const requested = source.find((item) => (item.id || item.name) === id);
+  if (requested) selectItem(requested);
+}
+
+onMounted(async () => {
+  const [_, storylets] = await Promise.all([
+    loadAll(),
+    StudioApi.listContent<StoryletRecord>("storylets").catch(() => []),
+  ]);
+  availableStorylets.value = storylets;
+  openRequestedEntity();
 });
+watch(() => [route.query.category, route.query.id], openRequestedEntity);
 
 const currentList = computed(() => {
   const cat = activeCategory.value;
@@ -41,6 +70,12 @@ function selectItem(item: any) {
   editingItem.value = JSON.parse(JSON.stringify(item));
 }
 
+function saveEditingItem(category: string, item: any) {
+  if (category === "characters") item.role = String(item.role ?? "").trim();
+  if (category === "locations") item.tags = uniqueTagNames(item.tags ?? []);
+  saveItem(category, item);
+}
+
 function createNew() {
   const cat = activeCategory.value;
   if (cat === "qualities") {
@@ -48,7 +83,7 @@ function createNew() {
   } else if (cat === "characters") {
     editingItem.value = { id: "char_new", name: "New Character", role: "witness", home_location: "", current_location: "", agenda: "", red_line: "" };
   } else if (cat === "locations") {
-    editingItem.value = { id: "loc_new", name: "New Location", description: "", connected_zones: [] };
+    editingItem.value = { id: "loc_new", name: "New Location", description: "", tags: [], connected_zones: [] };
   } else if (cat === "npc_behaviors") {
     editingItem.value = { id: "npc_new", actor_id: "", priority: 10, action: "wait", conditions: {}, effects: [] };
   } else if (cat === "events") {
@@ -114,7 +149,7 @@ function createNew() {
       <div v-else style="max-width:640px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
           <h2 style="font-size:18px; font-weight:700;">Edit {{ activeCategory }}</h2>
-          <button class="btn btn-primary" @click="saveItem(activeCategory, editingItem)">Save Record</button>
+          <button class="btn btn-primary" @click="saveEditingItem(activeCategory, editingItem)">Save Record</button>
         </div>
 
         <div v-if="activeCategory === 'qualities'">
@@ -149,7 +184,7 @@ function createNew() {
           </div>
           <div class="form-group">
             <label class="form-label">Role Tag</label>
-            <input v-model="editingItem.role" class="form-input" />
+            <TagEditor v-model="editingItem.role" :options="characterRoleOptions" :multiple="false" label="Character role tag" placeholder="Choose or create a role tag" />
           </div>
           <div class="form-group">
             <label class="form-label">Home Location</label>
@@ -169,6 +204,10 @@ function createNew() {
           <div class="form-group">
             <label class="form-label">Description</label>
             <textarea v-model="editingItem.description" class="form-textarea" style="min-height:80px;"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Location Tags</label>
+            <TagEditor v-model="editingItem.tags" :options="locationTagOptions" label="Location tags" placeholder="Choose or create location tags" />
           </div>
         </div>
 

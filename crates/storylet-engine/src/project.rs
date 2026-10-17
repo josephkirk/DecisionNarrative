@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::storylets::{ActorState, FactRef};
+use crate::storylets::{ActorState, FactRef, MetCharacterRequirement, VisitedLocationRequirement};
 use crate::{Effect, NpcBehaviorRule, PredicateSet, StoryletDefinition, WorldState};
 
 pub const PROJECT_SCHEMA_VERSION: u32 = 1;
@@ -72,6 +72,8 @@ pub struct LocationDefinition {
     pub id: String,
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
     #[serde(default)]
     pub connected_locations: Vec<String>,
     pub map_position: (f64, f64),
@@ -263,14 +265,6 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
     for (key, storylet) in &project.storylets {
         let path = format!("storylets.{key}");
         register_record(&mut issues, &mut global_ids, &path, key, &storylet.id);
-        if let Some(location) = &storylet.location_id {
-            validate_location_ref(
-                &mut issues,
-                &project.locations,
-                format!("{path}.location_id"),
-                location,
-            );
-        }
         if !storylet.urgency_weight.is_finite() {
             issue(
                 &mut issues,
@@ -286,7 +280,12 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
             &storylet.trigger,
         );
         if storylet.ending && storylet.choices.is_empty() {
-            issue(&mut issues, format!("{path}.choices"), "ending_without_choice", "ending storylets must have at least one choice");
+            issue(
+                &mut issues,
+                format!("{path}.choices"),
+                "ending_without_choice",
+                "ending storylets must have at least one choice",
+            );
         }
         let mut choices = BTreeSet::new();
         for (index, choice) in storylet.choices.iter().enumerate() {
@@ -321,6 +320,70 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
                     format!("{choice_path}.divert_target"),
                     "missing_storylet",
                     "divert target must reference a project storylet",
+                );
+            }
+        }
+        for (index, requirement) in storylet
+            .preconditions
+            .visited_locations_any_of
+            .iter()
+            .enumerate()
+        {
+            let (field, value, missing) = match requirement {
+                VisitedLocationRequirement::LocationId { location_id } => (
+                    "location_id",
+                    location_id,
+                    !project.locations.contains_key(location_id),
+                ),
+                VisitedLocationRequirement::LocationTag { tag } => ("tag", tag, false),
+            };
+            let requirement_path =
+                format!("{path}.preconditions.visited_locations_any_of[{index}].{field}");
+            if value.trim().is_empty() {
+                issue(
+                    &mut issues,
+                    requirement_path,
+                    "empty_precondition",
+                    "visited-location requirements must be nonempty",
+                );
+            } else if missing {
+                issue(
+                    &mut issues,
+                    requirement_path,
+                    "missing_location",
+                    format!("location '{value}' does not exist"),
+                );
+            }
+        }
+        for (index, requirement) in storylet
+            .preconditions
+            .met_characters_any_of
+            .iter()
+            .enumerate()
+        {
+            let (field, value, missing) = match requirement {
+                MetCharacterRequirement::CharacterId { character_id } => (
+                    "character_id",
+                    character_id,
+                    !project.characters.contains_key(character_id),
+                ),
+                MetCharacterRequirement::RoleTag { role } => ("role", role, false),
+            };
+            let requirement_path =
+                format!("{path}.preconditions.met_characters_any_of[{index}].{field}");
+            if value.trim().is_empty() {
+                issue(
+                    &mut issues,
+                    requirement_path,
+                    "empty_precondition",
+                    "met-character requirements must be nonempty",
+                );
+            } else if missing {
+                issue(
+                    &mut issues,
+                    requirement_path,
+                    "missing_character",
+                    format!("character '{value}' does not exist"),
                 );
             }
         }
@@ -437,7 +500,12 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
         }
         for (index, event_id) in scenario.event_ids.iter().enumerate() {
             if !project.events.contains_key(event_id) {
-                issue(&mut issues, format!("{path}.event_ids[{index}]"), "missing_event", "scenario event does not exist");
+                issue(
+                    &mut issues,
+                    format!("{path}.event_ids[{index}]"),
+                    "missing_event",
+                    "scenario event does not exist",
+                );
             }
         }
         for (index, storylet_id) in scenario.storylet_ids.iter().enumerate() {
@@ -483,6 +551,14 @@ pub fn build_world(
         scenario_id: Some(scenario.id.clone()),
         random_seed: scenario.seed,
         current_location: Some(scenario.player_start_location.clone()),
+        location_tags: project
+            .locations
+            .iter()
+            .map(|(id, location)| (id.clone(), location.tags.iter().cloned().collect()))
+            .collect(),
+        visited_locations: std::collections::BTreeSet::from([scenario
+            .player_start_location
+            .clone()]),
         ..WorldState::default()
     };
     for (key, definition) in &project.qualities {
@@ -509,6 +585,14 @@ pub fn build_world(
                 busy: false,
             },
         );
+    }
+    if let Some(location_id) = &world.current_location {
+        world.met_characters = world
+            .actors
+            .iter()
+            .filter(|(_, actor)| actor.current_location == *location_id)
+            .map(|(actor_id, _)| actor_id.clone())
+            .collect();
     }
     Ok(world)
 }

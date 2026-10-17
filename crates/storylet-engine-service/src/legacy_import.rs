@@ -1,16 +1,65 @@
 //! Single-run migration from legacy SQLite databases into the unified Store.
 
-use std::path::Path;
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::Value;
+use std::collections::BTreeMap;
+use std::path::Path;
 
 use crate::contracts::{
-    ActorPopulationPolicy, CharacterRecord, EventRecord,
-    LocationRecord, NpcBehaviorRecord, ProjectMetadata, QualityRecord, ScenarioRecord,
-    StartLocationPolicy, StoryletChoiceRecord, StoryletContentRecord, StoryletParameterRecord,
-    StoryletRecord,
+    ActorPopulationPolicy, CharacterRecord, EventRecord, LocationRecord, NpcBehaviorRecord,
+    ProjectMetadata, QualityRecord, ScenarioRecord, StartLocationPolicy, StoryletChoiceRecord,
+    StoryletContentRecord, StoryletParameterRecord, StoryletRecord,
 };
 use crate::store::Store;
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, rusqlite::Error> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for row in rows {
+        if row? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn legacy_storylet_query(conn: &Connection) -> Result<String, rusqlite::Error> {
+    let location_column = if has_column(conn, "storylets", "location")? {
+        "location"
+    } else {
+        "NULL"
+    };
+    let location_tags_column = if has_column(conn, "storylets", "location_tags")? {
+        "location_tags"
+    } else {
+        "NULL"
+    };
+    Ok(format!(
+        "SELECT id, title, {location_column}, {location_tags_column}, group_tag, cluster_type, urgency_weight, repeatability, cooldown_turns, parameters, preconditions, content, choices, effects, created_at, revision, approved_revision, ending FROM storylets"
+    ))
+}
+
+fn parse_tags(value: Option<String>) -> Vec<String> {
+    value
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn storylet_location_tags(
+    tags: Vec<String>,
+    location_id: Option<String>,
+    legacy_locations: &BTreeMap<String, Vec<String>>,
+) -> Vec<String> {
+    if tags.is_empty() {
+        if let Some(location_id) = location_id {
+            return legacy_locations
+                .get(&location_id)
+                .cloned()
+                .unwrap_or_else(|| vec![location_id]);
+        }
+    }
+    tags
+}
 
 pub fn maybe_import_legacy_database(
     store: &mut Store,
@@ -152,29 +201,44 @@ pub fn maybe_import_legacy_database(
     }
 
     // 4. Locations
+    let mut legacy_location_tags = BTreeMap::<String, Vec<String>>::new();
     {
-        let mut stmt = legacy_studio
-            .prepare("SELECT id, name, description, connected_zones, environmental_params, devices, created_at FROM locations")
-            .map_err(|e| e.to_string())?;
+        let tags_column =
+            if has_column(&legacy_studio, "locations", "tags").map_err(|e| e.to_string())? {
+                "tags"
+            } else {
+                "NULL"
+            };
+        let query = format!(
+            "SELECT id, name, description, {tags_column}, connected_zones, environmental_params, devices, created_at FROM locations"
+        );
+        let mut stmt = legacy_studio.prepare(&query).map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
-                let conn_str: Option<String> = r.get(3)?;
-                let env_str: Option<String> = r.get(4)?;
-                let dev_str: Option<String> = r.get(5)?;
+                let id: String = r.get(0)?;
+                let mut tags = parse_tags(r.get(3)?);
+                if tags.is_empty() {
+                    tags.push(id.clone());
+                }
+                let conn_str: Option<String> = r.get(4)?;
+                let env_str: Option<String> = r.get(5)?;
+                let dev_str: Option<String> = r.get(6)?;
                 Ok(LocationRecord {
-                    id: r.get(0)?,
+                    id,
                     name: r.get(1)?,
                     description: r.get(2)?,
+                    tags,
                     connected_zones: conn_str.and_then(|s| serde_json::from_str(&s).ok()),
                     environmental_params: env_str.and_then(|s| serde_json::from_str(&s).ok()),
                     devices: dev_str.and_then(|s| serde_json::from_str(&s).ok()),
-                    created_at: r.get(6)?,
+                    created_at: r.get(7)?,
                 })
             })
             .map_err(|e| e.to_string())?;
 
         for row in rows {
             let l = row.map_err(|e| e.to_string())?;
+            legacy_location_tags.insert(l.id.clone(), l.tags.clone());
             let json = serde_json::to_string(&l).map_err(|e| e.to_string())?;
             tx.execute(
                 "INSERT OR REPLACE INTO content_records (entity, id, data_json, revision, approved_revision, updated_at)
@@ -188,7 +252,9 @@ pub fn maybe_import_legacy_database(
     // 5. NPC Behaviors
     {
         let mut stmt = legacy_studio
-            .prepare("SELECT id, actor_id, priority, conditions, action, effects FROM npc_behaviors")
+            .prepare(
+                "SELECT id, actor_id, priority, conditions, action, effects FROM npc_behaviors",
+            )
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
@@ -219,51 +285,61 @@ pub fn maybe_import_legacy_database(
 
     // 6. Storylets (Import all text and logic; set approved_revision = None per user decision)
     {
-        let mut stmt = legacy_studio
-            .prepare("SELECT id, title, location, group_tag, cluster_type, urgency_weight, repeatability, cooldown_turns, parameters, preconditions, content, choices, effects, created_at, revision, approved_revision, ending FROM storylets")
-            .map_err(|e| e.to_string())?;
+        let query = legacy_storylet_query(&legacy_studio).map_err(|e| e.to_string())?;
+        let mut stmt = legacy_studio.prepare(&query).map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
-                let params_str: String = r.get(8)?;
-                let pre_str: String = r.get(9)?;
-                let content_str: String = r.get(10)?;
-                let choices_str: String = r.get(11)?;
-                let effects_str: String = r.get(12)?;
+                let params_str: String = r.get(9)?;
+                let pre_str: String = r.get(10)?;
+                let content_str: String = r.get(11)?;
+                let choices_str: String = r.get(12)?;
+                let effects_str: String = r.get(13)?;
 
-                let parameters: Vec<StoryletParameterRecord> = serde_json::from_str(&params_str).unwrap_or_default();
+                let parameters: Vec<StoryletParameterRecord> =
+                    serde_json::from_str(&params_str).unwrap_or_default();
                 let preconditions: Value = serde_json::from_str(&pre_str).unwrap_or(Value::Null);
-                let content: StoryletContentRecord = serde_json::from_str(&content_str).unwrap_or(StoryletContentRecord {
-                    text_template: String::new(),
-                    speaker_id: None,
-                    scene_opening: None,
-                    dialogue_quips: None,
-                });
-                let choices: Vec<StoryletChoiceRecord> = serde_json::from_str(&choices_str).unwrap_or_default();
+                let content: StoryletContentRecord =
+                    serde_json::from_str(&content_str).unwrap_or(StoryletContentRecord {
+                        text_template: String::new(),
+                        speaker_id: None,
+                        scene_opening: None,
+                        dialogue_quips: None,
+                    });
+                let choices: Vec<StoryletChoiceRecord> =
+                    serde_json::from_str(&choices_str).unwrap_or_default();
                 let effects: Value = serde_json::from_str(&effects_str).unwrap_or(Value::Null);
 
-                let rev: i64 = r.get(14)?;
-                let ending_int: i64 = r.get(16)?;
+                let rev: i64 = r.get(15)?;
+                let ending_int: i64 = r.get(17)?;
+                let location_id: Option<String> = r.get(2)?;
+                let location_tags = storylet_location_tags(
+                    parse_tags(r.get(3)?),
+                    location_id,
+                    &legacy_location_tags,
+                );
 
                 Ok(StoryletRecord {
                     id: r.get(0)?,
                     title: r.get(1)?,
-                    location: r.get(2)?,
-                    group_tag: r.get(3)?,
-                    cluster_type: r.get(4)?,
-                    urgency_weight: r.get(5)?,
-                    repeatability: r.get(6)?,
-                    cooldown_turns: r.get::<_, i64>(7)? as u32,
+                    location_tags,
+                    group_tag: r.get(4)?,
+                    cluster_type: r.get(5)?,
+                    urgency_weight: r.get(6)?,
+                    repeatability: r.get(7)?,
+                    cooldown_turns: r.get::<_, i64>(8)? as u32,
                     parameters,
                     preconditions,
                     content,
                     choices,
                     effects,
-                    created_at: r.get(13)?,
+                    created_at: r.get(14)?,
                     revision: rev as u64,
                     approved_revision: None, // User selected: Require fresh approval!
                     ending: ending_int != 0,
                     position: None,
                     size: None,
+                    local_variables: None,
+                    graph: None,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -320,7 +396,9 @@ pub fn maybe_import_legacy_database(
                     .unwrap_or_default();
 
                 if start_policy.location_id.is_none() {
-                    if let Some(fixed_loc) = raw.get("player_start_location").and_then(|v| v.as_str()) {
+                    if let Some(fixed_loc) =
+                        raw.get("player_start_location").and_then(|v| v.as_str())
+                    {
                         if !fixed_loc.trim().is_empty() {
                             start_policy.mode = "fixed".to_string();
                             start_policy.location_id = Some(fixed_loc.to_string());
@@ -424,7 +502,9 @@ pub fn maybe_import_legacy_database(
             }
 
             // Events
-            if let Ok(mut stmt) = legacy_engine.prepare("SELECT session_id, event_id, revision, event_json FROM runtime_events") {
+            if let Ok(mut stmt) = legacy_engine
+                .prepare("SELECT session_id, event_id, revision, event_json FROM runtime_events")
+            {
                 if let Ok(rows) = stmt.query_map([], |r| {
                     Ok((
                         r.get::<_, String>(0)?,
@@ -454,4 +534,44 @@ pub fn maybe_import_legacy_database(
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{legacy_storylet_query, storylet_location_tags};
+    use rusqlite::Connection;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn storylet_import_query_accepts_tag_only_schema() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE storylets (id TEXT, title TEXT, location_tags TEXT, group_tag TEXT, cluster_type TEXT, urgency_weight REAL, repeatability TEXT, cooldown_turns INTEGER, parameters TEXT, preconditions TEXT, content TEXT, choices TEXT, effects TEXT, created_at INTEGER, revision INTEGER, approved_revision INTEGER, ending INTEGER);",
+        )
+        .unwrap();
+
+        let query = legacy_storylet_query(&conn).unwrap();
+        assert!(query.contains("SELECT id, title, NULL, location_tags,"));
+        conn.prepare(&query).unwrap();
+    }
+
+    #[test]
+    fn legacy_location_bindings_resolve_to_location_tags() {
+        let locations = BTreeMap::from([(
+            String::from("archive-id"),
+            vec![String::from("archive"), String::from("indoors")],
+        )]);
+        assert_eq!(
+            storylet_location_tags(Vec::new(), Some(String::from("archive-id")), &locations),
+            vec![String::from("archive"), String::from("indoors")],
+        );
+        assert_eq!(
+            storylet_location_tags(
+                vec![String::from("custom")],
+                Some(String::from("archive-id")),
+                &locations,
+            ),
+            vec![String::from("custom")],
+        );
+    }
 }

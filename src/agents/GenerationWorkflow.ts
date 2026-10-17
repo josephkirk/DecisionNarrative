@@ -17,7 +17,7 @@ export type GenerationJobStatus = "ready" | "running" | "failed" | "complete";
 
 export interface GenerationJobRequest {
   title?: string;
-  location: string;
+  locationTags?: string[];
   clusterType: "linear" | "player_controlled_passage" | "wheel" | "aftermath";
   characterRoles: string[];
   triggerPreconditions: Array<{ variable: string; op: string; value: unknown }>;
@@ -101,7 +101,9 @@ export class GenerationWorkflow {
   }
 
   create(request: GenerationJobRequest): GenerationJob {
-    if (!request.location?.trim()) throw new GenerationWorkflowError("Choose a location for this storylet.");
+    if (request.locationTags !== undefined && (!Array.isArray(request.locationTags) || request.locationTags.some((tag) => typeof tag !== "string"))) {
+      throw new GenerationWorkflowError("Location tags must be a list of strings.");
+    }
     if (!request.clusterType || !Array.isArray(request.characterRoles) || !Array.isArray(request.triggerPreconditions)
       || request.desiredOutcomes === null || typeof request.desiredOutcomes !== "object" || Array.isArray(request.desiredOutcomes)) {
       throw new GenerationWorkflowError("The generation brief is incomplete or invalid.");

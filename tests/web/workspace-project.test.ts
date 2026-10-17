@@ -5,8 +5,8 @@ test("Codex records map to a generic validated project and a fresh scenario", ()
   const result = buildWorkspaceProject({
     qualities: [{ name: "clue.receipt", type: "tool", value: 0, description: "Receipt found" }],
     locations: [
-      { id: "market", name: "Market", description: "A covered market", connected_zones: ["archive"] },
-      { id: "archive", name: "Archive", description: "A night archive", connected_zones: ["market"] },
+      { id: "market", name: "Market", description: "A covered market", tags: ["market"], connected_zones: ["archive"] },
+      { id: "archive", name: "Archive", description: "A night archive", tags: ["archive"], connected_zones: ["market"] },
     ],
     characters: [{
       id: "nora", name: "Nora", role: "Clerk", home_location: "archive", current_location: "archive",
@@ -14,9 +14,12 @@ test("Codex records map to a generic validated project and a fresh scenario", ()
     }],
     storylets: [{
       revision: 2, approved_revision: 2,
-      id: "find-receipt", title: "The Receipt", location: "archive", cluster_type: "player_controlled_passage",
+      id: "find-receipt", title: "The Receipt", location_tags: ["archive"], cluster_type: "player_controlled_passage",
       urgency_weight: 65, repeatability: "always", cooldown_turns: 0,
-      parameters: [{ param_name: "clerk", query: "character.role == 'Clerk'" }],
+      parameters: [
+        { param_name: "clerk", query: 'role == "Clerk"' },
+        { param_name: "guard", query: "character_role == 'Guard'" },
+      ],
       preconditions: { all_of: [{ variable: "clue.receipt", op: "eq", value: 0 }] },
       content: { text_template: "Nora unfolds a receipt." },
       choices: [{ choice_id: "read", label: "Read it", effects: { "clue.receipt": 1 } }],
@@ -27,8 +30,9 @@ test("Codex records map to a generic validated project and a fresh scenario", ()
   expect(result.issues).toEqual([]);
   expect(result.project.name).toBe("Workspace");
   expect(result.project.scenarios[result.scenarioId].player_start_location).toBe("market");
-  expect(result.project.storylets["find-receipt"].required_roles).toEqual([{ role: "Clerk" }]);
+  expect(result.project.storylets["find-receipt"].required_roles).toEqual([{ role: "Clerk" }, { role: "Guard" }]);
   expect(result.project.storylets["find-receipt"].approved).toBe(true);
+  expect(result.project.storylets["find-receipt"].location_tags).toEqual(["archive"]);
   expect(result.project.storylets["find-receipt"].choices[0].effects).toEqual([
     { kind: "add_quality", key: "clue.receipt", amount: 1 },
   ]);
@@ -41,7 +45,7 @@ test("unsupported role query and unknown references are surfaced as conversion e
     characters: [],
     storylets: [{
       revision: 1, approved_revision: 1,
-      id: "unsupported", title: "Unsupported", location: "room", cluster_type: "linear", urgency_weight: 50,
+      id: "unsupported", title: "Unsupported", location_tags: ["room"], cluster_type: "linear", urgency_weight: 50,
       repeatability: "always", cooldown_turns: 0,
       parameters: [{ param_name: "role", query: "role matches a designer expression" }],
       preconditions: { all_of: [{ variable: "unknown.quality", op: "eq", value: true }] },
@@ -57,10 +61,10 @@ test("unsupported role query and unknown references are surfaced as conversion e
 test("unapproved storylet revisions are kept out of runtime bundles", () => {
   const result = buildWorkspaceProject({
     qualities: [],
-    locations: [{ id: "room", name: "Room", description: "", connected_zones: [] }],
+    locations: [{ id: "room", name: "Room", description: "", tags: ["room"], connected_zones: [] }],
     characters: [],
     storylets: [{
-      id: "draft", revision: 3, approved_revision: 2, title: "Draft", location: "room", cluster_type: "linear",
+      id: "draft", revision: 3, approved_revision: 2, title: "Draft", location_tags: ["room"], cluster_type: "linear",
       urgency_weight: 50, repeatability: "always", cooldown_turns: 0, parameters: [], preconditions: {},
       content: { text_template: "Not approved yet." }, choices: [], effects: {}, created_at: 1,
     }],
@@ -107,12 +111,12 @@ test("a saved scenario preserves its start state, cast positions, seed, and sele
   const result = buildWorkspaceProject({
     qualities: [{ name: "clue.receipt", type: "tool", value: 0 }],
     locations: [
-      { id: "market", name: "Market", description: "", connected_zones: ["archive"] },
-      { id: "archive", name: "Archive", description: "", connected_zones: ["market"] },
+      { id: "market", name: "Market", description: "", tags: ["market"], connected_zones: ["archive"] },
+      { id: "archive", name: "Archive", description: "", tags: ["archive"], connected_zones: ["market"] },
     ],
     characters: [{ id: "nora", name: "Nora", role: "Clerk", home_location: "archive", current_location: "archive", status_axes: {}, needs: {}, agenda: "", red_line: "" }],
     storylets: [{
-      id: "find-receipt", revision: 1, approved_revision: 1, title: "The Receipt", location: "archive",
+      id: "find-receipt", revision: 1, approved_revision: 1, title: "The Receipt", location_tags: ["archive"],
       cluster_type: "player_controlled_passage", urgency_weight: 50, repeatability: "always", cooldown_turns: 0,
       parameters: [{ param_name: "clerk", query: "role == 'Clerk'" }], preconditions: {},
       content: { text_template: "Nora finds a receipt." }, choices: [], effects: {}, created_at: 1,

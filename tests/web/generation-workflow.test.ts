@@ -18,7 +18,7 @@ class MemoryJobStore implements GenerationJobStore {
 }
 
 const request = {
-  location: "archive",
+  locationTags: ["archive"],
   clusterType: "linear" as const,
   characterRoles: ["archivist"],
   triggerPreconditions: [{ variable: "clue.open", op: "eq", value: true }],

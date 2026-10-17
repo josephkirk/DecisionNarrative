@@ -157,7 +157,7 @@ fn make_definitions(count: usize, locations_count: usize) -> Vec<StoryletDefinit
             summary: "A generic benchmark scene".into(),
             approved: true,
             ending: false,
-            location_id: Some(format!("location-{:02}", index % locations_count)),
+            location_tags: Default::default(),
             urgency_weight: 25.0 + (index % 75) as f64,
             cluster_type: ClusterType::PlayerControlledPassage,
             repeatability: Repeatability::Always,
@@ -165,6 +165,7 @@ fn make_definitions(count: usize, locations_count: usize) -> Vec<StoryletDefinit
                 role: "witness".into(),
             }],
             trigger: PredicateSet::default(),
+            preconditions: Default::default(),
             content: SceneContent {
                 opening: "A person notices something worth discussing.".into(),
             },

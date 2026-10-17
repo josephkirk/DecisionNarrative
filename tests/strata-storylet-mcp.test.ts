@@ -68,7 +68,7 @@ describe("Strata storylet content batches", () => {
       {
         ending: false,
         title: "The Lantern Slit",
-        location: "chamber",
+        location_tags: ["chamber"],
         group_tag: "chamber",
         cluster_type: "linear",
         urgency_weight: 80,
@@ -90,7 +90,7 @@ describe("Strata storylet content batches", () => {
       {
         ending: false,
         title: "The Watch Ticking",
-        location: "chamber",
+        location_tags: ["chamber"],
         group_tag: "chamber",
         cluster_type: "linear",
         urgency_weight: 85,
@@ -123,7 +123,7 @@ describe("Strata storylet content batches", () => {
       approved_revision: null,
       ending: false,
       title: "The Lantern Slit",
-      location: "chamber",
+      location_tags: ["chamber"],
       cluster_type: "linear",
       urgency_weight: 80,
       repeatability: "always",
@@ -169,8 +169,8 @@ describe("Strata storylet content batches", () => {
 
   test("rejects unallowed canon references when brief declares canon scope", () => {
     const unallowedLocation = structuredClone(validStoryletPayload);
-    unallowedLocation.storylets[0].location = "unmentioned_street";
-    expect(() => validateContentBatchPayload(unallowedLocation, contentArgs)).toThrow("references unallowed location 'unmentioned_street'");
+    unallowedLocation.storylets[0].location_tags = ["unmentioned_street"];
+    expect(() => validateContentBatchPayload(unallowedLocation, contentArgs)).toThrow("references unallowed location tag 'unmentioned_street'");
 
     const unallowedQuality = structuredClone(validStoryletPayload);
     (unallowedQuality.storylets[0].preconditions.all_of[0] as any).variable = "gold_coins";

@@ -132,12 +132,13 @@ export function validateContentBatchPayload(
       throw new Error(`Storylet ${index + 1} must have a non-empty title`);
     }
 
-    if (row.location !== undefined && row.location !== null) {
-      if (typeof row.location !== "string" || !row.location.trim()) {
-        throw new Error(`Storylet ${index + 1} has invalid location`);
-      }
-      if (canon.locations && !canon.locations.has(row.location.trim())) {
-        throw new Error(`Storylet ${index + 1} references unallowed location '${row.location}'`);
+    const locationTags = row.location_tags === undefined || row.location_tags === null ? [] : row.location_tags;
+    if (!Array.isArray(locationTags) || !locationTags.every((tag) => typeof tag === "string" && tag.trim())) {
+      throw new Error(`Storylet ${index + 1} has invalid location_tags`);
+    }
+    for (const tag of locationTags as string[]) {
+      if (canon.locations && !canon.locations.has(tag.trim())) {
+        throw new Error(`Storylet ${index + 1} references unallowed location tag '${tag}'`);
       }
     }
 
@@ -289,7 +290,7 @@ export function validateContentBatchPayload(
       approved_revision: null,
       ending: row.ending,
       title: row.title.trim(),
-      ...(row.location ? { location: (row.location as string).trim() } : {}),
+      ...(locationTags.length ? { location_tags: (locationTags as string[]).map((tag) => tag.trim()) } : {}),
       ...(row.group_tag ? { group_tag: (row.group_tag as string).trim() } : {}),
       cluster_type: row.cluster_type,
       urgency_weight: urgency,
@@ -345,7 +346,7 @@ export async function generateContentBatch(input: unknown, fetcher: typeof fetch
           { role: "user", content: [
             `Create exactly ${args.count} diverse storylet candidates for scenario family ${args.scenario_family}.`,
             "Each candidate must match the StoryletRecord shape:",
-            `{"storylets":[{"title":string,"location"?:string,"group_tag"?:string,"cluster_type":"linear"|"player_controlled_passage"|"wheel"|"aftermath","urgency_weight":number,"repeatability":"once_ever"|"always"|"cooldown"|"persistent","cooldown_turns":number,"parameters":[{"param_name":string,"query":string}],"preconditions":{"all_of"?:[{"variable":string,"op":string,"value":any}]},"content":{"text_template":string,"sceneOpening"?:string},"choices":[{"choice_id":string,"label":string,"systemVerb"?:string,"effects":object,"divert_target"?:string}],"effects":object}]}`,
+            `{"storylets":[{"title":string,"location_tags"?:string[],"group_tag"?:string,"cluster_type":"linear"|"player_controlled_passage"|"wheel"|"aftermath","urgency_weight":number,"repeatability":"once_ever"|"always"|"cooldown"|"persistent","cooldown_turns":number,"parameters":[{"param_name":string,"query":string}],"preconditions":{"all_of"?:[{"variable":string,"op":string,"value":any}]},"content":{"text_template":string,"sceneOpening"?:string},"choices":[{"choice_id":string,"label":string,"systemVerb"?:string,"effects":object,"divert_target"?:string}],"effects":object}]}`,
             `Project brief: ${brief}`,
             `Additional constraints: ${JSON.stringify(constraints)}`,
             "Include ending as a required boolean; set true only for the designated terminal storylet. Do not include id, revision, approved_revision, or created_at; the server assigns these deterministically.",

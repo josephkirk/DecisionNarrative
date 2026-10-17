@@ -1,8 +1,7 @@
 //! AI Generators: LiteLLM text generation and ComfyUI image generation clients.
 
-use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct LiteLlmRequest {
@@ -17,9 +16,15 @@ pub struct LiteLlmRequest {
     pub max_tokens: u32,
 }
 
-fn default_litellm_model() -> String { "gpt-4o-mini".into() }
-fn default_temperature() -> f64 { 0.7 }
-fn default_max_tokens() -> u32 { 1024 }
+fn default_litellm_model() -> String {
+    "gpt-4o-mini".into()
+}
+fn default_temperature() -> f64 {
+    0.7
+}
+fn default_max_tokens() -> u32 {
+    1024
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LiteLlmResponse {
@@ -40,8 +45,12 @@ pub struct ComfyPromptRequest {
     pub height: u32,
 }
 
-fn default_comfy_seed() -> u64 { 42 }
-fn default_comfy_dimension() -> u32 { 1024 }
+fn default_comfy_seed() -> u64 {
+    42
+}
+fn default_comfy_dimension() -> u32 {
+    1024
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ComfyPromptResponse {
@@ -69,9 +78,14 @@ impl AiGeneratorService {
 
     /// Generate text/dialogue via LiteLLM endpoint
     pub async fn generate_text(&self, req: &LiteLlmRequest) -> Result<LiteLlmResponse, String> {
-        let endpoint = format!("{}/chat/completions", self.litellm_url.trim_end_matches('/'));
+        let endpoint = format!(
+            "{}/chat/completions",
+            self.litellm_url.trim_end_matches('/')
+        );
 
-        let system_msg = req.system.as_deref().unwrap_or("You are a creative dialogue and narrative writer for non-linear storylets.");
+        let system_msg = req.system.as_deref().unwrap_or(
+            "You are a creative dialogue and narrative writer for non-linear storylets.",
+        );
 
         let body = json!({
             "model": req.model,
@@ -86,8 +100,12 @@ impl AiGeneratorService {
         let resp_res = self.client.post(&endpoint).json(&body).send().await;
         match resp_res {
             Ok(resp) if resp.status().is_success() => {
-                let data: Value = resp.json().await.map_err(|e| format!("Failed to parse LiteLLM JSON: {e}"))?;
-                let text = data.get("choices")
+                let data: Value = resp
+                    .json()
+                    .await
+                    .map_err(|e| format!("Failed to parse LiteLLM JSON: {e}"))?;
+                let text = data
+                    .get("choices")
                     .and_then(|c| c.get(0))
                     .and_then(|m| m.get("message"))
                     .and_then(|msg| msg.get("content"))
@@ -99,18 +117,22 @@ impl AiGeneratorService {
                     model: req.model.clone(),
                 })
             }
-            Ok(resp) => {
-                Err(format!("LiteLLM returned HTTP {}", resp.status()))
-            }
+            Ok(resp) => Err(format!("LiteLLM returned HTTP {}", resp.status())),
             Err(e) => {
                 // If LiteLLM is not running, return informative error
-                Err(format!("LiteLLM connection error at {}: {}", self.litellm_url, e))
+                Err(format!(
+                    "LiteLLM connection error at {}: {}",
+                    self.litellm_url, e
+                ))
             }
         }
     }
 
     /// Submit a text-to-image workflow prompt to ComfyUI
-    pub async fn queue_comfy_prompt(&self, req: &ComfyPromptRequest) -> Result<ComfyPromptResponse, String> {
+    pub async fn queue_comfy_prompt(
+        &self,
+        req: &ComfyPromptRequest,
+    ) -> Result<ComfyPromptResponse, String> {
         let endpoint = format!("{}/prompt", self.comfyui_url.trim_end_matches('/'));
         let client_id = uuid::Uuid::new_v4().to_string();
 
@@ -182,8 +204,12 @@ impl AiGeneratorService {
         let resp_res = self.client.post(&endpoint).json(&body).send().await;
         match resp_res {
             Ok(resp) if resp.status().is_success() => {
-                let data: Value = resp.json().await.map_err(|e| format!("Failed to parse ComfyUI JSON: {e}"))?;
-                let prompt_id = data.get("prompt_id")
+                let data: Value = resp
+                    .json()
+                    .await
+                    .map_err(|e| format!("Failed to parse ComfyUI JSON: {e}"))?;
+                let prompt_id = data
+                    .get("prompt_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or(&client_id)
                     .to_string();
@@ -193,19 +219,27 @@ impl AiGeneratorService {
                     status: "queued".into(),
                 })
             }
-            Ok(resp) => {
-                Err(format!("ComfyUI returned HTTP {}", resp.status()))
-            }
-            Err(e) => {
-                Err(format!("ComfyUI connection error at {}: {}", self.comfyui_url, e))
-            }
+            Ok(resp) => Err(format!("ComfyUI returned HTTP {}", resp.status())),
+            Err(e) => Err(format!(
+                "ComfyUI connection error at {}: {}",
+                self.comfyui_url, e
+            )),
         }
     }
 
     /// Get ComfyUI generation history / status for a prompt_id
     pub async fn get_comfy_history(&self, prompt_id: &str) -> Result<Value, String> {
-        let endpoint = format!("{}/history/{}", self.comfyui_url.trim_end_matches('/'), prompt_id);
-        let resp = self.client.get(&endpoint).send().await.map_err(|e| e.to_string())?;
+        let endpoint = format!(
+            "{}/history/{}",
+            self.comfyui_url.trim_end_matches('/'),
+            prompt_id
+        );
+        let resp = self
+            .client
+            .get(&endpoint)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
         if resp.status().is_success() {
             let data: Value = resp.json().await.map_err(|e| e.to_string())?;
             Ok(data)
@@ -215,8 +249,17 @@ impl AiGeneratorService {
     }
 
     /// Fetch raw generated image bytes from ComfyUI
-    pub async fn get_comfy_image(&self, filename: &str, subfolder: Option<&str>, folder_type: Option<&str>) -> Result<Vec<u8>, String> {
-        let mut endpoint = format!("{}/view?filename={}", self.comfyui_url.trim_end_matches('/'), filename);
+    pub async fn get_comfy_image(
+        &self,
+        filename: &str,
+        subfolder: Option<&str>,
+        folder_type: Option<&str>,
+    ) -> Result<Vec<u8>, String> {
+        let mut endpoint = format!(
+            "{}/view?filename={}",
+            self.comfyui_url.trim_end_matches('/'),
+            filename
+        );
         if let Some(sub) = subfolder {
             endpoint.push_str(&format!("&subfolder={sub}"));
         }
@@ -224,12 +267,20 @@ impl AiGeneratorService {
             endpoint.push_str(&format!("&type={ftype}"));
         }
 
-        let resp = self.client.get(&endpoint).send().await.map_err(|e| e.to_string())?;
+        let resp = self
+            .client
+            .get(&endpoint)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
         if resp.status().is_success() {
             let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
             Ok(bytes.to_vec())
         } else {
-            Err(format!("ComfyUI image view returned status {}", resp.status()))
+            Err(format!(
+                "ComfyUI image view returned status {}",
+                resp.status()
+            ))
         }
     }
 }

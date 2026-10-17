@@ -855,7 +855,7 @@ export class DesignerStudioController {
             <button class="btn-hud-action" style="padding: 2px 7px; color: var(--accent-rose);" data-id="${st.id}">✕</button>
           </div>
           <div class="candidate-metrics-row">
-            <span>Location: <strong>${st.location ?? "Any"}</strong></span>
+            <span>Location tags: <strong>${(st.location_tags ?? []).join(", ") || "Any"}</strong></span>
             <span>Cluster: <strong>${st.cluster_type}</strong></span>
             <span>Weight: <strong>${st.urgency_weight}</strong></span>
             <span class="storylet-status ${st.approved_revision === st.revision ? "approved" : "draft"}">${st.approved_revision === st.revision ? "Approved" : "Draft"} · v${st.revision ?? 1}</span>
@@ -1998,6 +1998,15 @@ export class DesignerStudioController {
         header.textContent = `${st.title} (${st.id})`;
         item.appendChild(header);
 
+        const locationTags = st.location_tags ?? [];
+        const playerLocation = this.cachedLocations.find((location) => location.id === resolvedStartLoc);
+        const locationEligible = !locationTags.length || locationTags.some((tag: string) => playerLocation?.tags.includes(tag));
+        const locationRow = document.createElement("div");
+        locationRow.style.fontSize = "10px";
+        locationRow.style.color = locationEligible ? "#10b981" : "#ef4444";
+        locationRow.textContent = `Location tags: ${locationTags.join(", ") || "Any"} · ${locationEligible ? "eligible" : "not eligible"} at ${playerLocation?.name ?? "unresolved player start"}`;
+        item.appendChild(locationRow);
+
         // Required roles
         const reqRoles: string[] = [];
         for (const p of st.parameters ?? []) {
@@ -2013,14 +2022,13 @@ export class DesignerStudioController {
           item.appendChild(noRoles);
         } else {
           for (const role of reqRoles) {
-            // Find candidates: must have role, and if storylet has location, actor's resolved location must match storylet location
+            // Required-role actors must be at the player's resolved start location.
             const candidates = Object.entries(resolvedActors).filter(([actorId, actorLoc]) => {
               const char = this.cachedCharacters.find((c: any) => c.id === actorId);
               if (!char) return false;
               const hasRole = char.role.trim().toLowerCase() === role.toLowerCase();
               if (!hasRole) return false;
-              if (st.location && actorLoc !== st.location) return false;
-              return true;
+              return actorLoc === resolvedStartLoc;
             }).map(([actorId]) => actorId);
 
             const roleRow = document.createElement("div");
@@ -2029,9 +2037,9 @@ export class DesignerStudioController {
             roleRow.style.fontSize = "10px";
             roleRow.style.padding = "2px 0";
 
-            const satisfied = candidates.length > 0;
+            const satisfied = candidates.length > 0 && locationEligible;
             const statusColor = satisfied ? "#10b981" : "#ef4444";
-            roleRow.innerHTML = `<span>Role "<strong>${role}</strong>"${st.location ? ` at ${st.location}` : ' (any loc)'}:</span><span style="color:${statusColor};font-weight:600">${candidates.length} candidate${candidates.length === 1 ? '' : 's'} ${satisfied ? `[${candidates.join(', ')}]` : '[NONE]'}</span>`;
+            roleRow.innerHTML = `<span>Role "<strong>${role}</strong>" at player location:</span><span style="color:${statusColor};font-weight:600">${candidates.length} candidate${candidates.length === 1 ? '' : 's'} ${satisfied ? `[${candidates.join(', ')}]` : '[NONE]'}</span>`;
             item.appendChild(roleRow);
           }
         }

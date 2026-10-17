@@ -42,7 +42,14 @@ async fn request(
         match serde_json::from_slice(&bytes) {
             Ok(v) => v,
             Err(e) => {
-                panic!("Failed to parse JSON for {} {}: status={}, bytes='{}', err={}", method, path, status, String::from_utf8_lossy(&bytes), e);
+                panic!(
+                    "Failed to parse JSON for {} {}: status={}, bytes='{}', err={}",
+                    method,
+                    path,
+                    status,
+                    String::from_utf8_lossy(&bytes),
+                    e
+                );
             }
         }
     };
@@ -461,4 +468,43 @@ async fn service_startup_rejects_event_journal_that_disagrees_with_snapshot() {
     assert!(
         RuntimeService::from_connection(Connection::open_with_flags(uri, flags).unwrap()).is_err()
     );
+}
+
+#[tokio::test]
+async fn studio_graph_requires_one_complete_start_to_end_flow() {
+    let app = test_app();
+    let graph = json!({
+        "nodes": [
+            { "id": "start", "title": "Start", "type": "start", "x": 10, "y": 20, "width": 160, "height": 80, "text": "Begin" },
+            { "id": "dialog", "title": "Dialog", "type": "dialog", "x": 200, "y": 20, "width": 280, "height": 160, "text": "The scene", "sections": [] },
+            { "id": "end", "title": "End", "type": "end", "x": 520, "y": 20, "width": 160, "height": 90, "is_terminal": false }
+        ],
+        "edges": [
+            { "id": "start-dialog", "from_node": "start", "from_port": "output", "to_node": "dialog", "to_port": "input" },
+            { "id": "dialog-end", "from_node": "dialog", "from_port": "output", "to_node": "end", "to_port": "input" }
+        ],
+        "local_variables": []
+    });
+    for (id, edges, expected_status) in [
+        ("valid", graph["edges"].clone(), StatusCode::OK),
+        ("broken", json!([]), StatusCode::CONFLICT),
+    ] {
+        let mut candidate = graph.clone();
+        candidate["edges"] = edges;
+        let (status, saved) = request(&app, "POST", "/api/v2/content/storylets", Some(json!({
+            "id": id, "title": id, "created_at": 1, "content": { "text_template": "" }, "graph": candidate
+        }))).await;
+        assert_eq!(status, StatusCode::CREATED, "{saved}");
+        let (status, result) = request(
+            &app,
+            "POST",
+            &format!("/api/v2/storylets/{id}/approve"),
+            Some(json!({ "expectedRevision": 1 })),
+        )
+        .await;
+        assert_eq!(status, expected_status, "{result}");
+        if id == "broken" {
+            assert!(result["error"].as_str().unwrap().contains("path to End"));
+        }
+    }
 }

@@ -31,6 +31,7 @@ export interface LocationRecord {
   id: string;
   name: string;
   description: string;
+  tags: string[];
   connected_zones?: string[];
   environmental_params?: Record<string, unknown>;
   devices?: Record<string, unknown>;
@@ -53,6 +54,8 @@ export interface EventRecord {
   event_type: "canon" | "world";
   trigger: Record<string, unknown>;
   effects: Record<string, unknown>;
+  local_variables?: LocalVariableDefinition[];
+  graph?: unknown;
   delay_turns?: number;
   repeatable?: boolean;
 }
@@ -72,25 +75,52 @@ export interface StoryletChoiceRecord {
   advisorPreview?: Record<string, unknown>;
 }
 
+
+export interface LocalVariableDefinition {
+  name: string;
+  type: "boolean" | "number" | "string";
+  default_value: boolean | number | string;
+}
+
+export interface QualityCondition {
+  variable: string;
+  op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | string;
+  value: unknown;
+}
+
+export type VisitedLocationPrecondition =
+  | { kind: "location_id"; location_id: string }
+  | { kind: "location_tag"; tag: string };
+
+export type MetCharacterPrecondition =
+  | { kind: "character_id"; character_id: string }
+  | { kind: "role_tag"; role: string };
+
+export interface StoryletPreconditions {
+  all_of?: QualityCondition[];
+  any_of?: QualityCondition[];
+  visited_locations_any_of?: VisitedLocationPrecondition[];
+  met_characters_any_of?: MetCharacterPrecondition[];
+}
+
 export interface StoryletRecord {
   id: string;
+  graph?: unknown;
+  local_variables?: LocalVariableDefinition[];
   revision: number;
   approved_revision?: number | null;
   title: string;
   ending: boolean;
   position?: [number, number];
   size?: [number, number];
-  location?: string | null;
+  location_tags: string[];
   group_tag?: string | null;
   cluster_type: "linear" | "player_controlled_passage" | "wheel" | "aftermath";
   urgency_weight: number;
   repeatability: "once_ever" | "always" | "cooldown" | "persistent";
   cooldown_turns: number;
   parameters: StoryletParameterRecord[];
-  preconditions: {
-    all_of?: Array<{ variable: string; op: string; value: unknown }>;
-    any_of?: Array<{ variable: string; op: string; value: unknown }>;
-  };
+  preconditions: StoryletPreconditions;
   content: {
     text_template: string;
     speaker_id?: string;
@@ -148,7 +178,7 @@ export interface LibrarySummaryItem {
   id: string;
   title: string;
   excerpt: string;
-  location?: string | null;
+  location_tags: string[];
   role_tags: string[];
   choice_count: number;
   revision: number;
@@ -163,7 +193,7 @@ export interface LibraryPageResult {
   page: number;
   page_size: number;
   total_pages: number;
-  available_locations: string[];
+  available_location_tags: string[];
 }
 
 export interface GenerationStageDescriptor {
@@ -211,6 +241,8 @@ export interface PlaytestSnapshot {
     turn: number;
     scenario_id?: string;
     current_location?: string | null;
+    visited_locations?: string[];
+    met_characters?: string[];
     qualities: Record<string, unknown>;
     actors: Record<string, { role_tags: string[]; current_location: string; busy: boolean }>;
     events: Array<{

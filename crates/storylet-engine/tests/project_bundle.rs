@@ -24,6 +24,7 @@ fn a_new_project_starts_empty_and_builds_a_generic_scenario_world() {
             id: "market".into(),
             name: "Covered Market".into(),
             description: "A narrow hall of canvas stalls.".into(),
+            tags: vec!["market".into()],
             connected_locations: vec![],
             map_position: (2.0, 3.0),
         },
@@ -34,6 +35,7 @@ fn a_new_project_starts_empty_and_builds_a_generic_scenario_world() {
             id: "archive".into(),
             name: "Night Archive".into(),
             description: "A municipal archive.".into(),
+            tags: vec!["archive".into()],
             connected_locations: vec!["market".into()],
             map_position: (4.0, 3.0),
         },
@@ -62,7 +64,7 @@ fn a_new_project_starts_empty_and_builds_a_generic_scenario_world() {
             actor_locations: BTreeMap::from([("nora".into(), "archive".into())]),
             storylet_ids: vec![],
             seed: 42,
-        event_ids: vec![],
+            event_ids: vec![],
             active_actor_ids: None,
         },
     );
@@ -84,6 +86,7 @@ fn project_validation_catches_dangling_references_and_unapproved_runtime_content
             id: "market".into(),
             name: "Market".into(),
             description: "".into(),
+            tags: vec![],
             connected_locations: vec!["missing".into()],
             map_position: (0.0, 0.0),
         },
@@ -98,7 +101,7 @@ fn project_validation_catches_dangling_references_and_unapproved_runtime_content
             actor_locations: BTreeMap::new(),
             storylet_ids: vec!["draft".into()],
             seed: 9,
-        event_ids: vec![],
+            event_ids: vec![],
             active_actor_ids: None,
         },
     );
@@ -109,12 +112,13 @@ fn project_validation_catches_dangling_references_and_unapproved_runtime_content
         summary: "".into(),
         approved: false,
         ending: false,
-        location_id: Some("missing".into()),
+        location_tags: Default::default(),
         urgency_weight: 50.0,
         cluster_type: storylet_engine::ClusterType::Linear,
         repeatability: storylet_engine::Repeatability::Always,
         required_roles: vec![],
         trigger: Default::default(),
+        preconditions: Default::default(),
         content: storylet_engine::SceneContent { opening: "".into() },
         choices: vec![],
     };
@@ -131,11 +135,6 @@ fn project_validation_catches_dangling_references_and_unapproved_runtime_content
         issues
             .iter()
             .any(|issue| issue.path == "scenarios.first.player_start_location")
-    );
-    assert!(
-        issues
-            .iter()
-            .any(|issue| issue.path == "storylets.draft.location_id")
     );
     assert!(
         issues

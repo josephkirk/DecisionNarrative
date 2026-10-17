@@ -102,9 +102,13 @@ export class RustRuntimeClient {
   private baseUrl: string | null;
   private readonly options: RustRuntimeClientOptions;
   private readonly manifestPath = path.resolve(import.meta.dir, "../../crates/storylet-engine-service/Cargo.toml");
-  private readonly binaryPath = path.resolve(
-    import.meta.dir,
-    `../../crates/storylet-engine-service/target/debug/storylet-engine-service${process.platform === "win32" ? ".exe" : ""}`,
+  private readonly cargoTargetDir = process.env.CARGO_TARGET_DIR
+    ? path.resolve(process.cwd(), process.env.CARGO_TARGET_DIR)
+    : path.resolve(import.meta.dir, "../../target/runtime-client");
+  private readonly binaryPath = path.join(
+    this.cargoTargetDir,
+    "debug",
+    `storylet-engine-service${process.platform === "win32" ? ".exe" : ""}`,
   );
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -242,7 +246,7 @@ export class RustRuntimeClient {
       address = `127.0.0.1:${reservation.port}`;
       reservation.stop(true);
     }
-    this.baseUrl = `http://${address}`;
+    const baseUrl = `http://${address}`;
     await this.ensureServiceBuilt();
     this.child = Bun.spawn(
       [this.binaryPath],
@@ -256,10 +260,11 @@ export class RustRuntimeClient {
         stdin: "ignore", stdout: "ignore", stderr: "ignore", windowsHide: true,
       },
     );
+    this.baseUrl = baseUrl;
     let lastError: unknown;
     for (let attempt = 0; attempt < 120; attempt++) {
       try {
-        const response = await fetch(`${this.baseUrl}/health`);
+        const response = await fetch(`${baseUrl}/health`);
         if (response.ok) return;
         lastError = new Error(`Rust service health returned HTTP ${response.status}`);
       } catch (error) {
@@ -282,7 +287,7 @@ export class RustRuntimeClient {
       serviceBuild = (async () => {
         const build = Bun.spawn(
           ["cargo", "build", "--quiet", "--manifest-path", this.manifestPath, "--bin", "storylet-engine-service"],
-          { cwd: process.cwd(), stdout: "ignore", stderr: "pipe", windowsHide: true },
+          { cwd: process.cwd(), env: { ...Bun.env, CARGO_TARGET_DIR: this.cargoTargetDir }, stdout: "ignore", stderr: "pipe", windowsHide: true },
         );
         const stderr = build.stderr ? new Response(build.stderr).text() : Promise.resolve("");
         const [exitCode, diagnostics] = await Promise.all([build.exited, stderr]);

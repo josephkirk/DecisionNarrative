@@ -1,8 +1,8 @@
 //! Story craft resource registry and SHA-256 provenance calculator.
 
-use std::path::PathBuf;
-use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoryCraftResourceReference {
@@ -89,9 +89,11 @@ impl CraftRegistry {
         let abs_path = self.root.join(def.source);
         let raw = std::fs::read_to_string(&abs_path)
             .map_err(|e| format!("Craft resource source '{}' unavailable: {e}", def.source))?;
-        let normalized = raw.replace("
+        let normalized = raw.replace(
+            "
 ", "
-");
+",
+        );
 
         Ok(StoryCraftResourceReference {
             id: def.id.to_string(),
@@ -108,15 +110,44 @@ impl CraftRegistry {
 
     pub fn for_stage(&self, stage: &str) -> Result<LoadedStoryCraftResources, String> {
         let selected_ids: &[&str] = match stage {
-            "canon_and_voice" => &["character-management", "worldbuilding", "voice-style", "revision-continuity"],
+            "canon_and_voice" => &[
+                "character-management",
+                "worldbuilding",
+                "voice-style",
+                "revision-continuity",
+            ],
             "physical_seed" => &["worldbuilding", "scene-craft"],
             "premise_options" => &["scene-craft", "interactive-fiction"],
-            "scene_plan" => &["character-management", "worldbuilding", "scene-craft", "voice-style"],
+            "scene_plan" => &[
+                "character-management",
+                "worldbuilding",
+                "scene-craft",
+                "voice-style",
+            ],
             "storylet_contract" => &["interactive-fiction", "revision-continuity"],
             "scene_variants" => &["scene-craft", "interactive-fiction", "voice-style"],
-            "craft_audit" => &["character-management", "worldbuilding", "scene-craft", "interactive-fiction", "voice-style", "line-editing", "revision-continuity"],
-            "revision" => &["scene-craft", "interactive-fiction", "voice-style", "line-editing", "revision-continuity"],
-            "review_package" => &["interactive-fiction", "voice-style", "line-editing", "revision-continuity"],
+            "craft_audit" => &[
+                "character-management",
+                "worldbuilding",
+                "scene-craft",
+                "interactive-fiction",
+                "voice-style",
+                "line-editing",
+                "revision-continuity",
+            ],
+            "revision" => &[
+                "scene-craft",
+                "interactive-fiction",
+                "voice-style",
+                "line-editing",
+                "revision-continuity",
+            ],
+            "review_package" => &[
+                "interactive-fiction",
+                "voice-style",
+                "line-editing",
+                "revision-continuity",
+            ],
             _ => &[],
         };
 
@@ -126,15 +157,20 @@ impl CraftRegistry {
         for &id in selected_ids {
             let ref_item = self.reference(id)?;
             let def = RESOURCES.iter().find(|r| r.id == id).unwrap();
-            prompt_sections.push(format!("CRAFT RESOURCE {}/1.0.0:
-{}", id, def.guidance));
+            prompt_sections.push(format!(
+                "CRAFT RESOURCE {}/1.0.0:
+{}",
+                id, def.guidance
+            ));
             references.push(ref_item);
         }
 
         Ok(LoadedStoryCraftResources {
-            prompt: prompt_sections.join("
+            prompt: prompt_sections.join(
+                "
 
-"),
+",
+            ),
             references,
         })
     }

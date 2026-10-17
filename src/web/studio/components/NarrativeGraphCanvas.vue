@@ -1,19 +1,21 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from "vue";
-import type { NarrativeGraph, NarrativeNode, NarrativeEdge, NodeType } from "../narrativeGraphTypes.ts";
+import { ref, computed, watch } from "vue";
+import type { NarrativeGraph, NarrativeNode, NarrativeEdge, NodeType, LocalVariableDefinition } from "../narrativeGraphTypes.ts";
 import { studioState, notify } from "../state.ts";
 
 const props = defineProps<{
   initialGraph: NarrativeGraph;
+  selectedNodeId: string | null;
 }>();
 
 const emit = defineEmits<{
   (e: "update-graph", graph: NarrativeGraph): void;
+  (e: "select-node", nodeId: string | null): void;
 }>();
 
 // Pan & Zoom
 const zoom = ref(1.0);
-const panX = ref(60);
+const panX = ref(40);
 const panY = ref(60);
 const isPanning = ref(false);
 const startPan = ref({ x: 0, y: 0 });
@@ -21,11 +23,7 @@ const startPan = ref({ x: 0, y: 0 });
 // Graph state
 const nodes = ref<NarrativeNode[]>([]);
 const edges = ref<NarrativeEdge[]>([]);
-
-onMounted(() => {
-  nodes.value = JSON.parse(JSON.stringify(props.initialGraph.nodes));
-  edges.value = JSON.parse(JSON.stringify(props.initialGraph.edges));
-});
+const localVariables = ref<LocalVariableDefinition[]>([]);
 
 // Dragging node
 const draggingNodeId = ref<string | null>(null);
@@ -42,8 +40,29 @@ const activeConnection = ref<{
 } | null>(null);
 
 // Selected elements
-const selectedNodeId = ref<string | null>(null);
+const selectedNodeId = computed({ get: () => props.selectedNodeId, set: (nodeId: string | null) => emit("select-node", nodeId) });
 const selectedEdgeId = ref<string | null>(null);
+const selectedNode = computed(() => nodes.value.find((node) => node.id === selectedNodeId.value) ?? null);
+watch(() => props.initialGraph, (graph) => {
+  nodes.value = graph.nodes;
+  edges.value = graph.edges;
+  localVariables.value = graph.local_variables || [];
+
+  if (selectedNodeId.value && !graph.nodes.some((node) => node.id === selectedNodeId.value)) {
+    selectedNodeId.value = null;
+    emit("select-node", null);
+  }
+  if (selectedEdgeId.value && !graph.edges.some((edge) => edge.id === selectedEdgeId.value)) {
+    selectedEdgeId.value = null;
+  }
+}, { immediate: true });
+const contextMenu = ref<{ kind: "canvas" | "node" | "edge"; x: number; y: number; targetId?: string } | null>(null);
+const nodeSearch = ref("");
+const scissorStart = ref<{ x: number; y: number } | null>(null);
+const scissorEnd = ref<{ x: number; y: number } | null>(null);
+const nodeTypes: NodeType[] = ["start", "dialog", "choice", "variable", "conditional", "image", "teleport", "go_to_location", "end"];
+const matchingNodeTypes = computed(() => nodeTypes.filter((type) => type.replaceAll("_", " " ).includes(nodeSearch.value.trim().toLowerCase())));
+const contextWorld = ref<{ x: number; y: number } | null>(null);
 
 // AI Generation loading states
 const generatingNodeId = ref<string | null>(null);
@@ -53,6 +72,7 @@ function emitUpdate() {
   emit("update-graph", {
     nodes: nodes.value,
     edges: edges.value,
+    local_variables: localVariables.value,
   });
 }
 
@@ -70,9 +90,17 @@ function eventToWorld(e: MouseEvent): { x: number; y: number } {
 
 // Canvas Mouse Interactions
 function onCanvasMouseDown(e: MouseEvent) {
-  if ((e.target as HTMLElement).closest(".graph-node") || (e.target as HTMLElement).closest(".socket")) return;
+  if ((e.target as HTMLElement).closest(".graph-node") || (e.target as HTMLElement).closest(".socket") || (e.target as HTMLElement).closest(".graph-toolbar")) return;
   selectedNodeId.value = null;
   selectedEdgeId.value = null;
+  emit("select-node", null);
+  contextMenu.value = null;
+  if (e.altKey) {
+    e.preventDefault();
+    scissorStart.value = eventToWorld(e);
+    scissorEnd.value = scissorStart.value;
+    return;
+  }
   isPanning.value = true;
   startPan.value = { x: e.clientX - panX.value, y: e.clientY - panY.value };
 }
@@ -93,13 +121,63 @@ function onCanvasMouseMove(e: MouseEvent) {
     const pt = eventToWorld(e);
     activeConnection.value.currentX = pt.x;
     activeConnection.value.currentY = pt.y;
+  } else if (scissorStart.value) {
+    scissorEnd.value = eventToWorld(e);
   }
 }
 
+function pointSegmentDistance(point: { x: number; y: number }, start: { x: number; y: number }, end: { x: number; y: number }) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSq = dx * dx + dy * dy;
+  const t = lengthSq === 0 ? 0 : Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSq));
+  return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
+}
+
 function onCanvasMouseUp() {
+  if (scissorStart.value && scissorEnd.value) {
+    const start = scissorStart.value;
+    const end = scissorEnd.value;
+    const removed = computedEdges.value.filter((edge) => {
+      const samples = 32;
+      for (let i = 0; i <= samples; i++) {
+        const t = i / samples;
+        const x = (1 - t) ** 3 * edge!.startX + 3 * (1 - t) ** 2 * t * (edge!.startX + Math.max(50, Math.abs(edge!.endX - edge!.startX) * 0.5)) + 3 * (1 - t) * t ** 2 * (edge!.endX - Math.max(50, Math.abs(edge!.endX - edge!.startX) * 0.5)) + t ** 3 * edge!.endX;
+        const y = (1 - t) ** 3 * edge!.startY + 3 * (1 - t) ** 2 * t * edge!.startY + 3 * (1 - t) * t ** 2 * edge!.endY + t ** 3 * edge!.endY;
+        if (pointSegmentDistance({ x, y }, start, end) <= 12) return true;
+      }
+      return false;
+    }).map((edge) => edge!.id);
+    if (removed.length) {
+      edges.value = edges.value.filter((edge) => !removed.includes(edge.id));
+      emitUpdate();
+    }
+  }
+  scissorStart.value = null;
+  scissorEnd.value = null;
   isPanning.value = false;
   draggingNodeId.value = null;
   activeConnection.value = null;
+}
+
+function onCanvasContextMenu(e: MouseEvent) {
+  if ((e.target as HTMLElement).closest(".graph-node") || (e.target as HTMLElement).closest(".edge-hit-area")) return;
+  e.preventDefault();
+  openMenu(e, "canvas");
+}
+
+function openMenu(e: MouseEvent, kind: "canvas" | "node" | "edge", targetId?: string) {
+  const rect = containerRef.value?.getBoundingClientRect();
+  if (!rect) return;
+  contextMenu.value = { kind, targetId, x: e.clientX - rect.left, y: e.clientY - rect.top };
+  contextWorld.value = eventToWorld(e);
+  nodeSearch.value = "";
+}
+
+function selectNode(node: NarrativeNode) {
+  selectedNodeId.value = node.id;
+  selectedEdgeId.value = null;
+  emit("select-node", node.id);
 }
 
 function onWheel(e: WheelEvent) {
@@ -111,8 +189,7 @@ function onWheel(e: WheelEvent) {
 // Node Header Dragging
 function startNodeDrag(e: MouseEvent, node: NarrativeNode) {
   e.stopPropagation();
-  selectedNodeId.value = node.id;
-  selectedEdgeId.value = null;
+  selectNode(node);
   draggingNodeId.value = node.id;
   const pt = eventToWorld(e);
   dragStartPos.value = {
@@ -178,20 +255,27 @@ function removeEdge(edgeId: string) {
 function removeNode(nodeId: string) {
   nodes.value = nodes.value.filter((n) => n.id !== nodeId);
   edges.value = edges.value.filter((e) => e.from_node !== nodeId && e.to_node !== nodeId);
-  if (selectedNodeId.value === nodeId) selectedNodeId.value = null;
+  if (selectedNodeId.value === nodeId) {
+    selectedNodeId.value = null;
+    emit("select-node", null);
+  }
   emitUpdate();
 }
 
 // Create new node of type
 function addNode(type: NodeType) {
   const nextId = `node_${type}_${Date.now().toString(36)}`;
-  const x = Math.round((-panX.value + 400) / zoom.value);
-  const y = Math.round((-panY.value + 250) / zoom.value);
+  const x = contextMenu.value?.kind === "canvas" && contextWorld.value
+    ? contextWorld.value.x
+    : Math.round((-panX.value + 400) / zoom.value);
+  const y = contextMenu.value?.kind === "canvas" && contextWorld.value
+    ? contextWorld.value.y
+    : Math.round((-panY.value + 250) / zoom.value);
 
   const baseNode: NarrativeNode = {
     id: nextId,
     type,
-    title: type.charAt(0).toUpperCase() + type.slice(1),
+    title: type === "go_to_location" ? "Go To Location" : type.charAt(0).toUpperCase() + type.slice(1),
     x,
     y,
     width: 260,
@@ -201,6 +285,7 @@ function addNode(type: NodeType) {
   if (type === "dialog") {
     baseNode.speaker_role = "Narrator";
     baseNode.text = "Spoken text or monologue...";
+    baseNode.sections = [{ id: `section_${nextId}`, title: "Main Beat", items: [{ kind: "line", id: `line_${nextId}`, speaker_role: "Narrator", target_role: "player", content: "", emotion_tag: "neutral" }] }];
   } else if (type === "choice") {
     baseNode.choices = [
       { id: "choice_0", text: "Proceed ahead" },
@@ -208,10 +293,10 @@ function addNode(type: NodeType) {
     ];
     baseNode.height = 160;
   } else if (type === "variable") {
-    baseNode.assignments = [{ quality: studioState.qualities[0]?.name || "tension", op: "add", value: 1 }];
+    baseNode.assignments = [{ scope: "global", quality: studioState.qualities[0]?.name || "tension", op: "add", value: 1 }];
     baseNode.height = 140;
   } else if (type === "conditional") {
-    baseNode.conditions = [{ variable: studioState.qualities[0]?.name || "tension", op: "gte", value: 1 }];
+    baseNode.conditions = [{ scope: "global", variable: studioState.qualities[0]?.name || "tension", op: "gte", value: 1 }];
     baseNode.height = 140;
   } else if (type === "image") {
     baseNode.prompt = "Dark mystery cellar, cinematic lighting, moody";
@@ -219,13 +304,17 @@ function addNode(type: NodeType) {
   } else if (type === "teleport") {
     baseNode.destination_storylet = "";
     baseNode.height = 100;
+  } else if (type === "go_to_location") {
+    baseNode.location_id = studioState.locations[0]?.id ?? "";
+    baseNode.height = 100;
   } else if (type === "end") {
     baseNode.is_terminal = true;
     baseNode.height = 80;
   }
 
   nodes.value.push(baseNode);
-  selectedNodeId.value = nextId;
+  contextMenu.value = null;
+  selectNode(baseNode);
   emitUpdate();
 }
 
@@ -321,6 +410,7 @@ async function generateImageForNode(node: NarrativeNode) {
     @mousemove="onCanvasMouseMove"
     @mouseup="onCanvasMouseUp"
     @wheel="onWheel"
+    @contextmenu.prevent="onCanvasContextMenu"
   >
     <!-- Top Floating Toolbar -->
     <div class="graph-toolbar">
@@ -333,6 +423,7 @@ async function generateImageForNode(node: NarrativeNode) {
         <button class="node-tool-btn conditional" @click="addNode('conditional')">Conditional</button>
         <button class="node-tool-btn image" @click="addNode('image')">Image (AI)</button>
         <button class="node-tool-btn teleport" @click="addNode('teleport')">Teleport</button>
+        <button class="node-tool-btn go-to-location" @click="addNode('go_to_location')">Go To Location</button>
         <button class="node-tool-btn end" @click="addNode('end')">End</button>
       </div>
 
@@ -340,7 +431,7 @@ async function generateImageForNode(node: NarrativeNode) {
         <span style="font-size:11px; font-weight:600; width:45px; text-align:center;">
           {{ Math.round(zoom * 100) }}%
         </span>
-        <button class="btn btn-secondary" style="font-size:11px; padding:3px 8px;" @click="zoom = 1.0; panX = 60; panY = 60;">Reset</button>
+        <button class="btn btn-secondary" style="font-size:11px; padding:3px 8px;" @click="zoom = 1.0; panX = 40; panY = 60;">Reset</button>
         <button class="btn btn-primary" style="font-size:11px; padding:4px 10px;" @click="emitUpdate">Sync to Storylet</button>
       </div>
     </div>
@@ -367,7 +458,8 @@ async function generateImageForNode(node: NarrativeNode) {
           <path
             :d="edge!.path"
             class="edge-hit-area"
-            @click.stop="selectedEdgeId = edge!.id"
+            @click.stop="selectedEdgeId = edge!.id; selectedNodeId = null; emit('select-node', null)"
+            @contextmenu.stop.prevent="openMenu($event, 'edge', edge!.id)"
           />
           <!-- Visible Bezier line -->
           <path
@@ -376,6 +468,8 @@ async function generateImageForNode(node: NarrativeNode) {
             marker-end="url(#socket-arrow)"
           />
         </g>
+
+        <path v-if="scissorStart && scissorEnd" :d="`M ${scissorStart.x} ${scissorStart.y} L ${scissorEnd.x} ${scissorEnd.y}`" class="scissor-line" />
 
         <!-- Active Dragging Connection Line -->
         <path
@@ -395,13 +489,14 @@ async function generateImageForNode(node: NarrativeNode) {
           top: `${node.y}px`,
           width: `${node.width}px`,
         }"
-        @click.stop="selectedNodeId = node.id"
+        @click.stop="selectNode(node)"
+        @contextmenu.stop.prevent="openMenu($event, 'node', node.id)"
       >
         <!-- Node Header -->
         <div class="node-header" @mousedown="startNodeDrag($event, node)">
           <div class="node-header-title">
             <span class="node-icon">
-              {{ node.type === 'start' ? '▶' : node.type === 'dialog' ? '💬' : node.type === 'choice' ? '🔀' : node.type === 'image' ? '🎨' : '⚙️' }}
+              {{ node.type === 'start' ? '▶' : node.type === 'dialog' ? '💬' : node.type === 'choice' ? '🔀' : node.type === 'image' ? '🎨' : node.type === 'go_to_location' ? '📍' : '⚙️' }}
             </span>
             <input v-model="node.title" class="node-title-input" @input="emitUpdate" />
           </div>
@@ -418,23 +513,10 @@ async function generateImageForNode(node: NarrativeNode) {
 
           <!-- DIALOG -->
           <div v-else-if="node.type === 'dialog'">
-            <div style="margin-bottom:8px;">
-              <label class="field-label">Dialog Source (Role):</label>
-              <input v-model="node.speaker_role" class="form-input" style="padding:4px 8px; font-size:11px;" @input="emitUpdate" />
-            </div>
-
-            <div style="margin-bottom:8px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <label class="field-label" style="margin-bottom:0;">Dialog Text:</label>
-                <button
-                  class="ai-action-btn"
-                  :disabled="generatingNodeId === node.id"
-                  @click.stop="generateDialogueForNode(node)"
-                >
-                  {{ generatingNodeId === node.id ? 'Drafting...' : '✨ AI Draft' }}
-                </button>
-              </div>
-              <textarea v-model="node.text" class="form-textarea" style="min-height:75px; font-size:11px; padding:6px;" @input="emitUpdate"></textarea>
+            <div class="field-label">Dialogue sequence</div>
+            <div style="font-size:11px;">{{ node.sections?.length ?? 0 }} sections · {{ node.sections?.reduce((total, section) => total + section.items.length, 0) ?? 0 }} steps</div>
+            <div v-if="node.sections?.[0]?.items?.[0]?.kind === 'line'" class="node-dialog-preview">
+              {{ node.sections[0].items[0].content || 'Select to edit dialogue…' }}
             </div>
           </div>
 
@@ -475,14 +557,21 @@ async function generateImageForNode(node: NarrativeNode) {
 
           <!-- TELEPORT / DIVERT -->
           <div v-else-if="node.type === 'teleport'">
-            <label class="field-label">Target Storylet ID:</label>
-            <input v-model="node.destination_storylet" class="form-input" placeholder="stl_next_scene" style="font-size:11px; padding:4px 8px;" @input="emitUpdate" />
+            <div class="field-label">Target Storylet</div>
+            <div style="font-size:11px;">{{ node.destination_storylet || 'Select to configure…' }}</div>
+          </div>
+
+          <div v-else-if="node.type === 'go_to_location'">
+            <div class="field-label">Destination Location</div>
+            <div style="font-size:11px;">{{ studioState.locations.find((location) => location.id === node.location_id)?.name || 'Choose a location…' }}</div>
           </div>
 
           <!-- END -->
           <div v-else-if="node.type === 'end'">
-            <div style="font-size:12px; font-weight:700; color:var(--status-danger);">Terminal Climax / Resolution</div>
+            <div style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.jump_to_storylet || 'Terminal ending' }}</div>
           </div>
+          <div v-else-if="node.type === 'variable'">{{ node.assignments?.length ?? 0 }} quality assignments</div>
+          <div v-else-if="node.type === 'conditional'">{{ node.conditions?.length ?? 0 }} condition rules</div>
         </div>
 
         <!-- Input Socket (Left edge) -->
@@ -501,6 +590,14 @@ async function generateImageForNode(node: NarrativeNode) {
           @mousedown="startConnection($event, node, 'output', 40)"
         ></div>
       </div>
+    </div>
+    <div v-if="contextMenu" class="graph-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @mousedown.stop @click.stop>
+      <template v-if="contextMenu.kind === 'canvas'">
+        <input v-model="nodeSearch" class="form-input" placeholder="Search node types" autofocus @keydown.esc="contextMenu = null" />
+        <button v-for="type in matchingNodeTypes" :key="type" class="context-menu-item" @click="addNode(type)">+ {{ type }}</button>
+        <div v-if="!matchingNodeTypes.length" class="context-menu-empty">No matching node types</div>
+      </template>
+      <button v-else class="context-menu-item danger" @click="contextMenu.kind === 'node' ? removeNode(contextMenu.targetId!) : removeEdge(contextMenu.targetId!); contextMenu = null">Delete {{ contextMenu.kind }}</button>
     </div>
   </div>
 </template>
@@ -591,6 +688,42 @@ async function generateImageForNode(node: NarrativeNode) {
   cursor: pointer;
   pointer-events: auto;
 }
+
+.scissor-line {
+  fill: none;
+  stroke: #ff453a;
+  stroke-width: 3;
+  stroke-dasharray: 7 5;
+  pointer-events: none;
+}
+
+.node-dialog-preview {
+  margin-top: 6px;
+  color: #c7c7cc;
+  max-height: 40px;
+  overflow: hidden;
+}
+
+.graph-context-menu {
+  position: absolute;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 190px;
+  max-height: min(360px, 70vh);
+  padding: 8px;
+  overflow: auto;
+  background: #232326;
+  border: 1px solid #48484a;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #0009;
+}
+
+.context-menu-item { padding: 6px 8px; text-align: left; color: #f2f2f7; background: transparent; border: 0; border-radius: 4px; cursor: pointer; text-transform: capitalize; }
+.context-menu-item:hover { background: #3a3a3c; }
+.context-menu-item.danger { color: #ff453a; }
+.context-menu-empty { padding: 6px 8px; color: #aeaeb2; font-size: 11px; }
 
 .active-connecting-line {
   fill: none;

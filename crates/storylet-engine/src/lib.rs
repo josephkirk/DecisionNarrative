@@ -25,6 +25,12 @@ pub struct WorldState {
     #[serde(default)]
     pub current_location: Option<String>,
     #[serde(default)]
+    pub location_tags: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    pub visited_locations: BTreeSet<String>,
+    #[serde(default)]
+    pub met_characters: BTreeSet<String>,
+    #[serde(default)]
     pub actors: BTreeMap<String, crate::storylets::ActorState>,
     #[serde(default)]
     pub relationships: BTreeMap<String, BTreeMap<String, f64>>,
@@ -307,6 +313,8 @@ pub fn apply_command(
     let mut touched = BTreeSet::new();
     let mut next_location = state.current_location.clone();
     let mut next_actors = state.actors.clone();
+    let mut next_visited_locations = state.visited_locations.clone();
+    let mut next_met_characters = state.met_characters.clone();
     let mut location_delta = None;
     let mut actor_location_deltas = BTreeMap::new();
 
@@ -368,9 +376,19 @@ pub fn apply_command(
     };
 
     // Commit only after every effect has validated successfully.
+    if let Some(location_id) = &next_location {
+        next_visited_locations.insert(location_id.clone());
+        for (actor_id, actor) in &next_actors {
+            if actor.current_location == *location_id {
+                next_met_characters.insert(actor_id.clone());
+            }
+        }
+    }
     state.qualities = next_qualities;
     state.current_location = next_location;
     state.actors = next_actors;
+    state.visited_locations = next_visited_locations;
+    state.met_characters = next_met_characters;
     state.revision = next_revision;
     state.turn = next_turn;
     state

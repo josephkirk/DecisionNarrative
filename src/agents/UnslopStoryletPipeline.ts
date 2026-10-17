@@ -181,12 +181,13 @@ export class UnslopStoryletPipeline {
         effects: choice.effects,
       };
     });
-    const locationSlug = job.request.location.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "scene";
+    const locationTags = (job.request.locationTags ?? []).map((tag) => tag.trim()).filter(Boolean);
+    const locationSlug = locationTags.join("-").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "scene";
     const storylet: StoryletRecord = {
       id: `stl_${locationSlug}_${job.id.slice(0, 8)}`,
       title: job.request.title?.trim() || final.title,
-      location: job.request.location,
-      group_tag: job.request.location,
+      location_tags: locationTags,
+      group_tag: "scene",
       cluster_type: job.request.clusterType,
       urgency_weight: job.request.urgencyWeight ?? 50,
       repeatability: job.request.clusterType === "aftermath" ? "once_ever" : "always",

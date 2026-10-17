@@ -1,11 +1,11 @@
 //! Deterministic scenario starting condition resolution derived from Story Codex.
 
-use std::collections::{BTreeMap, BTreeSet};
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::contracts::{
-    CharacterRecord, LocationRecord,
-    QualityRecord, ResolvedScenarioStart, ScenarioRecord, StartLocationPolicy,
+    CharacterRecord, LocationRecord, QualityRecord, ResolvedScenarioStart, ScenarioRecord,
+    StartLocationPolicy,
 };
 
 pub struct XorShift32 {
@@ -158,7 +158,9 @@ pub fn resolve_location_from_policy(
             .unwrap_or(fallback);
 
         if loc_id.is_empty() {
-            issues.push(format!("{path_prefix}: fixed location mode requires a location"));
+            issues.push(format!(
+                "{path_prefix}: fixed location mode requires a location"
+            ));
             return String::new();
         }
         if let Some(found) = locations.iter().find(|l| l.id == loc_id) {
@@ -170,7 +172,9 @@ pub fn resolve_location_from_policy(
 
     if mode == "random" {
         if locations.is_empty() {
-            issues.push(format!("{path_prefix}: cannot select random location from empty locations list"));
+            issues.push(format!(
+                "{path_prefix}: cannot select random location from empty locations list"
+            ));
             return String::new();
         }
         let idx = (rng.next_f64() * locations.len() as f64).floor() as usize;
@@ -178,9 +182,14 @@ pub fn resolve_location_from_policy(
     }
 
     if mode == "by_attribute" {
-        let attr_key = policy.and_then(|p| p.attribute_key.as_deref()).unwrap_or("").trim();
+        let attr_key = policy
+            .and_then(|p| p.attribute_key.as_deref())
+            .unwrap_or("")
+            .trim();
         if attr_key.is_empty() {
-            issues.push(format!("{path_prefix}: by_attribute mode requires an attribute key"));
+            issues.push(format!(
+                "{path_prefix}: by_attribute mode requires an attribute key"
+            ));
             return String::new();
         }
         let attr_val = policy.and_then(|p| p.attribute_value.as_ref());
@@ -200,7 +209,9 @@ pub fn resolve_location_from_policy(
         return matches[idx].id.clone();
     }
 
-    issues.push(format!("{path_prefix}: unsupported location policy mode '{mode}'"));
+    issues.push(format!(
+        "{path_prefix}: unsupported location policy mode '{mode}'"
+    ));
     fallback.to_string()
 }
 
@@ -244,7 +255,9 @@ pub fn resolve_actor_population(
             }
         }
         other => {
-            issues.push(format!("{path_prefix}.mode: unsupported actor population mode '{other}'"));
+            issues.push(format!(
+                "{path_prefix}.mode: unsupported actor population mode '{other}'"
+            ));
             characters.iter().collect()
         }
     };
@@ -261,7 +274,10 @@ pub fn resolve_actor_population(
                 result_locations.insert(char.id.clone(), override_loc.clone());
                 continue;
             } else {
-                issues.push(format!("{path_prefix}.{}: unknown override location '{override_loc}'", char.id));
+                issues.push(format!(
+                    "{path_prefix}.{}: unknown override location '{override_loc}'",
+                    char.id
+                ));
             }
         }
 
@@ -284,7 +300,10 @@ pub fn resolve_actor_population(
             };
 
             if chosen.is_empty() {
-                issues.push(format!("{path_prefix}.{}: unknown location for actor", char.id));
+                issues.push(format!(
+                    "{path_prefix}.{}: unknown location for actor",
+                    char.id
+                ));
             } else {
                 result_locations.insert(char.id.clone(), chosen.to_string());
             }
@@ -364,7 +383,10 @@ pub fn resolve_scenario_start(
         actors_per_location.insert(loc.id.clone(), Vec::new());
     }
     for (actor_id, loc_id) in &actor_locations {
-        actors_per_location.entry(loc_id.clone()).or_default().push(actor_id.clone());
+        actors_per_location
+            .entry(loc_id.clone())
+            .or_default()
+            .push(actor_id.clone());
     }
 
     ResolvedScenarioStart {

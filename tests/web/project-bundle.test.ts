@@ -1,16 +1,18 @@
 import { expect, test } from "bun:test";
 import { inspectProjectBundle, makeProjectBundle, type ProjectBundleContent } from "../../src/web/projectBundle.ts";
 import { StoryletRepository } from "../../src/db/repository.ts";
+import { Database } from "bun:sqlite";
+import { migrateLocationTagColumns } from "../../src/db/schema.ts";
 
 const content: ProjectBundleContent = {
   qualities: [{ name: "clock.pressure", type: "metric", value: 0, description: "Time until departure" }],
-  locations: [{ id: "platform", name: "Platform", description: "An empty platform.", connected_zones: [] }],
+  locations: [{ id: "platform", name: "Platform", description: "An empty platform.", tags: ["platform"], connected_zones: [] }],
   characters: [{
     id: "porter", name: "Porter", role: "Witness", home_location: "platform", current_location: "platform",
     status_axes: {}, needs: {}, agenda: "Keep the timetable", red_line: "Never abandon a passenger", schedule: { evening: "platform" },
   }],
   storylets: [{
-    id: "arrival", revision: 3, approved_revision: 3, title: "Late arrival", location: "platform", group_tag: "arrival",
+    id: "arrival", revision: 3, approved_revision: 3, title: "Late arrival", location_tags: ["platform"], group_tag: "arrival",
     cluster_type: "linear", urgency_weight: 40, repeatability: "always", cooldown_turns: 0, parameters: [],
     preconditions: { all_of: [] }, content: { text_template: "The porter checks the clock.", sceneOpening: "A train is late." },
     choices: [{ choice_id: "ask", label: "Ask about the delay", effects: {} }], effects: {}, created_at: 100,
@@ -19,7 +21,7 @@ const content: ProjectBundleContent = {
   scenarios: [{ id: "before-train", name: "Before the train", player_start_location: "platform", initial_qualities: { "clock.pressure": 0 }, actor_locations: { porter: "platform" }, storylet_ids: ["arrival"], seed: 11 }],
   generationJobs: [{
     id: "generation-1", revision: 2, status: "ready", nextStageIndex: 1,
-    request: { location: "platform", clusterType: "linear", characterRoles: [], triggerPreconditions: [], desiredOutcomes: {} },
+    request: { locationTags: ["platform"], clusterType: "linear", characterRoles: [], triggerPreconditions: [], desiredOutcomes: {} },
     stages: [], attempts: {}, createdAt: 100, updatedAt: 101,
   }],
 };
@@ -90,5 +92,21 @@ test("imported generation jobs cannot remain stuck in a running state", () => {
     expect(repository.getGenerationJob("generation-1")).toMatchObject({ status: "ready", revision: 9 });
   } finally {
     repository.close();
+  }
+});
+
+
+test("legacy location-bound storylets migrate to matching location tags", () => {
+  const db = new Database(":memory:");
+  try {
+    db.run("CREATE TABLE locations (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, connected_zones TEXT NOT NULL, environmental_params TEXT NOT NULL, devices TEXT NOT NULL, created_at INTEGER NOT NULL)");
+    db.run("CREATE TABLE storylets (id TEXT PRIMARY KEY, title TEXT NOT NULL, location TEXT, group_tag TEXT, cluster_type TEXT NOT NULL, urgency_weight REAL NOT NULL, repeatability TEXT NOT NULL, cooldown_turns INTEGER NOT NULL, parameters TEXT NOT NULL, preconditions TEXT NOT NULL, content TEXT NOT NULL, choices TEXT NOT NULL, effects TEXT NOT NULL, created_at INTEGER NOT NULL)");
+    db.run("INSERT INTO locations VALUES (?, ?, ?, ?, ?, ?, ?)", ["archive", "Archive", "", "[]", "{}", "{}", 1]);
+    db.run("INSERT INTO storylets VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", ["legacy", "Legacy scene", "archive", null, "linear", 50, "always", 0, "[]", "{}", "{}", "[]", "{}", 1]);
+    migrateLocationTagColumns(db);
+    expect(JSON.parse((db.query("SELECT tags FROM locations WHERE id = ?").get("archive") as { tags: string }).tags)).toEqual(["archive"]);
+    expect(JSON.parse((db.query("SELECT location_tags FROM storylets WHERE id = ?").get("legacy") as { location_tags: string }).location_tags)).toEqual(["archive"]);
+  } finally {
+    db.close();
   }
 });

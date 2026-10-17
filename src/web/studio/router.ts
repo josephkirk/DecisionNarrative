@@ -7,6 +7,7 @@ import ScenarioView from "./views/ScenarioView.vue";
 import GenerationView from "./views/GenerationView.vue";
 import PlaytestView from "./views/PlaytestView.vue";
 import ProjectView from "./views/ProjectView.vue";
+import TagManagerView from "./views/TagManagerView.vue";
 
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -20,5 +21,6 @@ export const router = createRouter({
     { path: "/generation", name: "generation", component: GenerationView },
     { path: "/playtest", name: "playtest", component: PlaytestView },
     { path: "/project", name: "project", component: ProjectView },
+    { path: "/tags", name: "tags", component: TagManagerView },
   ],
 });

@@ -15,7 +15,7 @@ const {
 } = useGenerationViewModel();
 const newJob = reactive({
   title: "New Staged Scene",
-  location: "",
+  locationTags: "",
   clusterType: "player_controlled_passage",
   characterRoles: ["witness"],
   triggerPreconditions: {},
@@ -50,7 +50,7 @@ function selectStage(stageRec: any) {
 async function handleCreateJob() {
   await createJob({
     title: newJob.title,
-    location: newJob.location || studioState.locations[0]?.id || "platform",
+    locationTags: newJob.locationTags.split(",").map((tag) => tag.trim()).filter(Boolean),
     clusterType: newJob.clusterType,
     characterRoles: newJob.characterRoles,
     triggerPreconditions: newJob.triggerPreconditions,
@@ -102,10 +102,8 @@ async function handleSaveStageEdit() {
             <input v-model="newJob.title" class="form-input" />
           </div>
           <div class="form-group" style="margin-bottom:10px;">
-            <label class="form-label">Location</label>
-            <select v-model="newJob.location" class="form-select">
-              <option v-for="l in studioState.locations" :key="l.id" :value="l.id">{{ l.name }}</option>
-            </select>
+            <label class="form-label">Location Tags (comma-separated)</label>
+            <input v-model="newJob.locationTags" class="form-input" placeholder="market, indoors" />
           </div>
           <button class="btn btn-primary" style="width:100%;" @click="handleCreateJob">+ Create Staged Job</button>
         </div>

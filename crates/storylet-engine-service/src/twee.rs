@@ -1,14 +1,12 @@
 //! Twee 3 and Twine 2 HTML parser, serializer, and storylet converter.
 //! Strictly conforms to iftechfoundation/twine-specs.
 
-use std::collections::BTreeMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
 
-use crate::contracts::{
-    StoryletChoiceRecord, StoryletContentRecord, StoryletRecord,
-};
+use crate::contracts::{StoryletChoiceRecord, StoryletContentRecord, StoryletRecord};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TwineLink {
@@ -86,7 +84,9 @@ pub fn extract_twine_links(text: &str) -> Vec<TwineLink> {
     links
 }
 
-fn parse_passage_header(line: &str) -> Option<(String, Vec<String>, Option<(i32, i32)>, Option<(i32, i32)>)> {
+fn parse_passage_header(
+    line: &str,
+) -> Option<(String, Vec<String>, Option<(i32, i32)>, Option<(i32, i32)>)> {
     let line = line.trim();
     if !line.starts_with("::") {
         return None;
@@ -110,14 +110,18 @@ fn parse_passage_header(line: &str) -> Option<(String, Vec<String>, Option<(i32,
                 if let Ok(meta_json) = serde_json::from_str::<Value>(meta_str) {
                     if let Some(pos_str) = meta_json.get("position").and_then(|v| v.as_str()) {
                         if let Some((x_s, y_s)) = pos_str.split_once(',') {
-                            if let (Ok(x), Ok(y)) = (x_s.trim().parse::<i32>(), y_s.trim().parse::<i32>()) {
+                            if let (Ok(x), Ok(y)) =
+                                (x_s.trim().parse::<i32>(), y_s.trim().parse::<i32>())
+                            {
                                 pos = Some((x, y));
                             }
                         }
                     }
                     if let Some(size_str) = meta_json.get("size").and_then(|v| v.as_str()) {
                         if let Some((w_s, h_s)) = size_str.split_once(',') {
-                            if let (Ok(w), Ok(h)) = (w_s.trim().parse::<i32>(), h_s.trim().parse::<i32>()) {
+                            if let (Ok(w), Ok(h)) =
+                                (w_s.trim().parse::<i32>(), h_s.trim().parse::<i32>())
+                            {
                                 size = Some((w, h));
                             }
                         }
@@ -144,7 +148,8 @@ fn parse_passage_header(line: &str) -> Option<(String, Vec<String>, Option<(i32,
 
 pub fn parse_twee_3(input: &str) -> Result<TweeStory, String> {
     let mut story = TweeStory::default();
-    let mut current_header: Option<(String, Vec<String>, Option<(i32, i32)>, Option<(i32, i32)>)> = None;
+    let mut current_header: Option<(String, Vec<String>, Option<(i32, i32)>, Option<(i32, i32)>)> =
+        None;
     let mut current_body_lines: Vec<&str> = Vec::new();
 
     for line in input.lines() {
@@ -285,7 +290,10 @@ pub fn serialize_twine_2_html(story: &TweeStory) -> String {
     for (index, p) in story.passages.iter().enumerate() {
         let pid = index + 1;
         let tags = p.tags.join(" ");
-        let (x, y) = p.position.unwrap_or(((index % 5) as i32 * 160 + 100, (index / 5) as i32 * 140 + 100));
+        let (x, y) = p.position.unwrap_or((
+            (index % 5) as i32 * 160 + 100,
+            (index / 5) as i32 * 140 + 100,
+        ));
         let (w, h) = p.size.unwrap_or((100, 100));
 
         out.push_str(&format!(
@@ -311,11 +319,21 @@ pub fn parse_twine_2_html(html: &str) -> Result<TweeStory, String> {
     let story_re = Regex::new(r#"<tw-storydata\s+([^>]+)>"#).unwrap();
     if let Some(caps) = story_re.captures(html) {
         let attrs = &caps[1];
-        if let Some(m) = extract_attr(attrs, "name") { story.title = m; }
-        if let Some(m) = extract_attr(attrs, "ifid") { story.ifid = m; }
-        if let Some(m) = extract_attr(attrs, "format") { story.format = m; }
-        if let Some(m) = extract_attr(attrs, "format-version") { story.format_version = m; }
-        if let Some(m) = extract_attr(attrs, "zoom").and_then(|z| z.parse::<f64>().ok()) { story.zoom = m; }
+        if let Some(m) = extract_attr(attrs, "name") {
+            story.title = m;
+        }
+        if let Some(m) = extract_attr(attrs, "ifid") {
+            story.ifid = m;
+        }
+        if let Some(m) = extract_attr(attrs, "format") {
+            story.format = m;
+        }
+        if let Some(m) = extract_attr(attrs, "format-version") {
+            story.format_version = m;
+        }
+        if let Some(m) = extract_attr(attrs, "zoom").and_then(|z| z.parse::<f64>().ok()) {
+            story.zoom = m;
+        }
     } else {
         return Err("No <tw-storydata> tag found in HTML".into());
     }
@@ -395,18 +413,23 @@ pub fn storylets_to_twee_story(project_title: &str, storylets: &[StoryletRecord]
         if st.ending {
             tags.push("ending".to_string());
         }
-        if let Some(ref loc) = st.location {
-            if !loc.trim().is_empty() {
-                tags.push(format!("location:{}", loc.trim()));
-            }
-        }
+        tags.extend(
+            st.location_tags
+                .iter()
+                .filter(|tag| !tag.trim().is_empty())
+                .map(|tag| format!("location_tag:{}", tag.trim())),
+        );
         if let Some(ref tag) = st.group_tag {
             if !tag.trim().is_empty() {
                 tags.push(tag.trim().to_string());
             }
         }
 
-        let mut body = st.content.scene_opening.clone().unwrap_or_else(|| st.content.text_template.clone());
+        let mut body = st
+            .content
+            .scene_opening
+            .clone()
+            .unwrap_or_else(|| st.content.text_template.clone());
 
         if !st.choices.is_empty() {
             body.push_str("\n\n");
@@ -416,12 +439,13 @@ pub fn storylets_to_twee_story(project_title: &str, storylets: &[StoryletRecord]
             }
         }
 
-        let pos = st.position
-            .map(|[x, y]| (x, y))
-            .or_else(|| Some(((index % 5) as i32 * 220 + 100, (index / 5) as i32 * 180 + 100)));
-        let size = st.size
-            .map(|[w, h]| (w, h))
-            .or(Some((120, 100)));
+        let pos = st.position.map(|[x, y]| (x, y)).or_else(|| {
+            Some((
+                (index % 5) as i32 * 220 + 100,
+                (index / 5) as i32 * 180 + 100,
+            ))
+        });
+        let size = st.size.map(|[w, h]| (w, h)).or(Some((120, 100)));
 
         story.passages.push(TweePassage {
             name: st.title.clone(),
@@ -449,16 +473,23 @@ pub fn twee_story_to_storylets(story: &TweeStory) -> Vec<StoryletRecord> {
 
     for (index, p) in story.passages.iter().enumerate() {
         let is_ending = p.tags.iter().any(|t| t.eq_ignore_ascii_case("ending"));
-        let location = p.tags.iter()
-            .find(|t| t.starts_with("location:"))
-            .map(|t| t.trim_start_matches("location:").to_string());
-        let group_tag = p.tags.iter()
-            .find(|t| !t.eq_ignore_ascii_case("ending") && !t.starts_with("location:"))
+        let location_tags: Vec<String> = p
+            .tags
+            .iter()
+            .filter_map(|tag| tag.strip_prefix("location_tag:"))
+            .map(str::to_string)
+            .collect();
+        let group_tag = p
+            .tags
+            .iter()
+            .find(|t| !t.eq_ignore_ascii_case("ending") && !t.starts_with("location_tag:"))
             .cloned();
 
         let links = extract_twine_links(&p.body);
-        let choices = links.into_iter().enumerate().map(|(c_idx, l)| {
-            StoryletChoiceRecord {
+        let choices = links
+            .into_iter()
+            .enumerate()
+            .map(|(c_idx, l)| StoryletChoiceRecord {
                 choice_id: format!("choice_{}", c_idx + 1),
                 label: l.display,
                 system_verb: Some("ACT".into()),
@@ -466,13 +497,20 @@ pub fn twee_story_to_storylets(story: &TweeStory) -> Vec<StoryletRecord> {
                 effects: json!({}),
                 divert_target: Some(l.target),
                 advisor_preview: None,
-            }
-        }).collect();
+            })
+            .collect();
 
         let clean_re = Regex::new(r"\[\[[^\]]+\]\]").unwrap();
         let clean_text = clean_re.replace_all(&p.body, "").trim().to_string();
 
-        let safe_id = format!("stl_twine_{}_{:04}", p.name.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "_").trim_matches('_'), index + 1);
+        let safe_id = format!(
+            "stl_twine_{}_{:04}",
+            p.name
+                .to_lowercase()
+                .replace(|c: char| !c.is_alphanumeric(), "_")
+                .trim_matches('_'),
+            index + 1
+        );
 
         storylets.push(StoryletRecord {
             id: safe_id,
@@ -482,7 +520,7 @@ pub fn twee_story_to_storylets(story: &TweeStory) -> Vec<StoryletRecord> {
             ending: is_ending,
             position: p.position.map(|(x, y)| [x, y]),
             size: p.size.map(|(w, h)| [w, h]),
-            location,
+            location_tags,
             group_tag,
             cluster_type: "player_controlled_passage".into(),
             urgency_weight: 50.0,
@@ -498,6 +536,8 @@ pub fn twee_story_to_storylets(story: &TweeStory) -> Vec<StoryletRecord> {
             },
             choices,
             effects: json!({}),
+            local_variables: None,
+            graph: None,
             created_at: now,
         });
     }

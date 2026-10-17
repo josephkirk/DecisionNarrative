@@ -35,9 +35,9 @@ fn native_abi_hosts_a_generic_storylet_from_scenario_through_choice() {
     let project = br#"{
         "schema_version":1,"id":"archive-mystery","name":"Archive Mystery","revision":1,
         "qualities":{"clue.receipt":{"key":"clue.receipt","kind":"custom","default_value":false,"description":"Receipt clue"}},
-        "locations":{"archive":{"id":"archive","name":"Receipt Archive","description":"A quiet records room","connected_locations":[],"map_position":[0.0,0.0]}},
+        "locations":{"archive":{"id":"archive","name":"Receipt Archive","description":"A quiet records room","tags":["archive"],"connected_locations":[],"map_position":[0.0,0.0]}},
         "characters":{},"events":{},
-        "storylets":{"read-receipt":{"id":"read-receipt","revision":1,"title":"The Missing Receipt","summary":"Find a receipt in the archive","approved":true,"location_id":"archive","urgency_weight":50.0,"cluster_type":"player_controlled_passage","repeatability":{"kind":"always"},"required_roles":[],"trigger":{"all_of":[],"any_of":[]},"content":{"opening":"A receipt lies between the ledger pages."},"choices":[{"id":"read","label":"Read the receipt","requirements":{"all_of":[],"any_of":[]},"effects":[{"kind":"set_quality","key":"clue.receipt","value":true}],"continues_scene":false,"divert_target":null}]}},
+        "storylets":{"read-receipt":{"id":"read-receipt","revision":1,"title":"The Missing Receipt","summary":"Find a receipt in the archive","approved":true,"location_tags":["archive"],"urgency_weight":50.0,"cluster_type":"player_controlled_passage","repeatability":{"kind":"always"},"required_roles":[],"trigger":{"all_of":[],"any_of":[]},"content":{"opening":"A receipt lies between the ledger pages."},"choices":[{"id":"read","label":"Read the receipt","requirements":{"all_of":[],"any_of":[]},"effects":[{"kind":"set_quality","key":"clue.receipt","value":true}],"continues_scene":false,"divert_target":null}]}},
         "npc_behaviors":{},"scenarios":{"opening":{"id":"opening","name":"Opening","player_start_location":"archive","initial_qualities":{},"actor_locations":{},"storylet_ids":["read-receipt"],"seed":7}}
     }"#;
     let scenario = b"opening";

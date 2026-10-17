@@ -76,7 +76,11 @@ pub async fn build_semantic_ranking_request(
         .await
         .map_err(|e| format!("Failed to parse candidate embeddings: {e}"))?;
 
-    let ranking_head: Option<RankingHead> = if let Ok(head_resp) = client.get(format!("{base_url}/v1/ranking-head")).send().await {
+    let ranking_head: Option<RankingHead> = if let Ok(head_resp) = client
+        .get(format!("{base_url}/v1/ranking-head"))
+        .send()
+        .await
+    {
         if head_resp.status().is_success() {
             head_resp.json().await.ok()
         } else {
@@ -112,24 +116,52 @@ pub async fn build_semantic_ranking_request(
 
 fn build_scene_context(session: &RuntimeSessionState) -> String {
     let loc_id = session.world.current_location.as_deref().unwrap_or("unset");
-    let loc_name = session.project.locations.get(loc_id).map(|l| l.name.as_str()).unwrap_or(loc_id);
+    let loc_name = session
+        .project
+        .locations
+        .get(loc_id)
+        .map(|l| l.name.as_str())
+        .unwrap_or(loc_id);
 
-    let actors = session.world.actors.iter().map(|(id, a)| {
-        let name = session.project.characters.get(id).map(|c| c.name.as_str()).unwrap_or(id);
-        format!("{name} at {}", a.current_location)
-    }).collect::<Vec<_>>().join("; ");
+    let actors = session
+        .world
+        .actors
+        .iter()
+        .map(|(id, a)| {
+            let name = session
+                .project
+                .characters
+                .get(id)
+                .map(|c| c.name.as_str())
+                .unwrap_or(id);
+            format!("{name} at {}", a.current_location)
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
 
-    let qualities = session.world.qualities.iter().map(|(k, v)| {
-        format!("{k}={v}")
-    }).collect::<Vec<_>>().join("; ");
+    let qualities = session
+        .world
+        .qualities
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("; ");
 
     format!("Location: {loc_name}. Characters: {actors}. World: {qualities}.")
 }
 
 fn build_storylet_doc(id: &str, session: &RuntimeSessionState) -> String {
     if let Some(st) = session.project.storylets.get(id) {
-        let choices = st.choices.iter().map(|c| c.label.as_str()).collect::<Vec<_>>().join("; ");
-        format!("Scene: {}. Summary: {}. Opening: {}. Choices: {}.", st.title, st.summary, st.content.opening, choices)
+        let choices = st
+            .choices
+            .iter()
+            .map(|c| c.label.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        format!(
+            "Scene: {}. Summary: {}. Opening: {}. Choices: {}.",
+            st.title, st.summary, st.content.opening, choices
+        )
     } else {
         id.to_string()
     }
@@ -143,10 +175,17 @@ fn compute_candidate_features(
     let mut map = std::collections::BTreeMap::new();
     let st = session.project.storylets.get(id);
 
-    let urgency = st.map(|s| (s.urgency_weight / 100.0).clamp(0.0, 1.0)).unwrap_or(0.5);
+    let urgency = st
+        .map(|s| (s.urgency_weight / 100.0).clamp(0.0, 1.0))
+        .unwrap_or(0.5);
     let arc_score = eval_c.map(|c| c.arc_alignment_score).unwrap_or(0.5);
 
-    let prior_count = session.world.events.iter().filter(|e| e.action.contains(&format!("storylet:{id}:"))).count();
+    let prior_count = session
+        .world
+        .events
+        .iter()
+        .filter(|e| e.action.contains(&format!("storylet:{id}:")))
+        .count();
     let novelty = 1.0 / (1.0 + prior_count as f64);
 
     let req_count = st.map(|s| s.required_roles.len()).unwrap_or(0);
