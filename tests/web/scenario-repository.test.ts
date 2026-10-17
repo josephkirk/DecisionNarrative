@@ -22,3 +22,36 @@ test("scenario records persist independently from disposable playtest sessions",
     repository.close();
   }
 });
+
+
+test("scenario records persist and round-trip optional selection policies", () => {
+  const repository = new StoryletRepository(":memory:");
+  try {
+    const scenario: ScenarioRecord = {
+      id: "policy-test",
+      name: "Policy Test",
+      player_start_location: "archive",
+      initial_qualities: {},
+      actor_locations: {},
+      storylet_ids: [],
+      seed: 99,
+      start_location_policy: {
+        mode: "by_attribute",
+        attribute_key: "security",
+        attribute_value: "high",
+      },
+      actor_population_policy: {
+        mode: "random",
+        count: 3,
+        location_policy: {
+          mode: "random",
+        },
+      },
+    };
+    repository.saveScenario(scenario);
+    expect(repository.getScenario(scenario.id)).toEqual(scenario);
+    expect(repository.listScenarios()).toEqual([scenario]);
+  } finally {
+    repository.close();
+  }
+});

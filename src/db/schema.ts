@@ -137,7 +137,8 @@ export function initializeDatabase(dbPath = "data/storylet_studio.db"): Database
       effects TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       revision INTEGER NOT NULL DEFAULT 1,
-      approved_revision INTEGER
+      approved_revision INTEGER,
+      ending INTEGER NOT NULL DEFAULT 0
     );
   `);
 
@@ -148,6 +149,9 @@ export function initializeDatabase(dbPath = "data/storylet_studio.db"): Database
   }
   if (!storyletColumns.some((column) => column.name === "approved_revision")) {
     db.run("ALTER TABLE storylets ADD COLUMN approved_revision INTEGER");
+  }
+  if (!storyletColumns.some((column) => column.name === "ending")) {
+    db.run("ALTER TABLE storylets ADD COLUMN ending INTEGER NOT NULL DEFAULT 0");
   }
 
   // 6. Call History table (Deterministic Replay & Butterfly Rollback Stack)

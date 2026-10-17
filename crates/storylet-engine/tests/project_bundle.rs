@@ -62,6 +62,8 @@ fn a_new_project_starts_empty_and_builds_a_generic_scenario_world() {
             actor_locations: BTreeMap::from([("nora".into(), "archive".into())]),
             storylet_ids: vec![],
             seed: 42,
+        event_ids: vec![],
+            active_actor_ids: None,
         },
     );
 
@@ -96,6 +98,8 @@ fn project_validation_catches_dangling_references_and_unapproved_runtime_content
             actor_locations: BTreeMap::new(),
             storylet_ids: vec!["draft".into()],
             seed: 9,
+        event_ids: vec![],
+            active_actor_ids: None,
         },
     );
     let mut draft = StoryletDefinition {
@@ -104,6 +108,7 @@ fn project_validation_catches_dangling_references_and_unapproved_runtime_content
         title: "Draft".into(),
         summary: "".into(),
         approved: false,
+        ending: false,
         location_id: Some("missing".into()),
         urgency_weight: 50.0,
         cluster_type: storylet_engine::ClusterType::Linear,

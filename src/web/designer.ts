@@ -324,6 +324,7 @@ export class DesignerStudioController {
       if (selected) this.populateScenarioEditor(selected);
       else this.newPlaytestScenario();
     });
+    this.bindScenarioPolicyControls();
     document.getElementById("btn-resume-playtest")?.addEventListener("click", () => this.resumeSavedPlaytest());
     document.getElementById("btn-refresh-playtest")?.addEventListener("click", () => this.refreshPlaytest());
     document.getElementById("btn-rank-local-encoder")?.addEventListener("click", () => this.rankPlaytestWithLocalEncoder());
@@ -1479,6 +1480,8 @@ export class DesignerStudioController {
       this.cachedQualities = await qualitiesResponse.json();
       this.cachedCharacters = await charactersResponse.json();
       this.populatePlaytestStartLocations(this.cachedLocations);
+      this.populateAttributeSelectOptions();
+      this.updateScenarioDiagnostics();
       this.renderScenarioStateFields();
       await this.loadPlaytestScenarios();
     } catch (error) {
@@ -1549,6 +1552,8 @@ export class DesignerStudioController {
       const [scenarios, storylets] = await Promise.all([scenarioResponse.json(), storyletResponse.json()]);
       if (!scenarioResponse.ok || !storyletResponse.ok) throw new Error("Could not load scenarios or approved storylets.");
       this.cachedScenarios = scenarios;
+      this.cachedStorylets = storylets;
+      this.populateAttributeSelectOptions();
       const approved = storylets.filter((storylet: any) => storylet.revision != null && storylet.approved_revision === storylet.revision);
       storyletSelect.replaceChildren();
       if (!approved.length) {
@@ -1576,6 +1581,41 @@ export class DesignerStudioController {
     (document.getElementById("scenario-name") as HTMLInputElement).value = scenario.name;
     (document.getElementById("playtest-start-location") as HTMLSelectElement).value = scenario.player_start_location;
     (document.getElementById("scenario-seed") as HTMLInputElement).value = String(scenario.seed);
+
+    // Populate start_location_policy
+    const startPolicy = scenario.start_location_policy;
+    const startLocMode = document.getElementById("scenario-start-location-mode") as HTMLSelectElement | null;
+    if (startLocMode) startLocMode.value = startPolicy?.mode || "fixed";
+    const startLocKey = document.getElementById("scenario-start-location-attr-key") as HTMLSelectElement | null;
+    if (startLocKey) startLocKey.value = startPolicy?.attribute_key || "";
+    const startLocVal = document.getElementById("scenario-start-location-attr-val") as HTMLInputElement | null;
+    if (startLocVal) startLocVal.value = startPolicy?.attribute_value !== undefined ? String(startPolicy.attribute_value) : "";
+    this.updateScenarioStartLocationVisibility();
+
+    // Populate actor_population_policy
+    const popPolicy = scenario.actor_population_policy;
+    const popMode = document.getElementById("scenario-actor-pop-mode") as HTMLSelectElement | null;
+    if (popMode) popMode.value = popPolicy?.mode || "all";
+    const popCount = document.getElementById("scenario-actor-pop-count") as HTMLInputElement | null;
+    if (popCount) popCount.value = popPolicy?.count !== undefined ? String(popPolicy.count) : "";
+    const popKey = document.getElementById("scenario-actor-pop-attr-key") as HTMLSelectElement | null;
+    if (popKey) popKey.value = popPolicy?.attribute_key || "";
+    const popVal = document.getElementById("scenario-actor-pop-attr-val") as HTMLInputElement | null;
+    if (popVal) popVal.value = popPolicy?.attribute_value !== undefined ? String(popPolicy.attribute_value) : "";
+    this.updateScenarioActorPopulationVisibility();
+
+    // Populate actor location_policy
+    const locPolicy = popPolicy?.location_policy;
+    const locMode = document.getElementById("scenario-actor-loc-mode") as HTMLSelectElement | null;
+    if (locMode) locMode.value = locPolicy?.mode || "fixed";
+    const locFixed = document.getElementById("scenario-actor-loc-fixed-select") as HTMLSelectElement | null;
+    if (locFixed) locFixed.value = locPolicy?.location_id || "";
+    const locKey = document.getElementById("scenario-actor-loc-attr-key") as HTMLSelectElement | null;
+    if (locKey) locKey.value = locPolicy?.attribute_key || "";
+    const locVal = document.getElementById("scenario-actor-loc-attr-val") as HTMLInputElement | null;
+    if (locVal) locVal.value = locPolicy?.attribute_value !== undefined ? String(locPolicy.attribute_value) : "";
+    this.updateScenarioActorLocationVisibility();
+
     this.renderScenarioStateFields(scenario.initial_qualities ?? {}, scenario.actor_locations ?? {});
     const storyletSelect = document.getElementById("scenario-storylet-ids") as HTMLSelectElement;
     for (const option of [...storyletSelect.options]) option.selected = scenario.storylet_ids.includes(option.value);
@@ -1585,6 +1625,7 @@ export class DesignerStudioController {
     (document.getElementById("btn-save-playtest-scenario") as HTMLButtonElement).textContent = "Update scenario";
     (document.getElementById("scenario-validation-message") as HTMLElement).textContent = "Playtests use the last saved scenario revision.";
     this.updatePlaytestStartButton();
+    this.updateScenarioDiagnostics();
   }
 
   private newPlaytestScenario(): void {
@@ -1592,18 +1633,425 @@ export class DesignerStudioController {
     (document.getElementById("scenario-id") as HTMLInputElement).value = "";
     (document.getElementById("scenario-name") as HTMLInputElement).value = "";
     (document.getElementById("scenario-seed") as HTMLInputElement).value = "1";
+
+    const startLocMode = document.getElementById("scenario-start-location-mode") as HTMLSelectElement | null;
+    if (startLocMode) startLocMode.value = "fixed";
+    const startLocKey = document.getElementById("scenario-start-location-attr-key") as HTMLSelectElement | null;
+    if (startLocKey) startLocKey.value = "";
+    const startLocVal = document.getElementById("scenario-start-location-attr-val") as HTMLInputElement | null;
+    if (startLocVal) startLocVal.value = "";
+    this.updateScenarioStartLocationVisibility();
+
+    const popMode = document.getElementById("scenario-actor-pop-mode") as HTMLSelectElement | null;
+    if (popMode) popMode.value = "all";
+    const popCount = document.getElementById("scenario-actor-pop-count") as HTMLInputElement | null;
+    if (popCount) popCount.value = "";
+    const popKey = document.getElementById("scenario-actor-pop-attr-key") as HTMLSelectElement | null;
+    if (popKey) popKey.value = "";
+    const popVal = document.getElementById("scenario-actor-pop-attr-val") as HTMLInputElement | null;
+    if (popVal) popVal.value = "";
+    this.updateScenarioActorPopulationVisibility();
+
+    const locMode = document.getElementById("scenario-actor-loc-mode") as HTMLSelectElement | null;
+    if (locMode) locMode.value = "fixed";
+    const locFixed = document.getElementById("scenario-actor-loc-fixed-select") as HTMLSelectElement | null;
+    if (locFixed) locFixed.value = "";
+    const locKey = document.getElementById("scenario-actor-loc-attr-key") as HTMLSelectElement | null;
+    if (locKey) locKey.value = "";
+    const locVal = document.getElementById("scenario-actor-loc-attr-val") as HTMLInputElement | null;
+    if (locVal) locVal.value = "";
+    this.updateScenarioActorLocationVisibility();
+
     this.renderScenarioStateFields();
     for (const option of [...(document.getElementById("scenario-storylet-ids") as HTMLSelectElement).options]) option.selected = Boolean(option.value);
     (document.getElementById("btn-delete-playtest-scenario") as HTMLButtonElement).disabled = true;
     (document.getElementById("btn-save-playtest-scenario") as HTMLButtonElement).textContent = "Save scenario";
     (document.getElementById("scenario-validation-message") as HTMLElement).textContent = "Enter an ID and name, then save this scenario to reuse its starting state.";
     this.updatePlaytestStartButton();
+    this.updateScenarioDiagnostics();
+  }
+
+
+  private bindScenarioPolicyControls(): void {
+    const startLocMode = document.getElementById("scenario-start-location-mode") as HTMLSelectElement | null;
+    startLocMode?.addEventListener("change", () => {
+      this.updateScenarioStartLocationVisibility();
+      this.updateScenarioDiagnostics();
+    });
+
+    const startLocKey = document.getElementById("scenario-start-location-attr-key") as HTMLSelectElement | null;
+    startLocKey?.addEventListener("change", () => this.updateScenarioDiagnostics());
+    const startLocVal = document.getElementById("scenario-start-location-attr-val") as HTMLInputElement | null;
+    startLocVal?.addEventListener("input", () => this.updateScenarioDiagnostics());
+    const startLocFixed = document.getElementById("playtest-start-location") as HTMLSelectElement | null;
+    startLocFixed?.addEventListener("change", () => this.updateScenarioDiagnostics());
+
+    const actorPopMode = document.getElementById("scenario-actor-pop-mode") as HTMLSelectElement | null;
+    actorPopMode?.addEventListener("change", () => {
+      this.updateScenarioActorPopulationVisibility();
+      this.updateScenarioDiagnostics();
+    });
+
+    const actorPopCount = document.getElementById("scenario-actor-pop-count") as HTMLInputElement | null;
+    actorPopCount?.addEventListener("input", () => this.updateScenarioDiagnostics());
+    const actorPopKey = document.getElementById("scenario-actor-pop-attr-key") as HTMLSelectElement | null;
+    actorPopKey?.addEventListener("change", () => this.updateScenarioDiagnostics());
+    const actorPopVal = document.getElementById("scenario-actor-pop-attr-val") as HTMLInputElement | null;
+    actorPopVal?.addEventListener("input", () => this.updateScenarioDiagnostics());
+
+    const actorLocMode = document.getElementById("scenario-actor-loc-mode") as HTMLSelectElement | null;
+    actorLocMode?.addEventListener("change", () => {
+      this.updateScenarioActorLocationVisibility();
+      this.updateScenarioDiagnostics();
+    });
+
+    const actorLocFixed = document.getElementById("scenario-actor-loc-fixed-select") as HTMLSelectElement | null;
+    actorLocFixed?.addEventListener("change", () => this.updateScenarioDiagnostics());
+    const actorLocKey = document.getElementById("scenario-actor-loc-attr-key") as HTMLSelectElement | null;
+    actorLocKey?.addEventListener("change", () => this.updateScenarioDiagnostics());
+    const actorLocVal = document.getElementById("scenario-actor-loc-attr-val") as HTMLInputElement | null;
+    actorLocVal?.addEventListener("input", () => this.updateScenarioDiagnostics());
+
+    const seedInput = document.getElementById("scenario-seed") as HTMLInputElement | null;
+    seedInput?.addEventListener("input", () => this.updateScenarioDiagnostics());
+
+    const storyletSelect = document.getElementById("scenario-storylet-ids") as HTMLSelectElement | null;
+    storyletSelect?.addEventListener("change", () => this.updateScenarioDiagnostics());
+
+    document.getElementById("scenario-actor-location-fields")?.addEventListener("change", () => this.updateScenarioDiagnostics());
+  }
+
+  private updateScenarioStartLocationVisibility(): void {
+    const mode = (document.getElementById("scenario-start-location-mode") as HTMLSelectElement | null)?.value || "fixed";
+    const fixedLabel = document.getElementById("scenario-start-location-fixed-label");
+    const attrControls = document.getElementById("scenario-start-location-attr-controls");
+    if (fixedLabel) fixedLabel.style.display = mode === "fixed" ? "grid" : "none";
+    if (attrControls) attrControls.style.display = mode === "by_attribute" ? "grid" : "none";
+  }
+
+  private updateScenarioActorPopulationVisibility(): void {
+    const mode = (document.getElementById("scenario-actor-pop-mode") as HTMLSelectElement | null)?.value || "all";
+    const countLabel = document.getElementById("scenario-actor-pop-count-label");
+    const attrControls = document.getElementById("scenario-actor-pop-attr-controls");
+    if (countLabel) countLabel.style.display = mode === "random" ? "grid" : "none";
+    if (attrControls) attrControls.style.display = mode === "by_attribute" ? "grid" : "none";
+  }
+
+  private updateScenarioActorLocationVisibility(): void {
+    const mode = (document.getElementById("scenario-actor-loc-mode") as HTMLSelectElement | null)?.value || "fixed";
+    const fixedLabel = document.getElementById("scenario-actor-loc-fixed-label");
+    const attrControls = document.getElementById("scenario-actor-loc-attr-controls");
+    const indivGroup = document.getElementById("scenario-actor-locations-group");
+    if (fixedLabel) fixedLabel.style.display = mode === "fixed" ? "grid" : "none";
+    if (attrControls) attrControls.style.display = mode === "by_attribute" ? "grid" : "none";
+    if (indivGroup) indivGroup.style.display = mode === "fixed" ? "block" : "none";
+  }
+
+  private populateAttributeSelectOptions(): void {
+    const locAttrKeys = new Set<string>(["id", "name", "description"]);
+    for (const loc of this.cachedLocations) {
+      if (loc.environmental_params) {
+        for (const k of Object.keys(loc.environmental_params)) locAttrKeys.add(k);
+      }
+      if (loc.devices) {
+        for (const k of Object.keys(loc.devices)) locAttrKeys.add(k);
+      }
+    }
+    const sortedLocKeys = [...locAttrKeys].sort();
+
+    const startLocKey = document.getElementById("scenario-start-location-attr-key") as HTMLSelectElement | null;
+    if (startLocKey) {
+      const prev = startLocKey.value;
+      startLocKey.replaceChildren(new Option("Select location attribute", ""));
+      for (const k of sortedLocKeys) startLocKey.add(new Option(k, k));
+      if (sortedLocKeys.includes(prev)) startLocKey.value = prev;
+    }
+
+    const actorLocKey = document.getElementById("scenario-actor-loc-attr-key") as HTMLSelectElement | null;
+    if (actorLocKey) {
+      const prev = actorLocKey.value;
+      actorLocKey.replaceChildren(new Option("Select location attribute", ""));
+      for (const k of sortedLocKeys) actorLocKey.add(new Option(k, k));
+      if (sortedLocKeys.includes(prev)) actorLocKey.value = prev;
+    }
+
+    const actorFixedLocSelect = document.getElementById("scenario-actor-loc-fixed-select") as HTMLSelectElement | null;
+    if (actorFixedLocSelect) {
+      const prev = actorFixedLocSelect.value;
+      actorFixedLocSelect.replaceChildren(new Option("Use individual or Codex location", ""));
+      for (const loc of this.cachedLocations) actorFixedLocSelect.add(new Option(loc.name, loc.id));
+      if (this.cachedLocations.some((loc: any) => loc.id === prev)) actorFixedLocSelect.value = prev;
+    }
+
+    const charAttrKeys = new Set<string>(["id", "name", "role", "home_location", "current_location", "agenda", "red_line"]);
+    for (const char of this.cachedCharacters) {
+      if (char.status_axes) {
+        for (const k of Object.keys(char.status_axes)) charAttrKeys.add(k);
+      }
+      if (char.qualities) {
+        for (const k of Object.keys(char.qualities)) charAttrKeys.add(k);
+      }
+      if (char.needs) {
+        for (const k of Object.keys(char.needs)) charAttrKeys.add(k);
+      }
+    }
+    const sortedCharKeys = [...charAttrKeys].sort();
+
+    const actorPopKey = document.getElementById("scenario-actor-pop-attr-key") as HTMLSelectElement | null;
+    if (actorPopKey) {
+      const prev = actorPopKey.value;
+      actorPopKey.replaceChildren(new Option("Select character attribute", ""));
+      for (const k of sortedCharKeys) actorPopKey.add(new Option(k, k));
+      if (sortedCharKeys.includes(prev)) actorPopKey.value = prev;
+    }
+  }
+
+  private updateScenarioDiagnostics(): void {
+    const actorsPerLocContainer = document.getElementById("scenario-actors-per-location");
+    const roleAvailContainer = document.getElementById("scenario-storylet-role-availability");
+    const summarySpan = document.getElementById("scenario-resolved-summary");
+    if (!actorsPerLocContainer || !roleAvailContainer) return;
+
+    const seed = Number((document.getElementById("scenario-seed") as HTMLInputElement | null)?.value || "1");
+    const startLocMode = (document.getElementById("scenario-start-location-mode") as HTMLSelectElement | null)?.value || "fixed";
+    const startLocFixed = (document.getElementById("playtest-start-location") as HTMLSelectElement | null)?.value || "";
+    const startLocKey = (document.getElementById("scenario-start-location-attr-key") as HTMLSelectElement | null)?.value || "";
+    const startLocVal = (document.getElementById("scenario-start-location-attr-val") as HTMLInputElement | null)?.value || "";
+
+    const actorPopMode = (document.getElementById("scenario-actor-pop-mode") as HTMLSelectElement | null)?.value || "all";
+    const actorPopCountVal = (document.getElementById("scenario-actor-pop-count") as HTMLInputElement | null)?.value;
+    const actorPopKey = (document.getElementById("scenario-actor-pop-attr-key") as HTMLSelectElement | null)?.value || "";
+    const actorPopVal = (document.getElementById("scenario-actor-pop-attr-val") as HTMLInputElement | null)?.value || "";
+
+    const actorLocMode = (document.getElementById("scenario-actor-loc-mode") as HTMLSelectElement | null)?.value || "fixed";
+    const actorLocFixed = (document.getElementById("scenario-actor-loc-fixed-select") as HTMLSelectElement | null)?.value || "";
+    const actorLocKey = (document.getElementById("scenario-actor-loc-attr-key") as HTMLSelectElement | null)?.value || "";
+    const actorLocVal = (document.getElementById("scenario-actor-loc-attr-val") as HTMLInputElement | null)?.value || "";
+
+    const individualActorLocations: Record<string, string> = {};
+    for (const select of [...(document.getElementById("scenario-actor-location-fields")?.querySelectorAll<HTMLSelectElement>("select[data-actor]") ?? [])]) {
+      if (select.value) individualActorLocations[select.dataset.actor!] = select.value;
+    }
+
+    const storyletSelect = document.getElementById("scenario-storylet-ids") as HTMLSelectElement | null;
+    const selectedStoryletIds = storyletSelect ? [...storyletSelect.selectedOptions].map((o) => o.value).filter(Boolean) : [];
+
+    // Construct preview scenario
+    const startPolicy: any = {
+      mode: startLocMode,
+      location_id: startLocMode === "fixed" ? startLocFixed : undefined,
+      attribute_key: startLocMode === "by_attribute" ? startLocKey : undefined,
+      attribute_value: startLocMode === "by_attribute" ? startLocVal : undefined,
+    };
+
+    const locationPolicy: any = {
+      mode: actorLocMode,
+      location_id: actorLocMode === "fixed" && actorLocFixed ? actorLocFixed : undefined,
+      attribute_key: actorLocMode === "by_attribute" ? actorLocKey : undefined,
+      attribute_value: actorLocMode === "by_attribute" ? actorLocVal : undefined,
+    };
+
+    const populationPolicy: any = {
+      mode: actorPopMode,
+      count: actorPopMode === "random" ? (actorPopCountVal ? Number(actorPopCountVal) : undefined) : undefined,
+      attribute_key: actorPopMode === "by_attribute" ? actorPopKey : undefined,
+      attribute_value: actorPopMode === "by_attribute" ? actorPopVal : undefined,
+      location_policy: locationPolicy,
+    };
+
+    const previewScenario: any = {
+      id: "preview",
+      name: "Preview",
+      player_start_location: startLocFixed,
+      initial_qualities: {},
+      actor_locations: individualActorLocations,
+      storylet_ids: selectedStoryletIds,
+      seed: Number.isSafeInteger(seed) && seed >= 0 ? seed : 1,
+      start_location_policy: startPolicy,
+      actor_population_policy: populationPolicy,
+    };
+
+    // Use workspaceProject resolution helpers
+    let resolvedStartLoc = "";
+    let resolvedActors: Record<string, string> = {};
+    const issues: string[] = [];
+
+    try {
+      // Deterministic PRNG
+      let s = (Math.floor(previewScenario.seed) >>> 0) || 1;
+      const rng = () => {
+        s = (s ^ (s << 13)) >>> 0;
+        s = (s ^ (s >>> 17)) >>> 0;
+        s = (s ^ (s << 5)) >>> 0;
+        return (s >>> 0) / 4294967296;
+      };
+
+      // Resolve start location
+      if (startPolicy.mode === "fixed") {
+        resolvedStartLoc = startPolicy.location_id || this.cachedLocations[0]?.id || "";
+      } else if (startPolicy.mode === "random") {
+        if (this.cachedLocations.length) {
+          const idx = Math.floor(rng() * this.cachedLocations.length);
+          resolvedStartLoc = this.cachedLocations[idx].id;
+        }
+      } else if (startPolicy.mode === "by_attribute") {
+        const matches = this.cachedLocations.filter((l: any) => {
+          let val = l[startPolicy.attribute_key];
+          if (val === undefined && l.environmental_params) val = l.environmental_params[startPolicy.attribute_key];
+          if (val === undefined && l.devices) val = l.devices[startPolicy.attribute_key];
+          return String(val ?? "").trim().toLowerCase() === String(startPolicy.attribute_value ?? "").trim().toLowerCase();
+        });
+        if (matches.length) {
+          const idx = Math.floor(rng() * matches.length);
+          resolvedStartLoc = matches[idx].id;
+        } else {
+          issues.push(`No location matches ${startPolicy.attribute_key} = ${startPolicy.attribute_value}`);
+        }
+      }
+
+      // Resolve actors
+      let candidateCharacters = [...this.cachedCharacters];
+      if (populationPolicy.mode === "random") {
+        const count = populationPolicy.count ?? 0;
+        const pool = [...candidateCharacters];
+        candidateCharacters = [];
+        for (let i = 0; i < count && pool.length > 0; i++) {
+          const idx = Math.floor(rng() * pool.length);
+          candidateCharacters.push(pool[idx]);
+          pool.splice(idx, 1);
+        }
+      } else if (populationPolicy.mode === "by_attribute") {
+        candidateCharacters = candidateCharacters.filter((c: any) => {
+          let val = c[populationPolicy.attribute_key];
+          if (val === undefined && c.status_axes) val = c.status_axes[populationPolicy.attribute_key];
+          if (val === undefined && c.qualities) val = c.qualities[populationPolicy.attribute_key];
+          if (val === undefined && c.needs) val = c.needs[populationPolicy.attribute_key];
+          return String(val ?? "").trim().toLowerCase() === String(populationPolicy.attribute_value ?? "").trim().toLowerCase();
+        });
+      }
+
+      for (const char of candidateCharacters) {
+        if (!locationPolicy || locationPolicy.mode === "fixed") {
+          const loc = locationPolicy?.location_id || individualActorLocations[char.id] || char.current_location || char.home_location;
+          resolvedActors[char.id] = loc;
+        } else if (locationPolicy.mode === "random") {
+          if (this.cachedLocations.length) {
+            const idx = Math.floor(rng() * this.cachedLocations.length);
+            resolvedActors[char.id] = this.cachedLocations[idx].id;
+          }
+        } else if (locationPolicy.mode === "by_attribute") {
+          const matches = this.cachedLocations.filter((l: any) => {
+            let val = l[locationPolicy.attribute_key];
+            if (val === undefined && l.environmental_params) val = l.environmental_params[locationPolicy.attribute_key];
+            if (val === undefined && l.devices) val = l.devices[locationPolicy.attribute_key];
+            return String(val ?? "").trim().toLowerCase() === String(locationPolicy.attribute_value ?? "").trim().toLowerCase();
+          });
+          if (matches.length) {
+            const idx = Math.floor(rng() * matches.length);
+            resolvedActors[char.id] = matches[idx].id;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error computing preview diagnostics:", e);
+    }
+
+    // Render actors per location
+    actorsPerLocContainer.replaceChildren();
+    const locMap: Record<string, string[]> = {};
+    for (const loc of this.cachedLocations) locMap[loc.id] = [];
+    for (const [actorId, locId] of Object.entries(resolvedActors)) {
+      if (!locMap[locId]) locMap[locId] = [];
+      locMap[locId].push(actorId);
+    }
+
+    for (const loc of this.cachedLocations) {
+      const actorsHere = locMap[loc.id] || [];
+      const row = document.createElement("div");
+      row.style.display = "flex";
+      row.style.justifyContent = "space-between";
+      row.style.padding = "2px 0";
+      row.style.borderBottom = "1px solid var(--border-subtle)";
+      const isStart = loc.id === resolvedStartLoc;
+      row.innerHTML = `<span style="color:var(--text-main)">${loc.name}${isStart ? ' <span style="color:var(--accent-primary);font-size:10px">(Player Start)</span>' : ''}</span><span style="color:var(--text-muted);font-weight:600">${actorsHere.length} actor${actorsHere.length === 1 ? '' : 's'} ${actorsHere.length > 0 ? `(${actorsHere.join(', ')})` : ''}</span>`;
+      actorsPerLocContainer.appendChild(row);
+    }
+
+    // Render storylet role availability
+    roleAvailContainer.replaceChildren();
+    const approvedStorylets = this.cachedStorylets.filter((s: any) => s.revision != null && s.approved_revision === s.revision);
+    const displayedStorylets = selectedStoryletIds.length
+      ? approvedStorylets.filter((s: any) => selectedStoryletIds.includes(s.id))
+      : approvedStorylets;
+
+    if (!displayedStorylets.length) {
+      roleAvailContainer.innerHTML = '<span class="playtest-help">No approved storylets selected in scenario.</span>';
+    } else {
+      for (const st of displayedStorylets) {
+        const item = document.createElement("div");
+        item.style.padding = "4px 0";
+        item.style.borderBottom = "1px solid var(--border-subtle)";
+
+        const header = document.createElement("div");
+        header.style.fontWeight = "600";
+        header.style.color = "var(--text-main)";
+        header.textContent = `${st.title} (${st.id})`;
+        item.appendChild(header);
+
+        // Required roles
+        const reqRoles: string[] = [];
+        for (const p of st.parameters ?? []) {
+          const match = p.query.trim().match(/^(?:character\.)?role\s*==\s*(['"])(.*?)\1$/i);
+          if (match?.[2]?.trim()) reqRoles.push(match[2].trim());
+        }
+
+        if (!reqRoles.length) {
+          const noRoles = document.createElement("div");
+          noRoles.style.color = "var(--text-muted)";
+          noRoles.style.fontSize = "10px";
+          noRoles.textContent = "No required character roles";
+          item.appendChild(noRoles);
+        } else {
+          for (const role of reqRoles) {
+            // Find candidates: must have role, and if storylet has location, actor's resolved location must match storylet location
+            const candidates = Object.entries(resolvedActors).filter(([actorId, actorLoc]) => {
+              const char = this.cachedCharacters.find((c: any) => c.id === actorId);
+              if (!char) return false;
+              const hasRole = char.role.trim().toLowerCase() === role.toLowerCase();
+              if (!hasRole) return false;
+              if (st.location && actorLoc !== st.location) return false;
+              return true;
+            }).map(([actorId]) => actorId);
+
+            const roleRow = document.createElement("div");
+            roleRow.style.display = "flex";
+            roleRow.style.justifyContent = "space-between";
+            roleRow.style.fontSize = "10px";
+            roleRow.style.padding = "2px 0";
+
+            const satisfied = candidates.length > 0;
+            const statusColor = satisfied ? "#10b981" : "#ef4444";
+            roleRow.innerHTML = `<span>Role "<strong>${role}</strong>"${st.location ? ` at ${st.location}` : ' (any loc)'}:</span><span style="color:${statusColor};font-weight:600">${candidates.length} candidate${candidates.length === 1 ? '' : 's'} ${satisfied ? `[${candidates.join(', ')}]` : '[NONE]'}</span>`;
+            item.appendChild(roleRow);
+          }
+        }
+        roleAvailContainer.appendChild(item);
+      }
+    }
+
+    if (summarySpan) {
+      summarySpan.textContent = issues.length
+        ? `Issues: ${issues.join(', ')}`
+        : `Seed ${previewScenario.seed} · ${Object.keys(resolvedActors).length} active actors`;
+    }
   }
 
   private updatePlaytestStartButton(): void {
+    const scenarioId = (document.getElementById("playtest-scenario-select") as HTMLSelectElement | null)?.value;
     const location = (document.getElementById("playtest-start-location") as HTMLSelectElement | null)?.value;
+    const startLocMode = (document.getElementById("scenario-start-location-mode") as HTMLSelectElement | null)?.value;
     const button = document.getElementById("btn-start-clean-playtest") as HTMLButtonElement | null;
-    if (button) button.disabled = !location;
+    if (button) button.disabled = !scenarioId && !location && startLocMode === "fixed";
   }
 
   private async savePlaytestScenario(): Promise<void> {
@@ -1630,7 +2078,51 @@ export class DesignerStudioController {
     if (!idInput.value.trim()) idInput.value = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const id = idInput.value.trim();
     const storyletIds = [...(document.getElementById("scenario-storylet-ids") as HTMLSelectElement).selectedOptions].map((option) => option.value).filter(Boolean);
-    const scenario = { id, name, player_start_location: locationId, initial_qualities: initialQualities, actor_locations: actorLocations, storylet_ids: storyletIds, seed };
+    const startLocMode = (document.getElementById("scenario-start-location-mode") as HTMLSelectElement | null)?.value || "fixed";
+    const startLocKey = (document.getElementById("scenario-start-location-attr-key") as HTMLSelectElement | null)?.value || "";
+    const startLocVal = (document.getElementById("scenario-start-location-attr-val") as HTMLInputElement | null)?.value || "";
+
+    const actorPopMode = (document.getElementById("scenario-actor-pop-mode") as HTMLSelectElement | null)?.value || "all";
+    const actorPopCountVal = (document.getElementById("scenario-actor-pop-count") as HTMLInputElement | null)?.value;
+    const actorPopKey = (document.getElementById("scenario-actor-pop-attr-key") as HTMLSelectElement | null)?.value || "";
+    const actorPopVal = (document.getElementById("scenario-actor-pop-attr-val") as HTMLInputElement | null)?.value || "";
+
+    const actorLocMode = (document.getElementById("scenario-actor-loc-mode") as HTMLSelectElement | null)?.value || "fixed";
+    const actorLocFixed = (document.getElementById("scenario-actor-loc-fixed-select") as HTMLSelectElement | null)?.value || "";
+    const actorLocKey = (document.getElementById("scenario-actor-loc-attr-key") as HTMLSelectElement | null)?.value || "";
+    const actorLocVal = (document.getElementById("scenario-actor-loc-attr-val") as HTMLInputElement | null)?.value || "";
+
+    const startLocationPolicy = {
+      mode: startLocMode as any,
+      location_id: startLocMode === "fixed" ? (locationId || undefined) : undefined,
+      attribute_key: startLocMode === "by_attribute" ? (startLocKey || undefined) : undefined,
+      attribute_value: startLocMode === "by_attribute" ? (startLocVal || undefined) : undefined,
+    };
+
+    const actorLocationPolicy = {
+      mode: actorLocMode as any,
+      location_id: actorLocMode === "fixed" && actorLocFixed ? actorLocFixed : undefined,
+      attribute_key: actorLocMode === "by_attribute" ? (actorLocKey || undefined) : undefined,
+      attribute_value: actorLocMode === "by_attribute" ? (actorLocVal || undefined) : undefined,
+    };
+
+    const actorPopulationPolicy = {
+      mode: actorPopMode as any,
+      count: actorPopMode === "random" && actorPopCountVal ? Number(actorPopCountVal) : undefined,
+      attribute_key: actorPopMode === "by_attribute" ? (actorPopKey || undefined) : undefined,
+      attribute_value: actorPopMode === "by_attribute" ? (actorPopVal || undefined) : undefined,
+      location_policy: actorLocationPolicy,
+    };
+
+    const scenario = {
+      id, name, player_start_location: locationId,
+      initial_qualities: initialQualities,
+      actor_locations: actorLocations,
+      storylet_ids: storyletIds,
+      seed,
+      start_location_policy: startLocationPolicy,
+      actor_population_policy: actorPopulationPolicy,
+    };
     const existing = this.cachedScenarios.some((item) => item.id === id);
     const response = await fetch(existing ? `/api/v1/scenarios/${encodeURIComponent(id)}` : "/api/v1/scenarios", {
       method: existing ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(scenario),
@@ -1734,8 +2226,10 @@ export class DesignerStudioController {
 
   private async startCleanPlaytest(): Promise<void> {
     const button = document.getElementById("btn-start-clean-playtest") as HTMLButtonElement;
+    const scenarioSelect = document.getElementById("playtest-scenario-select") as HTMLSelectElement | null;
+    const scenarioId = scenarioSelect?.value;
     const startLocationId = (document.getElementById("playtest-start-location") as HTMLSelectElement).value;
-    if (!startLocationId) return;
+    if (!scenarioId && !startLocationId) return;
     button.disabled = true;
     button.innerText = "Building clean scenario…";
     try {

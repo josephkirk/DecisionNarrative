@@ -39,7 +39,12 @@ async fn request(
     let body = if bytes.is_empty() {
         json!({})
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                panic!("Failed to parse JSON for {} {}: status={}, bytes='{}', err={}", method, path, status, String::from_utf8_lossy(&bytes), e);
+            }
+        }
     };
     (status, body)
 }

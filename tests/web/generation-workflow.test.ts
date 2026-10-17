@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   GENERATION_STAGES,
+  MAX_PIPELINE_RETRIES,
   GenerationWorkflow,
   type GenerationJob,
   type GenerationJobStore,
@@ -90,12 +91,76 @@ test("a failed provider gets two automatic retries and persists its failure stat
   });
   const job = workflow.create(request);
 
-  await expect(workflow.advance(job.id, job.revision)).rejects.toThrow("after three attempts");
+  await expect(workflow.advance(job.id, job.revision)).rejects.toThrow("stage attempt limit (3 attempts) reached");
   const failed = workflow.get(job.id);
   expect(attempts).toBe(3);
   expect(failed.status).toBe("failed");
   expect(failed.attempts.canon_and_voice).toBe(3);
   expect(failed.failure?.message).toBe("model unavailable");
+});
+
+test("generation enforces at most ten retries across all stages in one job", async () => {
+  const perStageCalls = new Map<string, number>();
+  let totalCalls = 0;
+  const workflow = new GenerationWorkflow(new MemoryJobStore(), async (stage) => {
+    totalCalls++;
+    const calls = (perStageCalls.get(stage) ?? 0) + 1;
+    perStageCalls.set(stage, calls);
+    const stageIndex = GENERATION_STAGES.findIndex((item) => item.id === stage);
+    if (stageIndex < 5 && calls === 3) return { artifact: { stage }, source: "test", model: "fixture", promptVersion: "test-v1" };
+    throw new Error("fixture failure");
+  });
+  let job = workflow.create(request);
+  for (let stage = 0; stage < 5; stage++) job = await workflow.advance(job.id, job.revision);
+
+  await expect(workflow.advance(job.id, job.revision)).rejects.toThrow("pipeline retry limit (" + MAX_PIPELINE_RETRIES + ") reached");
+  const failed = workflow.get(job.id);
+  expect(failed.totalRetries).toBe(MAX_PIPELINE_RETRIES);
+  expect(totalCalls).toBe(16);
+  expect(failed.attempts[GENERATION_STAGES[5].id]).toBe(1);
+  expect(failed.status).toBe("failed");
+});
+
+test("editing an earlier stage preserves the retry budget across workflow reload", async () => {
+  const repository = new StoryletRepository(":memory:");
+  try {
+    const store: GenerationJobStore = {
+      get: (id) => repository.getGenerationJob<GenerationJob>(id),
+      list: () => repository.listGenerationJobs<GenerationJob>(),
+      put: (job) => repository.saveGenerationJob(job),
+      delete: (id) => repository.deleteGenerationJob(id),
+    };
+    const perStageCalls = new Map<string, number>();
+    let totalCalls = 0;
+    const initial = new GenerationWorkflow(store, async (stage) => {
+      totalCalls++;
+      const calls = (perStageCalls.get(stage) ?? 0) + 1;
+      perStageCalls.set(stage, calls);
+      const stageIndex = GENERATION_STAGES.findIndex((item) => item.id === stage);
+      if (stageIndex < 5 && calls === 3) return { artifact: { stage }, source: "test", model: "fixture", promptVersion: "test-v1" };
+      throw new Error("fixture failure");
+    });
+    let job = initial.create(request);
+    for (let stage = 0; stage < 5; stage++) job = await initial.advance(job.id, job.revision);
+    expect(job.totalRetries).toBe(MAX_PIPELINE_RETRIES);
+
+    job = initial.editStage(job.id, "premise_options", { premise: "A changed premise" }, job.revision);
+    expect(job.totalRetries).toBe(MAX_PIPELINE_RETRIES);
+    expect(job.attempts.scene_plan).toBeUndefined();
+
+    const resumed = new GenerationWorkflow(store, async () => {
+      totalCalls++;
+      throw new Error("edited stage failure");
+    });
+    await expect(resumed.advance(job.id, job.revision)).rejects.toThrow("pipeline retry limit (" + MAX_PIPELINE_RETRIES + ") reached");
+    const failed = resumed.get(job.id);
+    expect(failed.totalRetries).toBe(MAX_PIPELINE_RETRIES);
+    expect(failed.attempts.scene_plan).toBe(1);
+    expect(totalCalls).toBe(16);
+    expect(failed.status).toBe("failed");
+  } finally {
+    repository.close();
+  }
 });
 
 test("saving a completed job as a draft is idempotent", async () => {
@@ -120,7 +185,7 @@ test("final review artifact becomes an unapproved, executable-shape storylet dra
       stage: "review_package", input: { request, previous: {} }, source: "test", model: "fixture",
       promptVersion: "test-v1", completedAt: 1,
       artifact: { storylet: { title: "The Ledger", sceneOpening: "A blue thread marks the page.", choices: [{ label: "Follow the thread", effects: { "clue.read": true } }] } },
-    }], attempts: {}, createdAt: 1, updatedAt: 1,
+    }], attempts: {}, totalRetries: 0, createdAt: 1, updatedAt: 1,
   };
   const result = new UnslopStoryletPipeline().storyletFromJob(job);
 
@@ -141,7 +206,7 @@ test("final review rejects choice effects outside the designer's declared outcom
       artifact: { storylet: { title: "The Ledger", sceneOpening: "A blue thread marks the page.", choices: [
         { label: "Invent a clue", effects: { "world.secret": true } },
       ] } },
-    }], attempts: {}, createdAt: 1, updatedAt: 1,
+    }], attempts: {}, totalRetries: 0, createdAt: 1, updatedAt: 1,
   };
 
   expect(() => new UnslopStoryletPipeline().storyletFromJob(job))
@@ -158,7 +223,7 @@ test("final review rejects choice values that differ from the designer's outcome
       artifact: { storylet: { title: "The Ledger", sceneOpening: "A blue thread marks the page.", choices: [
         { label: "Erase the clue", effects: { "clue.read": false } },
       ] } },
-    }], attempts: {}, createdAt: 1, updatedAt: 1,
+    }], attempts: {}, totalRetries: 0, createdAt: 1, updatedAt: 1,
   };
 
   expect(() => new UnslopStoryletPipeline().storyletFromJob(job))
@@ -175,7 +240,7 @@ test("style audit includes generated choice labels in its review text", () => {
       artifact: { storylet: { title: "Quietly, a Tapestry", sceneOpening: "A blue thread marks the page.", choices: [
         { label: "Follow the clue", effects: { "clue.read": true } },
       ] } },
-    }], attempts: {}, createdAt: 1, updatedAt: 1,
+    }], attempts: {}, totalRetries: 0, createdAt: 1, updatedAt: 1,
   };
 
   const result = new UnslopStoryletPipeline().storyletFromJob(job);

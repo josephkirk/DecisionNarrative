@@ -53,6 +53,8 @@ Project bundles are portable, versioned JSON. Use the studio's export/validate/i
 
 Generation is an authoring-time process. A designer provides the scene purpose, required roles, trigger conditions, and desired outcomes. The workflow develops alternatives, plans scene beats, drafts executable structure and prose, audits voice/continuity/choice clarity, and presents a review package. Outputs remain drafts until the designer approves both the storylet logic and its content. See the [storylet authoring guide](docs/guides/storylet-authoring.md) and the [system design](docs/design/storylet-studio.md) for the complete workflow and contracts.
 
+OMP agents can use the `storylet-content-deck` skill to divide large storylet requests into disjoint families and use the `narrative_platform` tool registered by `.mcp.json` for workspace inspection, staged generation, revision-checked approval, and Rust playtests. The MCP server is loopback-only and the studio must already be running; bundle replacement requires explicit confirmation. Generation jobs allow at most 10 retries across the full job. Generated Strata ranking examples are marked synthetic and training-only; they are not evaluation labels.
+
 The social model is setting-neutral. Its reusable principles—actor motives, obligations, directional relationships, witness-scoped knowledge, institutional access, resilient narrative routes, and causal event history—are described in the [social simulation design](docs/design/social-simulation.md).
 
 ## Optional semantic ranking

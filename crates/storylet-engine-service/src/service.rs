@@ -1,732 +1,1017 @@
-//! Loopback HTTP service and durable session storage for the storylet runtime.
+//! Application service coordinator for Storylet Studio.
 
-use std::{convert::Infallible, error::Error, fmt};
-use std::{path::Path, sync::Arc};
-
-use axum::{
-    Json, Router,
-    extract::{Path as RoutePath, Query, State},
-    http::StatusCode,
-    response::{
-        IntoResponse, Response,
-        sse::{Event, KeepAlive, Sse},
-    },
-    routing::{get, post},
-};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use serde::Deserialize;
-use serde_json::{Value, json};
-use tokio::sync::{Mutex, broadcast};
-use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use rusqlite::{OptionalExtension, TransactionBehavior};
+use serde::Serialize;
+use serde_json::{json, Value};
+use tokio::sync::{broadcast, Mutex};
 
 use storylet_engine::{
-    EngineError, ProjectBundle, RuntimeError, RuntimeSessionState, SemanticRankingRequest,
-    StoryletRuntime, WorldCommand, WorldEvent,
+    ProjectBundle, RuntimeSessionState, StoryletRuntime, WorldCommand, WorldEvent,
 };
 
-#[derive(Clone)]
-pub struct RuntimeService {
-    state: Arc<Mutex<ServiceState>>,
-    updates: broadcast::Sender<SessionChange>,
-}
+use crate::contracts::{
+    AuthoringOptions, GenerationJobRecord, LibraryPageResult,
+    LibraryQuery, ProjectBundleContent, ProjectBundleV2, ProjectMetadata, ScenarioRecord,
+    StoryletRecord,
+};
+use crate::generation::resources::StoryCraftResourceReference;
+use crate::generation::resources::CraftRegistry;
+use crate::generation::workflow::{get_stage_descriptors, GenerationService, GENERATION_STAGES};
+use crate::projection::project_workspace;
+use crate::scenario::resolve_scenario_start;
+use crate::store::Store;
 
 #[derive(Clone)]
-struct SessionChange {
-    session_id: String,
-    revision: u64,
-    snapshot: Value,
+pub struct StudioService {
+    inner: Arc<Mutex<StudioInner>>,
+    pub generation: Arc<GenerationService>,
+    pub updates: broadcast::Sender<SessionChange>,
+    pub embedding_url: String,
+    pub resource_root: PathBuf,
 }
 
-struct ServiceState {
+struct StudioInner {
+    store: Store,
     runtime: StoryletRuntime,
-    connection: Connection,
 }
 
-impl RuntimeService {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, ServiceError> {
-        let connection = Connection::open(path).map_err(ServiceError::database)?;
-        Self::from_connection(connection)
+#[derive(Clone, Debug, Serialize)]
+pub struct SessionChange {
+    pub session_id: String,
+    pub revision: u64,
+    pub snapshot: Value,
+}
+
+impl StudioService {
+    pub fn open(
+        db_path: impl AsRef<Path>,
+        resource_root: impl Into<PathBuf>,
+        strata_url: impl Into<String>,
+        strata_model: impl Into<String>,
+        embedding_url: impl Into<String>,
+    ) -> Result<Self, String> {
+        let store = Store::open(db_path).map_err(|e| e.to_string())?;
+        Self::build(store, resource_root, strata_url, strata_model, embedding_url)
     }
 
-    pub fn open_in_memory() -> Result<Self, ServiceError> {
-        let connection = Connection::open_in_memory().map_err(ServiceError::database)?;
-        Self::from_connection(connection)
+    pub fn open_in_memory(
+        resource_root: impl Into<PathBuf>,
+        strata_url: impl Into<String>,
+        strata_model: impl Into<String>,
+        embedding_url: impl Into<String>,
+    ) -> Result<Self, String> {
+        let store = Store::open_in_memory().map_err(|e| e.to_string())?;
+        Self::build(store, resource_root, strata_url, strata_model, embedding_url)
     }
 
-    pub fn from_connection(connection: Connection) -> Result<Self, ServiceError> {
-        initialize_schema(&connection)?;
+    pub fn from_connection(
+        conn: rusqlite::Connection,
+    ) -> Result<Self, String> {
+        let store = Store::from_connection(conn).map_err(|e| e.to_string())?;
+        Self::build(store, ".", "http://127.0.0.1:8080/v1", "strata-uncensored", "http://127.0.0.1:4318")
+    }
+
+    fn build(
+        store: Store,
+        resource_root: impl Into<PathBuf>,
+        strata_url: impl Into<String>,
+        strata_model: impl Into<String>,
+        embedding_url: impl Into<String>,
+    ) -> Result<Self, String> {
         let mut runtime = StoryletRuntime::default();
-        let mut statement = connection
+
+        let mut stmt = store.conn
             .prepare("SELECT state_json FROM runtime_sessions ORDER BY session_id")
-            .map_err(ServiceError::database)?;
-        let states = statement
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))
-            .map_err(ServiceError::database)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(ServiceError::database)?;
-        drop(statement);
-        for encoded in states {
-            let state: RuntimeSessionState = serde_json::from_str(&encoded).map_err(|error| {
-                ServiceError::startup(format!("saved session JSON is invalid: {error}"))
-            })?;
-            validate_event_history(&connection, &state)?;
-            runtime.restore_session(state).map_err(|error| {
-                ServiceError::startup(format!("saved session cannot be restored: {error}"))
-            })?;
+            .map_err(|e| e.to_string())?;
+
+        for enc_res in rows {
+            let enc = enc_res.map_err(|e| e.to_string())?;
+            let state: RuntimeSessionState = serde_json::from_str(&enc)
+                .map_err(|e| format!("saved session JSON is invalid: {e}"))?;
+
+            validate_event_history(&store.conn, &state)?;
+            runtime.restore_session(state).map_err(|e| format!("saved session cannot be restored: {e}"))?;
         }
+        drop(stmt);
+
+        // Recover any interrupted running generation jobs to ready
+        let _ = store.conn.execute(
+            "UPDATE generation_jobs SET status = 'ready', revision = revision + 1, updated_at = ?1 WHERE status = 'running'",
+            rusqlite::params![chrono_now_ms()],
+        );
+
         let (updates, _) = broadcast::channel(256);
-        let service = Self {
-            state: Arc::new(Mutex::new(ServiceState {
-                runtime,
-                connection,
-            })),
+        let res_root = resource_root.into();
+        let gen_service = GenerationService::new(res_root.clone(), strata_url, strata_model);
+
+        Ok(Self {
+            inner: Arc::new(Mutex::new(StudioInner { store, runtime })),
+            generation: Arc::new(gen_service),
             updates,
-        };
-        Ok(service)
+            embedding_url: embedding_url.into(),
+            resource_root: res_root,
+        })
     }
 
-    fn notify_session(&self, runtime: &StoryletRuntime, session_id: &str) {
-        if let Ok(snapshot) = runtime.snapshot(session_id) {
-            let _ = self.updates.send(SessionChange {
-                session_id: session_id.to_owned(),
-                revision: snapshot.world.revision,
-                snapshot: json!({ "sessionId": session_id, "snapshot": snapshot }),
-            });
+    // --- Project Settings & Bundles ---
+
+    pub async fn get_project_metadata(&self) -> Result<ProjectMetadata, String> {
+        let inner = self.inner.lock().await;
+        inner.store.get_project_metadata().map_err(|e| e.to_string())
+    }
+
+    pub async fn update_project_name(&self, name: &str) -> Result<ProjectMetadata, String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err("Project name cannot be empty".into());
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct ServiceError {
-    status: StatusCode,
-    message: String,
-}
-
-impl ServiceError {
-    fn new(status: StatusCode, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            message: message.into(),
-        }
+        let inner = self.inner.lock().await;
+        let mut meta = inner.store.get_project_metadata().map_err(|e| e.to_string())?;
+        meta.name = trimmed.to_string();
+        meta.revision += 1;
+        inner.store.save_project_metadata(&meta).map_err(|e| e.to_string())?;
+        Ok(meta)
     }
 
-    fn database(error: rusqlite::Error) -> Self {
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+    pub async fn export_playtest_session(&self, session_id: &str) -> Result<RuntimeSessionState, String> {
+        let inner = self.inner.lock().await;
+        inner.runtime.export_session(session_id).map_err(|e| e.to_string())
     }
 
-    fn startup(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
+    pub async fn restore_playtest_session(&self, state: RuntimeSessionState) -> Result<Value, String> {
+        let mut inner = self.inner.lock().await;
+        let session_id = state.session_id.clone();
+        let snapshot = inner.runtime.restore_session(state).map_err(|e| e.to_string())?;
+        persist_session_to_store(&mut inner, &session_id)?;
+
+        let snap_val = serde_json::to_value(&snapshot).map_err(|e| e.to_string())?;
+        let _ = self.updates.send(SessionChange {
+            session_id: session_id.clone(),
+            revision: snapshot.world.revision,
+            snapshot: json!({ "sessionId": session_id, "snapshot": snapshot }),
+        });
+
+        Ok(json!({ "snapshot": snap_val }))
     }
 
-    fn runtime(error: RuntimeError) -> Self {
-        let status = match error {
-            RuntimeError::SessionNotFound { .. } => StatusCode::NOT_FOUND,
-            RuntimeError::SessionAlreadyExists { .. } => StatusCode::CONFLICT,
-            RuntimeError::Engine(EngineError::RevisionConflict { .. })
-            | RuntimeError::Engine(EngineError::IdempotencyKeyReuse) => StatusCode::CONFLICT,
-            RuntimeError::InvalidProject(_)
-            | RuntimeError::UnknownLocation { .. }
-            | RuntimeError::UnknownQuality { .. }
-            | RuntimeError::Engine(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            RuntimeError::EmptySessionId | RuntimeError::InvalidSessionState(_) => {
-                StatusCode::BAD_REQUEST
+    pub async fn apply_semantic_rank(
+        &self,
+        session_id: &str,
+        slope: f64,
+        req: storylet_engine::SemanticRankingRequest,
+    ) -> Result<Value, String> {
+        let inner = self.inner.lock().await;
+        let res = inner.runtime.rank_semantic(session_id, slope, req).map_err(|e| e.to_string())?;
+        serde_json::to_value(res).map_err(|e| e.to_string())
+    }
+
+    pub async fn export_project_bundle(&self) -> Result<ProjectBundleV2, String> {
+        let inner = self.inner.lock().await;
+        let project = inner.store.get_project_metadata().map_err(|e| e.to_string())?;
+
+        let qualities = inner.store.list_qualities().map_err(|e| e.to_string())?;
+        let locations = inner.store.list_locations().map_err(|e| e.to_string())?;
+        let characters = inner.store.list_characters().map_err(|e| e.to_string())?;
+        let storylets = inner.store.list_storylets().map_err(|e| e.to_string())?;
+        let npc_behaviors = inner.store.list_npc_behaviors().map_err(|e| e.to_string())?;
+        let events = inner.store.list_events().map_err(|e| e.to_string())?;
+        let scenarios = inner.store.list_scenarios().map_err(|e| e.to_string())?;
+        let generation_jobs = inner.store.list_generation_jobs().map_err(|e| e.to_string())?;
+
+        Ok(ProjectBundleV2 {
+            format: "decision-narrative-project".into(),
+            schema_version: 2,
+            project,
+            content: ProjectBundleContent {
+                qualities,
+                locations,
+                characters,
+                storylets,
+                npc_behaviors,
+                events,
+                scenarios,
+                generation_jobs,
+            },
+        })
+    }
+
+    pub async fn validate_bundle(&self, bundle_val: &Value) -> Result<Vec<String>, String> {
+        let mut issues = Vec::new();
+
+        let bundle: ProjectBundleV2 = match serde_json::from_value(bundle_val.clone()) {
+            Ok(b) => b,
+            Err(e) => {
+                issues.push(format!("Bundle does not match schema version 2: {e}"));
+                return Ok(issues);
             }
         };
-        Self::new(status, error.to_string())
-    }
-}
 
-impl fmt::Display for ServiceError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
+        if bundle.format != "decision-narrative-project" {
+            issues.push(format!("Unsupported format '{}'", bundle.format));
+        }
+        if bundle.schema_version != 2 {
+            issues.push(format!("Unsupported schema_version {}; expected 2", bundle.schema_version));
+        }
 
-impl Error for ServiceError {}
-
-impl IntoResponse for ServiceError {
-    fn into_response(self) -> Response {
-        (self.status, Json(json!({ "error": self.message }))).into_response()
-    }
-}
-
-fn initialize_schema(connection: &Connection) -> Result<(), ServiceError> {
-    connection
-        .execute_batch(
-            "PRAGMA foreign_keys = ON;
-         CREATE TABLE IF NOT EXISTS runtime_sessions (
-             session_id TEXT PRIMARY KEY,
-             project_id TEXT NOT NULL,
-             revision TEXT NOT NULL,
-             turn TEXT NOT NULL,
-             state_json TEXT NOT NULL,
-             updated_at TEXT NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS runtime_events (
-             session_id TEXT NOT NULL,
-             event_id TEXT NOT NULL,
-             revision TEXT NOT NULL,
-             event_json TEXT NOT NULL,
-             PRIMARY KEY (session_id, event_id)
-         );",
-        )
-        .map_err(ServiceError::database)
-}
-
-fn validate_event_history(
-    connection: &Connection,
-    saved: &RuntimeSessionState,
-) -> Result<(), ServiceError> {
-    let mut statement = connection
-        .prepare("SELECT event_json FROM runtime_events WHERE session_id = ?1 ORDER BY rowid")
-        .map_err(ServiceError::database)?;
-    let rows = statement
-        .query_map([&saved.session_id], |row| row.get::<_, String>(0))
-        .map_err(ServiceError::database)?;
-    let mut events = Vec::new();
-    for row in rows {
-        let encoded = row.map_err(ServiceError::database)?;
-        events.push(
-            serde_json::from_str::<WorldEvent>(&encoded).map_err(|error| {
-                ServiceError::startup(format!("saved event JSON is invalid: {error}"))
-            })?,
+        // Validate content through projection
+        let res = project_workspace(
+            &bundle.project.id,
+            &bundle.project.name,
+            bundle.project.revision,
+            &bundle.content.qualities,
+            &bundle.content.locations,
+            &bundle.content.characters,
+            &bundle.content.storylets,
+            &bundle.content.npc_behaviors,
+            &bundle.content.events,
+            bundle.content.scenarios.first(),
         );
+
+        issues.extend(res.issues);
+        Ok(issues)
     }
-    if events != saved.world.events {
-        return Err(ServiceError::startup(format!(
-            "saved session '{}' event journal does not match its snapshot",
-            saved.session_id
-        )));
+
+    pub async fn import_bundle(&self, bundle_val: &Value) -> Result<(), String> {
+        let bundle: ProjectBundleV2 = serde_json::from_value(bundle_val.clone())
+            .map_err(|e| format!("Invalid bundle JSON: {e}"))?;
+
+        let mut inner = self.inner.lock().await;
+        inner.store
+            .replace_project_content(&bundle.project, &bundle.content)
+            .map_err(|e| e.to_string())
     }
-    Ok(())
+
+    // --- Content CRUD ---
+
+    pub async fn list_content(&self, entity: &str) -> Result<Value, String> {
+        let inner = self.inner.lock().await;
+        let list = inner.store.list_content_json(entity).map_err(|e| e.to_string())?;
+        let items: Vec<Value> = list.into_iter().filter_map(|s| serde_json::from_str(&s).ok()).collect();
+        Ok(Value::Array(items))
+    }
+
+    pub async fn get_content_item(&self, entity: &str, id: &str) -> Result<Value, String> {
+        let inner = self.inner.lock().await;
+        let opt = inner.store.get_content_json(entity, id).map_err(|e| e.to_string())?;
+        opt.and_then(|s| serde_json::from_str(&s).ok())
+            .ok_or_else(|| format!("{entity} item '{id}' not found"))
+    }
+
+    pub async fn save_content_item(&self, entity: &str, payload: &Value) -> Result<Value, String> {
+        let id = match entity {
+            "qualities" => payload.get("name").and_then(|v| v.as_str()).ok_or("Quality must have a 'name' field")?,
+            _ => payload.get("id").and_then(|v| v.as_str()).ok_or("Item must have an 'id' field")?,
+        };
+
+        let inner = self.inner.lock().await;
+        let mut final_payload = payload.clone();
+        let (revision, approved_rev) = if entity == "storylets" {
+            let existing_opt = inner.store.get_storylet(id).map_err(|e| e.to_string())?;
+            let next_rev = match existing_opt {
+                Some(prev) => prev.revision + 1,
+                None => payload.get("revision").and_then(|v| v.as_u64()).unwrap_or(1),
+            };
+            if let Some(obj) = final_payload.as_object_mut() {
+                obj.insert("revision".into(), Value::from(next_rev));
+                obj.insert("approved_revision".into(), Value::Null);
+            }
+            (next_rev, None)
+        } else {
+            let rev = payload.get("revision").and_then(|v| v.as_u64()).unwrap_or(1);
+            let app_rev = payload.get("approved_revision").and_then(|v| v.as_u64());
+            (rev, app_rev)
+        };
+
+        let json_str = serde_json::to_string(&final_payload).map_err(|e| e.to_string())?;
+        inner.store.save_content(entity, id, &json_str, revision, approved_rev).map_err(|e| e.to_string())?;
+        Ok(final_payload)
+    }
+
+    pub async fn delete_content_item(&self, entity: &str, id: &str) -> Result<bool, String> {
+        let inner = self.inner.lock().await;
+        inner.store.delete_content(entity, id).map_err(|e| e.to_string())
+    }
+
+    pub async fn approve_storylet(&self, id: &str, expected_revision: u64) -> Result<StoryletRecord, String> {
+        let inner = self.inner.lock().await;
+        inner.store.approve_storylet(id, expected_revision)?
+            .ok_or_else(|| format!("Storylet '{id}' not found"))
+    }
+
+    pub async fn query_library(&self, query: &LibraryQuery) -> Result<LibraryPageResult, String> {
+        let inner = self.inner.lock().await;
+        inner.store.query_library(query).map_err(|e| e.to_string())
+    }
+
+    pub async fn preview_scenario(&self, scenario_val: &Value) -> Result<Value, String> {
+        let scenario: ScenarioRecord = serde_json::from_value(scenario_val.clone())
+            .map_err(|e| format!("Invalid scenario format: {e}"))?;
+
+        let inner = self.inner.lock().await;
+        let qualities = inner.store.list_qualities().map_err(|e| e.to_string())?;
+        let locations = inner.store.list_locations().map_err(|e| e.to_string())?;
+        let characters = inner.store.list_characters().map_err(|e| e.to_string())?;
+
+        let resolved = resolve_scenario_start(&scenario, &qualities, &locations, &characters);
+        serde_json::to_value(&resolved).map_err(|e| e.to_string())
+    }
+
+    pub async fn get_authoring_options(&self) -> AuthoringOptions {
+        AuthoringOptions {
+            quality_types: vec!["currency".into(), "metric".into(), "tool".into(), "territory".into(), "menace".into()],
+            repeatability_modes: vec!["always".into(), "once_ever".into(), "cooldown".into(), "persistent".into()],
+            cluster_types: vec!["player_controlled_passage".into(), "linear".into(), "wheel".into(), "aftermath".into()],
+            policy_modes: vec!["fixed".into(), "random".into(), "by_attribute".into()],
+            event_types: vec!["canon".into(), "world".into()],
+            stages: get_stage_descriptors(),
+        }
+    }
+
+    // --- Craft Resources & Generation ---
+
+    pub async fn list_craft_resources(&self) -> Result<Vec<StoryCraftResourceReference>, String> {
+        let registry = CraftRegistry::new(&self.resource_root);
+        registry.catalog()
+    }
+
+    pub async fn list_generation_jobs(&self) -> Result<Value, String> {
+        let inner = self.inner.lock().await;
+        let list = inner.store.list_generation_jobs().map_err(|e| e.to_string())?;
+        serde_json::to_value(list).map_err(|e| e.to_string())
+    }
+
+    pub async fn get_generation_job(&self, id: &str) -> Result<Value, String> {
+        let inner = self.inner.lock().await;
+        let job = inner.store.get_generation_job(id).map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Generation job '{id}' not found"))?;
+        serde_json::to_value(job).map_err(|e| e.to_string())
+    }
+
+    pub async fn create_generation_job(&self, request: Value) -> Result<GenerationJobRecord, String> {
+        let now = chrono_now_ms();
+        let job = GenerationJobRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            revision: 0,
+            status: "ready".into(),
+            next_stage_index: 0,
+            request,
+            stages: Vec::new(),
+            attempts: BTreeMap::new(),
+            total_retries: 0,
+            draft_storylet_id: None,
+            draft_revision: None,
+            failure: None,
+            created_at: now,
+            updated_at: now,
+        };
+        {
+            let inner = self.inner.lock().await;
+            inner.store.save_generation_job(&job).map_err(|e| e.to_string())?;
+        }
+        self.generation.notify_job_update(&job);
+        Ok(job)
+    }
+
+    pub async fn advance_generation_job(&self, id: &str, expected_revision: u64) -> Result<GenerationJobRecord, String> {
+        let (mut job, stage_id) = {
+            let inner = self.inner.lock().await;
+            let mut j = inner.store.get_generation_job(id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("Generation job '{id}' not found"))?;
+
+            if j.revision != expected_revision {
+                return Err(format!("Revision conflict: job revision is {}, expected {}", j.revision, expected_revision));
+            }
+            if j.status == "complete" {
+                return Err("This generation job is already complete.".into());
+            }
+            if j.status == "running" {
+                return Err("A generation stage is already running.".into());
+            }
+            if j.status == "failed" {
+                return Err("This job reached its retry limit. Edit an earlier stage to resume it.".into());
+            }
+            if j.next_stage_index >= GENERATION_STAGES.len() {
+                return Err("No generation stages remain.".into());
+            }
+
+            let (s_id, _) = GENERATION_STAGES[j.next_stage_index];
+            let attempts = j.attempts.get(s_id).copied().unwrap_or(0) + 1;
+            if attempts > 3 || j.total_retries >= 10 {
+                j.status = "failed".into();
+                j.failure = Some(json!({ "stage": s_id, "message": "Attempt limit reached" }));
+                j.revision += 1;
+                j.updated_at = chrono_now_ms();
+                inner.store.save_generation_job(&j).map_err(|e| e.to_string())?;
+                return Err(format!("Stage '{s_id}' reached attempt limit"));
+            }
+
+            j.attempts.insert(s_id.to_string(), attempts);
+            if attempts > 1 { j.total_retries += 1; }
+            j.status = "running".into();
+            j.failure = None;
+            j.revision += 1;
+            j.updated_at = chrono_now_ms();
+            inner.store.save_generation_job(&j).map_err(|e| e.to_string())?;
+            (j, s_id)
+        };
+
+        self.generation.notify_job_update(&job);
+
+        let stage_res = self.generation.execute_stage(stage_id, &job.request, &job.stages).await;
+        let inner = self.inner.lock().await;
+        match stage_res {
+            Ok(rec) => {
+                job.stages.push(rec);
+                job.next_stage_index += 1;
+                job.status = if job.next_stage_index >= GENERATION_STAGES.len() { "complete".into() } else { "ready".into() };
+                job.revision += 1;
+                job.updated_at = chrono_now_ms();
+                inner.store.save_generation_job(&job).map_err(|e| e.to_string())?;
+                self.generation.notify_job_update(&job);
+                Ok(job)
+            }
+            Err(err) => {
+                job.status = "failed".into();
+                job.failure = Some(json!({ "stage": stage_id, "message": err.clone() }));
+                job.revision += 1;
+                job.updated_at = chrono_now_ms();
+                inner.store.save_generation_job(&job).map_err(|e| e.to_string())?;
+                self.generation.notify_job_update(&job);
+                Err(err)
+            }
+        }
+    }
+
+    pub async fn edit_generation_stage(&self, id: &str, stage: &str, expected_revision: u64, artifact: Value) -> Result<GenerationJobRecord, String> {
+        let inner = self.inner.lock().await;
+        let job = self.generation.edit_stage(&inner.store, id, stage, expected_revision, artifact)?;
+        Ok(job)
+    }
+
+    pub async fn save_generation_draft(&self, id: &str) -> Result<StoryletRecord, String> {
+        let inner = self.inner.lock().await;
+        self.generation.save_job_draft(&inner.store, id)
+    }
+
+    pub async fn delete_generation_job(&self, id: &str) -> Result<bool, String> {
+        let inner = self.inner.lock().await;
+        inner.store.delete_generation_job(id).map_err(|e| e.to_string())
+    }
+
+    pub async fn generate_storylet_batch(
+        &self,
+        family: &str,
+        count: usize,
+        batch_index: u64,
+        brief: &str,
+    ) -> Result<Value, String> {
+        let count = count.clamp(1, 24);
+        let endpoint = format!("{}/chat/completions", self.generation.strata_url.trim_end_matches('/'));
+        let prompt = format!(
+            "Create exactly {} diverse storylet candidates for scenario family {}.\n\
+             Each candidate must match the StoryletRecord shape:\n\
+             {{\"storylets\":[{{\"title\":string,\"location\"?:string,\"group_tag\"?:string,\"cluster_type\":\"linear\"|\"player_controlled_passage\"|\"wheel\"|\"aftermath\",\"urgency_weight\":number,\"repeatability\":\"once_ever\"|\"always\"|\"cooldown\"|\"persistent\",\"cooldown_turns\":number,\"parameters\":[{{\"param_name\":string,\"query\":string}}],\"preconditions\":{{\"all_of\"?:[{{\"variable\":string,\"op\":string,\"value\":any}}]}},\"content\":{{\"text_template\":string,\"sceneOpening\"?:string}},\"choices\":[{{\"choice_id\":string,\"label\":string,\"systemVerb\"?:string,\"effects\":object,\"divert_target\"?:string}}],\"effects\":object}}]}}\n\
+             Project brief: {}\n\
+             Include ending as a required boolean; set true only for the designated terminal storylet. Do not include id, revision, approved_revision, or created_at; the server assigns these deterministically.\n\
+             Return only JSON with the top-level 'storylets' key.",
+            count, family, brief
+        );
+
+        let body = json!({
+            "model": self.generation.strata_model,
+            "temperature": 0.7,
+            "max_tokens": (750 * count).min(12000),
+            "messages": [
+                { "role": "system", "content": "You are a specialized narrative designer generating storylet content candidates. Return only valid JSON." },
+                { "role": "user", "content": prompt }
+            ]
+        });
+
+        let resp = self.generation.http_client.post(&endpoint)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Strata request failed: {e}"))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Strata returned HTTP status {}", resp.status()));
+        }
+
+        let resp_data: Value = resp.json().await.map_err(|e| format!("Failed to parse Strata JSON: {e}"))?;
+        let text = resp_data.get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|m| m.get("message"))
+            .and_then(|msg| msg.get("content"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let parsed: Value = extract_json_from_strata(text)?;
+        let rows = parsed.get("storylets")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| "Strata output must contain a 'storylets' array".to_string())?;
+
+        if rows.len() != count {
+            return Err(format!("Expected exactly {count} storylets from Strata, but received {}", rows.len()));
+        }
+
+        let now = chrono_now_ms();
+        let mut results = Vec::new();
+
+        for (idx, row) in rows.iter().enumerate() {
+            let title = row.get("title").and_then(|t| t.as_str()).unwrap_or("Generated Scene");
+            let ending = row.get("ending").and_then(|e| e.as_bool()).unwrap_or(false);
+            let location = row.get("location").and_then(|l| l.as_str()).map(|s| s.to_string());
+            let group_tag = row.get("group_tag").and_then(|g| g.as_str()).map(|s| s.to_string());
+            let cluster_type = row.get("cluster_type").and_then(|c| c.as_str()).unwrap_or("player_controlled_passage");
+            let urgency = row.get("urgency_weight").and_then(|u| u.as_f64()).unwrap_or(50.0);
+            let repeatability = row.get("repeatability").and_then(|r| r.as_str()).unwrap_or("always");
+            let cooldown = row.get("cooldown_turns").and_then(|c| c.as_u64()).unwrap_or(0);
+            let content_obj = row.get("content").cloned().unwrap_or(json!({ "text_template": "" }));
+            let preconditions = row.get("preconditions").cloned().unwrap_or(json!({}));
+            let choices = row.get("choices").cloned().unwrap_or(json!([]));
+            let effects = row.get("effects").cloned().unwrap_or(json!({}));
+            let parameters = row.get("parameters").cloned().unwrap_or(json!([]));
+
+            let id = format!("stl_{family}_{batch_index:03}_{:04}", idx + 1);
+
+            results.push(json!({
+                "id": id,
+                "revision": 1,
+                "approved_revision": Value::Null,
+                "title": title,
+                "ending": ending,
+                "location": location,
+                "group_tag": group_tag,
+                "cluster_type": cluster_type,
+                "urgency_weight": urgency,
+                "repeatability": repeatability,
+                "cooldown_turns": cooldown,
+                "parameters": parameters,
+                "preconditions": preconditions,
+                "content": content_obj,
+                "choices": choices,
+                "effects": effects,
+                "created_at": now,
+            }));
+        }
+
+        Ok(Value::Array(results))
+    }
+
+    pub async fn generate_ranking_batch(
+        &self,
+        family: &str,
+        count: usize,
+        batch_index: u64,
+        brief: &str,
+    ) -> Result<Value, String> {
+        let count = count.clamp(1, 24);
+        let endpoint = format!("{}/chat/completions", self.generation.strata_url.trim_end_matches('/'));
+        let prompt = format!(
+            "Generate exactly {} synthetic storylet ranking training pairs for scenario family {}.\n\
+             Each row must match model/ranking-example.schema.json with 9 bounded features [0.0 - 1.0]:\n\
+             semantic_relevance, urgency, pacing_arc_alignment, novelty, waiting_time, goal_progress, role_binding_quality, predicted_consequence_alignment, no_action.\n\
+             Brief: {}\n\
+             Return only JSON with top-level 'examples' array.",
+            count, family, brief
+        );
+
+        let body = json!({
+            "model": self.generation.strata_model,
+            "temperature": 0.7,
+            "max_tokens": (600 * count).min(10000),
+            "messages": [
+                { "role": "system", "content": "You are a training-data generator for storylet ranking heads. Return only valid JSON with 'examples' array." },
+                { "role": "user", "content": prompt }
+            ]
+        });
+
+        let resp = self.generation.http_client.post(&endpoint)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Strata request failed: {e}"))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Strata returned HTTP status {}", resp.status()));
+        }
+
+        let resp_data: Value = resp.json().await.map_err(|e| format!("Failed to parse Strata JSON: {e}"))?;
+        let text = resp_data.get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|m| m.get("message"))
+            .and_then(|msg| msg.get("content"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let parsed: Value = extract_json_from_strata(text)?;
+        let rows = parsed.get("examples")
+            .or_else(|| parsed.as_array().map(|_| &parsed))
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| "Strata output must contain an 'examples' array".to_string())?;
+
+        if rows.len() != count {
+            return Err(format!("Expected exactly {count} ranking examples from Strata, but received {}", rows.len()));
+        }
+
+        let mut results = Vec::new();
+        for (idx, row) in rows.iter().enumerate() {
+            let id = format!("rnk_{family}_{batch_index:03}_{:04}", idx + 1);
+            let mut item = row.clone();
+            if let Some(obj) = item.as_object_mut() {
+                obj.insert("example_id".into(), Value::String(id));
+                obj.insert("split".into(), Value::String("train".into()));
+                obj.insert("label_source".into(), Value::String("strata_synthetic".into()));
+            }
+            results.push(item);
+        }
+
+        Ok(Value::Array(results))
+    }
+
+    // --- Playtests & Runtime Engine Integration ---
+
+    pub async fn create_playtest_session(
+        &self,
+        session_id: &str,
+        project: ProjectBundle,
+        scenario_id: &str,
+    ) -> Result<Value, String> {
+        let mut inner = self.inner.lock().await;
+        ensure_session_id_has_no_archive(&inner.store.conn, session_id)?;
+
+        let snapshot = inner.runtime
+            .create_session(session_id.to_string(), project, scenario_id)
+            .map_err(|e| e.to_string())?;
+
+        persist_session_to_store(&mut inner, session_id)?;
+
+        let snap_val = serde_json::to_value(&snapshot).map_err(|e| e.to_string())?;
+        let change = SessionChange {
+            session_id: session_id.to_string(),
+            revision: snapshot.world.revision,
+            snapshot: json!({ "sessionId": session_id, "snapshot": snapshot }),
+        };
+        let _ = self.updates.send(change);
+
+        Ok(json!({ "sessionId": session_id, "snapshot": snap_val }))
+    }
+
+    pub async fn create_playtest_from_workspace(
+        &self,
+        start_location_override: Option<&str>,
+        scenario_id: Option<&str>,
+    ) -> Result<Value, String> {
+        let mut inner = self.inner.lock().await;
+
+        let meta = inner.store.get_project_metadata().map_err(|e| e.to_string())?;
+        let qualities = inner.store.list_qualities().map_err(|e| e.to_string())?;
+        let locations = inner.store.list_locations().map_err(|e| e.to_string())?;
+        let characters = inner.store.list_characters().map_err(|e| e.to_string())?;
+        let storylets = inner.store.list_storylets().map_err(|e| e.to_string())?;
+        let npc_behaviors = inner.store.list_npc_behaviors().map_err(|e| e.to_string())?;
+        let events = inner.store.list_events().map_err(|e| e.to_string())?;
+
+        let mut scenario_rec: Option<ScenarioRecord> = None;
+        if let Some(s_id) = scenario_id {
+            if let Some(json_s) = inner.store.get_content_json("scenarios", s_id).map_err(|e| e.to_string())? {
+                scenario_rec = serde_json::from_str(&json_s).ok();
+            }
+        }
+
+        // Apply start location override if provided
+        if let Some(loc_id) = start_location_override {
+            if let Some(ref mut scen) = scenario_rec {
+                scen.start_location_policy.mode = "fixed".into();
+                scen.start_location_policy.location_id = Some(loc_id.to_string());
+            }
+        }
+
+        let proj = project_workspace(
+            &meta.id,
+            &meta.name,
+            meta.revision,
+            &qualities,
+            &locations,
+            &characters,
+            &storylets,
+            &npc_behaviors,
+            &events,
+            scenario_rec.as_ref(),
+        );
+
+        if !proj.issues.is_empty() {
+            return Err(format!("Workspace has issues before starting playtest: {}", proj.issues.join("; ")));
+        }
+
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let snapshot = inner.runtime
+            .create_session(session_id.clone(), proj.bundle, &proj.scenario_id)
+            .map_err(|e| e.to_string())?;
+
+        // Persist session to Store
+        persist_session_to_store(&mut inner, &session_id)?;
+
+        let snap_val = serde_json::to_value(&snapshot).map_err(|e| e.to_string())?;
+        let change = SessionChange {
+            session_id: session_id.clone(),
+            revision: snapshot.world.revision,
+            snapshot: json!({ "sessionId": session_id, "snapshot": snapshot }),
+        };
+        let _ = self.updates.send(change);
+
+        Ok(json!({ "sessionId": session_id, "snapshot": snap_val }))
+    }
+
+    pub async fn list_playtest_sessions(&self) -> Result<Value, String> {
+        let inner = self.inner.lock().await;
+        let mut stmt = inner.store.conn.prepare(
+            "SELECT session_id, project_id, revision, turn, state_json FROM runtime_sessions ORDER BY updated_at DESC",
+        ).map_err(|e| e.to_string())?;
+
+        let rows = stmt.query_map([], |row| {
+            let enc: String = row.get(4)?;
+            let state: Option<RuntimeSessionState> = serde_json::from_str(&enc).ok();
+            let curr_loc = state.as_ref().and_then(|s| s.world.current_location.clone());
+            let ev_count = state.as_ref().map(|s| s.world.events.len()).unwrap_or(0);
+
+            let scen_id = state.as_ref().map(|s| s.scenario_id.clone()).unwrap_or_default();
+            Ok(json!({
+                "session_id": row.get::<_, String>(0)?,
+                "project_id": row.get::<_, String>(1)?,
+                "scenario_id": scen_id,
+                "revision": row.get::<_, String>(2)?.parse::<u64>().unwrap_or(0),
+                "turn": row.get::<_, String>(3)?.parse::<u64>().unwrap_or(0),
+                "current_location": curr_loc,
+                "event_count": ev_count,
+            }))
+        }).map_err(|e| e.to_string())?;
+
+        let items: Vec<Value> = rows.filter_map(|r| r.ok()).collect();
+        Ok(Value::Array(items))
+    }
+
+    pub async fn get_playtest_snapshot(&self, session_id: &str) -> Result<Value, String> {
+        let inner = self.inner.lock().await;
+        let snap = inner.runtime.snapshot(session_id).map_err(|e| e.to_string())?;
+        serde_json::to_value(snap).map_err(|e| e.to_string())
+    }
+
+    pub async fn apply_director_decision(
+        &self,
+        session_id: &str,
+        slope: f64,
+        decision: storylet_engine::DecisionResult,
+    ) -> Result<Value, String> {
+        let inner = self.inner.lock().await;
+        let res = inner.runtime.apply_decision(session_id, slope, decision).map_err(|e| e.to_string())?;
+        serde_json::to_value(res).map_err(|e| e.to_string())
+    }
+
+    pub async fn evaluate_playtest_director(&self, session_id: &str, slope: f64) -> Result<Value, String> {
+        let inner = self.inner.lock().await;
+        let eval = inner.runtime.evaluate(session_id, slope).map_err(|e| e.to_string())?;
+        serde_json::to_value(eval).map_err(|e| e.to_string())
+    }
+
+    pub async fn rank_playtest_with_local_encoder(&self, session_id: &str, slope: f64) -> Result<Value, String> {
+        let (session, evaluation) = {
+            let inner = self.inner.lock().await;
+            let sess = inner.runtime.export_session(session_id).map_err(|e| e.to_string())?;
+            let eval = inner.runtime.evaluate(session_id, slope).map_err(|e| e.to_string())?;
+            (sess, eval)
+        };
+
+        let req = crate::ranking::build_semantic_ranking_request(&session, &evaluation, &self.embedding_url).await?;
+
+        let eval = {
+            let inner = self.inner.lock().await;
+            inner.runtime.rank_semantic(session_id, slope, req).map_err(|e| e.to_string())?
+        };
+
+        serde_json::to_value(eval).map_err(|e| e.to_string())
+    }
+
+    pub async fn apply_playtest_command(&self, session_id: &str, cmd_val: &Value) -> Result<Value, String> {
+        let cmd: WorldCommand = serde_json::from_value(cmd_val.clone())
+            .map_err(|e| format!("Invalid command JSON: {e}"))?;
+
+        let mut inner = self.inner.lock().await;
+        let prior_export = inner.runtime.export_session(session_id).map_err(|e| e.to_string())?;
+
+        let res = match inner.runtime.submit_command(session_id, cmd) {
+            Ok(r) => r,
+            Err(e) => return Err(e.to_string()),
+        };
+
+        if let Err(err) = persist_session_to_store(&mut inner, session_id) {
+            let _ = inner.runtime.delete_session(session_id);
+            let _ = inner.runtime.restore_session(prior_export);
+            return Err(format!("Failed to persist command: {err}"));
+        }
+
+        if !res.player.duplicate {
+            let snap = inner.runtime.snapshot(session_id).map_err(|e| e.to_string())?;
+            let _ = self.updates.send(SessionChange {
+                session_id: session_id.to_string(),
+                revision: snap.world.revision,
+                snapshot: json!({ "sessionId": session_id, "snapshot": snap }),
+            });
+        }
+
+        serde_json::to_value(res).map_err(|e| e.to_string())
+    }
+
+    pub async fn apply_playtest_choice(
+        &self,
+        session_id: &str,
+        storylet_id: &str,
+        choice_id: &str,
+        expected_revision: u64,
+        idempotency_key: &str,
+    ) -> Result<Value, String> {
+        let mut inner = self.inner.lock().await;
+        let prior_export = inner.runtime.export_session(session_id).map_err(|e| e.to_string())?;
+
+        let res = match inner.runtime.execute_choice(session_id, storylet_id, choice_id, idempotency_key, expected_revision) {
+            Ok(r) => r,
+            Err(e) => return Err(e.to_string()),
+        };
+
+        if let Err(err) = persist_session_to_store(&mut inner, session_id) {
+            let _ = inner.runtime.delete_session(session_id);
+            let _ = inner.runtime.restore_session(prior_export);
+            return Err(format!("Failed to persist choice: {err}"));
+        }
+
+        let snap = inner.runtime.snapshot(session_id).map_err(|e| e.to_string())?;
+        let _ = self.updates.send(SessionChange {
+            session_id: session_id.to_string(),
+            revision: snap.world.revision,
+            snapshot: json!({ "sessionId": session_id, "snapshot": snap }),
+        });
+
+        serde_json::to_value(res).map_err(|e| e.to_string())
+    }
+
+    pub async fn fork_playtest(
+        &self,
+        source_session_id: &str,
+        branch_session_id: Option<&str>,
+        event_id: &str,
+    ) -> Result<Value, String> {
+        let branch_id = branch_session_id
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+        let mut inner = self.inner.lock().await;
+        let snap = inner.runtime.fork_session(source_session_id, branch_id.clone(), event_id).map_err(|e| e.to_string())?;
+        persist_session_to_store(&mut inner, &branch_id)?;
+
+        let _ = self.updates.send(SessionChange {
+            session_id: branch_id.clone(),
+            revision: snap.world.revision,
+            snapshot: json!({ "sessionId": branch_id, "snapshot": snap }),
+        });
+
+        Ok(json!({ "sessionId": branch_id, "snapshot": snap }))
+    }
+
+    pub async fn get_playtest_events(&self, session_id: &str) -> Result<Value, String> {
+        let inner = self.inner.lock().await;
+        let mut stmt = inner.store.conn.prepare(
+            "SELECT event_json FROM runtime_events WHERE session_id = ?1 ORDER BY rowid",
+        ).map_err(|e| e.to_string())?;
+
+        let rows = stmt.query_map([session_id], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
+        let events: Vec<Value> = rows.filter_map(|r| r.ok()).filter_map(|s| serde_json::from_str(&s).ok()).collect();
+        Ok(Value::Array(events))
+    }
+
+    pub async fn delete_playtest(&self, session_id: &str) -> Result<bool, String> {
+        let mut inner = self.inner.lock().await;
+        inner.runtime.delete_session(session_id);
+        inner.store.conn.execute("DELETE FROM runtime_sessions WHERE session_id = ?1", [session_id]).map_err(|e| e.to_string())?;
+        Ok(true)
+    }
 }
 
-fn ensure_session_id_has_no_archive(
-    connection: &Connection,
-    session_id: &str,
-) -> Result<(), ServiceError> {
-    let archived: Option<i64> = connection
-        .query_row(
-            "SELECT 1 FROM runtime_events WHERE session_id = ?1 LIMIT 1",
-            [session_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(ServiceError::database)?;
-    if archived.is_some() {
-        return Err(ServiceError::new(
-            StatusCode::CONFLICT,
-            format!("session '{session_id}' has archived event history and cannot be reused"),
-        ));
-    }
-    Ok(())
-}
+fn persist_session_to_store(inner: &mut StudioInner, session_id: &str) -> Result<(), String> {
+    let saved = inner.runtime.export_session(session_id).map_err(|e| e.to_string())?;
+    let state_json = serde_json::to_string(&saved).map_err(|e| e.to_string())?;
 
-fn persist_session(state: &mut ServiceState, session_id: &str) -> Result<(), ServiceError> {
-    let saved = state
-        .runtime
-        .export_session(session_id)
-        .map_err(ServiceError::runtime)?;
-    let state_json =
-        serde_json::to_string(&saved).map_err(|error| ServiceError::startup(error.to_string()))?;
-    let tx = state
-        .connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(ServiceError::database)?;
-    let previous_revision: Option<String> = tx
-        .query_row(
-            "SELECT revision FROM runtime_sessions WHERE session_id = ?1",
-            [&saved.session_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(ServiceError::database)?;
-    let previous_revision = previous_revision
-        .map(|revision| {
-            revision.parse::<u64>().map_err(|error| {
-                ServiceError::startup(format!("saved session revision is invalid: {error}"))
-            })
-        })
-        .transpose()?
-        .unwrap_or(0);
+    let tx = inner.store.conn.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+
+    let now = chrono_now_ms().to_string();
     tx.execute(
         "INSERT INTO runtime_sessions (session_id, project_id, revision, turn, state_json, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(session_id) DO UPDATE SET project_id=excluded.project_id,
-             revision=excluded.revision, turn=excluded.turn, state_json=excluded.state_json,
-             updated_at=excluded.updated_at",
-        params![saved.session_id, saved.project_id, saved.world.revision.to_string(), saved.world.turn.to_string(), state_json, now_millis()],
-    ).map_err(ServiceError::database)?;
+         ON CONFLICT(session_id) DO UPDATE SET
+             revision = excluded.revision,
+             turn = excluded.turn,
+             state_json = excluded.state_json,
+             updated_at = excluded.updated_at",
+        rusqlite::params![saved.session_id, saved.project_id, saved.world.revision.to_string(), saved.world.turn.to_string(), state_json, now],
+    ).map_err(|e| e.to_string())?;
+
     {
-        let mut insert = tx.prepare(
-            "INSERT INTO runtime_events (session_id, event_id, revision, event_json) VALUES (?1, ?2, ?3, ?4)",
-        ).map_err(ServiceError::database)?;
-        for event in &saved.world.events {
-            if event.revision <= previous_revision {
-                continue;
-            }
-            let event_json = serde_json::to_string(event)
-                .map_err(|error| ServiceError::startup(error.to_string()))?;
-            let existing: Option<String> = tx
-                .query_row(
-                    "SELECT event_json FROM runtime_events WHERE session_id = ?1 AND event_id = ?2",
-                    params![saved.session_id, event.id],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(ServiceError::database)?;
+        let mut insert_ev = tx.prepare(
+            "INSERT INTO runtime_events (session_id, event_id, revision, event_json) VALUES (?1, ?2, ?3, ?4)"
+        ).map_err(|e| e.to_string())?;
+
+        for ev in &saved.world.events {
+            let ev_json = serde_json::to_string(ev).map_err(|e| e.to_string())?;
+            let existing: Option<String> = tx.query_row(
+                "SELECT event_json FROM runtime_events WHERE session_id = ?1 AND event_id = ?2",
+                rusqlite::params![saved.session_id, ev.id],
+                |r| r.get(0),
+            ).optional().map_err(|e| e.to_string())?;
+
             match existing {
-                Some(existing) if existing != event_json => {
-                    return Err(ServiceError::new(
-                        StatusCode::CONFLICT,
-                        format!(
-                            "event '{}' conflicts with archived session history",
-                            event.id
-                        ),
-                    ));
+                Some(prev_json) if prev_json != ev_json => {
+                    return Err(format!("event '{}' conflicts with archived session history", ev.id));
                 }
                 Some(_) => continue,
-                None => {}
+                None => {
+                    insert_ev.execute(rusqlite::params![saved.session_id, ev.id, ev.revision.to_string(), ev_json])
+                        .map_err(|e| e.to_string())?;
+                }
             }
-            insert
-                .execute(params![
-                    saved.session_id,
-                    event.id,
-                    event.revision.to_string(),
-                    event_json
-                ])
-                .map_err(ServiceError::database)?;
         }
     }
-    let persisted_count: i64 = tx
-        .query_row(
-            "SELECT COUNT(*) FROM runtime_events WHERE session_id = ?1",
-            [&saved.session_id],
-            |row| row.get(0),
-        )
-        .map_err(ServiceError::database)?;
-    if persisted_count != saved.world.events.len() as i64 {
-        return Err(ServiceError::new(
-            StatusCode::CONFLICT,
-            format!(
-                "session '{}' event history conflicts with its archive",
-                saved.session_id
-            ),
-        ));
-    }
-    tx.commit().map_err(ServiceError::database)
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
-fn restore_prior(state: &mut ServiceState, prior: RuntimeSessionState) {
-    state.runtime.delete_session(&prior.session_id);
-    // This state came from a successful export of the same runtime and has already passed validation.
-    state
-        .runtime
-        .restore_session(prior)
-        .expect("previous runtime state must be restorable");
-}
-
-fn now_millis() -> String {
+fn chrono_now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis()
-        .to_string()
+        .as_millis() as i64
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreatePlaytest {
-    #[serde(default)]
-    session_id: Option<String>,
-    project: ProjectBundle,
-    scenario_id: String,
+pub type RuntimeService = StudioService;
+
+pub fn router(service: StudioService) -> axum::Router {
+    crate::http::build_router(service, None)
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ForkPlaytest {
-    branch_session_id: Option<String>,
-    event_id: String,
-}
+fn validate_event_history(conn: &rusqlite::Connection, state: &RuntimeSessionState) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("SELECT event_json FROM runtime_events WHERE session_id = ?1 ORDER BY rowid")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([&state.session_id], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
 
-#[derive(Deserialize)]
-struct RestorePlaytest {
-    state: RuntimeSessionState,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DirectorQuery {
-    #[serde(default = "default_tension_slope")]
-    target_tension_slope: f64,
-}
-
-fn default_tension_slope() -> f64 {
-    0.15
-}
-
-pub fn router(service: RuntimeService) -> Router {
-    Router::new()
-        .route("/health", get(health))
-        .route("/api/v1/playtests", get(list_sessions).post(create_session))
-        .route("/api/v1/playtests/restore", post(restore_session))
-        .route(
-            "/api/v1/playtests/{session_id}",
-            get(snapshot).delete(delete_session),
-        )
-        .route("/api/v1/playtests/{session_id}/events", get(events))
-        .route("/api/v1/playtests/{session_id}/stream", get(session_stream))
-        .route("/api/v1/playtests/{session_id}/director", get(evaluate))
-        .route(
-            "/api/v1/playtests/{session_id}/director/decision",
-            post(apply_decision),
-        )
-        .route(
-            "/api/v1/playtests/{session_id}/director/semantic-rank",
-            post(apply_semantic_rank),
-        )
-        .route("/api/v1/playtests/{session_id}/commands", post(command))
-        .route("/api/v1/playtests/{session_id}/choices", post(choice))
-        .route("/api/v1/playtests/{session_id}/fork", post(fork_session))
-        .route("/api/v1/playtests/{session_id}/export", get(export_session))
-        .route(
-            "/api/v1/playtests/{session_id}/restore",
-            post(restore_session),
-        )
-        .with_state(service)
-}
-
-async fn health() -> Json<Value> {
-    Json(json!({ "status": "ok" }))
-}
-
-async fn list_sessions(State(service): State<RuntimeService>) -> Result<Json<Value>, ServiceError> {
-    let state = service.state.lock().await;
-    let mut statement = state.connection.prepare(
-        "SELECT session_id, project_id, revision, turn, state_json FROM runtime_sessions ORDER BY session_id",
-    ).map_err(ServiceError::database)?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        })
-        .map_err(ServiceError::database)?;
-    let mut sessions = Vec::new();
+    let mut events = Vec::new();
     for row in rows {
-        let (session_id, project_id, revision, turn, encoded) =
-            row.map_err(ServiceError::database)?;
-        let saved: RuntimeSessionState = serde_json::from_str(&encoded)
-            .map_err(|error| ServiceError::startup(error.to_string()))?;
-        sessions.push(json!({
-            "session_id": session_id, "project_id": project_id, "scenario_id": saved.scenario_id,
-            "revision": revision.parse::<u64>().unwrap_or_default(), "turn": turn.parse::<u64>().unwrap_or_default(),
-            "current_location": saved.world.current_location, "event_count": saved.world.events.len()
-        }));
+        let enc = row.map_err(|e| e.to_string())?;
+        events.push(serde_json::from_str::<WorldEvent>(&enc).map_err(|e| e.to_string())?);
     }
-    Ok(Json(Value::Array(sessions)))
-}
-
-async fn create_session(
-    State(service): State<RuntimeService>,
-    Json(body): Json<CreatePlaytest>,
-) -> Result<(StatusCode, Json<Value>), ServiceError> {
-    let session_id = body
-        .session_id
-        .filter(|id| !id.trim().is_empty())
-        .unwrap_or_else(|| uuid());
-    let mut state = service.state.lock().await;
-    ensure_session_id_has_no_archive(&state.connection, &session_id)?;
-    let snapshot = state
-        .runtime
-        .create_session(session_id.clone(), body.project, &body.scenario_id)
-        .map_err(ServiceError::runtime)?;
-    if let Err(error) = persist_session(&mut state, &session_id) {
-        state.runtime.delete_session(&session_id);
-        return Err(error);
+    if events != state.world.events {
+        return Err(format!("saved session '{}' event journal does not match its snapshot", state.session_id));
     }
-    service.notify_session(&state.runtime, &session_id);
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "sessionId": session_id, "snapshot": snapshot })),
-    ))
+    Ok(())
 }
 
-async fn session_stream(
-    State(service): State<RuntimeService>,
-    RoutePath(session_id): RoutePath<String>,
-) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ServiceError> {
-    let receiver = service.updates.subscribe();
-    let initial = {
-        let state = service.state.lock().await;
-        state
-            .runtime
-            .snapshot(&session_id)
-            .map(|snapshot| SessionChange {
-                session_id: session_id.clone(),
-                revision: snapshot.world.revision,
-                snapshot: json!({ "sessionId": session_id, "snapshot": snapshot }),
-            })
-            .map_err(ServiceError::runtime)?
-    };
-    let initial = tokio_stream::iter([Ok(session_change_event("playtest.snapshot", initial))]);
-    let updates = BroadcastStream::new(receiver).filter_map(move |item| match item {
-        Ok(change) if change.session_id == session_id => {
-            Some(Ok(session_change_event("playtest.updated", change)))
-        }
-        Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => {
-            Some(Ok(Event::default().event("playtest.resync").data("{}")))
-        }
-        _ => None,
-    });
-    Ok(Sse::new(initial.chain(updates)).keep_alive(KeepAlive::default()))
-}
-
-fn session_change_event(name: &str, change: SessionChange) -> Event {
-    Event::default()
-        .event(name)
-        .id(change.revision.to_string())
-        .data(change.snapshot.to_string())
-}
-
-async fn snapshot(
-    State(service): State<RuntimeService>,
-    RoutePath(session_id): RoutePath<String>,
-) -> Result<Json<Value>, ServiceError> {
-    let state = service.state.lock().await;
-    state
-        .runtime
-        .snapshot(&session_id)
-        .map(|result| Json(json!(result)))
-        .map_err(ServiceError::runtime)
-}
-
-async fn events(
-    State(service): State<RuntimeService>,
-    RoutePath(session_id): RoutePath<String>,
-) -> Result<Json<Value>, ServiceError> {
-    let state = service.state.lock().await;
-    let snapshot = state
-        .runtime
-        .snapshot(&session_id)
-        .map_err(ServiceError::runtime)?;
-    Ok(Json(
-        json!({ "sessionId": session_id, "turn": snapshot.world.turn, "events": snapshot.world.events }),
-    ))
-}
-
-async fn evaluate(
-    State(service): State<RuntimeService>,
-    RoutePath(session_id): RoutePath<String>,
-    Query(query): Query<DirectorQuery>,
-) -> Result<Json<Value>, ServiceError> {
-    if !query.target_tension_slope.is_finite() {
-        return Err(ServiceError::new(
-            StatusCode::BAD_REQUEST,
-            "targetTensionSlope must be finite",
-        ));
-    }
-    let state = service.state.lock().await;
-    state
-        .runtime
-        .evaluate(&session_id, query.target_tension_slope)
-        .map(|result| Json(json!(result)))
-        .map_err(ServiceError::runtime)
-}
-
-async fn apply_decision(
-    State(service): State<RuntimeService>,
-    RoutePath(session_id): RoutePath<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ServiceError> {
-    let decision = serde_json::from_value(body.get("decision").cloned().unwrap_or(body))
-        .map_err(|error| ServiceError::new(StatusCode::BAD_REQUEST, error.to_string()))?;
-    let state = service.state.lock().await;
-    state
-        .runtime
-        .apply_decision(&session_id, 0.15, decision)
-        .map(|result| Json(json!(result)))
-        .map_err(ServiceError::runtime)
-}
-
-async fn apply_semantic_rank(
-    State(service): State<RuntimeService>,
-    RoutePath(session_id): RoutePath<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ServiceError> {
-    let request = serde_json::from_value::<SemanticRankingRequest>(
-        body.get("request").cloned().unwrap_or(body),
-    )
-    .map_err(|error| ServiceError::new(StatusCode::BAD_REQUEST, error.to_string()))?;
-    let state = service.state.lock().await;
-    state
-        .runtime
-        .rank_semantic(&session_id, 0.15, request)
-        .map(|result| Json(json!(result)))
-        .map_err(ServiceError::runtime)
-}
-
-async fn command(
-    State(service): State<RuntimeService>,
-    RoutePath(session_id): RoutePath<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ServiceError> {
-    let command: WorldCommand =
-        serde_json::from_value(body.get("command").cloned().unwrap_or(body))
-            .map_err(|error| ServiceError::new(StatusCode::BAD_REQUEST, error.to_string()))?;
-    let mut state = service.state.lock().await;
-    let prior = state
-        .runtime
-        .export_session(&session_id)
-        .map_err(ServiceError::runtime)?;
-    let result = state
-        .runtime
-        .submit_command(&session_id, command)
-        .map_err(ServiceError::runtime)?;
-    if let Err(error) = persist_session(&mut state, &session_id) {
-        restore_prior(&mut state, prior);
-        return Err(error);
-    }
-    if result.world.revision > prior.world.revision {
-        service.notify_session(&state.runtime, &session_id);
-    }
-    Ok(Json(json!(result)))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ChoiceRequest {
-    storylet_id: String,
-    choice_id: String,
-    idempotency_key: Option<String>,
-    expected_revision: u64,
-}
-
-async fn choice(
-    State(service): State<RuntimeService>,
-    RoutePath(session_id): RoutePath<String>,
-    Json(body): Json<ChoiceRequest>,
-) -> Result<Json<Value>, ServiceError> {
-    let mut state = service.state.lock().await;
-    let prior = state
-        .runtime
-        .export_session(&session_id)
-        .map_err(ServiceError::runtime)?;
-    let result = state
-        .runtime
-        .execute_choice(
-            &session_id,
-            &body.storylet_id,
-            &body.choice_id,
-            body.idempotency_key.as_deref().unwrap_or(""),
-            body.expected_revision,
+fn ensure_session_id_has_no_archive(conn: &rusqlite::Connection, session_id: &str) -> Result<(), String> {
+    let count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM runtime_events WHERE session_id = ?1",
+            [session_id],
+            |row| row.get(0),
         )
-        .map_err(ServiceError::runtime)?;
-    if let Err(error) = persist_session(&mut state, &session_id) {
-        restore_prior(&mut state, prior);
-        return Err(error);
+        .unwrap_or(0);
+    
+    if count > 0 {
+        return Err(format!("session '{session_id}' has archived event history and cannot be reused"));
     }
-    if result.world.revision > prior.world.revision {
-        service.notify_session(&state.runtime, &session_id);
+    Ok(())
+}
+
+fn extract_json_from_strata(text: &str) -> Result<Value, String> {
+    if let Ok(v) = serde_json::from_str::<Value>(text) {
+        return Ok(v);
     }
-    Ok(Json(json!(result)))
-}
-
-async fn fork_session(
-    State(service): State<RuntimeService>,
-    RoutePath(session_id): RoutePath<String>,
-    Json(body): Json<ForkPlaytest>,
-) -> Result<(StatusCode, Json<Value>), ServiceError> {
-    let branch_id = body
-        .branch_session_id
-        .filter(|id| !id.trim().is_empty())
-        .unwrap_or_else(uuid);
-    let mut state = service.state.lock().await;
-    ensure_session_id_has_no_archive(&state.connection, &branch_id)?;
-    let snapshot = state
-        .runtime
-        .fork_session(&session_id, branch_id.clone(), &body.event_id)
-        .map_err(ServiceError::runtime)?;
-    if let Err(error) = persist_session(&mut state, &branch_id) {
-        state.runtime.delete_session(&branch_id);
-        return Err(error);
+    if let Some(start) = text.find('{') {
+        if let Some(end) = text.rfind('}') {
+            if end > start {
+                if let Ok(v) = serde_json::from_str::<Value>(&text[start..=end]) {
+                    return Ok(v);
+                }
+            }
+        }
     }
-    service.notify_session(&state.runtime, &branch_id);
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "sessionId": branch_id, "snapshot": snapshot })),
-    ))
-}
-
-async fn delete_session(
-    State(service): State<RuntimeService>,
-    RoutePath(session_id): RoutePath<String>,
-) -> Result<Json<Value>, ServiceError> {
-    let mut state = service.state.lock().await;
-    state
-        .runtime
-        .snapshot(&session_id)
-        .map_err(ServiceError::runtime)?;
-    let tx = state
-        .connection
-        .transaction()
-        .map_err(ServiceError::database)?;
-    tx.execute(
-        "DELETE FROM runtime_sessions WHERE session_id = ?1",
-        [&session_id],
-    )
-    .map_err(ServiceError::database)?;
-    tx.commit().map_err(ServiceError::database)?;
-    Ok(Json(
-        json!({ "deleted": state.runtime.delete_session(&session_id) }),
-    ))
-}
-
-async fn export_session(
-    State(service): State<RuntimeService>,
-    RoutePath(session_id): RoutePath<String>,
-) -> Result<Json<Value>, ServiceError> {
-    let state = service.state.lock().await;
-    state
-        .runtime
-        .export_session(&session_id)
-        .map(|result| Json(json!(result)))
-        .map_err(ServiceError::runtime)
-}
-
-async fn restore_session(
-    State(service): State<RuntimeService>,
-    Json(body): Json<RestorePlaytest>,
-) -> Result<(StatusCode, Json<Value>), ServiceError> {
-    let mut state = service.state.lock().await;
-    let session_id = body.state.session_id.clone();
-    let snapshot = state
-        .runtime
-        .restore_session(body.state)
-        .map_err(ServiceError::runtime)?;
-    if let Err(error) = persist_session(&mut state, &session_id) {
-        state.runtime.delete_session(&session_id);
-        return Err(error);
-    }
-    service.notify_session(&state.runtime, &session_id);
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "sessionId": session_id, "snapshot": snapshot })),
-    ))
-}
-
-fn uuid() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-    format!(
-        "session-{}-{}",
-        now_millis(),
-        NEXT_ID.fetch_add(1, Ordering::Relaxed)
-    )
+    Err("Strata response did not contain valid JSON object".into())
 }

@@ -58,6 +58,7 @@ fn main() {
                 effects: vec![],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .expect("benchmark player command must be valid");
@@ -155,6 +156,7 @@ fn make_definitions(count: usize, locations_count: usize) -> Vec<StoryletDefinit
             title: format!("Generic scene {index}"),
             summary: "A generic benchmark scene".into(),
             approved: true,
+            ending: false,
             location_id: Some(format!("location-{:02}", index % locations_count)),
             urgency_weight: 25.0 + (index % 75) as f64,
             cluster_type: ClusterType::PlayerControlledPassage,

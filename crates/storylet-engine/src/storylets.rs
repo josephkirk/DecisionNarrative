@@ -116,6 +116,8 @@ pub struct StoryletDefinition {
     pub title: String,
     pub summary: String,
     pub approved: bool,
+    #[serde(default)]
+    pub ending: bool,
     pub location_id: Option<String>,
     pub urgency_weight: f64,
     pub cluster_type: ClusterType,
@@ -456,8 +458,18 @@ pub(crate) fn predicate_matches(predicate: &Predicate, world: &WorldState) -> bo
         return false;
     };
     match predicate.op {
-        PredicateOp::Eq => actual == predicate.value,
-        PredicateOp::Neq => actual != predicate.value,
+        PredicateOp::Eq => match (actual.as_f64(), predicate.value.as_f64()) {
+            (Some(actual), Some(expected)) if actual.is_finite() && expected.is_finite() => {
+                actual == expected
+            }
+            _ => actual == predicate.value,
+        },
+        PredicateOp::Neq => match (actual.as_f64(), predicate.value.as_f64()) {
+            (Some(actual), Some(expected)) if actual.is_finite() && expected.is_finite() => {
+                actual != expected
+            }
+            _ => actual != predicate.value,
+        },
         PredicateOp::Gt => compare_numbers(&actual, &predicate.value, |a, b| a > b),
         PredicateOp::Gte => compare_numbers(&actual, &predicate.value, |a, b| a >= b),
         PredicateOp::Lt => compare_numbers(&actual, &predicate.value, |a, b| a < b),
@@ -600,6 +612,7 @@ pub fn execute_storylet_choice(
         effects: choice.effects.clone(),
         caused_by,
         advance_turn: true,
+        terminal: definition.ending,
     };
 
     // A lost response can be safely retried after the scene has already closed.

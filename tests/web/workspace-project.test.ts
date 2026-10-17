@@ -143,3 +143,159 @@ test("invalid saved scenario references are reported before runtime creation", (
   expect(result.issues.some((issue) => issue.includes("missing, invalid, or unapproved"))).toBe(true);
   expect(result.issues.some((issue) => issue.includes("nonnegative safe integer"))).toBe(true);
 });
+
+
+test("deterministic repeatability: identical seed produces identical resolved start location and actors", () => {
+  const records = {
+    qualities: [],
+    locations: [
+      { id: "loc-a", name: "Location A", description: "", connected_zones: ["loc-b", "loc-c"], environmental_params: { zone: "indoor", access: 1 } },
+      { id: "loc-b", name: "Location B", description: "", connected_zones: ["loc-a"], environmental_params: { zone: "outdoor", access: 2 } },
+      { id: "loc-c", name: "Location C", description: "", connected_zones: ["loc-a"], environmental_params: { zone: "indoor", access: 3 } },
+      { id: "loc-d", name: "Location D", description: "", connected_zones: [], environmental_params: { zone: "outdoor", access: 1 } },
+    ],
+    characters: [
+      { id: "c1", name: "Char 1", role: "Clerk", home_location: "loc-a", current_location: "loc-a", status_axes: { faction: "guild" }, needs: {}, agenda: "", red_line: "" },
+      { id: "c2", name: "Char 2", role: "Guard", home_location: "loc-b", current_location: "loc-b", status_axes: { faction: "city" }, needs: {}, agenda: "", red_line: "" },
+      { id: "c3", name: "Char 3", role: "Merchant", home_location: "loc-c", current_location: "loc-c", status_axes: { faction: "guild" }, needs: {}, agenda: "", red_line: "" },
+      { id: "c4", name: "Char 4", role: "Clerk", home_location: "loc-d", current_location: "loc-d", status_axes: { faction: "city" }, needs: {}, agenda: "", red_line: "" },
+    ],
+    storylets: [],
+  };
+
+  const scenario1 = {
+    id: "random-test",
+    name: "Random Test",
+    player_start_location: "loc-a",
+    initial_qualities: {},
+    actor_locations: {},
+    storylet_ids: [],
+    seed: 98765,
+    start_location_policy: { mode: "random" as const },
+    actor_population_policy: {
+      mode: "random" as const,
+      count: 2,
+      location_policy: { mode: "random" as const },
+    },
+  };
+
+  const res1 = buildWorkspaceProject(records, { scenario: scenario1 });
+  const res2 = buildWorkspaceProject(records, { scenario: { ...scenario1 } });
+
+  expect(res1.issues).toEqual([]);
+  expect(res2.issues).toEqual([]);
+  expect(res1.project.scenarios["random-test"].player_start_location)
+    .toBe(res2.project.scenarios["random-test"].player_start_location);
+  expect(res1.project.scenarios["random-test"].actor_locations)
+    .toEqual(res2.project.scenarios["random-test"].actor_locations);
+  expect(Object.keys(res1.project.scenarios["random-test"].actor_locations).length).toBe(2);
+});
+
+test("attribute matching: start location and actor population resolve matching entities", () => {
+  const records = {
+    qualities: [],
+    locations: [
+      { id: "loc-a", name: "Location A", description: "", connected_zones: [], environmental_params: { security_level: "High", is_open: true } },
+      { id: "loc-b", name: "Location B", description: "", connected_zones: [], environmental_params: { security_level: "Low", is_open: false } },
+    ],
+    characters: [
+      { id: "c1", name: "Alice", role: "Detective", home_location: "loc-a", current_location: "loc-a", status_axes: { rank: "Senior" }, needs: {}, agenda: "", red_line: "" },
+      { id: "c2", name: "Bob", role: "Patrol", home_location: "loc-b", current_location: "loc-b", status_axes: { rank: "Junior" }, needs: {}, agenda: "", red_line: "" },
+      { id: "c3", name: "Charlie", role: "Detective", home_location: "loc-a", current_location: "loc-a", status_axes: { rank: "Senior" }, needs: {}, agenda: "", red_line: "" },
+    ],
+    storylets: [],
+  };
+
+  const scenario = {
+    id: "attr-test",
+    name: "Attr Test",
+    player_start_location: "loc-b",
+    initial_qualities: {},
+    actor_locations: {},
+    storylet_ids: [],
+    seed: 42,
+    start_location_policy: {
+      mode: "by_attribute" as const,
+      attribute_key: "security_level",
+      attribute_value: "High",
+    },
+    actor_population_policy: {
+      mode: "by_attribute" as const,
+      attribute_key: "rank",
+      attribute_value: "Senior",
+      location_policy: {
+        mode: "by_attribute" as const,
+        attribute_key: "security_level",
+        attribute_value: "Low",
+      },
+    },
+  };
+
+  const res = buildWorkspaceProject(records, { scenario });
+  expect(res.issues).toEqual([]);
+  // Start location matches security_level == High -> loc-a
+  expect(res.project.scenarios["attr-test"].player_start_location).toBe("loc-a");
+  // Actors matching rank == Senior -> c1, c3 placed in security_level == Low -> loc-b
+  expect(res.project.scenarios["attr-test"].actor_locations).toEqual({
+    c1: "loc-b",
+    c3: "loc-b",
+  });
+});
+
+test("missing attribute matches and invalid selector config report validation errors", () => {
+  const records = {
+    qualities: [],
+    locations: [{ id: "loc-a", name: "Loc A", description: "", connected_zones: [] }],
+    characters: [{ id: "c1", name: "C1", role: "Role", home_location: "loc-a", current_location: "loc-a", status_axes: {}, needs: {}, agenda: "", red_line: "" }],
+    storylets: [],
+  };
+
+  const brokenScenario = {
+    id: "broken-attr",
+    name: "Broken Attr",
+    player_start_location: "loc-a",
+    initial_qualities: {},
+    actor_locations: {},
+    storylet_ids: [],
+    seed: 1,
+    start_location_policy: {
+      mode: "by_attribute" as const,
+      attribute_key: "nonexistent",
+      attribute_value: "val",
+    },
+    actor_population_policy: {
+      mode: "random" as const,
+      count: -5,
+    },
+  };
+
+  const res = buildWorkspaceProject(records, { scenario: brokenScenario });
+  expect(res.issues.some((issue) => issue.includes("no location matches attribute"))).toBe(true);
+  expect(res.issues.some((issue) => issue.includes("non-negative integer count"))).toBe(true);
+});
+
+test("old scenario records without policies remain 100% backwards compatible", () => {
+  const records = {
+    qualities: [{ name: "gold", type: "currency", value: 10 }],
+    locations: [{ id: "market", name: "Market", description: "", connected_zones: [] }],
+    characters: [{ id: "vendor", name: "Vendor", role: "Merchant", home_location: "market", current_location: "market", status_axes: {}, needs: {}, agenda: "", red_line: "" }],
+    storylets: [],
+  };
+
+  const legacyScenario = {
+    id: "legacy",
+    name: "Legacy Scenario",
+    player_start_location: "market",
+    initial_qualities: { gold: 50 },
+    actor_locations: { vendor: "market" },
+    storylet_ids: [],
+    seed: 77,
+  };
+
+  const res = buildWorkspaceProject(records, { scenario: legacyScenario });
+  expect(res.issues).toEqual([]);
+  expect(res.project.scenarios["legacy"].player_start_location).toBe("market");
+  expect(res.project.scenarios["legacy"].actor_locations).toEqual({ vendor: "market" });
+  expect(res.project.scenarios["legacy"].initial_qualities).toEqual({ gold: 50 });
+  expect(res.project.scenarios["legacy"].seed).toBe(77);
+});

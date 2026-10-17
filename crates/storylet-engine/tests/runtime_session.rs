@@ -4,7 +4,7 @@ use serde_json::json;
 use storylet_engine::{
     CharacterDefinition, ClusterType, DecisionResult, Effect, FactRef, LocationDefinition,
     NpcBehaviorRule, Predicate, PredicateOp, PredicateSet, ProjectBundle, QualityDefinition,
-    QualityType, RankedStorylet, RankingHead, Repeatability, RoleRequirement, ScenarioDefinition,
+    QualityType, RankedStorylet, RankingHead, Repeatability, RoleRequirement, ScenarioDefinition, EventDefinition, EventType,
     SceneContent, SemanticCandidateEmbedding, SemanticRankingRequest, StoryletChoice,
     StoryletDefinition, StoryletRuntime, WorldCommand,
 };
@@ -63,6 +63,7 @@ fn project() -> ProjectBundle {
             title: "The Receipt".into(),
             summary: "A clerk finds the missing receipt".into(),
             approved: true,
+            ending: false,
             location_id: Some("archive".into()),
             urgency_weight: 20.0,
             cluster_type: ClusterType::PlayerControlledPassage,
@@ -136,6 +137,8 @@ fn project() -> ProjectBundle {
             actor_locations: BTreeMap::new(),
             storylet_ids: vec!["find_receipt".into()],
             seed: 19,
+        event_ids: vec![],
+            active_actor_ids: None,
         },
     );
     project
@@ -161,6 +164,7 @@ fn player_movement_triggers_npc_cascade_and_unlocks_a_storylet_in_the_rust_runti
                 }],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -177,6 +181,61 @@ fn player_movement_triggers_npc_cascade_and_unlocks_a_storylet_in_the_rust_runti
 
     let evaluation = runtime.evaluate("test-session", 0.15).unwrap();
     assert_eq!(evaluation.selected.as_deref(), Some("find_receipt"));
+}
+
+#[test]
+fn scenario_canon_and_world_events_fire_after_their_turn_and_are_recorded() {
+    let mut authored = project();
+    authored.qualities.insert("world.pressure".into(), QualityDefinition {
+        key: "world.pressure".into(), kind: QualityType::Metric, default_value: json!(0), description: "Ambient pressure".into(),
+    });
+    authored.events.insert("canon_revelation".into(), EventDefinition {
+        id: "canon_revelation".into(), title: "A canon revelation".into(), description: "Nora confirms the receipt.".into(),
+        trigger: PredicateSet { all_of: vec![Predicate { fact: FactRef::Quality { key: "evidence.receipt_found".into() }, op: PredicateOp::Eq, value: json!(true) }], any_of: vec![] },
+        effects: vec![Effect::SetQuality { key: "evidence.read".into(), value: json!(true) }], delay_turns: 1, repeatable: false, event_type: EventType::Canon,
+    });
+    authored.events.insert("weather_shift".into(), EventDefinition {
+        id: "weather_shift".into(), title: "Rain reaches the archive".into(), description: "The gutters answer the storm.".into(),
+        trigger: PredicateSet::default(), effects: vec![Effect::AddQuality { key: "world.pressure".into(), amount: 1.0 }], delay_turns: 1, repeatable: false, event_type: EventType::World,
+    });
+    authored.scenarios.get_mut("opening").unwrap().event_ids = vec!["canon_revelation".into(), "weather_shift".into()];
+    let mut runtime = StoryletRuntime::default();
+    runtime.create_session("scenario-events", authored, "opening").unwrap();
+    let result = runtime.submit_command("scenario-events", WorldCommand {
+        idempotency_key: "turn-one".into(), expected_revision: 0, actor_id: "player".into(), action: "wait".into(),
+        effects: vec![Effect::SetQuality { key: "evidence.receipt_found".into(), value: json!(true) }],
+        caused_by: vec![], advance_turn: true, terminal: false,
+    }).unwrap();
+    let event_actions: Vec<_> = result.world.events.iter().map(|event| event.action.as_str()).collect();
+    assert!(event_actions.contains(&"event:canon:canon_revelation"));
+    assert!(event_actions.contains(&"event:world:weather_shift"));
+    assert_eq!(result.world.qualities.get("evidence.read"), Some(&json!(true)));
+    assert_eq!(result.world.qualities.get("world.pressure"), Some(&json!(1.0)));
+}
+
+#[test]
+fn ending_choice_terminates_session_and_blocks_later_actions() {
+    let mut authored = project();
+    authored.storylets.get_mut("find_receipt").unwrap().ending = true;
+    authored.scenarios.get_mut("opening").unwrap().actor_locations.insert("nora".into(), "archive".into());
+    let mut runtime = StoryletRuntime::default();
+    runtime.create_session("ending", authored, "opening").unwrap();
+    runtime.submit_command("ending", WorldCommand {
+        idempotency_key: "reveal".into(), expected_revision: 0, actor_id: "player".into(), action: "reveal".into(),
+        effects: vec![
+            Effect::SetQuality { key: "evidence.receipt_found".into(), value: json!(true) },
+            Effect::MovePlayer { location_id: "archive".into() },
+        ], caused_by: vec![], advance_turn: true, terminal: false,
+    }).unwrap();
+    let completed = runtime.execute_choice("ending", "find_receipt", "read", "ending-choice", 1).unwrap();
+    assert!(completed.player.event.terminal);
+    assert!(completed.world.is_terminal());
+    assert!(runtime.evaluate("ending", 0.15).unwrap().candidates.is_empty());
+    let error = runtime.submit_command("ending", WorldCommand {
+        idempotency_key: "after-ending".into(), expected_revision: completed.world.revision, actor_id: "player".into(), action: "again".into(),
+        effects: vec![], caused_by: vec![], advance_turn: true, terminal: false,
+    }).unwrap_err();
+    assert!(error.to_string().contains("reached its ending"));
 }
 
 #[test]
@@ -205,6 +264,7 @@ fn external_decision_is_revalidated_and_can_choose_no_action() {
                 }],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -288,6 +348,7 @@ fn rust_engine_scores_embeddings_and_rejects_incomplete_or_ineligible_vectors() 
                 }],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -448,6 +509,7 @@ fn replaying_a_player_command_does_not_replay_its_npc_cascade() {
         effects: vec![],
         caused_by: vec![],
         advance_turn: true,
+                terminal: false,
     };
     let first = runtime
         .submit_command("idempotent", command.clone())
@@ -482,6 +544,7 @@ fn invalid_player_command_keeps_session_snapshot_unchanged() {
             }],
             caused_by: vec![],
             advance_turn: true,
+            terminal: false,
         },
     );
 
@@ -506,6 +569,7 @@ fn clearing_a_playtest_discards_all_session_state_and_allows_a_clean_restart() {
                 effects: vec![],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -544,6 +608,7 @@ fn fork_replays_an_event_prefix_and_keeps_future_branch_actions_isolated() {
                 }],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -574,6 +639,7 @@ fn fork_replays_an_event_prefix_and_keeps_future_branch_actions_isolated() {
                 effects: vec![],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -606,6 +672,7 @@ fn exported_session_restores_world_and_director_state_after_runtime_restart() {
                 }],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -645,6 +712,7 @@ fn eligible_storylet_choice_executes_through_runtime_and_retries_idempotently() 
                 }],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();

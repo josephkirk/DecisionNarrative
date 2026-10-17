@@ -30,8 +30,15 @@ pub struct WorldState {
     pub relationships: BTreeMap<String, BTreeMap<String, f64>>,
     #[serde(default)]
     pub knowledge: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
     pub events: Vec<WorldEvent>,
     pub applied_commands: BTreeMap<String, String>,
+}
+
+impl WorldState {
+    pub fn is_terminal(&self) -> bool {
+        self.events.iter().any(|event| event.terminal)
+    }
 }
 
 /// A single idempotent request to mutate the world and advance one action turn.
@@ -46,6 +53,8 @@ pub struct WorldCommand {
     pub caused_by: Vec<String>,
     #[serde(default = "default_true")]
     pub advance_turn: bool,
+    #[serde(default, skip_deserializing)]
+    pub terminal: bool,
 }
 
 fn default_true() -> bool {
@@ -104,6 +113,8 @@ pub struct WorldEvent {
     pub location_delta: Option<(Option<String>, Option<String>)>,
     #[serde(default)]
     pub actor_location_deltas: BTreeMap<String, (String, String)>,
+    #[serde(default)]
+    pub terminal: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -159,6 +170,7 @@ pub enum EngineError {
     },
     PersistentSceneCannotContinue,
     CooldownOverflow,
+    SessionEnded,
 }
 
 impl fmt::Display for EngineError {
@@ -222,6 +234,7 @@ impl fmt::Display for EngineError {
             Self::CooldownOverflow => {
                 write!(formatter, "storylet cooldown exceeds world turn range")
             }
+            Self::SessionEnded => write!(formatter, "playtest session has reached its ending"),
         }
     }
 }
@@ -251,6 +264,7 @@ pub fn apply_command(
             || event.effects != command.effects
             || event.caused_by != command.caused_by
             || event.advanced_turn != command.advance_turn
+            || event.terminal != command.terminal
         {
             return Err(EngineError::IdempotencyKeyReuse);
         }
@@ -260,6 +274,10 @@ pub fn apply_command(
             event,
             duplicate: true,
         });
+    }
+
+    if state.is_terminal() {
+        return Err(EngineError::SessionEnded);
     }
 
     if command.expected_revision != state.revision {
@@ -346,6 +364,7 @@ pub fn apply_command(
         caused_by: command.caused_by,
         location_delta,
         actor_location_deltas,
+        terminal: command.terminal,
     };
 
     // Commit only after every effect has validated successfully.
@@ -471,6 +490,7 @@ pub fn replay_events(
                 effects: recorded.effects.clone(),
                 caused_by: recorded.caused_by.clone(),
                 advance_turn: recorded.advanced_turn,
+                terminal: recorded.terminal,
             },
         )?;
         if result.event != *recorded {

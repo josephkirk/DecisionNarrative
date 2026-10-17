@@ -1264,12 +1264,6 @@ body.generic-playtest #canvas-wrapper {
 .playtest-choice-list button:hover { border-color: var(--border-focus); background: var(--bg-card-hover); }
 .playtest-choice-list button:disabled { opacity: 0.5; cursor: wait; }
 
-@media (max-width: 840px) {
-  .playtest-toolbar { align-items: stretch; flex-direction: column; }
-  .playtest-start-controls { min-width: 0; }
-  .playtest-session-workspace:not(.hidden) { grid-template-columns: 1fr; }
-}
-
 .playtest-branch-controls { display: grid; gap: 12px; padding: 16px 18px 18px; border-top: 1px solid var(--border-subtle); }
 .playtest-branch-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--text-muted); font-size: 12px; }
 .playtest-branch-actions .form-select { min-width: 220px; max-width: 360px; }
@@ -1282,7 +1276,8 @@ body.generic-playtest #canvas-wrapper {
 .playtest-scenario-toolbar { display: grid; grid-template-columns: auto minmax(200px, 1fr) auto auto; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
 .playtest-scenario-fields { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 12px; }
 .playtest-scenario-fields label { display: grid; align-content: start; gap: 6px; color: var(--text-muted); font-size: 11px; }
-.playtest-scenario-fields label:nth-child(5), .playtest-scenario-fields label:nth-child(6), .playtest-scenario-fields label:nth-child(7), .playtest-scenario-fields .scenario-state-group { grid-column: span 2; }
+.playtest-scenario-fields .scenario-span-2, .playtest-scenario-fields .scenario-state-group { grid-column: span 2; }
+.playtest-scenario-fields .scenario-span-4 { grid-column: 1 / -1; }
 .playtest-scenario-fields select[multiple] { min-height: 104px; }
 .scenario-state-group { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; }
 .scenario-state-group legend { padding: 0 6px; color: var(--text-muted); font-size: 11px; }
@@ -1292,4 +1287,91 @@ body.generic-playtest #canvas-wrapper {
 .scenario-state-row .form-input, .scenario-state-row .form-select { min-width: 0; }
 .playtest-scenario-footer { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 @media (max-width: 900px) { .playtest-scenario-fields { grid-template-columns: repeat(2, minmax(140px, 1fr)); } .playtest-scenario-toolbar { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 560px) { .playtest-scenario-fields { grid-template-columns: 1fr; } .playtest-scenario-fields label:nth-child(5), .playtest-scenario-fields label:nth-child(6), .playtest-scenario-fields label:nth-child(7), .playtest-scenario-fields .scenario-state-group { grid-column: auto; } }
+@media (max-width: 560px) { .playtest-scenario-fields { grid-template-columns: 1fr; } .playtest-scenario-fields .scenario-span-2, .playtest-scenario-fields .scenario-span-4, .playtest-scenario-fields .scenario-state-group { grid-column: auto; } }
+
+/* Workshop panes must stay usable at medium widths. */
+@media (max-width: 1200px) {
+  .workshop-tri-pane {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 16px;
+    height: auto;
+    flex: 0 0 auto;
+  }
+
+  .workshop-tri-pane > .panel-card:last-child {
+    grid-column: 1 / -1;
+    max-height: min(420px, 60vh);
+  }
+
+  .workshop-tri-pane > .manuscript-panel {
+    min-height: 560px;
+  }
+}
+
+@media (max-width: 840px) {
+  .workshop-tri-pane {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workshop-tri-pane > .panel-card:last-child {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 1500px) {
+  .playtest-toolbar { align-items: stretch; flex-direction: column; }
+  .playtest-start-controls { min-width: 0; }
+  .playtest-resume-controls { grid-template-columns: 1fr; }
+  .playtest-session-workspace:not(.hidden) { grid-template-columns: minmax(0, 1fr); }
+  .playtest-scenario-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  #app-shell { flex-direction: column; }
+  #left-nav-rail {
+    order: 2;
+    width: 100%;
+    min-width: 0;
+    height: 64px;
+    min-height: 64px;
+    flex-direction: row;
+    border-top: 1px solid var(--border-subtle);
+    border-right: 0;
+  }
+  #left-nav-rail .nav-brand,
+  #left-nav-rail .nav-footer,
+  #left-nav-rail .nav-section-title,
+  .nav-btn-sub { display: none; }
+  #left-nav-rail .nav-menu {
+    flex-direction: row;
+    min-width: 0;
+    padding: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  #left-nav-rail .nav-item-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 5px 2px;
+    text-align: center;
+  }
+  #left-nav-rail .nav-btn-main { font-size: 9px; white-space: nowrap; }
+  #left-nav-rail .nav-item-btn.active::before {
+    top: auto;
+    right: 12px;
+    bottom: 0;
+    left: 12px;
+    width: auto;
+    height: 3px;
+  }
+  #main-workspace { width: 100%; min-height: 0; }
+  .playtest-start-controls { grid-template-columns: minmax(0, 1fr); }
+  .playtest-scenario-fields { grid-template-columns: minmax(0, 1fr); }
+  .playtest-scenario-fields .scenario-span-2,
+  .playtest-scenario-fields .scenario-span-4,
+  .playtest-scenario-fields .scenario-state-group { grid-column: auto; }
+  .playtest-scenario-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+}

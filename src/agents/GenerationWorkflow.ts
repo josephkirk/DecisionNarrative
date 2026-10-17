@@ -1,3 +1,5 @@
+export const MAX_PIPELINE_RETRIES = 10;
+
 export const GENERATION_STAGES = [
   { id: "canon_and_voice", title: "Gather canon and voice constraints" },
   { id: "physical_seed", title: "Establish a physical scene seed" },
@@ -44,6 +46,7 @@ export interface GenerationJob {
   request: GenerationJobRequest;
   stages: GenerationStageRecord[];
   attempts: Partial<Record<GenerationStageId, number>>;
+  totalRetries: number;
   draftStoryletId?: string;
   draftRevision?: number;
   failure?: { stage: GenerationStageId; message: string };
@@ -87,7 +90,8 @@ export class GenerationWorkflow {
   constructor(private readonly store: GenerationJobStore, private readonly runStage: GenerationStageRunner) {}
 
   recoverInterruptedJobs(): void {
-    for (const job of this.store.list()) {
+    for (const storedJob of this.store.list()) {
+      const job = this.normalizeRetryCount(storedJob);
       if (job.status !== "running") continue;
       job.status = "ready";
       job.revision++;
@@ -105,7 +109,7 @@ export class GenerationWorkflow {
     const now = Date.now();
     const job: GenerationJob = {
       id: crypto.randomUUID(), revision: 0, status: "ready", nextStageIndex: 0,
-      request: structuredClone(request), stages: [], attempts: {}, createdAt: now, updatedAt: now,
+      request: structuredClone(request), stages: [], attempts: {}, totalRetries: 0, createdAt: now, updatedAt: now,
     };
     this.store.put(job);
     return structuredClone(job);
@@ -114,7 +118,7 @@ export class GenerationWorkflow {
   get(id: string): GenerationJob {
     const job = this.store.get(id);
     if (!job) throw new GenerationWorkflowError(`Generation job '${id}' was not found.`, 404);
-    return job;
+    return this.normalizeRetryCount(job);
   }
 
   delete(id: string): boolean {
@@ -166,7 +170,7 @@ export class GenerationWorkflow {
       artifact: structuredClone(artifact), source: "designer", model: "human edit", promptVersion: "manual-v1", completedAt: Date.now(),
     });
     job.nextStageIndex = index + 1;
-    for (const later of GENERATION_STAGES.slice(index + 1)) delete job.attempts[later.id];
+    for (const later of GENERATION_STAGES.slice(index)) delete job.attempts[later.id];
     job.status = index === GENERATION_STAGES.length - 1 ? "complete" : "ready";
     job.failure = undefined;
     job.revision++;
@@ -196,6 +200,8 @@ export class GenerationWorkflow {
 
     let failure: unknown;
     for (let attempt = (job.attempts[stage] ?? 0) + 1; attempt <= 3; attempt++) {
+      if (attempt > 1 && job.totalRetries >= MAX_PIPELINE_RETRIES) break;
+      if (attempt > 1) job.totalRetries++;
       job.attempts[stage] = attempt;
       this.store.put(job);
       try {
@@ -218,6 +224,7 @@ export class GenerationWorkflow {
         return structuredClone(job);
       } catch (error) {
         failure = error;
+        if (job.totalRetries >= MAX_PIPELINE_RETRIES) break;
       }
     }
 
@@ -227,7 +234,18 @@ export class GenerationWorkflow {
     job.updatedAt = Date.now();
     this.store.put(job);
     this.publish(job);
-    throw new GenerationWorkflowError(`Stage '${stage}' failed after three attempts: ${job.failure.message}`, 503);
+    const reason = job.totalRetries >= MAX_PIPELINE_RETRIES
+      ? `pipeline retry limit (${MAX_PIPELINE_RETRIES}) reached`
+      : `stage attempt limit (${job.attempts[stage]} attempts) reached`;
+    throw new GenerationWorkflowError(`Stage '${stage}' failed; ${reason}: ${job.failure.message}`, 503);
+  }
+
+  private normalizeRetryCount(job: GenerationJob): GenerationJob {
+    if (!Number.isSafeInteger(job.totalRetries) || job.totalRetries < 0) {
+      job.totalRetries = Object.values(job.attempts ?? {}).reduce((total, attempts) => total + Math.max(0, (attempts ?? 0) - 1), 0);
+      this.store.put(job);
+    }
+    return job;
   }
 
   private previousArtifacts(job: GenerationJob, beforeIndex: number): Partial<Record<GenerationStageId, unknown>> {

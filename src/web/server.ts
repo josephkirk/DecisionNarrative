@@ -108,18 +108,84 @@ function buildCurrentWorkspaceProject(startLocationId?: string, scenarioId?: str
 
 function saveScenarioRecord(body: Partial<ScenarioRecord>, status = 201): Response {
   if (typeof body.id !== "string" || !body.id.trim() || typeof body.name !== "string" || !body.name.trim()
-    || typeof body.player_start_location !== "string" || !body.player_start_location.trim()
+    || typeof body.player_start_location !== "string"
     || !Number.isSafeInteger(body.seed) || (body.seed ?? -1) < 0
     || !body.initial_qualities || Array.isArray(body.initial_qualities) || typeof body.initial_qualities !== "object"
     || !body.actor_locations || Array.isArray(body.actor_locations) || typeof body.actor_locations !== "object"
     || !Array.isArray(body.storylet_ids) || !body.storylet_ids.every((id) => typeof id === "string")) {
     return jsonResponse({ error: "Scenario needs an ID, name, start location, nonnegative integer seed, quality and actor maps, and a storylet ID list." }, 400);
   }
+
+  // Validate start_location_policy if present
+  if (body.start_location_policy !== undefined && body.start_location_policy !== null) {
+    const slp = body.start_location_policy;
+    if (typeof slp !== "object" || Array.isArray(slp)) {
+      return jsonResponse({ error: "start_location_policy must be an object" }, 400);
+    }
+    if (slp.mode !== "fixed" && slp.mode !== "random" && slp.mode !== "by_attribute") {
+      return jsonResponse({ error: "start_location_policy.mode must be 'fixed', 'random', or 'by_attribute'" }, 400);
+    }
+    if (slp.mode === "fixed" && slp.location_id !== undefined && (typeof slp.location_id !== "string" || !slp.location_id.trim())) {
+      return jsonResponse({ error: "start_location_policy.location_id must be a non-empty string when provided" }, 400);
+    }
+    if (slp.mode === "by_attribute" && (typeof slp.attribute_key !== "string" || !slp.attribute_key.trim())) {
+      return jsonResponse({ error: "start_location_policy.attribute_key must be a non-empty string when mode is 'by_attribute'" }, 400);
+    }
+  }
+
+  // Validate actor_population_policy if present
+  if (body.actor_population_policy !== undefined && body.actor_population_policy !== null) {
+    const app = body.actor_population_policy;
+    if (typeof app !== "object" || Array.isArray(app)) {
+      return jsonResponse({ error: "actor_population_policy must be an object" }, 400);
+    }
+    if (app.mode !== "all" && app.mode !== "random" && app.mode !== "by_attribute") {
+      return jsonResponse({ error: "actor_population_policy.mode must be 'all', 'random', or 'by_attribute'" }, 400);
+    }
+    if (app.mode === "random" && (typeof app.count !== "number" || !Number.isInteger(app.count) || app.count < 0)) {
+      return jsonResponse({ error: "actor_population_policy.count must be a non-negative integer when mode is 'random'" }, 400);
+    }
+    if (app.mode === "by_attribute" && (typeof app.attribute_key !== "string" || !app.attribute_key.trim())) {
+      return jsonResponse({ error: "actor_population_policy.attribute_key must be a non-empty string when mode is 'by_attribute'" }, 400);
+    }
+    if (app.location_policy !== undefined && app.location_policy !== null) {
+      const alp = app.location_policy;
+      if (typeof alp !== "object" || Array.isArray(alp)) {
+        return jsonResponse({ error: "actor_population_policy.location_policy must be an object" }, 400);
+      }
+      if (alp.mode !== "fixed" && alp.mode !== "random" && alp.mode !== "by_attribute") {
+        return jsonResponse({ error: "actor_population_policy.location_policy.mode must be 'fixed', 'random', or 'by_attribute'" }, 400);
+      }
+      if (alp.mode === "fixed" && alp.location_id !== undefined && (typeof alp.location_id !== "string" || !alp.location_id.trim())) {
+        return jsonResponse({ error: "actor_population_policy.location_policy.location_id must be a non-empty string when provided" }, 400);
+      }
+      if (alp.mode === "by_attribute" && (typeof alp.attribute_key !== "string" || !alp.attribute_key.trim())) {
+        return jsonResponse({ error: "actor_population_policy.location_policy.attribute_key must be a non-empty string when mode is 'by_attribute'" }, 400);
+      }
+    }
+  }
+
+  if (body.event_definitions !== undefined && (!Array.isArray(body.event_definitions) || body.event_definitions.some((event) =>
+    !event || typeof event !== "object" || Array.isArray(event) || typeof event.id !== "string" || !event.id.trim()
+    || typeof event.title !== "string" || !event.title.trim() || typeof event.description !== "string"
+    || (event.event_type !== "canon" && event.event_type !== "world")
+    || !event.trigger || typeof event.trigger !== "object" || Array.isArray(event.trigger)
+    || (event.trigger.all_of !== undefined && (!Array.isArray(event.trigger.all_of) || event.trigger.all_of.some((predicate) => !predicate || typeof predicate.variable !== "string" || !predicate.variable.trim() || typeof predicate.op !== "string" || !predicate.op.trim() || !Object.hasOwn(predicate, "value"))))
+    || (event.trigger.any_of !== undefined && (!Array.isArray(event.trigger.any_of) || event.trigger.any_of.some((predicate) => !predicate || typeof predicate.variable !== "string" || !predicate.variable.trim() || typeof predicate.op !== "string" || !predicate.op.trim() || !Object.hasOwn(predicate, "value"))))
+    || !event.effects || typeof event.effects !== "object" || Array.isArray(event.effects)
+    || (event.delay_turns !== undefined && (!Number.isSafeInteger(event.delay_turns) || event.delay_turns < 0))
+    || (event.repeatable !== undefined && typeof event.repeatable !== "boolean")))) {
+    return jsonResponse({ error: "event_definitions must contain valid canon/world events with typed triggers and effects" }, 400);
+  }
+
   const scenario: ScenarioRecord = {
     id: body.id.trim(), name: body.name.trim(), player_start_location: body.player_start_location,
     initial_qualities: body.initial_qualities,
     actor_locations: body.actor_locations,
     storylet_ids: [...new Set(body.storylet_ids)], seed: body.seed!,
+    start_location_policy: body.start_location_policy,
+    actor_population_policy: body.actor_population_policy,
+    event_definitions: body.event_definitions ?? repo.getScenario(body.id.trim())?.event_definitions ?? [],
   };
   const validation = buildWorkspaceProject(currentWorkspaceRecords(), { scenario });
   if (validation.issues.length) return jsonResponse({ error: "Scenario needs correction before saving", issues: validation.issues }, 422);

@@ -14,6 +14,7 @@ fn storylet(id: &str) -> StoryletDefinition {
         title: format!("{id} title"),
         summary: "A project-owned scene".into(),
         approved: true,
+        ending: false,
         location_id: Some("archive".into()),
         urgency_weight: 70.0,
         cluster_type: ClusterType::PlayerControlledPassage,

@@ -75,27 +75,20 @@ function validateChoiceEffects(choices: unknown[], declaredOutcomes: Record<stri
 
 export function auditUnslopCompliance(text: string): UnslopAuditResult {
   const violations: string[] = [];
-
   const lower = text.toLowerCase();
-  for (const w of BANNED_WORDS) {
-    if (lower.includes(w)) {
-      violations.push(`banned_word: '${w}'`);
-    }
+  for (const w of BANNED_WORDS) if (lower.includes(w)) violations.push(`banned_word: '${w}'`);
+  for (const pat of BANNED_PATTERNS) if (pat.regex.test(text)) violations.push(`banned_pattern: ${pat.name}`);
+  if (text.includes("—")) violations.push("banned_pattern: em_dash");
+  if (/(?:,\s+)\b\w+ing\b[^.!?]*[.!?](?=\s|$)/i.test(text)) violations.push("banned_pattern: participial_closer");
+  const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((part) => part.trim().split(/\s+/).filter(Boolean).length) ?? [];
+  if (sentences.length >= 2) {
+    const mean = sentences.reduce((sum, n) => sum + n, 0) / sentences.length;
+    const variance = sentences.reduce((sum, n) => sum + (n - mean) ** 2, 0) / sentences.length;
+    const cv = mean === 0 ? 0 : Math.sqrt(variance) / mean;
+    if (cv < 0.35) violations.push(`sentence_length_cv_below_0.35: ${cv.toFixed(3)}`);
   }
-
-  for (const pat of BANNED_PATTERNS) {
-    if (pat.regex.test(text)) {
-      violations.push(`banned_pattern: ${pat.name}`);
-    }
-  }
-
-  return {
-    passed: violations.length === 0,
-    violations,
-    text,
-  };
+  return { passed: violations.length === 0, violations, text };
 }
-
 export class UnslopStoryletPipeline {
   private readonly craftResources = new StoryCraftResourceRegistry();
   private readonly promptVersion = "storylet-craft-v2";

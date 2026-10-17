@@ -33,6 +33,7 @@ fn definition(repeatability: Repeatability) -> StoryletDefinition {
         title: "A ledger at the clinic".into(),
         summary: "A generic authored incident".into(),
         approved: true,
+        ending: false,
         location_id: Some("archive".into()),
         urgency_weight: 60.0,
         cluster_type: ClusterType::Linear,

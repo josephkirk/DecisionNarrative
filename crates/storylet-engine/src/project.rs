@@ -106,6 +106,16 @@ pub struct EventDefinition {
     pub delay_turns: u64,
     #[serde(default)]
     pub repeatable: bool,
+    #[serde(default)]
+    pub event_type: EventType,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventType {
+    Canon,
+    #[default]
+    World,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -120,6 +130,10 @@ pub struct ScenarioDefinition {
     #[serde(default)]
     pub storylet_ids: Vec<String>,
     pub seed: u64,
+    #[serde(default)]
+    pub event_ids: Vec<String>,
+    #[serde(default)]
+    pub active_actor_ids: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -271,6 +285,9 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
             &format!("{path}.trigger"),
             &storylet.trigger,
         );
+        if storylet.ending && storylet.choices.is_empty() {
+            issue(&mut issues, format!("{path}.choices"), "ending_without_choice", "ending storylets must have at least one choice");
+        }
         let mut choices = BTreeSet::new();
         for (index, choice) in storylet.choices.iter().enumerate() {
             let choice_path = format!("{path}.choices[{index}]");
@@ -406,6 +423,23 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
                 location,
             );
         }
+        if let Some(ref active) = scenario.active_actor_ids {
+            for (index, actor_id) in active.iter().enumerate() {
+                if !project.characters.contains_key(actor_id) {
+                    issue(
+                        &mut issues,
+                        format!("{path}.active_actor_ids[{index}]"),
+                        "missing_character",
+                        format!("active character '{actor_id}' does not exist"),
+                    );
+                }
+            }
+        }
+        for (index, event_id) in scenario.event_ids.iter().enumerate() {
+            if !project.events.contains_key(event_id) {
+                issue(&mut issues, format!("{path}.event_ids[{index}]"), "missing_event", "scenario event does not exist");
+            }
+        }
         for (index, storylet_id) in scenario.storylet_ids.iter().enumerate() {
             match project.storylets.get(storylet_id) {
                 None => issue(
@@ -458,6 +492,11 @@ pub fn build_world(
     }
     world.qualities.extend(scenario.initial_qualities.clone());
     for (id, character) in &project.characters {
+        if let Some(ref active) = scenario.active_actor_ids {
+            if !active.contains(id) {
+                continue;
+            }
+        }
         let current_location = scenario
             .actor_locations
             .get(id)

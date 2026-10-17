@@ -25,6 +25,7 @@ export interface StoryletRecord {
   revision?: number;
   approved_revision?: number | null;
   title: string;
+  ending?: boolean;
   location?: string;
   group_tag?: string;
   cluster_type: "linear" | "player_controlled_passage" | "wheel" | "aftermath";
@@ -71,6 +72,47 @@ export interface LocationRecord {
   created_at?: number;
 }
 
+export type StartLocationMode = "fixed" | "random" | "by_attribute";
+
+export interface StartLocationPolicy {
+  mode: StartLocationMode;
+  location_id?: string;
+  attribute_key?: string;
+  attribute_value?: unknown;
+}
+
+export type ActorPopulationMode = "all" | "random" | "by_attribute";
+export type ActorLocationMode = "fixed" | "random" | "by_attribute";
+
+export interface ActorLocationPolicy {
+  mode: ActorLocationMode;
+  location_id?: string;
+  attribute_key?: string;
+  attribute_value?: unknown;
+}
+
+export interface ActorPopulationPolicy {
+  mode: ActorPopulationMode;
+  count?: number;
+  attribute_key?: string;
+  attribute_value?: unknown;
+  location_policy?: ActorLocationPolicy;
+}
+
+export interface ScenarioEventRecord {
+  id: string;
+  title: string;
+  description: string;
+  event_type: "canon" | "world";
+  trigger: {
+    all_of?: Array<{ variable: string; op: string; value: unknown }>;
+    any_of?: Array<{ variable: string; op: string; value: unknown }>;
+  };
+  effects: Record<string, unknown>;
+  delay_turns?: number;
+  repeatable?: boolean;
+}
+
 export interface ScenarioRecord {
   id: string;
   name: string;
@@ -79,6 +121,9 @@ export interface ScenarioRecord {
   actor_locations: Record<string, string>;
   storylet_ids: string[];
   seed: number;
+  start_location_policy?: StartLocationPolicy;
+  actor_population_policy?: ActorPopulationPolicy;
+  event_definitions?: ScenarioEventRecord[];
 }
 
 export interface CharacterRecord {
@@ -509,11 +554,11 @@ export class StoryletRepository {
       INSERT INTO storylets (
         id, title, location, group_tag, cluster_type, urgency_weight,
         repeatability, cooldown_turns, parameters, preconditions, content,
-        choices, effects, created_at, revision, approved_revision
+        choices, effects, created_at, revision, approved_revision, ending
       ) VALUES (
         $id, $title, $location, $group_tag, $cluster_type, $urgency_weight,
         $repeatability, $cooldown_turns, $parameters, $preconditions, $content,
-        $choices, $effects, $created_at, $revision, NULL
+        $choices, $effects, $created_at, $revision, NULL, $ending
       )
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
@@ -528,6 +573,7 @@ export class StoryletRepository {
         content = excluded.content,
         choices = excluded.choices,
         effects = excluded.effects,
+        ending = excluded.ending,
         revision = excluded.revision,
         approved_revision = NULL;
     `);
@@ -547,6 +593,7 @@ export class StoryletRepository {
       $effects: JSON.stringify(st.effects),
       $created_at: st.created_at ?? Date.now(),
       $revision: revision,
+      $ending: st.ending === true ? 1 : 0,
     });
     this.bumpProjectRevision();
     this.storyletsCache = null;
@@ -592,6 +639,7 @@ export class StoryletRepository {
       id: row.id,
       revision: row.revision,
       approved_revision: row.approved_revision,
+      ending: row.ending === 1,
       title: row.title,
       location: row.location,
       group_tag: row.group_tag,

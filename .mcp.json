@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "decisionnarrative_strata": {
+      "command": "bun",
+      "args": ["run", "scripts/strata-storylet-mcp.ts"]
+    }
+  }
+}

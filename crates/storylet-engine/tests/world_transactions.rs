@@ -16,6 +16,7 @@ fn command(id: &str, revision: u64, effects: Vec<Effect>) -> WorldCommand {
         effects,
         caused_by: Vec::new(),
         advance_turn: true,
+                terminal: false,
     }
 }
 
