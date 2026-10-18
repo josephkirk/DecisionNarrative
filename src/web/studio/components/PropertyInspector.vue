@@ -468,8 +468,10 @@ function handleJumpTargetChange(node: NarrativeNode) {
       </div>
 
       <div v-else-if="selectedNode.type === 'image'">
-        <div class="form-group"><label class="field-label">Image Prompt</label><textarea v-model="selectedNode.prompt" class="form-textarea" @input="emitGraphUpdate(selectedNode)" /></div>
-        <div v-if="selectedNode.image_url" class="form-group"><label class="field-label">Generated Image URL</label><input v-model="selectedNode.image_url" class="form-input" @input="emitGraphUpdate(selectedNode)" /></div>
+        <div class="form-group">
+          <label class="field-label">Image URL</label>
+          <input v-model="selectedNode.image_url" class="form-input" placeholder="Image URL or project-relative path" @input="emitGraphUpdate(selectedNode)" />
+        </div>
       </div>
 
       <div v-else-if="selectedNode.type === 'teleport'">

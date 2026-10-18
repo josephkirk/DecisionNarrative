@@ -3,35 +3,52 @@
 use rusqlite::{OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, broadcast};
 
 use storylet_engine::{
-    ProjectBundle, RuntimeSessionState, StoryletRuntime, WorldCommand, WorldEvent,
+    EngineError, ProjectBundle, RUNTIME_SESSION_FORMAT_VERSION, RuntimeError, RuntimeSessionState,
+    StoryletRuntime, WorldCommand, WorldEvent,
 };
 
+#[derive(Debug)]
+pub enum ChoiceOperationError {
+    InvalidInput(String),
+    SessionNotFound(String),
+    NotFound(String),
+    Conflict(String),
+    Runtime(String),
+    Persistence(String),
+}
+
+impl std::fmt::Display for ChoiceOperationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidInput(message)
+            | Self::Conflict(message)
+            | Self::Runtime(message)
+            | Self::Persistence(message) => formatter.write_str(message),
+            Self::SessionNotFound(session_id) => {
+                write!(formatter, "session '{session_id}' was not found")
+            }
+            Self::NotFound(message) => formatter.write_str(message),
+        }
+    }
+}
+
 use crate::contracts::{
-    AuthoringOptions, GenerationJobRecord, LibraryPageResult, LibraryQuery, ProjectBundleContent,
-    ProjectBundleV2, ProjectMetadata, ScenarioRecord, StoryletRecord,
+    AuthoringOptions, LibraryPageResult, LibraryQuery, ProjectBundleContent, ProjectBundleV2,
+    ProjectMetadata, ScenarioRecord, StoryletRecord,
 };
-use crate::generation::resources::CraftRegistry;
-use crate::generation::resources::StoryCraftResourceReference;
-use crate::generation::workflow::{GENERATION_STAGES, GenerationService, get_stage_descriptors};
 use crate::projection::project_workspace;
 use crate::scenario::resolve_scenario_start;
 use crate::store::Store;
 
-use crate::ai_generators::AiGeneratorService;
-
 #[derive(Clone)]
 pub struct StudioService {
     inner: Arc<Mutex<StudioInner>>,
-    pub generation: Arc<GenerationService>,
-    pub ai: Arc<AiGeneratorService>,
     pub updates: broadcast::Sender<SessionChange>,
-    pub embedding_url: String,
     pub resource_root: PathBuf,
 }
 
@@ -51,99 +68,95 @@ impl StudioService {
     pub fn open(
         db_path: impl AsRef<Path>,
         resource_root: impl Into<PathBuf>,
-        strata_url: impl Into<String>,
-        strata_model: impl Into<String>,
-        embedding_url: impl Into<String>,
     ) -> Result<Self, String> {
         let store = Store::open(db_path).map_err(|e| e.to_string())?;
-        Self::build(
-            store,
-            resource_root,
-            strata_url,
-            strata_model,
-            embedding_url,
-        )
+        Self::build(store, resource_root)
     }
 
-    pub fn open_in_memory(
-        resource_root: impl Into<PathBuf>,
-        strata_url: impl Into<String>,
-        strata_model: impl Into<String>,
-        embedding_url: impl Into<String>,
-    ) -> Result<Self, String> {
+    pub fn open_in_memory(resource_root: impl Into<PathBuf>) -> Result<Self, String> {
         let store = Store::open_in_memory().map_err(|e| e.to_string())?;
-        Self::build(
-            store,
-            resource_root,
-            strata_url,
-            strata_model,
-            embedding_url,
-        )
+        Self::build(store, resource_root)
     }
 
     pub fn from_connection(conn: rusqlite::Connection) -> Result<Self, String> {
         let store = Store::from_connection(conn).map_err(|e| e.to_string())?;
-        Self::build(
-            store,
-            ".",
-            "http://127.0.0.1:8080/v1",
-            "strata-uncensored",
-            "http://127.0.0.1:4318",
-        )
+        Self::build(store, ".")
     }
 
-    fn build(
-        store: Store,
-        resource_root: impl Into<PathBuf>,
-        strata_url: impl Into<String>,
-        strata_model: impl Into<String>,
-        embedding_url: impl Into<String>,
-    ) -> Result<Self, String> {
+    fn build(mut store: Store, resource_root: impl Into<PathBuf>) -> Result<Self, String> {
         let mut runtime = StoryletRuntime::default();
+        let saved_sessions = {
+            let mut stmt = store
+                .conn
+                .prepare("SELECT session_id, state_json FROM runtime_sessions ORDER BY session_id")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+        };
 
-        let mut stmt = store
-            .conn
-            .prepare("SELECT state_json FROM runtime_sessions ORDER BY session_id")
-            .map_err(|e| e.to_string())?;
-
-        let rows = stmt
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?;
-
-        for enc_res in rows {
-            let enc = enc_res.map_err(|e| e.to_string())?;
+        let mut migrations = Vec::new();
+        for (row_id, enc) in saved_sessions {
             let state: RuntimeSessionState = serde_json::from_str(&enc)
-                .map_err(|e| format!("saved session JSON is invalid: {e}"))?;
-
-            validate_event_history(&store.conn, &state)?;
+                .map_err(|e| format!("saved session '{row_id}' JSON is invalid: {e}"))?;
+            if state.session_id != row_id {
+                return Err(format!(
+                    "saved session row '{row_id}' contains state for '{}'",
+                    state.session_id
+                ));
+            }
+            validate_event_history(&store.conn, &state)
+                .map_err(|e| format!("saved session '{row_id}' event history is invalid: {e}"))?;
+            let needs_migration = state.format_version < RUNTIME_SESSION_FORMAT_VERSION;
             runtime
                 .restore_session(state)
-                .map_err(|e| format!("saved session cannot be restored: {e}"))?;
+                .map_err(|e| format!("saved session '{row_id}' cannot be restored: {e}"))?;
+            if needs_migration {
+                migrations.push((
+                    enc,
+                    runtime.export_session(&row_id).map_err(|e| {
+                        format!("failed to export migrated session '{row_id}': {e}")
+                    })?,
+                ));
+            }
         }
-        drop(stmt);
 
-        // Recover any interrupted running generation jobs to ready
-        let _ = store.conn.execute(
-            "UPDATE generation_jobs SET status = 'ready', revision = revision + 1, updated_at = ?1 WHERE status = 'running'",
-            rusqlite::params![chrono_now_ms()],
-        );
+        if !migrations.is_empty() {
+            let tx = store.conn.transaction().map_err(|e| e.to_string())?;
+            for (old_state_json, state) in migrations {
+                let new_state_json = serde_json::to_string(&state).map_err(|e| e.to_string())?;
+                let updated = tx.execute(
+                    "UPDATE runtime_sessions SET revision = ?1, turn = ?2, state_json = ?3, updated_at = ?4
+                     WHERE session_id = ?5 AND state_json = ?6",
+                    rusqlite::params![
+                        state.world.revision.to_string(),
+                        state.world.turn.to_string(),
+                        new_state_json,
+                        chrono_now_ms().to_string(),
+                        &state.session_id,
+                        old_state_json
+                    ],
+                ).map_err(|e| e.to_string())?;
+                if updated != 1 {
+                    return Err(format!(
+                        "saved session '{}' changed during migration",
+                        state.session_id
+                    ));
+                }
+            }
+            tx.commit().map_err(|e| e.to_string())?;
+        }
 
         let (updates, _) = broadcast::channel(256);
         let res_root = resource_root.into();
-        let gen_service = GenerationService::new(res_root.clone(), strata_url, strata_model);
-
-        let litellm_url =
-            std::env::var("LITELLM_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:4000/v1".into());
-        let comfyui_url =
-            std::env::var("COMFYUI_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8188".into());
-        let ai = Arc::new(AiGeneratorService::new(litellm_url, comfyui_url));
 
         Ok(Self {
             inner: Arc::new(Mutex::new(StudioInner { store, runtime })),
-            generation: Arc::new(gen_service),
-            ai,
             updates,
-            embedding_url: embedding_url.into(),
             resource_root: res_root,
         })
     }
@@ -210,20 +223,6 @@ impl StudioService {
         Ok(json!({ "snapshot": snap_val }))
     }
 
-    pub async fn apply_semantic_rank(
-        &self,
-        session_id: &str,
-        slope: f64,
-        req: storylet_engine::SemanticRankingRequest,
-    ) -> Result<Value, String> {
-        let inner = self.inner.lock().await;
-        let res = inner
-            .runtime
-            .rank_semantic(session_id, slope, req)
-            .map_err(|e| e.to_string())?;
-        serde_json::to_value(res).map_err(|e| e.to_string())
-    }
-
     pub async fn export_project_bundle(&self) -> Result<ProjectBundleV2, String> {
         let inner = self.inner.lock().await;
         let project = inner
@@ -241,11 +240,6 @@ impl StudioService {
             .map_err(|e| e.to_string())?;
         let events = inner.store.list_events().map_err(|e| e.to_string())?;
         let scenarios = inner.store.list_scenarios().map_err(|e| e.to_string())?;
-        let generation_jobs = inner
-            .store
-            .list_generation_jobs()
-            .map_err(|e| e.to_string())?;
-
         Ok(ProjectBundleV2 {
             format: "decision-narrative-project".into(),
             schema_version: 2,
@@ -258,7 +252,6 @@ impl StudioService {
                 npc_behaviors,
                 events,
                 scenarios,
-                generation_jobs,
             },
         })
     }
@@ -444,439 +437,76 @@ impl StudioService {
             ],
             policy_modes: vec!["fixed".into(), "random".into(), "by_attribute".into()],
             event_types: vec!["canon".into(), "world".into()],
-            stages: get_stage_descriptors(),
         }
     }
 
-    // --- Craft Resources & Generation ---
+    // --- Studio Interaction Context ---
 
-    pub async fn list_craft_resources(&self) -> Result<Vec<StoryCraftResourceReference>, String> {
-        let registry = CraftRegistry::new(&self.resource_root);
-        registry.catalog()
-    }
-
-    pub async fn list_generation_jobs(&self) -> Result<Value, String> {
-        let inner = self.inner.lock().await;
-        let list = inner
-            .store
-            .list_generation_jobs()
-            .map_err(|e| e.to_string())?;
-        serde_json::to_value(list).map_err(|e| e.to_string())
-    }
-
-    pub async fn get_generation_job(&self, id: &str) -> Result<Value, String> {
-        let inner = self.inner.lock().await;
-        let job = inner
-            .store
-            .get_generation_job(id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("Generation job '{id}' not found"))?;
-        serde_json::to_value(job).map_err(|e| e.to_string())
-    }
-
-    pub async fn create_generation_job(
-        &self,
-        request: Value,
-    ) -> Result<GenerationJobRecord, String> {
-        let now = chrono_now_ms();
-        let job = GenerationJobRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            revision: 0,
-            status: "ready".into(),
-            next_stage_index: 0,
-            request,
-            stages: Vec::new(),
-            attempts: BTreeMap::new(),
-            total_retries: 0,
-            draft_storylet_id: None,
-            draft_revision: None,
-            failure: None,
-            created_at: now,
-            updated_at: now,
-        };
-        {
-            let inner = self.inner.lock().await;
-            inner
-                .store
-                .save_generation_job(&job)
-                .map_err(|e| e.to_string())?;
-        }
-        self.generation.notify_job_update(&job);
-        Ok(job)
-    }
-
-    pub async fn advance_generation_job(
-        &self,
-        id: &str,
-        expected_revision: u64,
-    ) -> Result<GenerationJobRecord, String> {
-        let (mut job, stage_id) = {
-            let inner = self.inner.lock().await;
-            let mut j = inner
-                .store
-                .get_generation_job(id)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| format!("Generation job '{id}' not found"))?;
-
-            if j.revision != expected_revision {
-                return Err(format!(
-                    "Revision conflict: job revision is {}, expected {}",
-                    j.revision, expected_revision
-                ));
-            }
-            if j.status == "complete" {
-                return Err("This generation job is already complete.".into());
-            }
-            if j.status == "running" {
-                return Err("A generation stage is already running.".into());
-            }
-            if j.status == "failed" {
-                return Err(
-                    "This job reached its retry limit. Edit an earlier stage to resume it.".into(),
-                );
-            }
-            if j.next_stage_index >= GENERATION_STAGES.len() {
-                return Err("No generation stages remain.".into());
-            }
-
-            let (s_id, _) = GENERATION_STAGES[j.next_stage_index];
-            let attempts = j.attempts.get(s_id).copied().unwrap_or(0) + 1;
-            if attempts > 3 || j.total_retries >= 10 {
-                j.status = "failed".into();
-                j.failure = Some(json!({ "stage": s_id, "message": "Attempt limit reached" }));
-                j.revision += 1;
-                j.updated_at = chrono_now_ms();
-                inner
-                    .store
-                    .save_generation_job(&j)
-                    .map_err(|e| e.to_string())?;
-                return Err(format!("Stage '{s_id}' reached attempt limit"));
-            }
-
-            j.attempts.insert(s_id.to_string(), attempts);
-            if attempts > 1 {
-                j.total_retries += 1;
-            }
-            j.status = "running".into();
-            j.failure = None;
-            j.revision += 1;
-            j.updated_at = chrono_now_ms();
-            inner
-                .store
-                .save_generation_job(&j)
-                .map_err(|e| e.to_string())?;
-            (j, s_id)
-        };
-
-        self.generation.notify_job_update(&job);
-
-        let stage_res = self
-            .generation
-            .execute_stage(stage_id, &job.request, &job.stages)
-            .await;
-        let inner = self.inner.lock().await;
-        match stage_res {
-            Ok(rec) => {
-                job.stages.push(rec);
-                job.next_stage_index += 1;
-                job.status = if job.next_stage_index >= GENERATION_STAGES.len() {
-                    "complete".into()
-                } else {
-                    "ready".into()
-                };
-                job.revision += 1;
-                job.updated_at = chrono_now_ms();
-                inner
-                    .store
-                    .save_generation_job(&job)
-                    .map_err(|e| e.to_string())?;
-                self.generation.notify_job_update(&job);
-                Ok(job)
-            }
-            Err(err) => {
-                job.status = "failed".into();
-                job.failure = Some(json!({ "stage": stage_id, "message": err.clone() }));
-                job.revision += 1;
-                job.updated_at = chrono_now_ms();
-                inner
-                    .store
-                    .save_generation_job(&job)
-                    .map_err(|e| e.to_string())?;
-                self.generation.notify_job_update(&job);
-                Err(err)
-            }
-        }
-    }
-
-    pub async fn edit_generation_stage(
-        &self,
-        id: &str,
-        stage: &str,
-        expected_revision: u64,
-        artifact: Value,
-    ) -> Result<GenerationJobRecord, String> {
-        let inner = self.inner.lock().await;
-        let job =
-            self.generation
-                .edit_stage(&inner.store, id, stage, expected_revision, artifact)?;
-        Ok(job)
-    }
-
-    pub async fn save_generation_draft(&self, id: &str) -> Result<StoryletRecord, String> {
-        let inner = self.inner.lock().await;
-        self.generation.save_job_draft(&inner.store, id)
-    }
-
-    pub async fn delete_generation_job(&self, id: &str) -> Result<bool, String> {
+    pub async fn save_interaction_context(&self, context: &Value) -> Result<(), String> {
         let inner = self.inner.lock().await;
         inner
             .store
-            .delete_generation_job(id)
+            .save_interaction_context(context)
             .map_err(|e| e.to_string())
     }
 
-    pub async fn generate_storylet_batch(
-        &self,
-        family: &str,
-        count: usize,
-        batch_index: u64,
-        brief: &str,
-    ) -> Result<Value, String> {
-        let count = count.clamp(1, 24);
-        let endpoint = format!(
-            "{}/chat/completions",
-            self.generation.strata_url.trim_end_matches('/')
-        );
-        let prompt = format!(
-            "Create exactly {} diverse storylet candidates for scenario family {}.\n\
-             Each candidate must match the StoryletRecord shape:\n\
-             {{\"storylets\":[{{\"title\":string,\"location_tags\"?:string[],\"group_tag\"?:string,\"cluster_type\":\"linear\"|\"player_controlled_passage\"|\"wheel\"|\"aftermath\",\"urgency_weight\":number,\"repeatability\":\"once_ever\"|\"always\"|\"cooldown\"|\"persistent\",\"cooldown_turns\":number,\"parameters\":[{{\"param_name\":string,\"query\":string}}],\"preconditions\":{{\"all_of\"?:[{{\"variable\":string,\"op\":string,\"value\":any}}]}},\"content\":{{\"text_template\":string,\"sceneOpening\"?:string}},\"choices\":[{{\"choice_id\":string,\"label\":string,\"systemVerb\"?:string,\"effects\":object,\"divert_target\"?:string}}],\"effects\":object}}]}}\n\
-             Project brief: {}\n\
-             Include ending as a required boolean; set true only for the designated terminal storylet. Do not include id, revision, approved_revision, or created_at; the server assigns these deterministically.\n\
-             Return only JSON with the top-level 'storylets' key.",
-            count, family, brief
-        );
-
-        let body = json!({
-            "model": self.generation.strata_model,
-            "temperature": 0.7,
-            "max_tokens": (750 * count).min(12000),
-            "messages": [
-                { "role": "system", "content": "You are a specialized narrative designer generating storylet content candidates. Return only valid JSON." },
-                { "role": "user", "content": prompt }
-            ]
-        });
-
-        let resp = self
-            .generation
-            .http_client
-            .post(&endpoint)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| format!("Strata request failed: {e}"))?;
-
-        if !resp.status().is_success() {
-            return Err(format!("Strata returned HTTP status {}", resp.status()));
-        }
-
-        let resp_data: Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse Strata JSON: {e}"))?;
-        let text = resp_data
-            .get("choices")
-            .and_then(|c| c.get(0))
-            .and_then(|m| m.get("message"))
-            .and_then(|msg| msg.get("content"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        let parsed: Value = extract_json_from_strata(text)?;
-        let rows = parsed
-            .get("storylets")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| "Strata output must contain a 'storylets' array".to_string())?;
-
-        if rows.len() != count {
-            return Err(format!(
-                "Expected exactly {count} storylets from Strata, but received {}",
-                rows.len()
-            ));
-        }
-
-        let now = chrono_now_ms();
-        let mut results = Vec::new();
-
-        for (idx, row) in rows.iter().enumerate() {
-            let title = row
-                .get("title")
-                .and_then(|t| t.as_str())
-                .unwrap_or("Generated Scene");
-            let ending = row.get("ending").and_then(|e| e.as_bool()).unwrap_or(false);
-            let location_tags = match row.get("location_tags") {
-                None | Some(Value::Null) => Vec::new(),
-                Some(Value::Array(tags)) => tags
-                    .iter()
-                    .enumerate()
-                    .map(|(tag_index, tag)| {
-                        let value = tag
-                            .as_str()
-                            .map(str::trim)
-                            .filter(|value| !value.is_empty())
-                            .ok_or_else(|| {
-                                format!(
-                                    "Storylet {} has invalid location tag {}",
-                                    idx + 1,
-                                    tag_index + 1
-                                )
-                            })?;
-                        Ok(value.to_string())
-                    })
-                    .collect::<Result<Vec<_>, String>>()?,
-                _ => return Err(format!("Storylet {} has invalid location_tags", idx + 1)),
-            };
-            let group_tag = row
-                .get("group_tag")
-                .and_then(|g| g.as_str())
-                .map(|s| s.to_string());
-            let cluster_type = row
-                .get("cluster_type")
-                .and_then(|c| c.as_str())
-                .unwrap_or("player_controlled_passage");
-            let urgency = row
-                .get("urgency_weight")
-                .and_then(|u| u.as_f64())
-                .unwrap_or(50.0);
-            let repeatability = row
-                .get("repeatability")
-                .and_then(|r| r.as_str())
-                .unwrap_or("always");
-            let cooldown = row
-                .get("cooldown_turns")
-                .and_then(|c| c.as_u64())
-                .unwrap_or(0);
-            let content_obj = row
-                .get("content")
-                .cloned()
-                .unwrap_or(json!({ "text_template": "" }));
-            let preconditions = row.get("preconditions").cloned().unwrap_or(json!({}));
-            let choices = row.get("choices").cloned().unwrap_or(json!([]));
-            let effects = row.get("effects").cloned().unwrap_or(json!({}));
-            let parameters = row.get("parameters").cloned().unwrap_or(json!([]));
-
-            let id = format!("stl_{family}_{batch_index:03}_{:04}", idx + 1);
-
-            results.push(json!({
-                "id": id,
-                "revision": 1,
-                "approved_revision": Value::Null,
-                "title": title,
-                "ending": ending,
-                "location_tags": location_tags,
-                "group_tag": group_tag,
-                "cluster_type": cluster_type,
-                "urgency_weight": urgency,
-                "repeatability": repeatability,
-                "cooldown_turns": cooldown,
-                "parameters": parameters,
-                "preconditions": preconditions,
-                "content": content_obj,
-                "choices": choices,
-                "effects": effects,
-                "created_at": now,
-            }));
-        }
-
-        Ok(Value::Array(results))
+    pub async fn mark_interaction_context_stale(&self) -> Result<(), String> {
+        let inner = self.inner.lock().await;
+        inner
+            .store
+            .mark_interaction_context_stale()
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn generate_ranking_batch(
-        &self,
-        family: &str,
-        count: usize,
-        batch_index: u64,
-        brief: &str,
-    ) -> Result<Value, String> {
-        let count = count.clamp(1, 24);
-        let endpoint = format!(
-            "{}/chat/completions",
-            self.generation.strata_url.trim_end_matches('/')
-        );
-        let prompt = format!(
-            "Generate exactly {} synthetic storylet ranking training pairs for scenario family {}.\n\
-             Each row must match model/ranking-example.schema.json with 9 bounded features [0.0 - 1.0]:\n\
-             semantic_relevance, urgency, pacing_arc_alignment, novelty, waiting_time, goal_progress, role_binding_quality, predicted_consequence_alignment, no_action.\n\
-             Brief: {}\n\
-             Return only JSON with top-level 'examples' array.",
-            count, family, brief
-        );
+    pub async fn get_interaction_context(&self) -> Result<Value, String> {
+        let inner = self.inner.lock().await;
+        let meta = inner
+            .store
+            .get_project_metadata()
+            .map_err(|e| e.to_string())?;
+        let row = inner
+            .store
+            .get_interaction_context()
+            .map_err(|e| e.to_string())?;
 
-        let body = json!({
-            "model": self.generation.strata_model,
-            "temperature": 0.7,
-            "max_tokens": (600 * count).min(10000),
-            "messages": [
-                { "role": "system", "content": "You are a training-data generator for storylet ranking heads. Return only valid JSON with 'examples' array." },
-                { "role": "user", "content": prompt }
-            ]
-        });
+        let now = chrono_now_ms();
+        match row {
+            Some((context, captured_at, updated_at, is_stale)) => {
+                let age_ms = (now - captured_at).max(0);
+                let context_project_rev = context
+                    .get("project")
+                    .and_then(|p| p.get("revision"))
+                    .and_then(|r| r.as_u64());
+                let live_project_rev = meta.revision;
+                let revision_matches = context_project_rev == Some(live_project_rev);
+                let fresh = age_ms < 60_000 && !is_stale;
 
-        let resp = self
-            .generation
-            .http_client
-            .post(&endpoint)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| format!("Strata request failed: {e}"))?;
-
-        if !resp.status().is_success() {
-            return Err(format!("Strata returned HTTP status {}", resp.status()));
-        }
-
-        let resp_data: Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse Strata JSON: {e}"))?;
-        let text = resp_data
-            .get("choices")
-            .and_then(|c| c.get(0))
-            .and_then(|m| m.get("message"))
-            .and_then(|msg| msg.get("content"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        let parsed: Value = extract_json_from_strata(text)?;
-        let rows = parsed
-            .get("examples")
-            .or_else(|| parsed.as_array().map(|_| &parsed))
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| "Strata output must contain an 'examples' array".to_string())?;
-
-        if rows.len() != count {
-            return Err(format!(
-                "Expected exactly {count} ranking examples from Strata, but received {}",
-                rows.len()
-            ));
-        }
-
-        let mut results = Vec::new();
-        for (idx, row) in rows.iter().enumerate() {
-            let id = format!("rnk_{family}_{batch_index:03}_{:04}", idx + 1);
-            let mut item = row.clone();
-            if let Some(obj) = item.as_object_mut() {
-                obj.insert("example_id".into(), Value::String(id));
-                obj.insert("split".into(), Value::String("train".into()));
-                obj.insert(
-                    "label_source".into(),
-                    Value::String("strata_synthetic".into()),
-                );
+                Ok(json!({
+                    "hasContext": true,
+                    "context": context,
+                    "capturedAt": captured_at,
+                    "updatedAt": updated_at,
+                    "ageMs": age_ms,
+                    "fresh": fresh,
+                    "isStale": is_stale,
+                    "revisionMatches": revision_matches,
+                    "liveProjectRevision": live_project_rev,
+                    "contextProjectRevision": context_project_rev,
+                }))
             }
-            results.push(item);
+            None => Ok(json!({
+                "hasContext": false,
+                "context": Value::Null,
+                "capturedAt": Value::Null,
+                "updatedAt": Value::Null,
+                "ageMs": Value::Null,
+                "fresh": false,
+                "isStale": true,
+                "revisionMatches": false,
+                "liveProjectRevision": meta.revision,
+                "contextProjectRevision": Value::Null,
+            })),
         }
-
-        Ok(Value::Array(results))
     }
 
     // --- Playtests & Runtime Engine Integration ---
@@ -1032,20 +662,6 @@ impl StudioService {
         serde_json::to_value(snap).map_err(|e| e.to_string())
     }
 
-    pub async fn apply_director_decision(
-        &self,
-        session_id: &str,
-        slope: f64,
-        decision: storylet_engine::DecisionResult,
-    ) -> Result<Value, String> {
-        let inner = self.inner.lock().await;
-        let res = inner
-            .runtime
-            .apply_decision(session_id, slope, decision)
-            .map_err(|e| e.to_string())?;
-        serde_json::to_value(res).map_err(|e| e.to_string())
-    }
-
     pub async fn evaluate_playtest_director(
         &self,
         session_id: &str,
@@ -1056,42 +672,6 @@ impl StudioService {
             .runtime
             .evaluate(session_id, slope)
             .map_err(|e| e.to_string())?;
-        serde_json::to_value(eval).map_err(|e| e.to_string())
-    }
-
-    pub async fn rank_playtest_with_local_encoder(
-        &self,
-        session_id: &str,
-        slope: f64,
-    ) -> Result<Value, String> {
-        let (session, evaluation) = {
-            let inner = self.inner.lock().await;
-            let sess = inner
-                .runtime
-                .export_session(session_id)
-                .map_err(|e| e.to_string())?;
-            let eval = inner
-                .runtime
-                .evaluate(session_id, slope)
-                .map_err(|e| e.to_string())?;
-            (sess, eval)
-        };
-
-        let req = crate::ranking::build_semantic_ranking_request(
-            &session,
-            &evaluation,
-            &self.embedding_url,
-        )
-        .await?;
-
-        let eval = {
-            let inner = self.inner.lock().await;
-            inner
-                .runtime
-                .rank_semantic(session_id, slope, req)
-                .map_err(|e| e.to_string())?
-        };
-
         serde_json::to_value(eval).map_err(|e| e.to_string())
     }
 
@@ -1142,41 +722,82 @@ impl StudioService {
         choice_id: &str,
         expected_revision: u64,
         idempotency_key: &str,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, ChoiceOperationError> {
+        if storylet_id.trim().is_empty() {
+            return Err(ChoiceOperationError::InvalidInput(
+                "storyletId must not be empty".into(),
+            ));
+        }
+        if choice_id.trim().is_empty() {
+            return Err(ChoiceOperationError::InvalidInput(
+                "choiceId must not be empty".into(),
+            ));
+        }
+        if idempotency_key.trim().is_empty() {
+            return Err(ChoiceOperationError::InvalidInput(
+                "idempotencyKey must not be empty".into(),
+            ));
+        }
         let mut inner = self.inner.lock().await;
-        let prior_export = inner
-            .runtime
-            .export_session(session_id)
-            .map_err(|e| e.to_string())?;
+        let prior_export =
+            inner
+                .runtime
+                .export_session(session_id)
+                .map_err(|error| match error {
+                    RuntimeError::SessionNotFound { session_id } => {
+                        ChoiceOperationError::SessionNotFound(session_id)
+                    }
+                    other => ChoiceOperationError::Runtime(other.to_string()),
+                })?;
 
-        let res = match inner.runtime.execute_choice(
-            session_id,
-            storylet_id,
-            choice_id,
-            idempotency_key,
-            expected_revision,
-        ) {
-            Ok(r) => r,
-            Err(e) => return Err(e.to_string()),
-        };
+        let res = inner
+            .runtime
+            .execute_choice(
+                session_id,
+                storylet_id,
+                choice_id,
+                idempotency_key,
+                expected_revision,
+            )
+            .map_err(|error| match error {
+                RuntimeError::SessionNotFound { session_id } => {
+                    ChoiceOperationError::SessionNotFound(session_id)
+                }
+                RuntimeError::Engine(
+                    EngineError::RevisionConflict { .. } | EngineError::IdempotencyKeyReuse,
+                ) => ChoiceOperationError::Conflict(error.to_string()),
+                RuntimeError::Engine(EngineError::ChoiceNotFound) => {
+                    ChoiceOperationError::NotFound(error.to_string())
+                }
+                RuntimeError::Engine(
+                    EngineError::StoryletNotEligible { .. }
+                    | EngineError::ChoiceRequirementFailed { .. }
+                    | EngineError::InstanceNotActive
+                    | EngineError::SessionEnded
+                    | EngineError::PersistentSceneCannotContinue,
+                ) => ChoiceOperationError::Conflict(error.to_string()),
+                other => ChoiceOperationError::Runtime(other.to_string()),
+            })?;
 
         if let Err(err) = persist_session_to_store(&mut inner, session_id) {
             let _ = inner.runtime.delete_session(session_id);
             let _ = inner.runtime.restore_session(prior_export);
-            return Err(format!("Failed to persist choice: {err}"));
+            return Err(ChoiceOperationError::Persistence(format!(
+                "Failed to persist choice: {err}"
+            )));
         }
 
         let snap = inner
             .runtime
             .snapshot(session_id)
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| ChoiceOperationError::Runtime(error.to_string()))?;
         let _ = self.updates.send(SessionChange {
             session_id: session_id.to_string(),
             revision: snap.world.revision,
             snapshot: json!({ "sessionId": session_id, "snapshot": snap }),
         });
 
-        serde_json::to_value(res).map_err(|e| e.to_string())
+        serde_json::to_value(res).map_err(|error| ChoiceOperationError::Runtime(error.to_string()))
     }
 
     pub async fn fork_playtest(
@@ -1362,20 +983,4 @@ fn ensure_session_id_has_no_archive(
         ));
     }
     Ok(())
-}
-
-fn extract_json_from_strata(text: &str) -> Result<Value, String> {
-    if let Ok(v) = serde_json::from_str::<Value>(text) {
-        return Ok(v);
-    }
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
-            if end > start {
-                if let Ok(v) = serde_json::from_str::<Value>(&text[start..=end]) {
-                    return Ok(v);
-                }
-            }
-        }
-    }
-    Err("Strata response did not contain valid JSON object".into())
 }

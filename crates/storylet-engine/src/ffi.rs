@@ -1,8 +1,5 @@
 //! Stable C ABI for native hosts. Inputs are UTF-8 JSON; outputs are owned buffers released with dn_buffer_free. ABI version: 1.
-use crate::{
-    DecisionResult, RuntimeSessionState, SemanticRankingRequest, StoryletRuntime, WorldCommand,
-    WorldState, apply_command,
-};
+use crate::{RuntimeSessionState, StoryletRuntime, WorldCommand, WorldState, apply_command};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::ptr;
@@ -257,54 +254,6 @@ pub unsafe extern "C" fn dn_playtest_evaluate(
         handle
             .runtime
             .evaluate(session_id, target_tension_slope)
-            .map_err(|error| error.to_string()),
-    )
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn dn_playtest_apply_decision(
-    handle: *mut DnPlaytestHandle,
-    data: *const u8,
-    len: usize,
-    target_tension_slope: f64,
-) -> DnBuffer {
-    let Some(handle) = (unsafe { handle.as_mut() }) else {
-        return result_buffer::<Value>(Err("playtest handle is null".into()));
-    };
-    let Some(decision) = (unsafe { read_json::<DecisionResult>(data, len) }) else {
-        return result_buffer::<Value>(Err("decision result is not valid JSON".into()));
-    };
-    let Some(session_id) = handle.session_id.as_deref() else {
-        return result_buffer::<Value>(Err("playtest has not been started".into()));
-    };
-    result_buffer(
-        handle
-            .runtime
-            .apply_decision(session_id, target_tension_slope, decision)
-            .map_err(|error| error.to_string()),
-    )
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn dn_playtest_rank_semantic(
-    handle: *mut DnPlaytestHandle,
-    data: *const u8,
-    len: usize,
-    target_tension_slope: f64,
-) -> DnBuffer {
-    let Some(handle) = (unsafe { handle.as_mut() }) else {
-        return result_buffer::<Value>(Err("playtest handle is null".into()));
-    };
-    let Some(request) = (unsafe { read_json::<SemanticRankingRequest>(data, len) }) else {
-        return result_buffer::<Value>(Err("semantic ranking request is not valid JSON".into()));
-    };
-    let Some(session_id) = handle.session_id.as_deref() else {
-        return result_buffer::<Value>(Err("playtest has not been started".into()));
-    };
-    result_buffer(
-        handle
-            .runtime
-            .rank_semantic(session_id, target_tension_slope, request)
             .map_err(|error| error.to_string()),
     )
 }

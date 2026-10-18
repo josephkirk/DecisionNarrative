@@ -94,16 +94,6 @@ export function initializeDatabase(dbPath = "data/storylet_studio.db"): Database
     );
   `);
 
-  // Resumable authoring jobs persist their stage artifacts and prompt provenance.
-  db.run(`
-    CREATE TABLE IF NOT EXISTS generation_jobs (
-      id TEXT PRIMARY KEY,
-      revision INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      job_json TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-  `);
 
   // Authored scenario starting states belong to the reusable project, not to a playtest run.
   db.run(`

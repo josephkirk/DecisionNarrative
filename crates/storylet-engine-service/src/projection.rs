@@ -586,9 +586,16 @@ fn parse_effects(
     if let Some(obj) = val.as_object() {
         for (key, v) in obj {
             if key == "$move_player" {
-                match v.as_str().filter(|location_id| location_ids.contains(*location_id)) {
-                    Some(location_id) => effects.push(Effect::MovePlayer { location_id: location_id.to_owned() }),
-                    None => issues.push(format!("{path}.{key}: location must reference an existing project location")),
+                match v
+                    .as_str()
+                    .filter(|location_id| location_ids.contains(*location_id))
+                {
+                    Some(location_id) => effects.push(Effect::MovePlayer {
+                        location_id: location_id.to_owned(),
+                    }),
+                    None => issues.push(format!(
+                        "{path}.{key}: location must reference an existing project location"
+                    )),
                 }
                 continue;
             }
@@ -622,7 +629,9 @@ fn parse_effects(
 
 #[cfg(test)]
 mod parse_role_query_tests {
-    use super::{parse_effects, parse_predicate_set, parse_role_query, parse_storylet_preconditions};
+    use super::{
+        parse_effects, parse_predicate_set, parse_role_query, parse_storylet_preconditions,
+    };
 
     #[test]
     fn parses_player_movement_only_to_existing_locations() {
@@ -632,13 +641,34 @@ mod parse_role_query_tests {
 
         let locations = BTreeSet::from(["market".to_string()]);
         let mut issues = Vec::new();
-        let effects = parse_effects(&json!({"$move_player": "market"}), &BTreeSet::new(), &locations, &mut issues, "choice.effects");
-        assert_eq!(effects, vec![Effect::MovePlayer { location_id: "market".into() }]);
+        let effects = parse_effects(
+            &json!({"$move_player": "market"}),
+            &BTreeSet::new(),
+            &locations,
+            &mut issues,
+            "choice.effects",
+        );
+        assert_eq!(
+            effects,
+            vec![Effect::MovePlayer {
+                location_id: "market".into()
+            }]
+        );
         assert!(issues.is_empty());
 
-        let effects = parse_effects(&json!({"$move_player": "missing"}), &BTreeSet::new(), &locations, &mut issues, "choice.effects");
+        let effects = parse_effects(
+            &json!({"$move_player": "missing"}),
+            &BTreeSet::new(),
+            &locations,
+            &mut issues,
+            "choice.effects",
+        );
         assert!(effects.is_empty());
-        assert!(issues.iter().any(|issue| issue.contains("existing project location")));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.contains("existing project location"))
+        );
     }
 
     #[test]

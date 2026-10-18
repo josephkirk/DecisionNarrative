@@ -9,7 +9,7 @@ use axum::{
         IntoResponse, Response,
         sse::{Event, KeepAlive, Sse},
     },
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -39,7 +39,10 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
         .route("/health", get(health))
         .route("/api/health", get(health))
         .route("/api/v2/authoring-options", get(get_authoring_options))
-        // Project metadata & bundles
+        .route(
+            "/api/v2/context",
+            get(get_interaction_context).post(post_interaction_context),
+        )
         .route(
             "/api/v2/project",
             get(get_project_meta).patch(patch_project_meta),
@@ -101,56 +104,7 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
                 .delete(delete_scenario),
         )
         .route("/api/v2/scenarios/preview", post(preview_scenario))
-        // Generation
-        .route(
-            "/api/v2/generation-jobs",
-            get(list_gen_jobs).post(create_gen_job),
-        )
-        .route(
-            "/api/v1/generation-jobs",
-            get(list_gen_jobs).post(create_gen_job),
-        )
-        .route(
-            "/api/v2/generation-jobs/{id}",
-            get(get_gen_job).delete(delete_gen_job),
-        )
-        .route(
-            "/api/v1/generation-jobs/{id}",
-            get(get_gen_job).delete(delete_gen_job),
-        )
-        .route(
-            "/api/v2/generation-jobs/{id}/advance",
-            post(advance_gen_job),
-        )
-        .route(
-            "/api/v1/generation-jobs/{id}/advance",
-            post(advance_gen_job),
-        )
-        .route(
-            "/api/v2/generation-jobs/{id}/stages/{stage}",
-            put(edit_gen_stage),
-        )
-        .route(
-            "/api/v1/generation-jobs/{id}/stages/{stage}",
-            put(edit_gen_stage),
-        )
-        .route("/api/v2/generation-jobs/{id}/draft", post(save_gen_draft))
-        .route("/api/v1/generation-jobs/{id}/draft", post(save_gen_draft))
-        .route("/api/v2/generation-jobs/{id}/events", get(gen_job_stream))
-        .route("/api/v1/generation-jobs/{id}/events", get(gen_job_stream))
-        .route("/api/v2/craft-resources", get(list_craft_resources))
-        .route("/api/v2/generation/litellm", post(generate_litellm))
-        .route(
-            "/api/v2/generation/comfyui/prompt",
-            post(queue_comfyui_prompt),
-        )
-        .route(
-            "/api/v2/generation/comfyui/history/{id}",
-            get(get_comfyui_history),
-        )
-        .route("/api/v2/generation/comfyui/view", get(view_comfyui_image))
         .route("/api/v2/audio/inspect", get(inspect_audio_file))
-        .route("/api/v1/craft-resources", get(list_craft_resources))
         // Playtest sessions
         .route(
             "/api/v1/playtests/from-workspace",
@@ -173,18 +127,6 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
             post(apply_playtest_choice),
         )
         .route("/api/v1/playtests/{id}/director", get(evaluate_director))
-        .route(
-            "/api/v1/playtests/{id}/director/decision",
-            post(apply_director_decision),
-        )
-        .route(
-            "/api/v1/playtests/{id}/director/semantic-rank",
-            post(apply_semantic_rank),
-        )
-        .route(
-            "/api/v1/playtests/{id}/director/rank",
-            post(rank_local_encoder),
-        )
         .route("/api/v1/playtests/{id}/events", get(get_playtest_events))
         .route("/api/v1/playtests/{id}/stream", get(playtest_stream))
         .route("/api/v1/playtests/{id}/fork", post(fork_playtest))
@@ -207,10 +149,7 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
 }
 
 async fn index_handler() -> Response {
-    let content = match std::fs::read_to_string("dist/studio/index.html") {
-        Ok(c) => c,
-        Err(_) => std::fs::read_to_string("public/index.html").unwrap_or_default(),
-    };
+    let content = std::fs::read_to_string("dist/studio/index.html").unwrap_or_default();
     let mut resp = Response::new(Body::from(content));
     resp.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -226,9 +165,33 @@ async fn health() -> Response {
     )
         .into_response()
 }
-
 async fn get_authoring_options(State(service): State<StudioService>) -> Response {
     (StatusCode::OK, Json(service.get_authoring_options().await)).into_response()
+}
+
+async fn post_interaction_context(
+    State(service): State<StudioService>,
+    Json(body): Json<Value>,
+) -> Response {
+    match service.save_interaction_context(&body).await {
+        Ok(_) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
+    }
+}
+
+async fn get_interaction_context(State(service): State<StudioService>) -> Response {
+    match service.get_interaction_context().await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
+    }
 }
 
 async fn get_project_meta(State(service): State<StudioService>) -> Response {
@@ -671,117 +634,6 @@ async fn preview_scenario(
     }
 }
 
-// Generation
-async fn list_gen_jobs(State(s): State<StudioService>) -> Response {
-    match s.list_generation_jobs().await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
-async fn get_gen_job(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    match s.get_generation_job(&id).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
-    }
-}
-
-async fn create_gen_job(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
-    match s.create_generation_job(p).await {
-        Ok(job) => (StatusCode::CREATED, Json(json!(job))).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
-    }
-}
-
-#[derive(Deserialize)]
-struct AdvanceGenBody {
-    #[serde(rename = "expectedRevision")]
-    pub expected_revision: u64,
-}
-
-async fn advance_gen_job(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-    Json(b): Json<AdvanceGenBody>,
-) -> Response {
-    match s.advance_generation_job(&id, b.expected_revision).await {
-        Ok(job) => (StatusCode::OK, Json(json!(job))).into_response(),
-        Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
-    }
-}
-
-#[derive(Deserialize)]
-struct EditStageBody {
-    #[serde(rename = "expectedRevision")]
-    pub expected_revision: u64,
-    pub artifact: Value,
-}
-
-async fn edit_gen_stage(
-    State(s): State<StudioService>,
-    Path((id, stage)): Path<(String, String)>,
-    Json(b): Json<EditStageBody>,
-) -> Response {
-    match s
-        .edit_generation_stage(&id, &stage, b.expected_revision, b.artifact)
-        .await
-    {
-        Ok(job) => (StatusCode::OK, Json(json!(job))).into_response(),
-        Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
-    }
-}
-
-async fn save_gen_draft(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    match s.save_generation_draft(&id).await {
-        Ok(st) => (StatusCode::OK, Json(json!(st))).into_response(),
-        Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
-    }
-}
-
-async fn delete_gen_job(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    match s.delete_generation_job(&id).await {
-        Ok(del) => (StatusCode::OK, Json(json!({ "deleted": del }))).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
-async fn gen_job_stream(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let rx = s.generation.job_events.subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(move |item| {
-        if let Ok((job_id, payload)) = item {
-            if job_id == id {
-                let data = serde_json::to_string(&payload).unwrap_or_default();
-                return Some(Ok(Event::default().event("generation").data(data)));
-            }
-        }
-        None
-    });
-
-    Sse::new(stream).keep_alive(KeepAlive::default())
-}
-
-async fn list_craft_resources(State(s): State<StudioService>) -> Response {
-    match s.list_craft_resources().await {
-        Ok(list) => (StatusCode::OK, Json(json!({ "resources": list }))).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
 // Playtests
 #[derive(Deserialize)]
 struct WorkspacePlaytestRequest {
@@ -822,42 +674,6 @@ async fn create_playtest(
         }
     }
 }
-
-async fn generate_litellm(
-    State(s): State<StudioService>,
-    Json(body): Json<crate::ai_generators::LiteLlmRequest>,
-) -> Response {
-    match s.ai.generate_text(&body).await {
-        Ok(res) => (StatusCode::OK, Json(json!(res))).into_response(),
-        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
-    }
-}
-
-async fn queue_comfyui_prompt(
-    State(s): State<StudioService>,
-    Json(body): Json<crate::ai_generators::ComfyPromptRequest>,
-) -> Response {
-    match s.ai.queue_comfy_prompt(&body).await {
-        Ok(res) => (StatusCode::OK, Json(json!(res))).into_response(),
-        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
-    }
-}
-
-async fn get_comfyui_history(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    match s.ai.get_comfy_history(&id).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
-    }
-}
-
-#[derive(Deserialize)]
-struct ComfyViewQuery {
-    pub filename: String,
-    pub subfolder: Option<String>,
-    #[serde(rename = "type")]
-    pub folder_type: Option<String>,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct AudioInspectQuery {
     pub path: String,
@@ -990,29 +806,6 @@ async fn inspect_audio_file(Query(q): Query<AudioInspectQuery>) -> impl IntoResp
                 duration: None,
             }),
         )
-    }
-}
-
-async fn view_comfyui_image(
-    State(s): State<StudioService>,
-    Query(q): Query<ComfyViewQuery>,
-) -> Response {
-    match s
-        .ai
-        .get_comfy_image(
-            &q.filename,
-            q.subfolder.as_deref(),
-            q.folder_type.as_deref(),
-        )
-        .await
-    {
-        Ok(bytes) => {
-            let mut resp = Response::new(Body::from(bytes));
-            resp.headers_mut()
-                .insert(header::CONTENT_TYPE, "image/png".parse().unwrap());
-            resp
-        }
-        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
     }
 }
 
@@ -1151,7 +944,19 @@ async fn apply_playtest_choice(
         .await
     {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
+        Err(error) => {
+            let status = match error {
+                crate::service::ChoiceOperationError::InvalidInput(_) => StatusCode::BAD_REQUEST,
+                crate::service::ChoiceOperationError::SessionNotFound(_)
+                | crate::service::ChoiceOperationError::NotFound(_) => StatusCode::NOT_FOUND,
+                crate::service::ChoiceOperationError::Conflict(_) => StatusCode::CONFLICT,
+                crate::service::ChoiceOperationError::Runtime(_)
+                | crate::service::ChoiceOperationError::Persistence(_) => {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
+            };
+            (status, Json(json!({ "error": error.to_string() }))).into_response()
+        }
     }
 }
 
@@ -1164,31 +969,6 @@ fn default_slope() -> f64 {
     0.15
 }
 
-#[derive(Deserialize)]
-struct DecisionBody {
-    pub decision: storylet_engine::DecisionResult,
-    #[serde(rename = "targetTensionSlope", default = "default_slope")]
-    pub target_tension_slope: f64,
-}
-
-async fn apply_director_decision(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-    Json(body): Json<DecisionBody>,
-) -> Response {
-    match s
-        .apply_director_decision(&id, body.target_tension_slope, body.decision)
-        .await
-    {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
 async fn evaluate_director(
     State(s): State<StudioService>,
     Path(id): Path<String>,
@@ -1196,24 +976,6 @@ async fn evaluate_director(
 ) -> Response {
     match s
         .evaluate_playtest_director(&id, q.target_tension_slope)
-        .await
-    {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
-async fn rank_local_encoder(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-    Query(q): Query<DirectorQuery>,
-) -> Response {
-    match s
-        .rank_playtest_with_local_encoder(&id, q.target_tension_slope)
         .await
     {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
@@ -1324,31 +1086,6 @@ async fn restore_playtest(State(s): State<StudioService>, bytes: axum::body::Byt
 
     match s.restore_playtest_session(state).await {
         Ok(data) => (StatusCode::CREATED, Json(data)).into_response(),
-        Err(e) => (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
-#[derive(Deserialize)]
-struct SemanticRankBody {
-    pub request: storylet_engine::SemanticRankingRequest,
-    #[serde(rename = "targetTensionSlope", default = "default_slope")]
-    pub target_tension_slope: f64,
-}
-
-async fn apply_semantic_rank(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-    Json(body): Json<SemanticRankBody>,
-) -> Response {
-    match s
-        .apply_semantic_rank(&id, body.target_tension_slope, body.request)
-        .await
-    {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(e) => (
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({ "error": e })),

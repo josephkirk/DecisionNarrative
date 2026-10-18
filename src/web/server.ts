@@ -2,17 +2,13 @@
  * Storylet Studio — Designer Web Platform & Game Server
  * Exposes full REST API for:
  * - Entity Management (Characters, Locations, Qualities in SQLite)
- * - Storylet Workbench & staged Strata-backed generation pipeline
- * - Generic Rust director, model-ranking adapter, and causal playtest trace
+ * - Generic Rust director and causal playtest trace
  * - Butterfly Effect Simulation (Autonomous NPC Ticks, Observer Ripples, Rollback)
  */
 
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { StoryletRepository, type ScenarioRecord } from "../db/repository.ts";
-import { UnslopStoryletPipeline, StoryletGenerationError, type StoryletGenerationRequest } from "../agents/UnslopStoryletPipeline.ts";
-import { StoryCraftResourceRegistry } from "../agents/StoryCraftResources.ts";
-import { GenerationWorkflow, GenerationWorkflowError, type GenerationJob } from "../agents/GenerationWorkflow.ts";
 import { RustRuntimeClient } from "../engine/RustRuntimeClient.ts";
 import { handlePlaytestApi } from "./playtestApi.ts";
 import { buildWorkspaceProject } from "./workspaceProject.ts";
@@ -24,19 +20,10 @@ const DATABASE_PATH = Bun.env.STORYLET_DB_PATH ?? "data/storylet_studio.db";
 
 // Initialize Repositories and Engines
 const repo = new StoryletRepository(DATABASE_PATH);
-const unslopPipeline = new UnslopStoryletPipeline();
-const storyCraftResources = new StoryCraftResourceRegistry();
 const rustRuntime = new RustRuntimeClient({
   address: Bun.env.STORYLET_ENGINE_ADDR,
   databasePath: Bun.env.STORYLET_ENGINE_DB_PATH ?? "data/storylet_engine.db",
 });
-const generationWorkflow = new GenerationWorkflow({
-  get: (id) => repo.getGenerationJob<GenerationJob>(id),
-  list: () => repo.listGenerationJobs<GenerationJob>(),
-  put: (job) => repo.saveGenerationJob(job),
-  delete: (id) => repo.deleteGenerationJob(id),
-}, (stage, request, previous) => unslopPipeline.generateWorkflowStage(stage, request, previous));
-generationWorkflow.recoverInterruptedJobs();
 
 let rustRuntimeReady = false;
 try {
@@ -49,7 +36,6 @@ try {
 console.log("================================================================================");
 console.log("  STORYLET STUDIO — DESIGN & PLAYTEST SERVER                                  ");
 console.log(`  Serving on: http://127.0.0.1:${PORT}`);
-console.log(`  Strata Endpoint: ${Bun.env.STRATA_BASE_URL ?? "not configured"}`);
 console.log(`  Authoring Database: ${DATABASE_PATH}`);
 console.log(`  Playtest State: ${rustRuntimeReady ? "Rust HTTP service ready; sessions owned by Rust" : "Rust service unavailable"}`);
 console.log("================================================================================");
@@ -84,7 +70,6 @@ function currentProjectContent(): ProjectBundleContent {
     storylets: records.storylets,
     npcBehaviors: records.npcBehaviors,
     scenarios: records.scenarios,
-    generationJobs: repo.listGenerationJobs<GenerationJob>(),
   };
 }
 
@@ -316,7 +301,6 @@ const server = Bun.serve({
         status: "ok",
         system: "Generic Storylet Studio",
         port: PORT,
-        strataEndpoint: Bun.env.STRATA_BASE_URL ?? null,
         playtestRuntime: "Rust, SQLite-backed sessions",
         authoringDatabase: DATABASE_PATH
       });
@@ -454,101 +438,6 @@ const server = Bun.serve({
       const id = pathname.replace("/api/storylets/", "");
       const deleted = repo.deleteStorylet(id);
       return jsonResponse({ success: deleted, id });
-    }
-
-    // -------------------------------------------------------------------------
-    // API: Resumable nine-stage storylet generation jobs
-    // -------------------------------------------------------------------------
-    if (pathname === "/api/v1/generation-jobs") {
-      if (req.method === "GET") return jsonResponse(repo.listGenerationJobs());
-      if (req.method === "POST") {
-        try {
-          const body = await req.json() as StoryletGenerationRequest;
-          const request: StoryletGenerationRequest = {
-            ...body,
-            projectContext: {
-              locations: repo.listLocations().map(({ id, name, description }) => ({ id, name, description })),
-              characters: repo.listCharacters().map(({ id, name, role, agenda, red_line, schedule }) => ({ id, name, role, agenda, red_line, schedule })),
-              qualities: repo.listQualities().map(({ name, type, description }) => ({ name, type, description })),
-            },
-          };
-          return jsonResponse({ job: generationWorkflow.create(request) }, 201);
-        } catch (error) {
-          const status = error instanceof GenerationWorkflowError ? error.statusCode : 400;
-          return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, status);
-        }
-      }
-    }
-
-    if (pathname === "/api/v1/craft-resources" && req.method === "GET") {
-      try {
-        return jsonResponse({ resources: await storyCraftResources.catalog() });
-      } catch (error) {
-        return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, 503);
-      }
-    }
-
-    const generationJobMatch = pathname.match(/^\/api\/v1\/generation-jobs\/([^/]+)(?:\/(advance|events|draft|stages\/([^/]+)))?$/);
-    if (generationJobMatch) {
-      let jobId: string;
-      try { jobId = decodeURIComponent(generationJobMatch[1]); }
-      catch { return jsonResponse({ error: "Invalid generation job ID encoding" }, 400); }
-      const action = generationJobMatch[2];
-      try {
-        if (!action && req.method === "GET") return jsonResponse({ job: generationWorkflow.get(jobId) });
-        if (!action && req.method === "DELETE") {
-          const job = generationWorkflow.get(jobId);
-          if (job.status === "running") return jsonResponse({ error: "Wait for the active stage before deleting this job." }, 409);
-          return jsonResponse({ deleted: generationWorkflow.delete(jobId) });
-        }
-        if (action === "advance" && req.method === "POST") {
-          const body = await req.json() as { expectedRevision?: number };
-          const job = await generationWorkflow.advance(jobId, body.expectedRevision as number);
-          return jsonResponse({ job });
-        }
-        if (action === "events" && req.method === "GET") {
-          let unsubscribe: (() => void) | undefined;
-          let controllerRef: ReadableStreamDefaultController<Uint8Array> | undefined;
-          const stream = new ReadableStream<Uint8Array>({
-            start(controller) {
-              controllerRef = controller;
-              const encoder = new TextEncoder();
-              const send = (job: GenerationJob) => controller.enqueue(encoder.encode(`event: generation\ndata: ${JSON.stringify(job)}\n\n`));
-              send(generationWorkflow.get(jobId));
-              unsubscribe = generationWorkflow.subscribe(jobId, send);
-              req.signal.addEventListener("abort", () => {
-                unsubscribe?.();
-                try { controller.close(); } catch { /* stream already closed */ }
-              }, { once: true });
-            },
-            cancel() { unsubscribe?.(); },
-          });
-          return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" } });
-        }
-        if (action === "draft" && req.method === "POST") {
-          const job = generationWorkflow.get(jobId);
-          if (job.draftStoryletId) {
-            const existing = repo.getStorylet(job.draftStoryletId);
-            if (existing) return jsonResponse({ success: true, storylet: existing, alreadySaved: true }, 200);
-          }
-          const { storylet, audit } = unslopPipeline.storyletFromJob(job);
-          repo.saveStorylet(storylet);
-          const saved = repo.getStorylet(storylet.id);
-          if (!saved || saved.revision == null) throw new Error("Storylet draft was not persisted with a revision.");
-          const updatedJob = generationWorkflow.markDraftSaved(jobId, storylet.id, saved.revision);
-          return jsonResponse({ success: true, storylet: saved, audit, job: updatedJob }, 201);
-        }
-        if (action?.startsWith("stages/") && req.method === "PUT") {
-          const stage = decodeURIComponent(generationJobMatch[3]) as Parameters<typeof generationWorkflow.editStage>[1];
-          const body = await req.json() as { expectedRevision?: number; artifact?: unknown };
-          return jsonResponse({ job: generationWorkflow.editStage(jobId, stage, body.artifact, body.expectedRevision as number) });
-        }
-        return jsonResponse({ error: "Method not allowed" }, 405);
-      } catch (error) {
-        const status = error instanceof GenerationWorkflowError ? error.statusCode
-          : error instanceof StoryletGenerationError ? error.statusCode : 400;
-        return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, status);
-      }
     }
 
     if (pathname === "/api/history" && req.method === "GET") {

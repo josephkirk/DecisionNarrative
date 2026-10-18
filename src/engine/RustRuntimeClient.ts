@@ -53,27 +53,7 @@ export interface RustRuntimeCommandResult {
   world: RustSessionSnapshot["world"];
 }
 
-export interface RustDirectorDecision {
-  formatVersion: 1;
-  contextRevision: number;
-  source: string;
-  modelVersion: string;
-  confidence: number;
-  noActionProbability: number;
-  ranking: Array<{ storyletId: string; score: number; probability: number }>;
-}
 
-export interface RustSemanticRankingRequest {
-  formatVersion: 1;
-  contextRevision: number;
-  modelVersion: string;
-  queryEmbedding: number[];
-  rankingHead?: {
-    schema_version: number; model_version: string; feature_names: string[];
-    weights: Record<string, number>; bias: number; temperature: number; no_action_bias: number;
-  };
-  candidates: Array<{ storyletId: string; embedding: number[]; features?: Record<string, number> }>;
-}
 
 export interface RustRuntimeClientOptions {
   /** Connect to an already-running local service instead of launching one. */
@@ -181,21 +161,6 @@ export class RustRuntimeClient {
     return this.get(`/api/v1/playtests/${encodeURIComponent(sessionId)}/director?${query}`);
   }
 
-  applyDecision(sessionId: string, decision: RustDirectorDecision): Promise<{
-    candidates: unknown[];
-    selected: string | null;
-    decision?: RustDirectorDecision;
-  }> {
-    return this.post(`/api/v1/playtests/${encodeURIComponent(sessionId)}/director/decision`, { decision });
-  }
-
-  rankSemantic(sessionId: string, request: RustSemanticRankingRequest): Promise<{
-    candidates: unknown[];
-    selected: string | null;
-    decision?: RustDirectorDecision;
-  }> {
-    return this.post(`/api/v1/playtests/${encodeURIComponent(sessionId)}/director/semantic-rank`, { request });
-  }
 
   submitCommand(sessionId: string, command: RustWorldCommand): Promise<RustRuntimeCommandResult> {
     return this.post(`/api/v1/playtests/${encodeURIComponent(sessionId)}/commands`, { command });

@@ -51,13 +51,6 @@ export interface StoryletRecord {
     conditions?: Array<{ variable: string; op: string; value: unknown }>;
     effects: Record<string, unknown>;
     divert_target?: string | null;
-    advisorPreview?: {
-      civilianTrustDelta: number;
-      securityRisk: number;
-      resourceCost: string;
-      frictionDescription: string;
-      suggestAlternativeTest?: string;
-    };
   }>;
   effects: Record<string, unknown>;
   created_at: number;
@@ -214,11 +207,10 @@ export class StoryletRepository {
       storylets: StoryletRecord[];
       npcBehaviors: NpcBehaviorRecord[];
       scenarios: ScenarioRecord[];
-      generationJobs: Array<{ id: string; revision: number; status: string; updatedAt: number }>;
     },
   ): void {
     const replace = this.db.transaction(() => {
-      for (const table of ["npc_behaviors", "storylets", "scenarios", "generation_jobs", "qualities", "characters", "locations"]) {
+      for (const table of ["npc_behaviors", "storylets", "scenarios", "qualities", "characters", "locations"]) {
         this.db.prepare(`DELETE FROM ${table}`).run();
       }
       for (const item of content.qualities) this.saveQuality(item);
@@ -233,12 +225,6 @@ export class StoryletRepository {
       }
       for (const item of content.npcBehaviors) this.saveNpcBehavior(item);
       for (const item of content.scenarios) this.saveScenario(item);
-      for (const item of content.generationJobs) {
-        const restored = item.status === "running"
-          ? { ...item, status: "ready", revision: item.revision + 1, updatedAt: Date.now() }
-          : item;
-        this.saveGenerationJob(restored);
-      }
       this.saveProjectMetadata(metadata);
     });
     replace();
@@ -516,41 +502,6 @@ export class StoryletRepository {
     return result.changes > 0;
   }
 
-  // --- Resumable storylet generation audit trail ---
-  public saveGenerationJob(job: { id: string; revision: number; status: string; updatedAt: number }): void {
-    this.db.prepare(`
-      INSERT INTO generation_jobs (id, revision, status, job_json, updated_at)
-      VALUES ($id, $revision, $status, $job_json, $updated_at)
-      ON CONFLICT(id) DO UPDATE SET
-        revision = excluded.revision,
-        status = excluded.status,
-        job_json = excluded.job_json,
-        updated_at = excluded.updated_at
-    `).run({
-      $id: job.id,
-      $revision: job.revision,
-      $status: job.status,
-      $job_json: JSON.stringify(job),
-      $updated_at: job.updatedAt,
-    });
-    this.bumpProjectRevision();
-  }
-
-  public getGenerationJob<T>(id: string): T | null {
-    const row = this.db.prepare("SELECT job_json FROM generation_jobs WHERE id = ?").get(id) as { job_json: string } | undefined;
-    return row ? JSON.parse(row.job_json) as T : null;
-  }
-
-  public listGenerationJobs<T>(): T[] {
-    const rows = this.db.prepare("SELECT job_json FROM generation_jobs ORDER BY updated_at DESC").all() as Array<{ job_json: string }>;
-    return rows.map((row) => JSON.parse(row.job_json) as T);
-  }
-
-  public deleteGenerationJob(id: string): boolean {
-    const result = this.db.prepare("DELETE FROM generation_jobs WHERE id = ?").run(id);
-    if (result.changes > 0) this.bumpProjectRevision();
-    return result.changes > 0;
-  }
 
   // --- Storylets ---
   public saveStorylet(st: StoryletRecord): void {

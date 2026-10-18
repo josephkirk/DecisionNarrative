@@ -123,12 +123,6 @@ pub struct StoryletChoiceRecord {
     pub effects: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub divert_target: Option<String>,
-    #[serde(
-        default,
-        rename = "advisorPreview",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub advisor_preview: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -323,35 +317,7 @@ pub struct AuthoringOptions {
     pub cluster_types: Vec<String>,
     pub policy_modes: Vec<String>,
     pub event_types: Vec<String>,
-    pub stages: Vec<GenerationStageDescriptor>,
 }
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct GenerationStageDescriptor {
-    pub id: String,
-    pub title: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct GenerationJobRecord {
-    pub id: String,
-    pub revision: u64,
-    pub status: String,
-    pub next_stage_index: usize,
-    pub request: Value,
-    pub stages: Vec<Value>,
-    pub attempts: BTreeMap<String, usize>,
-    pub total_retries: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub draft_storylet_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub draft_revision: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure: Option<Value>,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectBundleContent {
     pub qualities: Vec<QualityRecord>,
@@ -362,8 +328,6 @@ pub struct ProjectBundleContent {
     pub npc_behaviors: Vec<NpcBehaviorRecord>,
     pub events: Vec<EventRecord>,
     pub scenarios: Vec<ScenarioRecord>,
-    #[serde(rename = "generationJobs")]
-    pub generation_jobs: Vec<GenerationJobRecord>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

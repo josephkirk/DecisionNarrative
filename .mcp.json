@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "decisionnarrative_strata": {
-      "command": "bun",
-      "args": ["run", "scripts/strata-storylet-mcp.ts"]
+    "decisionnarrative": {
+      "command": "cargo",
+      "args": ["run", "--manifest-path", "crates/storylet-engine-service/Cargo.toml", "--bin", "storylet-engine-service", "--", "--mcp"]
     }
   }
 }

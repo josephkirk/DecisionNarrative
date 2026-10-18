@@ -2,11 +2,10 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 use storylet_engine::{
-    CharacterDefinition, ClusterType, DecisionResult, Effect, EventDefinition, EventType, FactRef,
+    CharacterDefinition, ClusterType, Effect, EventDefinition, EventType, FactRef,
     LocationDefinition, NpcBehaviorRule, Predicate, PredicateOp, PredicateSet, ProjectBundle,
-    QualityDefinition, QualityType, RankedStorylet, RankingHead, Repeatability, RoleRequirement,
-    ScenarioDefinition, SceneContent, SemanticCandidateEmbedding, SemanticRankingRequest,
-    StoryletChoice, StoryletDefinition, StoryletRuntime, WorldCommand,
+    QualityDefinition, QualityType, Repeatability, RoleRequirement, ScenarioDefinition,
+    SceneContent, StoryletChoice, StoryletDefinition, StoryletRuntime, WorldCommand,
 };
 
 fn project() -> ProjectBundle {
@@ -348,238 +347,6 @@ fn ending_choice_terminates_session_and_blocks_later_actions() {
 }
 
 #[test]
-fn external_decision_is_revalidated_and_can_choose_no_action() {
-    let mut authored = project();
-    let mut alternate = authored.storylets["find_receipt"].clone();
-    alternate.id = "ask_clerk".into();
-    alternate.title = "Ask the Clerk".into();
-    authored.storylets.insert(alternate.id.clone(), alternate);
-    authored.scenarios.get_mut("opening").unwrap().storylet_ids =
-        vec!["find_receipt".into(), "ask_clerk".into()];
-    let mut runtime = StoryletRuntime::default();
-    runtime
-        .create_session("decision", authored, "opening")
-        .unwrap();
-    runtime
-        .submit_command(
-            "decision",
-            WorldCommand {
-                idempotency_key: "player:enter-archive".into(),
-                expected_revision: 0,
-                actor_id: "player".into(),
-                action: "move".into(),
-                effects: vec![Effect::MovePlayer {
-                    location_id: "archive".into(),
-                }],
-                caused_by: vec![],
-                advance_turn: true,
-                terminal: false,
-            },
-        )
-        .unwrap();
-
-    let decision = DecisionResult {
-        format_version: 1,
-        context_revision: 2,
-        source: "test-ranker".into(),
-        model_version: "fixture-1".into(),
-        confidence: 0.8,
-        no_action_probability: 0.2,
-        ranking: vec![
-            RankedStorylet {
-                storylet_id: "ask_clerk".into(),
-                score: 0.9,
-                probability: 0.6,
-            },
-            RankedStorylet {
-                storylet_id: "find_receipt".into(),
-                score: 0.4,
-                probability: 0.2,
-            },
-        ],
-    };
-    let result = runtime
-        .apply_decision("decision", 0.15, decision.clone())
-        .unwrap();
-    assert_eq!(result.selected.as_deref(), Some("ask_clerk"));
-    assert_eq!(result.candidates[0].storylet_id, "ask_clerk");
-    assert_eq!(result.decision, Some(decision.clone()));
-
-    let mut no_action = decision;
-    no_action.no_action_probability = 0.8;
-    no_action.ranking[0].probability = 0.1;
-    no_action.ranking[1].probability = 0.1;
-    let result = runtime.apply_decision("decision", 0.15, no_action).unwrap();
-    assert_eq!(result.selected, None);
-
-    let stale = DecisionResult {
-        format_version: 1,
-        context_revision: 1,
-        source: "test-ranker".into(),
-        model_version: "fixture-1".into(),
-        confidence: 0.5,
-        no_action_probability: 1.0,
-        ranking: vec![],
-    };
-    assert!(runtime.apply_decision("decision", 0.15, stale).is_err());
-}
-
-#[test]
-fn rust_engine_scores_embeddings_and_rejects_incomplete_or_ineligible_vectors() {
-    let mut authored = project();
-    let mut alternate = authored.storylets["find_receipt"].clone();
-    alternate.id = "ask_clerk".into();
-    alternate.title = "Ask the Clerk".into();
-    authored.storylets.insert(alternate.id.clone(), alternate);
-    let mut remote = authored.storylets["find_receipt"].clone();
-    remote.id = "weather_elsewhere".into();
-    remote.location_tags = std::collections::BTreeSet::from(["market".into()]);
-    authored.storylets.insert(remote.id.clone(), remote);
-    authored.scenarios.get_mut("opening").unwrap().storylet_ids = vec![
-        "find_receipt".into(),
-        "ask_clerk".into(),
-        "weather_elsewhere".into(),
-    ];
-    let mut runtime = StoryletRuntime::default();
-    runtime
-        .create_session("semantic", authored, "opening")
-        .unwrap();
-    runtime
-        .submit_command(
-            "semantic",
-            WorldCommand {
-                idempotency_key: "player:enter-archive".into(),
-                expected_revision: 0,
-                actor_id: "player".into(),
-                action: "move".into(),
-                effects: vec![Effect::MovePlayer {
-                    location_id: "archive".into(),
-                }],
-                caused_by: vec![],
-                advance_turn: true,
-                terminal: false,
-            },
-        )
-        .unwrap();
-
-    let request = SemanticRankingRequest {
-        format_version: 1,
-        context_revision: 2,
-        model_version: "encoder@revision-1".into(),
-        query_embedding: vec![1.0, 0.0],
-        ranking_head: None,
-        candidates: vec![
-            SemanticCandidateEmbedding {
-                storylet_id: "ask_clerk".into(),
-                embedding: vec![0.0, 1.0],
-                features: BTreeMap::new(),
-            },
-            SemanticCandidateEmbedding {
-                storylet_id: "find_receipt".into(),
-                embedding: vec![1.0, 0.0],
-                features: BTreeMap::new(),
-            },
-        ],
-    };
-    let result = runtime
-        .rank_semantic("semantic", 0.15, request.clone())
-        .unwrap();
-    assert_eq!(result.selected.as_deref(), Some("find_receipt"));
-    assert_eq!(result.candidates[0].storylet_id, "find_receipt");
-    assert_eq!(
-        result.decision.as_ref().unwrap().source,
-        "embedding_baseline_uncalibrated"
-    );
-    assert!(result.decision.as_ref().unwrap().confidence == 0.0);
-    let probabilities = result
-        .decision
-        .as_ref()
-        .unwrap()
-        .ranking
-        .iter()
-        .map(|item| item.probability)
-        .sum::<f64>()
-        + result.decision.as_ref().unwrap().no_action_probability;
-    assert!((probabilities - 1.0).abs() < 1e-10);
-
-    let feature_names = vec![
-        "semantic_relevance",
-        "urgency",
-        "pacing_arc_alignment",
-        "novelty",
-        "waiting_time",
-        "goal_progress",
-        "role_binding_quality",
-        "predicted_consequence_alignment",
-        "no_action",
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect::<Vec<_>>();
-    let head = RankingHead {
-        schema_version: 1,
-        model_version: "reviewed-pairwise-v1".into(),
-        feature_names: feature_names.clone(),
-        weights: [
-            ("semantic_relevance", 0.0),
-            ("urgency", 10.0),
-            ("pacing_arc_alignment", 0.0),
-            ("novelty", 0.0),
-            ("waiting_time", 0.0),
-            ("goal_progress", 0.0),
-            ("role_binding_quality", 0.0),
-            ("predicted_consequence_alignment", 0.0),
-            ("no_action", 0.0),
-        ]
-        .into_iter()
-        .map(|(name, weight)| (name.to_owned(), weight))
-        .collect(),
-        bias: 0.0,
-        temperature: 1.0,
-        no_action_bias: -20.0,
-    };
-    let mut ranked = request.clone();
-    ranked.ranking_head = Some(head);
-    for candidate in &mut ranked.candidates {
-        candidate.features = feature_names
-            .iter()
-            .map(|name| (name.clone(), 0.0))
-            .collect();
-        if candidate.storylet_id == "ask_clerk" {
-            candidate.features.insert("urgency".into(), 1.0);
-        }
-    }
-    let trained = runtime.rank_semantic("semantic", 0.15, ranked).unwrap();
-    assert_eq!(trained.selected.as_deref(), Some("ask_clerk"));
-    assert_eq!(
-        trained.decision.as_ref().unwrap().source,
-        "trained_ranking_head_uncalibrated"
-    );
-    assert_eq!(
-        trained.decision.as_ref().unwrap().model_version,
-        "encoder@revision-1+reviewed-pairwise-v1"
-    );
-    assert_eq!(trained.decision.as_ref().unwrap().confidence, 0.0);
-
-    let mut incomplete = request.clone();
-    incomplete.candidates.pop();
-    assert!(runtime.rank_semantic("semantic", 0.15, incomplete).is_err());
-    let mut includes_ineligible = request.clone();
-    includes_ineligible
-        .candidates
-        .push(SemanticCandidateEmbedding {
-            storylet_id: "weather_elsewhere".into(),
-            embedding: vec![1.0, 0.0],
-            features: BTreeMap::new(),
-        });
-    assert!(
-        runtime
-            .rank_semantic("semantic", 0.15, includes_ineligible)
-            .is_err()
-    );
-}
-
-#[test]
 fn replaying_a_player_command_does_not_replay_its_npc_cascade() {
     let mut authored = project();
     authored.npc_behaviors.clear();
@@ -795,7 +562,24 @@ fn exported_session_restores_world_and_director_state_after_runtime_restart() {
     let restored = restarted.restore_session(saved.clone()).unwrap();
     assert_eq!(restored, before);
     assert_eq!(restarted.evaluate("durable", 0.15).unwrap().selected, None);
-
+    let mut legacy_json = serde_json::to_value(saved.clone()).unwrap();
+    legacy_json["format_version"] = json!(1);
+    legacy_json["session_id"] = json!("legacy");
+    let legacy_world = legacy_json["world"].as_object_mut().unwrap();
+    legacy_world.remove("location_tags");
+    legacy_world.remove("visited_locations");
+    legacy_world.remove("met_characters");
+    let legacy: storylet_engine::RuntimeSessionState = serde_json::from_value(legacy_json).unwrap();
+    let mut legacy_restart = StoryletRuntime::default();
+    let normalized = legacy_restart.restore_session(legacy).unwrap();
+    assert_eq!(normalized.world, before.world);
+    assert_eq!(
+        legacy_restart
+            .export_session("legacy")
+            .unwrap()
+            .format_version,
+        2
+    );
     let mut tampered = saved;
     tampered.session_id = "tampered".into();
     tampered.world.events.pop();

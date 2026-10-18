@@ -61,7 +61,7 @@ pub async fn handle_mcp_message(service: &StudioService, msg: &Value) -> Option<
                     "tools": { "listChanged": false }
                 },
                 "serverInfo": {
-                    "name": "decisionnarrative_strata",
+                    "name": "decisionnarrative",
                     "version": "1.0.0"
                 }
             }
@@ -134,80 +134,136 @@ pub async fn handle_mcp_message(service: &StudioService, msg: &Value) -> Option<
 }
 
 fn get_tool_definitions() -> Vec<Value> {
-    vec![
-        json!({
-            "name": "narrative_platform",
-            "description": "Operate the local DecisionNarrative platform: inspect and validate workspace content, manage project entities, run staged Strata-backed generation, and exercise deterministic Rust playtests.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["operation"],
-                "properties": {
-                    "operation": {
-                        "type": "string",
-                        "enum": [
-                            "platform.health", "workspace.inspect", "workspace.validate", "workspace.replace",
-                            "content.list", "content.save", "content.delete", "storylet.approve",
-                            "scenarios.list", "scenarios.get", "scenarios.create", "scenarios.save", "scenarios.delete", "scenarios.preview",
-                            "craft_resources.list", "generation.list", "generation.create", "generation.get",
-                            "generation.advance", "generation.edit_stage", "generation.save_draft", "generation.delete",
-                            "playtest.list", "playtest.create_from_workspace", "playtest.create", "playtest.snapshot",
-                            "playtest.director", "playtest.rank", "playtest.command", "playtest.choose", "playtest.fork",
-                            "playtest.events", "playtest.delete"
-                        ]
+    vec![json!({
+        "name": "narrative_platform",
+        "description": "Operate the local DecisionNarrative platform: inspect workspace context and content, manage authored project entities, and exercise deterministic Rust playtests.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["operation"],
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "enum": [
+                        "platform.health", "workspace.context", "workspace.inspect", "workspace.validate", "workspace.replace",
+                        "content.list", "content.get", "content.save", "content.delete", "storylet.approve",
+                        "scenarios.list", "scenarios.get", "scenarios.create", "scenarios.save", "scenarios.delete", "scenarios.preview",
+                        "playtest.list", "playtest.create_from_workspace", "playtest.snapshot",
+                        "playtest.director", "playtest.command", "playtest.choose", "playtest.fork",
+                        "playtest.events", "playtest.delete"
+                    ]
+                },
+                "entity": {
+                    "type": "string",
+                    "enum": ["qualities", "characters", "locations", "storylets", "npc_behaviors", "events", "scenarios"]
+                },
+                "id": { "type": "string" },
+                "payload": { "type": "object" },
+                "bundle": { "type": "object" },
+                "confirmReplace": { "type": "boolean" },
+                "expectedRevision": { "type": "integer", "minimum": 0 },
+                "startLocationId": { "type": "string" },
+                "scenarioId": { "type": "string" },
+                "command": { "type": "object" },
+                "choiceId": { "type": "string" },
+                "storyletId": { "type": "string" },
+                "idempotencyKey": { "type": "string" },
+                "eventId": { "type": "string" },
+                "branchSessionId": { "type": "string" },
+                "targetTensionSlope": { "type": "number" }
+            },
+            "allOf": [
+                {
+                    "if": {
+                        "properties": { "operation": { "const": "workspace.validate" } },
+                        "required": ["operation"]
                     },
-                    "entity": {
-                        "type": "string",
-                        "enum": ["qualities", "characters", "locations", "storylets", "npc_behaviors", "events"]
+                    "then": { "required": ["bundle"] }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "const": "workspace.replace" } },
+                        "required": ["operation"]
                     },
-                    "id": { "type": "string" },
-                    "payload": { "type": "object" },
-                    "bundle": { "type": "object" },
-                    "confirmReplace": { "type": "boolean" },
-                    "expectedRevision": { "type": "integer", "minimum": 0 },
-                    "stage": { "type": "string" },
-                    "artifact": {},
-                    "startLocationId": { "type": "string" },
-                    "scenarioId": { "type": "string" },
-                    "command": { "type": "object" },
-                    "choiceId": { "type": "string" },
-                    "idempotencyKey": { "type": "string" },
-                    "eventId": { "type": "string" },
-                    "branchSessionId": { "type": "string" },
-                    "targetTensionSlope": { "type": "number" }
+                    "then": {
+                        "required": ["bundle", "confirmReplace"],
+                        "properties": { "confirmReplace": { "const": true } }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "const": "content.list" } },
+                        "required": ["operation"]
+                    },
+                    "then": { "required": ["entity"] }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "enum": ["content.get", "content.delete"] } },
+                        "required": ["operation"]
+                    },
+                    "then": { "required": ["entity", "id"] }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "const": "content.save" } },
+                        "required": ["operation"]
+                    },
+                    "then": { "required": ["entity", "payload"] }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "enum": ["scenarios.get", "scenarios.delete"] } },
+                        "required": ["operation"]
+                    },
+                    "then": { "required": ["id"] }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "enum": ["scenarios.create", "scenarios.save", "scenarios.preview"] } },
+                        "required": ["operation"]
+                    },
+                    "then": { "required": ["payload"] }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "const": "storylet.approve" } },
+                        "required": ["operation"]
+                    },
+                    "then": { "required": ["id", "expectedRevision"] }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "enum": ["playtest.snapshot", "playtest.director", "playtest.events", "playtest.delete"] } },
+                        "required": ["operation"]
+                    },
+                    "then": { "required": ["id"] }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "const": "playtest.command" } },
+                        "required": ["operation"]
+                    },
+                    "then": { "required": ["id", "command"] }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "const": "playtest.choose" } },
+                        "required": ["operation"]
+                    },
+                    "then": {
+                        "required": ["id", "storyletId", "choiceId", "expectedRevision", "idempotencyKey"]
+                    }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "const": "playtest.fork" } },
+                        "required": ["operation"]
+                    },
+                    "then": { "required": ["id", "eventId"] }
                 }
-            }
-        }),
-        json!({
-            "name": "generate_storylet_content_batch",
-            "description": "Generate 1-24 valid DecisionNarrative StoryletRecord draft candidates using local Strata. Returns candidate records with deterministic IDs and approved_revision=null.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["scenario_family", "count", "brief"],
-                "properties": {
-                    "scenario_family": { "type": "string", "minLength": 1, "maxLength": 80 },
-                    "count": { "type": "integer", "minimum": 1, "maximum": 24 },
-                    "batch_index": { "type": "integer", "minimum": 1, "default": 1 },
-                    "brief": { "type": "string", "minLength": 1, "maxLength": 12000 },
-                    "constraints": { "type": "array", "items": { "type": "string" } }
-                }
-            }
-        }),
-        json!({
-            "name": "generate_storylet_ranking_batch",
-            "description": "Generate 1-24 Strata-synthetic, training-only storylet ranking examples matching model/ranking-example.schema.json.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["scenario_family", "count", "brief"],
-                "properties": {
-                    "scenario_family": { "type": "string", "minLength": 1, "maxLength": 80 },
-                    "count": { "type": "integer", "minimum": 1, "maximum": 24 },
-                    "batch_index": { "type": "integer", "minimum": 1, "default": 1 },
-                    "brief": { "type": "string", "minLength": 1, "maxLength": 12000 },
-                    "constraints": { "type": "array", "items": { "type": "string" } }
-                }
-            }
-        }),
-    ]
+            ]
+        }
+    })]
 }
 
 async fn dispatch_tool_call(
@@ -223,8 +279,6 @@ async fn dispatch_tool_call(
                 .ok_or_else(|| "Missing required 'operation'".to_string())?;
             dispatch_narrative_platform_op(service, op, args).await
         }
-        "generate_storylet_content_batch" => generate_content_batch_mcp(service, args).await,
-        "generate_storylet_ranking_batch" => generate_ranking_batch_mcp(service, args).await,
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -238,6 +292,7 @@ async fn dispatch_narrative_platform_op(
         "platform.health" => {
             Ok(json!({ "status": "ok", "service": "decisionnarrative_studio_rust" }))
         }
+        "workspace.context" => service.get_interaction_context().await,
         "workspace.inspect" => {
             let bundle = service.export_project_bundle().await?;
             serde_json::to_value(&bundle).map_err(|e| e.to_string())
@@ -257,6 +312,11 @@ async fn dispatch_narrative_platform_op(
                 .get("bundle")
                 .ok_or_else(|| "Missing bundle payload".to_string())?;
             service.import_bundle(bundle_val).await?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after workspace replace: {e}"
+                );
+            }
             Ok(json!({ "success": true, "message": "Project replaced successfully" }))
         }
         "content.list" => {
@@ -266,6 +326,17 @@ async fn dispatch_narrative_platform_op(
                 .ok_or_else(|| "Missing entity".to_string())?;
             service.list_content(entity).await
         }
+        "content.get" => {
+            let entity = args
+                .get("entity")
+                .and_then(|e| e.as_str())
+                .ok_or_else(|| "Missing entity".to_string())?;
+            let id = args
+                .get("id")
+                .and_then(|i| i.as_str())
+                .ok_or_else(|| "Missing id".to_string())?;
+            service.get_content_item(entity, id).await
+        }
         "content.save" => {
             let entity = args
                 .get("entity")
@@ -274,7 +345,13 @@ async fn dispatch_narrative_platform_op(
             let payload = args
                 .get("payload")
                 .ok_or_else(|| "Missing payload".to_string())?;
-            service.save_content_item(entity, payload).await
+            let res = service.save_content_item(entity, payload).await?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after content save: {e}"
+                );
+            }
+            Ok(res)
         }
         "content.delete" => {
             let entity = args
@@ -286,6 +363,11 @@ async fn dispatch_narrative_platform_op(
                 .and_then(|i| i.as_str())
                 .ok_or_else(|| "Missing id".to_string())?;
             let deleted = service.delete_content_item(entity, id).await?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after content delete: {e}"
+                );
+            }
             Ok(json!({ "deleted": deleted }))
         }
         "storylet.approve" => {
@@ -298,6 +380,11 @@ async fn dispatch_narrative_platform_op(
                 .and_then(|r| r.as_u64())
                 .ok_or_else(|| "Missing expectedRevision".to_string())?;
             let st = service.approve_storylet(id, rev).await?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after storylet approve: {e}"
+                );
+            }
             serde_json::to_value(&st).map_err(|e| e.to_string())
         }
         "scenarios.list" => service.list_content("scenarios").await,
@@ -312,7 +399,13 @@ async fn dispatch_narrative_platform_op(
             let payload = args
                 .get("payload")
                 .ok_or_else(|| "Missing payload".to_string())?;
-            service.save_content_item("scenarios", payload).await
+            let res = service.save_content_item("scenarios", payload).await?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after scenario save: {e}"
+                );
+            }
+            Ok(res)
         }
         "scenarios.delete" => {
             let id = args
@@ -320,6 +413,11 @@ async fn dispatch_narrative_platform_op(
                 .and_then(|i| i.as_str())
                 .ok_or_else(|| "Missing id".to_string())?;
             let deleted = service.delete_content_item("scenarios", id).await?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after scenario delete: {e}"
+                );
+            }
             Ok(json!({ "deleted": deleted }))
         }
         "scenarios.preview" => {
@@ -328,77 +426,19 @@ async fn dispatch_narrative_platform_op(
                 .ok_or_else(|| "Missing payload".to_string())?;
             service.preview_scenario(payload).await
         }
-        "craft_resources.list" => {
-            let catalog = service.list_craft_resources().await?;
-            serde_json::to_value(&catalog).map_err(|e| e.to_string())
-        }
-        "generation.list" => service.list_generation_jobs().await,
-        "generation.create" => {
-            let payload = args.get("payload").cloned().unwrap_or(json!({}));
-            let job = service.create_generation_job(payload).await?;
-            serde_json::to_value(&job).map_err(|e| e.to_string())
-        }
-        "generation.get" => {
-            let id = args
-                .get("id")
-                .and_then(|i| i.as_str())
-                .ok_or_else(|| "Missing id".to_string())?;
-            service.get_generation_job(id).await
-        }
-        "generation.advance" => {
-            let id = args
-                .get("id")
-                .and_then(|i| i.as_str())
-                .ok_or_else(|| "Missing id".to_string())?;
-            let rev = args
-                .get("expectedRevision")
-                .and_then(|r| r.as_u64())
-                .ok_or_else(|| "Missing expectedRevision".to_string())?;
-            let job = service.advance_generation_job(id, rev).await?;
-            serde_json::to_value(&job).map_err(|e| e.to_string())
-        }
-        "generation.edit_stage" => {
-            let id = args
-                .get("id")
-                .and_then(|i| i.as_str())
-                .ok_or_else(|| "Missing id".to_string())?;
-            let stage = args
-                .get("stage")
-                .and_then(|s| s.as_str())
-                .ok_or_else(|| "Missing stage".to_string())?;
-            let rev = args
-                .get("expectedRevision")
-                .and_then(|r| r.as_u64())
-                .ok_or_else(|| "Missing expectedRevision".to_string())?;
-            let artifact = args.get("artifact").cloned().unwrap_or(Value::Null);
-            let job = service
-                .edit_generation_stage(id, stage, rev, artifact)
-                .await?;
-            serde_json::to_value(&job).map_err(|e| e.to_string())
-        }
-        "generation.save_draft" => {
-            let id = args
-                .get("id")
-                .and_then(|i| i.as_str())
-                .ok_or_else(|| "Missing id".to_string())?;
-            let st = service.save_generation_draft(id).await?;
-            serde_json::to_value(&st).map_err(|e| e.to_string())
-        }
-        "generation.delete" => {
-            let id = args
-                .get("id")
-                .and_then(|i| i.as_str())
-                .ok_or_else(|| "Missing id".to_string())?;
-            let deleted = service.delete_generation_job(id).await?;
-            Ok(json!({ "deleted": deleted }))
-        }
         "playtest.list" => service.list_playtest_sessions().await,
         "playtest.create_from_workspace" => {
             let start_loc = args.get("startLocationId").and_then(|s| s.as_str());
             let scen_id = args.get("scenarioId").and_then(|s| s.as_str());
-            service
+            let res = service
                 .create_playtest_from_workspace(start_loc, scen_id)
-                .await
+                .await?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after playtest create: {e}"
+                );
+            }
+            Ok(res)
         }
         "playtest.snapshot" => {
             let id = args
@@ -418,17 +458,6 @@ async fn dispatch_narrative_platform_op(
                 .unwrap_or(0.15);
             service.evaluate_playtest_director(id, slope).await
         }
-        "playtest.rank" => {
-            let id = args
-                .get("id")
-                .and_then(|i| i.as_str())
-                .ok_or_else(|| "Missing id".to_string())?;
-            let slope = args
-                .get("targetTensionSlope")
-                .and_then(|s| s.as_f64())
-                .unwrap_or(0.15);
-            service.rank_playtest_with_local_encoder(id, slope).await
-        }
         "playtest.command" => {
             let id = args
                 .get("id")
@@ -437,7 +466,13 @@ async fn dispatch_narrative_platform_op(
             let cmd = args
                 .get("command")
                 .ok_or_else(|| "Missing command".to_string())?;
-            service.apply_playtest_command(id, cmd).await
+            let res = service.apply_playtest_command(id, cmd).await?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after playtest command: {e}"
+                );
+            }
+            Ok(res)
         }
         "playtest.choose" => {
             let id = args
@@ -455,14 +490,22 @@ async fn dispatch_narrative_platform_op(
             let rev = args
                 .get("expectedRevision")
                 .and_then(|r| r.as_u64())
-                .unwrap_or(0);
+                .ok_or_else(|| "Missing expectedRevision".to_string())?;
             let key = args
                 .get("idempotencyKey")
                 .and_then(|k| k.as_str())
-                .unwrap_or("");
-            service
+                .filter(|key| !key.trim().is_empty())
+                .ok_or_else(|| "Missing idempotencyKey (non-empty)".to_string())?;
+            let res = service
                 .apply_playtest_choice(id, st_id, choice_id, rev, key)
                 .await
+                .map_err(|error| error.to_string())?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after playtest choice: {e}"
+                );
+            }
+            Ok(res)
         }
         "playtest.fork" => {
             let src = args
@@ -474,7 +517,13 @@ async fn dispatch_narrative_platform_op(
                 .get("eventId")
                 .and_then(|e| e.as_str())
                 .ok_or_else(|| "Missing eventId".to_string())?;
-            service.fork_playtest(src, branch, ev_id).await
+            let res = service.fork_playtest(src, branch, ev_id).await?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after playtest fork: {e}"
+                );
+            }
+            Ok(res)
         }
         "playtest.events" => {
             let id = args
@@ -489,46 +538,13 @@ async fn dispatch_narrative_platform_op(
                 .and_then(|i| i.as_str())
                 .ok_or_else(|| "Missing id".to_string())?;
             let deleted = service.delete_playtest(id).await?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after playtest delete: {e}"
+                );
+            }
             Ok(json!({ "deleted": deleted }))
         }
         _ => Err(format!("Unknown narrative_platform operation: {op}")),
     }
-}
-
-async fn generate_content_batch_mcp(
-    service: &StudioService,
-    args: &Value,
-) -> Result<Value, String> {
-    let family = args
-        .get("scenario_family")
-        .and_then(|f| f.as_str())
-        .unwrap_or("default");
-    let count = args.get("count").and_then(|c| c.as_u64()).unwrap_or(1) as usize;
-    let brief = args.get("brief").and_then(|b| b.as_str()).unwrap_or("");
-    let batch_idx = args
-        .get("batch_index")
-        .and_then(|b| b.as_u64())
-        .unwrap_or(1);
-    service
-        .generate_storylet_batch(family, count, batch_idx, brief)
-        .await
-}
-
-async fn generate_ranking_batch_mcp(
-    service: &StudioService,
-    args: &Value,
-) -> Result<Value, String> {
-    let family = args
-        .get("scenario_family")
-        .and_then(|f| f.as_str())
-        .unwrap_or("default");
-    let count = args.get("count").and_then(|c| c.as_u64()).unwrap_or(1) as usize;
-    let brief = args.get("brief").and_then(|b| b.as_str()).unwrap_or("");
-    let batch_idx = args
-        .get("batch_index")
-        .and_then(|b| b.as_u64())
-        .unwrap_or(1);
-    service
-        .generate_ranking_batch(family, count, batch_idx, brief)
-        .await
 }

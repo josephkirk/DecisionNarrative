@@ -1,8 +1,41 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { computed, onMounted, provide, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { NAVIGATION_ITEMS } from "./studio/definitions.ts";
 import { studioState, notify } from "./studio/state.ts";
 import { StudioApi } from "./studio/api.ts";
+import { buildInteractionContext, interactionContextKey, type InteractionFocus } from "./studio/interactionContext.ts";
+
+const route = useRoute();
+const interactionFocus = ref<InteractionFocus | null>(null);
+watch(() => route.fullPath, () => { interactionFocus.value = null; });
+const interactionContext = computed(() => buildInteractionContext({
+  route: { name: route.name, path: route.path, fullPath: route.fullPath, params: route.params, query: route.query },
+  project: studioState.project,
+  activePlaytestSessionId: studioState.activePlaytestSessionId,
+  activePlaytestSnapshot: studioState.activePlaytestSnapshot,
+  focus: interactionFocus.value,
+}));
+function setInteractionFocus(focus: InteractionFocus | null) {
+  interactionFocus.value = focus;
+}
+provide(interactionContextKey, { context: interactionContext, setFocus: setInteractionFocus });
+let contextPublishTimer: ReturnType<typeof setTimeout> | undefined;
+let contextPublishErrorLogged = false;
+let contextPublishQueue: Promise<unknown> = Promise.resolve();
+watch(interactionContext, (context) => {
+  const payload = JSON.stringify(context);
+  if (contextPublishTimer) clearTimeout(contextPublishTimer);
+  contextPublishTimer = setTimeout(() => {
+    contextPublishQueue = contextPublishQueue
+      .then(() => StudioApi.publishInteractionContext(JSON.parse(payload)))
+      .then(() => { contextPublishErrorLogged = false; })
+      .catch((error) => {
+        if (!contextPublishErrorLogged) console.error("Unable to publish studio interaction context:", error);
+        contextPublishErrorLogged = true;
+      });
+  }, 120);
+}, { deep: true, flush: "post" });
 
 onMounted(async () => {
   try {

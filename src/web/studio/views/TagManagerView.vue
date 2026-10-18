@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, inject, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { StudioApi } from "../api.ts";
 import type { CharacterRecord, LocationRecord, StoryletRecord } from "../contracts.ts";
 import { buildTagIndex, TAG_KINDS, type TagKind } from "../tagData.ts";
+import { interactionContextKey } from "../interactionContext.ts";
 
 const router = useRouter();
 const characters = ref<CharacterRecord[]>([]);
@@ -31,6 +32,19 @@ onMounted(async () => {
 const allTags = computed(() => buildTagIndex({ characters: characters.value, locations: locations.value, storylets: storylets.value }));
 const visibleTags = computed(() => allTags.value.filter((tag) => tag.kind === activeKind.value && tag.name.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())));
 const kindCount = (kind: TagKind) => allTags.value.filter((tag) => tag.kind === kind).length;
+const interactionContext = inject(interactionContextKey);
+watch(() => [activeKind.value, query.value, visibleTags.value], () => {
+  const search = query.value.trim();
+  interactionContext?.setFocus({
+    entity: { type: "tag_manager", id: activeKind.value, label: "Tag Manager", data: { category: activeKind.value, total: kindCount(activeKind.value) } },
+    selection: search ? {
+      type: "tag_filter",
+      id: `${activeKind.value}:${search}`,
+      label: search,
+      data: visibleTags.value.map((tag) => ({ name: tag.name, references: tag.references })),
+    } : null,
+  });
+}, { deep: true, immediate: true });
 function openReference(reference: { entityType: string; entityId: string; nodeId?: string; itemId?: string }) {
   if (reference.entityType === "character") router.push({ path: "/codex", query: { category: "characters", id: reference.entityId } });
   else if (reference.entityType === "location") router.push({ path: "/codex", query: { category: "locations", id: reference.entityId } });

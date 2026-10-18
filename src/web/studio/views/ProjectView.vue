@@ -79,7 +79,7 @@ async function handleImport() {
       <div style="padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px; margin-bottom:20px;">
         <h3 style="font-size:14px; font-weight:700; margin-bottom:8px;">EXPORT PROJECT</h3>
         <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
-          Download complete portable project bundle v2 (Story Codex, storylets, scenarios, and generation jobs).
+          Download complete portable project bundle v2 (Story Codex, storylets, and scenarios).
         </p>
         <a href="/api/v2/project-bundle" class="btn btn-secondary" download>Export .storylet.json</a>
       </div>

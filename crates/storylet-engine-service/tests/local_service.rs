@@ -242,14 +242,48 @@ async fn rust_http_service_rejects_invalid_or_stale_commands_without_mutation() 
 }
 
 #[tokio::test]
-async fn director_decision_endpoint_accepts_a_clean_no_action_result() {
+async fn studio_interaction_context_can_be_published_and_queried() {
+    let app = test_app();
+    let context_payload = json!({
+        "capturedAt": 1700000000000_i64,
+        "route": {
+            "name": "storylets",
+            "path": "/storylets",
+            "fullPath": "/storylets"
+        },
+        "project": {
+            "id": "workspace-project",
+            "name": "Workspace",
+            "revision": 0
+        },
+        "entity": {
+            "type": "storylet",
+            "id": "stl_opening",
+            "label": "Opening Scene"
+        }
+    });
+
+    let (status, post_resp) = request(&app, "POST", "/api/v2/context", Some(context_payload)).await;
+    assert_eq!(status, StatusCode::OK, "{post_resp}");
+    assert_eq!(post_resp["ok"], true);
+
+    let (status, get_resp) = request(&app, "GET", "/api/v2/context", None).await;
+    assert_eq!(status, StatusCode::OK, "{get_resp}");
+    assert_eq!(get_resp["hasContext"], true);
+    assert_eq!(get_resp["context"]["entity"]["id"], "stl_opening");
+    assert_eq!(get_resp["liveProjectRevision"], 0);
+    assert_eq!(get_resp["isStale"], false);
+}
+
+#[tokio::test]
+async fn director_evaluates_playtest_candidates_deterministically() {
     let app = test_app();
     let (status, created) = request(
         &app,
         "POST",
         "/api/v1/playtests",
         Some(json!({
-            "sessionId": "ranked-run", "scenarioId": "opening", "project": empty_project()
+            "sessionId": "director-run", "scenarioId": "opening", "project": empty_project()
         })),
     )
     .await;
@@ -257,24 +291,13 @@ async fn director_decision_endpoint_accepts_a_clean_no_action_result() {
 
     let (status, result) = request(
         &app,
-        "POST",
-        "/api/v1/playtests/ranked-run/director/decision",
-        Some(json!({
-            "decision": {
-                "formatVersion": 1,
-                "contextRevision": 0,
-                "source": "fixture-ranker",
-                "modelVersion": "fixture-1",
-                "confidence": 0.9,
-                "noActionProbability": 1.0,
-                "ranking": []
-            }
-        })),
+        "GET",
+        "/api/v1/playtests/director-run/director?targetTensionSlope=0.15",
+        None,
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{result}");
-    assert_eq!(result["selected"], Value::Null);
-    assert_eq!(result["decision"]["source"], "fixture-ranker");
+    assert!(result.get("candidates").is_some());
 }
 
 #[tokio::test]
@@ -431,7 +454,72 @@ async fn reusing_a_deleted_session_id_is_rejected_when_archive_events_exist() {
 fn service_startup_rejects_corrupt_saved_session_state() {
     let connection = Connection::open_in_memory().unwrap();
     connection.execute_batch("CREATE TABLE runtime_sessions (session_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, revision TEXT NOT NULL, turn TEXT NOT NULL, state_json TEXT NOT NULL, updated_at TEXT NOT NULL); INSERT INTO runtime_sessions VALUES ('broken', 'project', '0', '0', 'not-json', '0');").unwrap();
-    assert!(RuntimeService::from_connection(connection).is_err());
+    let error = RuntimeService::from_connection(connection)
+        .err()
+        .expect("corrupt persisted session must fail startup");
+    assert!(error.contains("broken"));
+}
+
+#[tokio::test]
+async fn service_startup_migrates_legacy_runtime_session_indexes() {
+    let uri = "file:legacy_runtime_migration?mode=memory&cache=shared";
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+        | OpenFlags::SQLITE_OPEN_CREATE
+        | OpenFlags::SQLITE_OPEN_URI;
+    let anchor = Connection::open_with_flags(uri, flags).unwrap();
+    anchor
+        .execute_batch(
+            "CREATE TABLE runtime_sessions (
+            session_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            revision TEXT NOT NULL,
+            turn TEXT NOT NULL,
+            state_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );",
+        )
+        .unwrap();
+
+    let project =
+        serde_json::from_value::<storylet_engine::ProjectBundle>(empty_project()).unwrap();
+    let mut runtime = storylet_engine::StoryletRuntime::default();
+    runtime
+        .create_session("legacy", project, "opening")
+        .unwrap();
+    let saved = runtime.export_session("legacy").unwrap();
+    let mut legacy = serde_json::to_value(saved).unwrap();
+    legacy["format_version"] = json!(1);
+    let world = legacy["world"].as_object_mut().unwrap();
+    world.remove("location_tags");
+    world.remove("visited_locations");
+    world.remove("met_characters");
+    let state_json = serde_json::to_string(&legacy).unwrap();
+    anchor
+        .execute(
+            "INSERT INTO runtime_sessions VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["legacy", "station-mystery", "0", "0", state_json, "0"],
+        )
+        .unwrap();
+
+    let service =
+        RuntimeService::from_connection(Connection::open_with_flags(uri, flags).unwrap()).unwrap();
+    let app = router(service.clone());
+    let (status, snapshot) = request(&app, "GET", "/api/v1/playtests/legacy", None).await;
+    assert_eq!(status, StatusCode::OK, "{snapshot}");
+    assert_eq!(snapshot["world"]["visited_locations"], json!(["platform"]));
+    assert!(snapshot["world"]["location_tags"].get("platform").is_some());
+
+    let migrated_json: String = anchor
+        .query_row(
+            "SELECT state_json FROM runtime_sessions WHERE session_id = 'legacy'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let migrated: Value = serde_json::from_str(&migrated_json).unwrap();
+    assert_eq!(migrated["format_version"], json!(2));
+    assert_eq!(migrated["world"]["visited_locations"], json!(["platform"]));
+    assert!(migrated["world"]["location_tags"].get("platform").is_some());
 }
 
 #[tokio::test]
@@ -507,4 +595,300 @@ async fn studio_graph_requires_one_complete_start_to_end_flow() {
             assert!(result["error"].as_str().unwrap().contains("path to End"));
         }
     }
+}
+
+#[tokio::test]
+async fn image_nodes_save_and_approve_with_manual_urls() {
+    let app = test_app();
+    let graph = json!({
+        "nodes": [
+            { "id": "start", "title": "Start", "type": "start", "x": 0, "y": 0, "width": 160, "height": 80, "text": "Begin" },
+            { "id": "image", "title": "Image", "type": "image", "x": 180, "y": 0, "width": 220, "height": 140, "image_url": "assets/platform.png" },
+            { "id": "end", "title": "End", "type": "end", "x": 420, "y": 0, "width": 160, "height": 80, "is_terminal": true }
+        ],
+        "edges": [
+            { "id": "start-image", "from_node": "start", "from_port": "output", "to_node": "image", "to_port": "input" },
+            { "id": "image-end", "from_node": "image", "from_port": "output", "to_node": "end", "to_port": "input" }
+        ],
+        "local_variables": []
+    });
+    let (status, saved) = request(
+        &app,
+        "POST",
+        "/api/v2/content/storylets",
+        Some(json!({
+            "id": "image-storylet",
+            "title": "Image Scene",
+            "created_at": 1,
+            "content": { "text_template": "" },
+            "graph": graph
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(
+        saved["graph"]["nodes"][1]["image_url"],
+        "assets/platform.png"
+    );
+    assert!(saved["graph"]["nodes"][1].get("prompt").is_none());
+    assert!(saved["graph"]["nodes"][1].get("status").is_none());
+
+    let (status, approved) = request(
+        &app,
+        "POST",
+        "/api/v2/storylets/image-storylet/approve",
+        Some(json!({ "expectedRevision": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{approved}");
+    assert_eq!(
+        approved["graph"]["nodes"][1]["image_url"],
+        "assets/platform.png"
+    );
+}
+
+#[tokio::test]
+async fn mcp_narrative_platform_advertises_and_dispatches_every_operation() {
+    let service = RuntimeService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+
+    // Get tool definitions via tools/list
+    let list_req = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list"
+    });
+    let list_resp = storylet_engine_service::mcp::handle_mcp_message(&service, &list_req)
+        .await
+        .expect("tools/list response");
+
+    let tools = list_resp["result"]["tools"]
+        .as_array()
+        .expect("tools array");
+    let platform_tool = tools
+        .iter()
+        .find(|t| t["name"] == "narrative_platform")
+        .expect("narrative_platform tool");
+    let input_schema = &platform_tool["inputSchema"];
+    for name in [
+        "entity",
+        "id",
+        "payload",
+        "bundle",
+        "confirmReplace",
+        "expectedRevision",
+        "startLocationId",
+        "scenarioId",
+        "command",
+        "choiceId",
+        "storyletId",
+        "idempotencyKey",
+        "eventId",
+        "branchSessionId",
+        "targetTensionSlope",
+    ] {
+        assert!(
+            input_schema["properties"].get(name).is_some(),
+            "missing schema property {name}"
+        );
+    }
+    let rules = input_schema["allOf"].as_array().expect("operation rules");
+    for (operation, expected) in [
+        ("workspace.validate", &["bundle"][..]),
+        ("workspace.replace", &["bundle", "confirmReplace"][..]),
+        ("content.list", &["entity"][..]),
+        ("content.get", &["entity", "id"][..]),
+        ("content.delete", &["entity", "id"][..]),
+        ("content.save", &["entity", "payload"][..]),
+        ("scenarios.get", &["id"][..]),
+        ("scenarios.delete", &["id"][..]),
+        ("scenarios.create", &["payload"][..]),
+        ("scenarios.save", &["payload"][..]),
+        ("scenarios.preview", &["payload"][..]),
+        ("storylet.approve", &["id", "expectedRevision"][..]),
+        ("playtest.snapshot", &["id"][..]),
+        ("playtest.director", &["id"][..]),
+        ("playtest.events", &["id"][..]),
+        ("playtest.delete", &["id"][..]),
+        ("playtest.command", &["id", "command"][..]),
+        (
+            "playtest.choose",
+            &[
+                "id",
+                "storyletId",
+                "choiceId",
+                "expectedRevision",
+                "idempotencyKey",
+            ][..],
+        ),
+        ("playtest.fork", &["id", "eventId"][..]),
+    ] {
+        let rule = rules
+            .iter()
+            .find(|rule| {
+                let operation_schema = &rule["if"]["properties"]["operation"];
+                operation_schema["const"] == operation
+                    || operation_schema["enum"]
+                        .as_array()
+                        .is_some_and(|ops| ops.iter().any(|op| op == operation))
+            })
+            .unwrap_or_else(|| panic!("missing schema rule for {operation}"));
+        let required = rule["then"]["required"]
+            .as_array()
+            .expect("required arguments");
+        for name in expected {
+            assert!(
+                required.iter().any(|value| value == name),
+                "{operation} schema missing required {name}"
+            );
+        }
+    }
+    assert_eq!(
+        rules
+            .iter()
+            .find(|rule| rule["if"]["properties"]["operation"]["const"] == "workspace.replace")
+            .unwrap()["then"]["properties"]["confirmReplace"]["const"],
+        true
+    );
+
+    let operations = platform_tool["inputSchema"]["properties"]["operation"]["enum"]
+        .as_array()
+        .expect("operation enum");
+
+    for op_val in operations {
+        let op = op_val.as_str().unwrap();
+        let call_req = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "narrative_platform",
+                "arguments": {
+                    "operation": op,
+                    "entity": "storylets",
+                    "id": "nonexistent",
+                    "payload": { "id": "test", "title": "Test" },
+                    "bundle": empty_project(),
+                    "confirmReplace": false,
+                    "expectedRevision": 0
+                }
+            }
+        });
+        let call_resp = storylet_engine_service::mcp::handle_mcp_message(&service, &call_req)
+            .await
+            .expect("tools/call response");
+
+        // The operation must NOT fail with "Unknown narrative_platform operation"
+        if let Some(err) = call_resp["error"]["message"].as_str() {
+            assert!(
+                !err.starts_with("Unknown narrative_platform operation"),
+                "Operation '{op}' advertised in enum but unhandled in dispatch: {err}"
+            );
+        }
+    }
+    for (id, arguments, expected_error) in [
+        (
+            3,
+            json!({
+                "operation": "playtest.choose",
+                "id": "missing-revision",
+                "storyletId": "story",
+                "choiceId": "choice",
+                "idempotencyKey": "once"
+            }),
+            "Missing expectedRevision",
+        ),
+        (
+            4,
+            json!({
+                "operation": "playtest.choose",
+                "id": "missing-key",
+                "storyletId": "story",
+                "choiceId": "choice",
+                "expectedRevision": 0
+            }),
+            "Missing idempotencyKey",
+        ),
+    ] {
+        let response = storylet_engine_service::mcp::handle_mcp_message(
+            &service,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "tools/call",
+                "params": { "name": "narrative_platform", "arguments": arguments }
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response["result"]["isError"], true);
+        assert!(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains(expected_error)
+        );
+    }
+}
+
+#[tokio::test]
+async fn playtest_choice_http_maps_blank_missing_and_conflicting_requests() {
+    let app = test_app();
+    let (status, _) = request(
+        &app,
+        "POST",
+        "/api/v1/playtests",
+        Some(json!({
+            "sessionId": "choice-status",
+            "scenarioId": "opening",
+            "project": empty_project()
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    for (field, value) in [
+        ("storyletId", ""),
+        ("choiceId", ""),
+        ("idempotencyKey", " "),
+    ] {
+        let mut body = json!({
+            "storyletId": "story",
+            "choiceId": "choice",
+            "expectedRevision": 0,
+            "idempotencyKey": "once"
+        });
+        body[field] = json!(value);
+        let (status, _) = request(
+            &app,
+            "POST",
+            "/api/v1/playtests/choice-status/choices",
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{field}");
+    }
+
+    let valid = json!({
+        "storyletId": "story",
+        "choiceId": "choice",
+        "expectedRevision": 0,
+        "idempotencyKey": "once"
+    });
+    let (status, _) = request(
+        &app,
+        "POST",
+        "/api/v1/playtests/missing/choices",
+        Some(valid.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, _) = request(
+        &app,
+        "POST",
+        "/api/v1/playtests/choice-status/choices",
+        Some(valid),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
 }

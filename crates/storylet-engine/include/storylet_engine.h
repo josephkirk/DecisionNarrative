@@ -32,10 +32,6 @@ DnBuffer dn_playtest_snapshot(const DnPlaytestHandle *handle);
 DnBuffer dn_playtest_export_session(const DnPlaytestHandle *handle);
 DnBuffer dn_playtest_restore_session(DnPlaytestHandle *handle, const uint8_t *session_json, size_t session_len);
 DnBuffer dn_playtest_evaluate(const DnPlaytestHandle *handle, double target_tension_slope);
-DnBuffer dn_playtest_apply_decision(DnPlaytestHandle *handle, const uint8_t *decision_json, size_t decision_len,
-                                    double target_tension_slope);
-DnBuffer dn_playtest_rank_semantic(DnPlaytestHandle *handle, const uint8_t *request_json, size_t request_len,
-                                   double target_tension_slope);
 DnBuffer dn_playtest_submit_command(DnPlaytestHandle *handle, const uint8_t *command_json, size_t command_len);
 DnBuffer dn_playtest_execute_choice(DnPlaytestHandle *handle, const uint8_t *choice_json, size_t choice_len);
 #ifdef __cplusplus

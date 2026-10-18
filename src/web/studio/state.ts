@@ -3,7 +3,6 @@ import type {
   AuthoringOptions,
   CharacterRecord,
   EventRecord,
-  GenerationJobRecord,
   LocationRecord,
   NpcBehaviorRecord,
   PlaytestSnapshot,
@@ -23,7 +22,6 @@ export interface GlobalStudioState {
   scenarios: ScenarioRecord[];
   activePlaytestSessionId: string | null;
   activePlaytestSnapshot: PlaytestSnapshot | null;
-  generationJobs: GenerationJobRecord[];
   notification: { message: string; type: "info" | "success" | "error" } | null;
 }
 
@@ -38,7 +36,6 @@ export const studioState = reactive<GlobalStudioState>({
   scenarios: [],
   activePlaytestSessionId: null,
   activePlaytestSnapshot: null,
-  generationJobs: [],
   notification: null,
 });
 

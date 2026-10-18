@@ -1,10 +1,9 @@
 use serde_json::Value;
 use storylet_engine::ffi::{
     dn_buffer_free, dn_engine_abi_version, dn_engine_create, dn_engine_destroy,
-    dn_engine_export_snapshot, dn_engine_import_snapshot, dn_playtest_apply_decision,
-    dn_playtest_create, dn_playtest_destroy, dn_playtest_evaluate, dn_playtest_execute_choice,
-    dn_playtest_export_session, dn_playtest_rank_semantic, dn_playtest_restore_session,
-    dn_playtest_snapshot, dn_playtest_start,
+    dn_engine_export_snapshot, dn_engine_import_snapshot, dn_playtest_create, dn_playtest_destroy,
+    dn_playtest_evaluate, dn_playtest_execute_choice, dn_playtest_export_session,
+    dn_playtest_restore_session, dn_playtest_snapshot, dn_playtest_start,
 };
 
 unsafe fn take_json(buffer: &storylet_engine::ffi::DnBuffer) -> Value {
@@ -58,25 +57,6 @@ fn native_abi_hosts_a_generic_storylet_from_scenario_through_choice() {
     let evaluation_value = unsafe { take_json(&evaluation) };
     unsafe { dn_buffer_free(evaluation) };
     assert_eq!(evaluation_value["result"]["selected"], "read-receipt");
-
-    let semantic = br#"{"formatVersion":1,"contextRevision":0,"modelVersion":"fixture@rev-1","queryEmbedding":[1.0,0.0],"candidates":[{"storyletId":"read-receipt","embedding":[1.0,0.0]}]}"#;
-    let ranked =
-        unsafe { dn_playtest_rank_semantic(handle, semantic.as_ptr(), semantic.len(), 0.15) };
-    let ranked_value = unsafe { take_json(&ranked) };
-    unsafe { dn_buffer_free(ranked) };
-    assert_eq!(ranked_value["ok"], true, "{ranked_value}");
-    assert_eq!(
-        ranked_value["result"]["decision"]["source"],
-        "embedding_baseline_uncalibrated"
-    );
-
-    let decision = br#"{"formatVersion":1,"contextRevision":0,"source":"native-host","modelVersion":"fixture-1","confidence":0.8,"noActionProbability":0.1,"ranking":[{"storyletId":"read-receipt","score":0.9,"probability":0.9}]}"#;
-    let resolved =
-        unsafe { dn_playtest_apply_decision(handle, decision.as_ptr(), decision.len(), 0.15) };
-    let resolved_value = unsafe { take_json(&resolved) };
-    unsafe { dn_buffer_free(resolved) };
-    assert_eq!(resolved_value["result"]["selected"], "read-receipt");
-
     let choice = br#"{"storyletId":"read-receipt","choiceId":"read","idempotencyKey":"native:read-receipt","expectedRevision":0}"#;
     let applied = unsafe { dn_playtest_execute_choice(handle, choice.as_ptr(), choice.len()) };
     let applied_value = unsafe { take_json(&applied) };

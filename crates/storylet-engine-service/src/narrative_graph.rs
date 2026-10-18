@@ -87,11 +87,8 @@ pub enum NarrativeNodeData {
         default_route: bool,
     },
     Image {
-        prompt: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         image_url: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        status: Option<String>,
     },
     Teleport {
         destination_storylet: String,
@@ -190,6 +187,25 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
     }
 }
 
+fn is_safe_image_url(image_url: &str) -> bool {
+    let value = image_url.trim();
+    if value.is_empty()
+        || value.starts_with("//")
+        || value.contains('\\')
+        || value.chars().any(char::is_control)
+    {
+        return false;
+    }
+    let first_segment = value.split('/').next().unwrap_or_default();
+    match first_segment.split_once(':') {
+        Some((scheme, _)) => {
+            matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https")
+                && value[scheme.len() + 1..].starts_with("//")
+        }
+        None => true,
+    }
+}
+
 impl NarrativeGraph {
     pub fn new() -> Self {
         Self::default()
@@ -284,20 +300,38 @@ impl NarrativeGraph {
                 .iter()
                 .filter(|edge| edge.from_node == node.id)
                 .collect();
+            if let NarrativeNodeData::Image { image_url } = &node.data {
+                if image_url
+                    .as_deref()
+                    .is_none_or(|url| !is_safe_image_url(url))
+                {
+                    issues.push(format!(
+                        "Image node {} must have a safe HTTP(S) URL or project-relative path.",
+                        node.title
+                    ));
+                }
+            }
             match &node.data {
                 NarrativeNodeData::GoToLocation { location_id } => {
                     if location_id.trim().is_empty() {
                         issues.push("Go To Location nodes must select a location.".into());
                     }
-                    let has_unsupported_incoming_edge = self.edges.iter()
+                    let has_unsupported_incoming_edge = self
+                        .edges
+                        .iter()
                         .filter(|edge| edge.to_node == node.id)
-                        .any(|edge| !self.nodes.iter().any(|source| {
-                            source.id == edge.from_node && matches!(&source.data, NarrativeNodeData::Choice { .. })
-                        }));
+                        .any(|edge| {
+                            !self.nodes.iter().any(|source| {
+                                source.id == edge.from_node
+                                    && matches!(&source.data, NarrativeNodeData::Choice { .. })
+                            })
+                        });
                     if has_unsupported_incoming_edge {
                         issues.push(format!("Go To Location node {} may only be targeted directly by a Choice branch.", node.title));
                     }
-                    if edges.len() != 1 || edges.first().is_some_and(|edge| edge.from_port != "output") {
+                    if edges.len() != 1
+                        || edges.first().is_some_and(|edge| edge.from_port != "output")
+                    {
                         issues.push(format!("Go To Location node {} must have exactly one outgoing edge from its output port.", node.title));
                     }
                 }
@@ -466,7 +500,9 @@ impl NarrativeGraph {
                         y: idx as i32 * 140 + 80,
                         width: 220,
                         height: 100,
-                        data: NarrativeNodeData::GoToLocation { location_id: location_id.into() },
+                        data: NarrativeNodeData::GoToLocation {
+                            location_id: location_id.into(),
+                        },
                     });
                     edges.push(NarrativeEdge {
                         id: format!("edge_choice_{idx}_location"),
@@ -624,22 +660,37 @@ impl NarrativeGraph {
                             })
                             .map(|e| e.to_node.clone());
 
-                        let target_node = target_node_id.and_then(|tid| self.nodes.iter().find(|n| n.id == tid));
+                        let target_node =
+                            target_node_id.and_then(|tid| self.nodes.iter().find(|n| n.id == tid));
                         let divert_target = target_node.and_then(|node| match &node.data {
-                            NarrativeNodeData::Teleport { destination_storylet } => Some(destination_storylet.clone()),
-                            NarrativeNodeData::End { jump_to_storylet, .. } => jump_to_storylet.clone(),
+                            NarrativeNodeData::Teleport {
+                                destination_storylet,
+                            } => Some(destination_storylet.clone()),
+                            NarrativeNodeData::End {
+                                jump_to_storylet, ..
+                            } => jump_to_storylet.clone(),
                             _ => None,
                         });
-                        let mut choice_effects = opt.effects.as_ref()
+                        let mut choice_effects = opt
+                            .effects
+                            .as_ref()
                             .and_then(Value::as_object)
                             .cloned()
                             .map(Value::Object)
                             .unwrap_or_else(|| json!({}));
-                        choice_effects.as_object_mut().expect("choice effects are an object").remove("$move_player");
-                        if let Some(NarrativeNode { data: NarrativeNodeData::GoToLocation { location_id }, .. }) = target_node {
-                            choice_effects.as_object_mut().expect("choice effects are an object").insert(
-                                "$move_player".into(), Value::String(location_id.clone()),
-                            );
+                        choice_effects
+                            .as_object_mut()
+                            .expect("choice effects are an object")
+                            .remove("$move_player");
+                        if let Some(NarrativeNode {
+                            data: NarrativeNodeData::GoToLocation { location_id },
+                            ..
+                        }) = target_node
+                        {
+                            choice_effects
+                                .as_object_mut()
+                                .expect("choice effects are an object")
+                                .insert("$move_player".into(), Value::String(location_id.clone()));
                         }
 
                         choices.push(StoryletChoiceRecord {
@@ -649,7 +700,6 @@ impl NarrativeGraph {
                             conditions: None,
                             effects: choice_effects,
                             divert_target,
-                            advisor_preview: None,
                         });
                     }
                 }
@@ -787,6 +837,35 @@ mod graph_wire_contract_tests {
     }
 
     #[test]
+    fn image_url_validation_matches_typescript() {
+        for (url, expected) in [
+            ("assets/a:b.png", true),
+            ("HTTPS://x/y", true),
+            ("https:x", false),
+            ("\u{7f}x", false),
+            ("javascript:alert(1)", false),
+            ("//example.com/image.png", false),
+            ("", false),
+        ] {
+            assert_eq!(super::is_safe_image_url(url), expected, "{url:?}");
+        }
+
+        for url in ["", "javascript:alert(1)", "//example.com/image.png", "https:x", "\u{7f}x"] {
+            let mut payload = studio_graph();
+            payload["nodes"][1]["type"] = json!("image");
+            payload["nodes"][1]["image_url"] = json!(url);
+            let graph: NarrativeGraph = serde_json::from_value(payload).unwrap();
+            let issues = graph.validate().unwrap_err().join(" ");
+            assert!(issues.contains("safe HTTP(S) URL or project-relative path"));
+        }
+
+        let mut payload = studio_graph();
+        payload["nodes"][1]["type"] = json!("image");
+        payload["nodes"][1]["image_url"] = json!("assets/a:b.png");
+        let graph: NarrativeGraph = serde_json::from_value(payload).unwrap();
+        graph.validate().expect("project-relative image paths are allowed");
+    }
+    #[test]
     fn graph_rejects_multiple_edges_from_one_output_port() {
         let mut payload = studio_graph();
         let duplicate = payload["edges"][1].clone();
@@ -801,9 +880,9 @@ mod graph_wire_contract_tests {
 
     #[test]
     fn go_to_location_choice_compiles_and_round_trips() {
-        use serde_json::json;
         use super::NarrativeNodeData;
         use crate::contracts::StoryletRecord;
+        use serde_json::json;
 
         let mut payload = studio_graph();
         payload["nodes"].as_array_mut().unwrap().insert(2, json!({
@@ -846,7 +925,9 @@ mod graph_wire_contract_tests {
         ]);
         let graph: NarrativeGraph = serde_json::from_value(payload).unwrap();
         let issues = graph.validate().unwrap_err().join(" ");
-        assert!(issues.contains("Go To Location node Market may only be targeted directly by a Choice branch."));
+        assert!(issues.contains(
+            "Go To Location node Market may only be targeted directly by a Choice branch."
+        ));
     }
 
     #[test]

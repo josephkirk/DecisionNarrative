@@ -11,7 +11,6 @@ export const NAVIGATION_ITEMS: NavItem[] = [
   { id: "codex", label: "Story Codex", desc: "World records & events", icon: "•", path: "/codex" },
   { id: "tags", label: "Tag Manager", desc: "Tag usage & references", icon: "•", path: "/tags" },
   { id: "scenarios", label: "Starting Scenarios", desc: "Initial state presets", icon: "•", path: "/scenarios" },
-  { id: "generation", label: "Strata Generation", desc: "Staged scene drafting", icon: "•", path: "/generation" },
   { id: "playtest", label: "Playtest & Director", desc: "Interactive runtime", icon: "•", path: "/playtest" },
   { id: "project", label: "Project & Export", desc: "Metadata & bundles", icon: "•", path: "/project" },
 ];

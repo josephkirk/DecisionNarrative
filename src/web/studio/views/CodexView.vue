@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed, ref, watch } from "vue";
+import { inject, onMounted, computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import TagEditor from "../components/TagEditor.vue";
 
@@ -9,6 +9,7 @@ import { studioState } from "../state.ts";
 import { StudioApi } from "../api.ts";
 import type { StoryletRecord } from "../contracts.ts";
 import { buildTagIndex, uniqueTagNames } from "../tagData.ts";
+import { interactionContextKey } from "../interactionContext.ts";
 
 const {
   activeCategory,
@@ -25,6 +26,27 @@ const availableStorylets = ref<StoryletRecord[]>([]);
 const tagIndex = computed(() => buildTagIndex({ characters: studioState.characters, locations: studioState.locations, storylets: availableStorylets.value }));
 const characterRoleOptions = computed(() => uniqueTagNames(tagIndex.value.filter((tag) => tag.kind === "role").map((tag) => tag.name)));
 const locationTagOptions = computed(() => uniqueTagNames(tagIndex.value.filter((tag) => tag.kind === "location").map((tag) => tag.name)));
+const interactionContext = inject(interactionContextKey);
+const contextEntityTypes: Record<string, string> = {
+  qualities: "quality",
+  characters: "character",
+  locations: "location",
+  npc_behaviors: "npc_behavior",
+  events: "event",
+};
+watch(() => [activeCategory.value, selectedId.value, editingItem.value], () => {
+  const item = editingItem.value;
+  if (!item) {
+    interactionContext?.setFocus({ entity: null, selection: null });
+    return;
+  }
+  const id = String(item.id ?? item.name ?? selectedId.value ?? "");
+  const label = String(item.name ?? item.title ?? id);
+  interactionContext?.setFocus({
+    entity: { type: contextEntityTypes[activeCategory.value] ?? activeCategory.value, id, label, data: JSON.parse(JSON.stringify(item)) },
+    selection: { type: "codex_record", id, label },
+  });
+}, { deep: true });
 
 function openRequestedEntity() {
   const category = route.query.category;

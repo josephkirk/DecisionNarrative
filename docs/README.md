@@ -2,9 +2,9 @@
 
 ## Product and design
 
-- [Storylet studio design](design/storylet-studio.md) — product scope, runtime and authoring architecture, data contracts, generation, playtest, ranking, and acceptance criteria.
+- [Storylet studio design](design/storylet-studio.md) — product scope, runtime and authoring architecture, data contracts, playtesting, and acceptance criteria.
 - [Social simulation design](design/social-simulation.md) — setting-neutral principles for actors, relationships, knowledge, institutions, causality, and authored narrative.
-- [Storylet authoring guide](guides/storylet-authoring.md) — practical checklist for generating, reviewing, and playtesting project-owned content.
+- [Storylet authoring guide](guides/storylet-authoring.md) — practical checklist for authoring, reviewing, and playtesting project-owned content.
 - [Agent handoff](HANDOFF.md) — implementation map, current limitations, verification commands, and next work.
 
 ## Measurements

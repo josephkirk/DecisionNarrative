@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
-import type { NarrativeGraph, NarrativeNode, NarrativeEdge, NodeType, LocalVariableDefinition } from "../narrativeGraphTypes.ts";
+import { isSafeImageUrl, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType, type LocalVariableDefinition } from "../narrativeGraphTypes.ts";
 import { studioState, notify } from "../state.ts";
 
 const props = defineProps<{
@@ -61,11 +61,24 @@ const nodeSearch = ref("");
 const scissorStart = ref<{ x: number; y: number } | null>(null);
 const scissorEnd = ref<{ x: number; y: number } | null>(null);
 const nodeTypes: NodeType[] = ["start", "dialog", "choice", "variable", "conditional", "image", "teleport", "go_to_location", "end"];
+
+const failedImageNodes = ref(new Set<string>());
+watch(
+  () => nodes.value.map((node) => [node.id, node.image_url] as const),
+  (current, previous = []) => {
+    const previousUrls = new Map(previous);
+    for (const [nodeId, imageUrl] of current) {
+      if (previousUrls.get(nodeId) !== imageUrl) failedImageNodes.value.delete(nodeId);
+    }
+  },
+);
+
+function markImageFailed(nodeId: string) {
+  failedImageNodes.value.add(nodeId);
+}
 const matchingNodeTypes = computed(() => nodeTypes.filter((type) => type.replaceAll("_", " " ).includes(nodeSearch.value.trim().toLowerCase())));
 const contextWorld = ref<{ x: number; y: number } | null>(null);
 
-// AI Generation loading states
-const generatingNodeId = ref<string | null>(null);
 const containerRef = ref<HTMLElement | null>(null);
 
 function emitUpdate() {
@@ -299,8 +312,8 @@ function addNode(type: NodeType) {
     baseNode.conditions = [{ scope: "global", variable: studioState.qualities[0]?.name || "tension", op: "gte", value: 1 }];
     baseNode.height = 140;
   } else if (type === "image") {
-    baseNode.prompt = "Dark mystery cellar, cinematic lighting, moody";
-    baseNode.height = 220;
+    baseNode.image_url = "";
+    baseNode.height = 140;
   } else if (type === "teleport") {
     baseNode.destination_storylet = "";
     baseNode.height = 100;
@@ -356,50 +369,6 @@ const computedEdges = computed(() => {
   }).filter(Boolean);
 });
 
-// LiteLLM Dialogue Generation
-async function generateDialogueForNode(node: NarrativeNode) {
-  generatingNodeId.value = node.id;
-  try {
-    const prompt = `Write an engaging line of dialogue for the role '${node.speaker_role || 'Character'}'. Context: ${node.text || 'In a tense mystery situation.'}`;
-    const resp = await fetch("/api/v2/generation/litellm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, model: "gpt-4o-mini" }),
-    });
-    const res = await resp.json();
-    if (!resp.ok) throw new Error(res.error || "LiteLLM unavailable");
-    node.text = res.text.trim();
-    notify("Generated dialogue via LiteLLM", "success");
-    emitUpdate();
-  } catch (err) {
-    notify(err instanceof Error ? err.message : String(err), "error");
-  } finally {
-    generatingNodeId.value = null;
-  }
-}
-
-// ComfyUI Image Generation
-async function generateImageForNode(node: NarrativeNode) {
-  generatingNodeId.value = node.id;
-  node.image_url = undefined;
-  try {
-    const resp = await fetch("/api/v2/generation/comfyui/prompt", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: node.prompt || "cinematic narrative illustration" }),
-    });
-    const res = await resp.json();
-    if (!resp.ok) throw new Error(res.error || "ComfyUI unavailable");
-
-    notify(`Queued image on ComfyUI (Prompt #${res.prompt_id.slice(0, 8)})`, "info");
-    node.image_url = `/api/v2/generation/comfyui/view?filename=DecisionNarrative_00001_.png`;
-    emitUpdate();
-  } catch (err) {
-    notify(err instanceof Error ? err.message : String(err), "error");
-  } finally {
-    generatingNodeId.value = null;
-  }
-}
 </script>
 
 <template>
@@ -421,7 +390,7 @@ async function generateImageForNode(node: NarrativeNode) {
         <button class="node-tool-btn choice" @click="addNode('choice')">Choice</button>
         <button class="node-tool-btn variable" @click="addNode('variable')">Variable</button>
         <button class="node-tool-btn conditional" @click="addNode('conditional')">Conditional</button>
-        <button class="node-tool-btn image" @click="addNode('image')">Image (AI)</button>
+        <button class="node-tool-btn image" @click="addNode('image')">Image</button>
         <button class="node-tool-btn teleport" @click="addNode('teleport')">Teleport</button>
         <button class="node-tool-btn go-to-location" @click="addNode('go_to_location')">Go To Location</button>
         <button class="node-tool-btn end" @click="addNode('end')">End</button>
@@ -534,24 +503,16 @@ async function generateImageForNode(node: NarrativeNode) {
             </div>
           </div>
 
-          <!-- IMAGE (ComfyUI) -->
+          <!-- IMAGE -->
           <div v-else-if="node.type === 'image'">
-            <div style="margin-bottom:8px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <label class="field-label" style="margin-bottom:0;">Prompt:</label>
-                <button
-                  class="ai-action-btn"
-                  :disabled="generatingNodeId === node.id"
-                  @click.stop="generateImageForNode(node)"
-                >
-                  {{ generatingNodeId === node.id ? 'Rendering...' : '🎨 Generate' }}
-                </button>
-              </div>
-              <textarea v-model="node.prompt" class="form-textarea" style="min-height:50px; font-size:11px; padding:6px;" @input="emitUpdate"></textarea>
+            <div v-if="!node.image_url" style="font-size:11px; color:var(--text-muted); padding:8px 0;">
+              No image URL configured.
             </div>
-
-            <div v-if="node.image_url" style="text-align:center; margin-top:6px;">
-              <img :src="node.image_url" style="width:100%; height:110px; object-fit:cover; border-radius:6px; border:1px solid var(--border-subtle);" />
+            <div v-else-if="!isSafeImageUrl(node.image_url) || failedImageNodes.has(node.id)" style="font-size:11px; color:var(--text-muted); padding:8px 0;">
+              Image URL is unsafe or unavailable.
+            </div>
+            <div v-else style="text-align:center; margin-top:6px;">
+              <img :src="node.image_url" @error="markImageFailed(node.id)" style="width:100%; height:110px; object-fit:cover; border-radius:6px; border:1px solid var(--border-subtle);" />
             </div>
           </div>
 
@@ -846,19 +807,4 @@ async function generateImageForNode(node: NarrativeNode) {
   margin-left: 6px;
 }
 
-.ai-action-btn {
-  background: rgba(10, 132, 255, 0.2);
-  border: 1px solid #0a84ff;
-  color: #409cff;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.ai-action-btn:hover {
-  background: #0a84ff;
-  color: #ffffff;
-}
 </style>

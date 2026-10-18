@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from "vue";
+import { inject, onMounted, ref, computed, watch } from "vue";
 import { usePlaytestViewModel } from "../view-models/playtest.ts";
 import { studioState, locationMap, characterMap } from "../state.ts";
 import { StudioApi } from "../api.ts";
 import type { StoryletRecord } from "../contracts.ts";
+import { interactionContextKey } from "../interactionContext.ts";
 
 const {
   activeTab,
@@ -21,12 +22,34 @@ const {
   moveToLocation,
   chooseOption,
   forkPlaytest,
-  rankLocalEncoder,
 } = usePlaytestViewModel();
 const selectedStoryletRecord = ref<StoryletRecord | null>(null);
 const selectedEventId = ref<string | null>(null);
 const compareSessionId = ref<string>("");
 const comparisonReport = ref<string>("");
+
+const interactionContext = inject(interactionContextKey);
+watch(() => [sessionId.value, snapshot.value, selectedStoryletRecord.value, selectedEventId.value, events.value], () => {
+  const selectedEvent = events.value.find((event) => event.id === selectedEventId.value);
+  if (selectedEvent) {
+    interactionContext?.setFocus({
+      entity: null,
+      selection: { type: "playtest_event", id: selectedEvent.id, label: selectedEvent.action, data: selectedEvent },
+    });
+    return;
+  }
+  if (selectedStoryletRecord.value) {
+    const storylet = selectedStoryletRecord.value;
+    interactionContext?.setFocus({
+      entity: { type: "storylet", id: storylet.id, label: storylet.title, data: JSON.parse(JSON.stringify(storylet)) },
+      selection: { type: "playtest_scene", id: storylet.id, data: { sessionId: sessionId.value } },
+    });
+    return;
+  }
+  interactionContext?.setFocus(sessionId.value
+    ? { entity: { type: "playtest_session", id: sessionId.value, data: { snapshot: snapshot.value } }, selection: null }
+    : { entity: null, selection: null });
+}, { deep: true });
 
 onMounted(async () => {
   await loadSessions();
@@ -64,10 +87,6 @@ async function handleFork() {
     await loadSessions();
     await selectSession(res.sessionId);
   }
-}
-
-async function handleRankLocal() {
-  await rankLocalEncoder();
 }
 
 function handleCompare() {
@@ -215,9 +234,6 @@ function handleCompare() {
           <div v-else-if="activeTab === 'director'">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
               <span style="font-weight:700; text-transform:uppercase; color:var(--text-muted);">Candidate Pool</span>
-              <button class="btn btn-secondary" style="font-size:11px; padding:3px 8px;" @click="handleRankLocal">
-                Rank Local Encoder
-              </button>
             </div>
 
             <div v-for="c in directorEval?.candidates ?? []" :key="c.storylet_id" style="margin-bottom:10px; padding:8px 10px; background:var(--bg-input); border-radius:8px;">

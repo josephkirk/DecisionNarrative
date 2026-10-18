@@ -98,9 +98,9 @@ fn main() {
             "availableParallelism": std::thread::available_parallelism().map(|v| v.get()).ok(),
         },
         "notes": [
-            "Measures deterministic eligibility, role binding, scoring, and sorting; no encoder or trained ranker is included.",
+            "Measures deterministic eligibility, role binding, scoring, and sorting.",
             "Complete-turn measurement includes full candidate evaluation, one player wait, and all configured NPC rule evaluations/actions.",
-            "Run on the target GPU host for model and hardware acceptance; this harness reports CPU-side Rust runtime costs.",
+            "Run on target hardware for runtime acceptance; this harness reports CPU-side Rust runtime costs.",
         ],
     });
     println!("{}", serde_json::to_string_pretty(&output).unwrap());

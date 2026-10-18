@@ -117,15 +117,6 @@ export function usePlaytestViewModel() {
     }
   }
 
-  async function rankLocalEncoder() {
-    if (!sessionId.value) return;
-    try {
-      directorEval.value = await StudioApi.rankLocalEncoder(sessionId.value);
-      notify("Evaluated candidates with local encoder", "success");
-    } catch (e) {
-      notify(e instanceof Error ? e.message : String(e), "error");
-    }
-  }
 
   return {
     activeTab,
@@ -143,6 +134,5 @@ export function usePlaytestViewModel() {
     moveToLocation,
     chooseOption,
     forkPlaytest,
-    rankLocalEncoder,
   };
 }

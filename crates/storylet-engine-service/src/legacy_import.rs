@@ -444,34 +444,6 @@ pub fn maybe_import_legacy_database(
         }
     }
 
-    // 8. Generation Jobs
-    {
-        let mut stmt = legacy_studio
-            .prepare("SELECT id, revision, status, job_json, updated_at FROM generation_jobs")
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, i64>(4)?,
-                ))
-            })
-            .map_err(|e| e.to_string())?;
-
-        for row in rows {
-            let (id, rev, status, job_json, updated_at) = row.map_err(|e| e.to_string())?;
-            tx.execute(
-                "INSERT OR REPLACE INTO generation_jobs (id, revision, status, job_json, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![id, rev, status, job_json, updated_at],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-    }
-
     // 9. Runtime Sessions and Events (from legacy engine db if exists)
     let engine_path = legacy_engine_path.as_ref();
     if engine_path.exists() {

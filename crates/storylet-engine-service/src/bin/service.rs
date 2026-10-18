@@ -24,14 +24,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let resource_root = env::var("STORYLET_RESOURCE_ROOT").unwrap_or_else(|_| ".".into());
 
-    let strata_url =
-        env::var("STRATA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8080/v1".into());
-
-    let strata_model = env::var("STRATA_MODEL").unwrap_or_else(|_| "strata-uncensored".into());
-
-    let embedding_url =
-        env::var("EMBEDDING_SERVICE_URL").unwrap_or_else(|_| "http://127.0.0.1:4318".into());
-
     // Run one-time migration if needed
     if db_path != ":memory:" {
         if let Some(parent) = PathBuf::from(&db_path).parent() {
@@ -51,15 +43,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let service = if db_path == ":memory:" {
-        StudioService::open_in_memory(resource_root, strata_url, strata_model, embedding_url)?
+        StudioService::open_in_memory(resource_root)?
     } else {
-        StudioService::open(
-            &db_path,
-            resource_root,
-            strata_url,
-            strata_model,
-            embedding_url,
-        )?
+        StudioService::open(&db_path, resource_root)?
     };
 
     if args.iter().any(|arg| arg == "--mcp") {
@@ -78,9 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .parse()?;
 
-    let static_dir = Some(PathBuf::from("dist/studio"))
-        .filter(|p| p.exists())
-        .or_else(|| Some(PathBuf::from("public")));
+    let static_dir = Some(PathBuf::from("dist/studio")).filter(|p| p.exists());
 
     let app = build_router(service, static_dir);
     let listener = TcpListener::bind(address).await?;

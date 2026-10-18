@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { inject, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useLibraryViewModel } from "../view-models/library.ts";
 import TwineStoryMap from "../components/TwineStoryMap.vue";
 import TwineImportExportModal from "../components/TwineImportExportModal.vue";
 import { StudioApi } from "../api.ts";
 import type { StoryletRecord } from "../contracts.ts";
+import { interactionContextKey } from "../interactionContext.ts";
 
 const router = useRouter();
 const {
@@ -21,6 +22,26 @@ const {
 const viewMode = ref<"grid" | "twine_map">("grid");
 const showTwineModal = ref(false);
 const allProjectStorylets = ref<StoryletRecord[]>([]);
+const interactionContext = inject(interactionContextKey);
+watch(() => [filters, result.value, viewMode.value], () => {
+  const visibleStorylets = result.value.items.map(({ id, title, revision, approved_revision, location_tags, role_tags }) => ({
+    id, title, revision, approved_revision, location_tags, role_tags,
+  }));
+  interactionContext?.setFocus({
+    entity: {
+      type: "storylet_library",
+      id: "storylets",
+      label: "Storylets",
+      data: { filters: { ...filters }, viewMode: viewMode.value, total: result.value.total, visibleStorylets },
+    },
+    selection: filters.q.trim() ? {
+      type: "storylet_filter",
+      id: filters.q.trim(),
+      label: filters.q.trim(),
+      data: { filters: { ...filters }, visibleStorylets },
+    } : null,
+  });
+}, { deep: true });
 
 async function loadAllStorylets() {
   try {

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { StoryletRecord } from "../../src/web/studio/contracts.ts";
-import { applyJumpPreconditions, validateNarrativeGraph, type NarrativeGraph } from "../../src/web/studio/narrativeGraphTypes.ts";
+import { applyJumpPreconditions, isSafeImageUrl, validateNarrativeGraph, type NarrativeGraph } from "../../src/web/studio/narrativeGraphTypes.ts";
 
 test("jump preconditions produce effect values that satisfy supported operators", () => {
   const target = {
@@ -76,4 +76,31 @@ test("storylet graph must contain one reachable Start-to-End flow", () => {
   const disconnected = { ...graph, nodes: [...graph.nodes, { id: "orphan", type: "dialog" as const, title: "Orphan", x: 0, y: 150, width: 180, height: 100 }] };
   expect(validateNarrativeGraph(disconnected)).toContain("Every node must be reachable from Start.");
   expect(validateNarrativeGraph(disconnected)).toContain("Every node must have a path to End.");
+});
+test("image URL validation matches Rust and graph validation reports unsafe nodes", () => {
+  const cases: Array<[string, boolean]> = [
+    ["assets/a:b.png", true],
+    ["HTTPS://x/y", true],
+    ["https:x", false],
+    ["\u007fx", false],
+    ["javascript:alert(1)", false],
+    ["//example.com/platform.png", false],
+    ["", false],
+  ];
+  for (const [url, safe] of cases) expect(isSafeImageUrl(url)).toBe(safe);
+
+  const graph: NarrativeGraph = {
+    nodes: [
+      { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
+      { id: "image", type: "image", title: "Hero", x: 150, y: 0, width: 180, height: 100, image_url: "javascript:alert(1)" },
+      { id: "end", type: "end", title: "End", x: 400, y: 0, width: 100, height: 80 },
+    ],
+    edges: [
+      { id: "start-image", from_node: "start", from_port: "output", to_node: "image", to_port: "input" },
+      { id: "image-end", from_node: "image", from_port: "output", to_node: "end", to_port: "input" },
+    ],
+  };
+  expect(validateNarrativeGraph(graph)).toContain(
+    "Image node Hero must have a safe HTTP(S) URL or project-relative path.",
+  );
 });

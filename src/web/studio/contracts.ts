@@ -72,7 +72,6 @@ export interface StoryletChoiceRecord {
   conditions?: Array<{ variable: string; op: string; value: unknown }>;
   effects: Record<string, unknown>;
   divert_target?: string | null;
-  advisorPreview?: Record<string, unknown>;
 }
 
 
@@ -196,42 +195,14 @@ export interface LibraryPageResult {
   available_location_tags: string[];
 }
 
-export interface GenerationStageDescriptor {
-  id: string;
-  title: string;
-}
-
 export interface AuthoringOptions {
   quality_types: string[];
   repeatability_modes: string[];
   cluster_types: string[];
   policy_modes: string[];
   event_types: string[];
-  stages: GenerationStageDescriptor[];
 }
 
-export interface GenerationJobRecord {
-  id: string;
-  revision: number;
-  status: "ready" | "running" | "failed" | "complete";
-  next_stage_index: number;
-  request: Record<string, unknown>;
-  stages: Array<{
-    stage: string;
-    artifact: unknown;
-    source: string;
-    model: string;
-    promptVersion: string;
-    completedAt: number;
-  }>;
-  attempts: Record<string, number>;
-  total_retries: number;
-  draft_storylet_id?: string;
-  draft_revision?: number;
-  failure?: { stage: string; message: string };
-  created_at: number;
-  updated_at: number;
-}
 
 export interface PlaytestSnapshot {
   session_id: string;
@@ -271,10 +242,4 @@ export interface CandidateEvaluation {
 export interface DirectorEvaluation {
   candidates: CandidateEvaluation[];
   selected?: string | null;
-  decision?: {
-    formatVersion: number;
-    source: string;
-    no_action_probability: number;
-    ranking: Array<{ storylet_id: string; score: number; probability: number }>;
-  };
 }

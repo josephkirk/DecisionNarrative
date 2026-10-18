@@ -496,7 +496,6 @@ pub fn twee_story_to_storylets(story: &TweeStory) -> Vec<StoryletRecord> {
                 conditions: None,
                 effects: json!({}),
                 divert_target: Some(l.target),
-                advisor_preview: None,
             })
             .collect();
 

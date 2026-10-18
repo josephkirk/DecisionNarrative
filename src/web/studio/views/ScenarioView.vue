@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { inject, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useScenarioViewModel } from "../view-models/scenario.ts";
 import { studioState } from "../state.ts";
+import { interactionContextKey } from "../interactionContext.ts";
 
 const router = useRouter();
 const {
@@ -17,6 +18,15 @@ const {
   saveScenario,
   startPlaytestFromScenario,
 } = useScenarioViewModel();
+const interactionContext = inject(interactionContextKey);
+watch(() => [selectedScenarioId.value, activeScenario.id, activeScenario.name, JSON.stringify(activeScenario)], () => {
+  const id = String(selectedScenarioId.value || activeScenario.id);
+  const label = String(activeScenario.name || id);
+  interactionContext?.setFocus({
+    entity: { type: "scenario", id, label, data: JSON.parse(JSON.stringify(activeScenario)) },
+    selection: { type: "scenario", id, label },
+  });
+}, { deep: true });
 
 onMounted(async () => {
   await loadScenarios();

@@ -49,9 +49,6 @@ test("fresh designer workspace can author and start a scenario through the real 
     expect(await (await request("/api/v1/scenarios")).json()).toEqual([]);
     expect(await (await request("/api/v1/project")).json()).toMatchObject({ id: "workspace-project", name: "Workspace", revision: 0 });
 
-    const craftResources = await (await request("/api/v1/craft-resources")).json() as { resources: Array<{ id: string; sourceHash: string; promptHash: string }> };
-    expect(craftResources.resources).toHaveLength(7);
-    expect(craftResources.resources.every((resource) => resource.sourceHash.length === 64 && resource.promptHash.length === 64)).toBe(true);
     expect((await request("/api/v1/project", { method: "PATCH", headers: { "content-type": "application/json" }, body: "null" })).status).toBe(400);
     expect((await request("/api/v1/project-bundle/validate", { method: "POST", headers: { "content-type": "application/json" }, body: "null" })).status).toBe(400);
 

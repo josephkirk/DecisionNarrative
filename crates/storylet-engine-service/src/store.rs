@@ -6,9 +6,9 @@ use std::path::Path;
 use crate::narrative_graph::NarrativeGraph;
 
 use crate::contracts::{
-    CharacterRecord, EventRecord, GenerationJobRecord, LibraryPageResult, LibraryQuery,
-    LibrarySummaryItem, LocationRecord, NpcBehaviorRecord, ProjectBundleContent, ProjectMetadata,
-    QualityRecord, ScenarioRecord, StoryletRecord,
+    CharacterRecord, EventRecord, LibraryPageResult, LibraryQuery, LibrarySummaryItem,
+    LocationRecord, NpcBehaviorRecord, ProjectBundleContent, ProjectMetadata, QualityRecord,
+    ScenarioRecord, StoryletRecord,
 };
 
 pub struct Store {
@@ -60,14 +60,13 @@ impl Store {
 
              CREATE INDEX IF NOT EXISTS idx_content_entity ON content_records(entity);
 
-             CREATE TABLE IF NOT EXISTS generation_jobs (
-                 id TEXT PRIMARY KEY,
-                 revision INTEGER NOT NULL,
-                 status TEXT NOT NULL,
-                 job_json TEXT NOT NULL,
-                 updated_at INTEGER NOT NULL
+             CREATE TABLE IF NOT EXISTS interaction_context (
+                 singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                 context_json TEXT NOT NULL,
+                 captured_at INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL,
+                 is_stale INTEGER NOT NULL DEFAULT 0
              );
-
              CREATE TABLE IF NOT EXISTS runtime_sessions (
                  session_id TEXT PRIMARY KEY,
                  project_id TEXT NOT NULL,
@@ -91,7 +90,29 @@ impl Store {
              );",
         )?;
 
-        // Ensure default project metadata exists
+        // Migration: add is_stale to interaction_context if absent in existing DBs
+        let has_is_stale: bool = {
+            let mut stmt = self
+                .conn
+                .prepare("PRAGMA table_info(interaction_context)")?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut found = false;
+            for col in rows {
+                if col? == "is_stale" {
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+        if !has_is_stale {
+            let tx = self.conn.unchecked_transaction()?;
+            tx.execute(
+                "ALTER TABLE interaction_context ADD COLUMN is_stale INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            tx.commit()?;
+        }
         let exists: bool = self
             .conn
             .query_row(
@@ -497,62 +518,57 @@ impl Store {
         })
     }
 
-    // --- Generation Jobs ---
+    // --- Studio Interaction Context ---
 
-    pub fn list_generation_jobs(&self) -> Result<Vec<GenerationJobRecord>, rusqlite::Error> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT job_json FROM generation_jobs ORDER BY updated_at DESC")?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        let list: Vec<GenerationJobRecord> = rows
-            .filter_map(|r| r.ok())
-            .filter_map(|s| serde_json::from_str(&s).ok())
-            .collect();
-        Ok(list)
-    }
-
-    pub fn get_generation_job(
+    pub fn save_interaction_context(
         &self,
-        id: &str,
-    ) -> Result<Option<GenerationJobRecord>, rusqlite::Error> {
-        let json_opt: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT job_json FROM generation_jobs WHERE id = ?1",
-                params![id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        Ok(json_opt.and_then(|s| serde_json::from_str(&s).ok()))
-    }
-
-    pub fn save_generation_job(&self, job: &GenerationJobRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(job)
+        context: &serde_json::Value,
+    ) -> Result<(), rusqlite::Error> {
+        let now = chrono_now_ms();
+        let captured_at = context
+            .get("capturedAt")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(now);
+        let json = serde_json::to_string(context)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.conn.execute(
-            "INSERT INTO generation_jobs (id, revision, status, job_json, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(id) DO UPDATE SET
-                 revision = excluded.revision,
-                 status = excluded.status,
-                 job_json = excluded.job_json,
-                 updated_at = excluded.updated_at",
-            params![
-                job.id,
-                job.revision as i64,
-                job.status,
-                json,
-                job.updated_at
-            ],
+            "INSERT INTO interaction_context (singleton, context_json, captured_at, updated_at, is_stale)
+             VALUES (1, ?1, ?2, ?3, 0)
+             ON CONFLICT(singleton) DO UPDATE SET
+                 context_json = excluded.context_json,
+                 captured_at = excluded.captured_at,
+                 updated_at = excluded.updated_at,
+                 is_stale = 0",
+            params![json, captured_at, now],
         )?;
         Ok(())
     }
 
-    pub fn delete_generation_job(&self, id: &str) -> Result<bool, rusqlite::Error> {
-        let count = self
-            .conn
-            .execute("DELETE FROM generation_jobs WHERE id = ?1", params![id])?;
-        Ok(count > 0)
+    pub fn mark_interaction_context_stale(&self) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE interaction_context SET is_stale = 1 WHERE singleton = 1",
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_interaction_context(
+        &self,
+    ) -> Result<Option<(serde_json::Value, i64, i64, bool)>, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT context_json, captured_at, updated_at, is_stale FROM interaction_context WHERE singleton = 1",
+        )?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            let raw: String = row.get(0)?;
+            let captured_at: i64 = row.get(1)?;
+            let updated_at: i64 = row.get(2)?;
+            let is_stale: bool = row.get::<_, i64>(3)? != 0;
+            if let Ok(parsed) = serde_json::from_str(&raw) {
+                return Ok(Some((parsed, captured_at, updated_at, is_stale)));
+            }
+        }
+        Ok(None)
     }
 
     // --- Transactional Project Content Replacement ---
@@ -566,8 +582,6 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM content_records", [])?;
-        tx.execute("DELETE FROM generation_jobs", [])?;
-
         tx.execute(
             "UPDATE project_metadata SET project_id = ?1, name = ?2, revision = ?3 WHERE singleton = 1",
             params![meta.id, meta.name, meta.revision as i64],
@@ -623,14 +637,6 @@ impl Store {
                 params![s.id, json, now],
             )?;
         }
-        for j in &content.generation_jobs {
-            let json = serde_json::to_string(j).unwrap();
-            tx.execute(
-                "INSERT INTO generation_jobs (id, revision, status, job_json, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![j.id, j.revision as i64, j.status, json, j.updated_at],
-            )?;
-        }
-
         tx.commit()?;
         Ok(())
     }

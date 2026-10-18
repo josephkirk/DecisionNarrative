@@ -3,7 +3,6 @@ import type {
   CharacterRecord,
   DirectorEvaluation,
   EventRecord,
-  GenerationJobRecord,
   LibraryPageResult,
   LocationRecord,
   NpcBehaviorRecord,
@@ -14,6 +13,7 @@ import type {
   ScenarioRecord,
   StoryletRecord,
 } from "./contracts.ts";
+import type { StudioInteractionContext } from "./interactionContext.ts";
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly issues?: string[]) {
@@ -74,6 +74,12 @@ export const StudioApi = {
     });
   },
 
+  publishInteractionContext(context: StudioInteractionContext): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>("/api/v2/context", {
+      method: "POST",
+      body: JSON.stringify(context),
+    });
+  },
   // Library
   queryLibrary(params: Record<string, string | number>): Promise<LibraryPageResult> {
     const q = new URLSearchParams();
@@ -127,42 +133,6 @@ export const StudioApi = {
     });
   },
 
-  // Generation
-  listGenerationJobs(): Promise<GenerationJobRecord[]> {
-    return request<GenerationJobRecord[]>("/api/v2/generation-jobs");
-  },
-  createGenerationJob(requestPayload: unknown): Promise<GenerationJobRecord> {
-    return request<GenerationJobRecord>("/api/v2/generation-jobs", {
-      method: "POST",
-      body: JSON.stringify(requestPayload),
-    });
-  },
-  getGenerationJob(id: string): Promise<GenerationJobRecord> {
-    return request<GenerationJobRecord>(`/api/v2/generation-jobs/${encodeURIComponent(id)}`);
-  },
-  advanceGenerationJob(id: string, expectedRevision: number): Promise<GenerationJobRecord> {
-    return request<GenerationJobRecord>(`/api/v2/generation-jobs/${encodeURIComponent(id)}/advance`, {
-      method: "POST",
-      body: JSON.stringify({ expectedRevision }),
-    });
-  },
-  editGenerationStage(id: string, stage: string, expectedRevision: number, artifact: unknown): Promise<GenerationJobRecord> {
-    return request<GenerationJobRecord>(`/api/v2/generation-jobs/${encodeURIComponent(id)}/stages/${encodeURIComponent(stage)}`, {
-      method: "PUT",
-      body: JSON.stringify({ expectedRevision, artifact }),
-    });
-  },
-  saveGenerationDraft(id: string): Promise<StoryletRecord> {
-    return request<StoryletRecord>(`/api/v2/generation-jobs/${encodeURIComponent(id)}/draft`, {
-      method: "POST",
-    });
-  },
-  deleteGenerationJob(id: string): Promise<{ deleted: boolean }> {
-    return request<{ deleted: boolean }>(`/api/v2/generation-jobs/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    });
-  },
-
   // Playtests
   createPlaytestFromWorkspace(startLocationId?: string, scenarioId?: string): Promise<{ sessionId: string; snapshot: PlaytestSnapshot }> {
     return request<{ sessionId: string; snapshot: PlaytestSnapshot }>("/api/v1/playtests/from-workspace", {
@@ -195,11 +165,6 @@ export const StudioApi = {
   },
   evaluateDirector(sessionId: string, targetTensionSlope = 0.15): Promise<DirectorEvaluation> {
     return request<DirectorEvaluation>(`/api/v1/playtests/${encodeURIComponent(sessionId)}/director?targetTensionSlope=${targetTensionSlope}`);
-  },
-  rankLocalEncoder(sessionId: string, targetTensionSlope = 0.15): Promise<DirectorEvaluation> {
-    return request<DirectorEvaluation>(`/api/v1/playtests/${encodeURIComponent(sessionId)}/director/rank?targetTensionSlope=${targetTensionSlope}`, {
-      method: "POST",
-    });
   },
   forkPlaytest(sourceSessionId: string, eventId: string, branchSessionId?: string): Promise<{ sessionId: string; snapshot: PlaytestSnapshot }> {
     return request(`/api/v1/playtests/${encodeURIComponent(sourceSessionId)}/fork`, {

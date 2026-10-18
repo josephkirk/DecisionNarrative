@@ -1,5 +1,15 @@
 import type { StoryletRecord, StoryletChoiceRecord, LocalVariableDefinition } from "./contracts.ts";
 
+
+export function isSafeImageUrl(value: string | undefined): boolean {
+  const source = value?.trim();
+  if (!source || source.startsWith("//") || source.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/.test(source)) return false;
+  const firstSegment = source.split("/", 1)[0] ?? "";
+  const separator = firstSegment.indexOf(":");
+  if (separator < 0) return true;
+  const scheme = firstSegment.slice(0, separator).toLowerCase();
+  return (scheme === "http" || scheme === "https") && source.slice(separator + 1).startsWith("//");
+}
 export type NodeType =
   | "start"
   | "dialog"
@@ -80,7 +90,6 @@ export interface NarrativeNode {
   choices?: ChoiceOption[];
   assignments?: VariableAssignment[];
   conditions?: ConditionRule[];
-  prompt?: string;
   image_url?: string;
   destination_storylet?: string;
   location_id?: string;
@@ -255,7 +264,14 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
   if (graph.nodes.some((node) => !node || typeof node !== "object" || typeof node.id !== "string" || !node.id.trim() || !allowedTypes.has(node.type))) {
     return ["Graph nodes must have nonempty IDs and recognized types."];
   }
-  if (graph.nodes.some((node) => node.type === "go_to_location" && !node.location_id?.trim())) issues.push("Go To Location nodes must select a location.");
+  for (const node of graph.nodes) {
+    if (node.type === "go_to_location" && !node.location_id?.trim()) {
+      issues.push("Go To Location nodes must select a location.");
+    }
+    if (node.type === "image" && !isSafeImageUrl(node.image_url)) {
+      issues.push(`Image node ${node.title} must have a safe HTTP(S) URL or project-relative path.`);
+    }
+  }
   if (graph.edges.some((edge) => !edge || typeof edge !== "object" || typeof edge.id !== "string" || !edge.id.trim() || typeof edge.from_node !== "string" || typeof edge.from_port !== "string" || typeof edge.to_node !== "string" || typeof edge.to_port !== "string")) {
     return ["Graph edges must have nonempty IDs and valid endpoint fields."];
   }

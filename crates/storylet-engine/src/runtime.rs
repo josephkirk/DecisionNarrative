@@ -86,73 +86,13 @@ pub struct RuntimeSessionState {
     pub director: DirectorState,
 }
 
-pub const RUNTIME_SESSION_FORMAT_VERSION: u32 = 1;
+const LEGACY_RUNTIME_SESSION_FORMAT_VERSION: u32 = 1;
+pub const RUNTIME_SESSION_FORMAT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeEvaluation {
     pub candidates: Vec<CandidateEvaluation>,
     pub selected: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub decision: Option<DecisionResult>,
-}
-
-/// Host- or model-produced ranking over the complete eligible set. Rust still
-/// re-evaluates hard conditions against the current revision before accepting it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DecisionResult {
-    pub format_version: u32,
-    pub context_revision: u64,
-    pub source: String,
-    pub model_version: String,
-    pub confidence: f64,
-    pub no_action_probability: f64,
-    pub ranking: Vec<RankedStorylet>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RankedStorylet {
-    pub storylet_id: String,
-    pub score: f64,
-    pub probability: f64,
-}
-
-/// Exported pairwise ranking head trained from reviewed storylet preferences.
-/// The key and weight names are versioned so the model service and host cannot
-/// silently disagree about feature meaning.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct RankingHead {
-    pub schema_version: u32,
-    pub model_version: String,
-    pub feature_names: Vec<String>,
-    pub weights: BTreeMap<String, f64>,
-    pub bias: f64,
-    pub temperature: f64,
-    pub no_action_bias: f64,
-}
-
-/// Embeddings returned by an optional host-side encoder. The library performs
-/// normalization, feature blending, probability calculation, and selection.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SemanticRankingRequest {
-    pub format_version: u32,
-    pub context_revision: u64,
-    pub model_version: String,
-    pub query_embedding: Vec<f64>,
-    pub candidates: Vec<SemanticCandidateEmbedding>,
-    #[serde(default)]
-    pub ranking_head: Option<RankingHead>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SemanticCandidateEmbedding {
-    pub storylet_id: String,
-    pub embedding: Vec<f64>,
-    #[serde(default)]
-    pub features: BTreeMap<String, f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -242,9 +182,12 @@ impl StoryletRuntime {
 
     pub fn restore_session(
         &mut self,
-        state: RuntimeSessionState,
+        mut state: RuntimeSessionState,
     ) -> Result<SessionSnapshot, RuntimeError> {
-        if state.format_version != RUNTIME_SESSION_FORMAT_VERSION {
+        if !matches!(
+            state.format_version,
+            LEGACY_RUNTIME_SESSION_FORMAT_VERSION | RUNTIME_SESSION_FORMAT_VERSION
+        ) {
             return Err(RuntimeError::InvalidSessionState(format!(
                 "format version {} is unsupported",
                 state.format_version
@@ -276,7 +219,26 @@ impl StoryletRuntime {
             ));
         }
         let replayed = crate::replay_events(initial, &state.world.events)?;
-        if replayed != state.world {
+        if state.format_version == LEGACY_RUNTIME_SESSION_FORMAT_VERSION {
+            if replayed != state.world {
+                // Older v1 snapshots omitted these indexes; reconstruct only those derived fields.
+                let mut normalized = state.world.clone();
+                normalized.location_tags.clone_from(&replayed.location_tags);
+                normalized
+                    .visited_locations
+                    .clone_from(&replayed.visited_locations);
+                normalized
+                    .met_characters
+                    .clone_from(&replayed.met_characters);
+                if replayed != normalized {
+                    return Err(RuntimeError::InvalidSessionState(
+                        "legacy event log does not reproduce the saved world".into(),
+                    ));
+                }
+            }
+            state.world = replayed;
+            state.format_version = RUNTIME_SESSION_FORMAT_VERSION;
+        } else if replayed != state.world {
             return Err(RuntimeError::InvalidSessionState(
                 "event log does not reproduce the saved world".into(),
             ));
@@ -437,7 +399,6 @@ impl StoryletRuntime {
             return Ok(RuntimeEvaluation {
                 candidates: Vec::new(),
                 selected: None,
-                decision: None,
             });
         }
         let definitions: Vec<_> = session
@@ -458,272 +419,7 @@ impl StoryletRuntime {
         Ok(RuntimeEvaluation {
             candidates,
             selected,
-            decision: None,
         })
-    }
-
-    /// Accept an external Jev/model ranking only when it describes this exact
-    /// world revision and every currently eligible storylet exactly once.
-    pub fn apply_decision(
-        &self,
-        session_id: &str,
-        target_tension_slope: f64,
-        mut decision: DecisionResult,
-    ) -> Result<RuntimeEvaluation, RuntimeError> {
-        let mut evaluation = self.evaluate(session_id, target_tension_slope)?;
-        let session = self.session(session_id)?;
-        let invalid = |message: &str| RuntimeError::InvalidSessionState(message.to_owned());
-        if decision.format_version != 1 {
-            return Err(invalid("unsupported decision result format"));
-        }
-        if decision.context_revision != session.world.revision {
-            return Err(RuntimeError::Engine(EngineError::RevisionConflict {
-                expected: decision.context_revision,
-                actual: session.world.revision,
-            }));
-        }
-        if decision.source.trim().is_empty()
-            || decision.model_version.trim().is_empty()
-            || !decision.confidence.is_finite()
-            || !(0.0..=1.0).contains(&decision.confidence)
-            || !decision.no_action_probability.is_finite()
-            || !(0.0..=1.0).contains(&decision.no_action_probability)
-        {
-            return Err(invalid("decision metadata and probabilities must be valid"));
-        }
-        let eligible: BTreeMap<_, _> = evaluation
-            .candidates
-            .iter()
-            .filter(|candidate| candidate.eligible)
-            .map(|candidate| (candidate.storylet_id.clone(), candidate.clone()))
-            .collect();
-        let mut seen = std::collections::BTreeSet::new();
-        let mut probability_total = decision.no_action_probability;
-        for item in &decision.ranking {
-            if !item.score.is_finite()
-                || !item.probability.is_finite()
-                || !(0.0..=1.0).contains(&item.probability)
-                || !seen.insert(item.storylet_id.clone())
-                || !eligible.contains_key(&item.storylet_id)
-            {
-                return Err(invalid(
-                    "ranking must contain unique eligible storylets and finite probabilities",
-                ));
-            }
-            probability_total += item.probability;
-        }
-        if seen.len() != eligible.len() || (probability_total - 1.0).abs() > 1e-5 {
-            return Err(invalid(
-                "ranking must cover every eligible storylet and probabilities must sum to one",
-            ));
-        }
-
-        decision.ranking.sort_by(|left, right| {
-            right
-                .probability
-                .total_cmp(&left.probability)
-                .then_with(|| right.score.total_cmp(&left.score))
-                .then_with(|| left.storylet_id.cmp(&right.storylet_id))
-        });
-
-        let ranked_ids: Vec<_> = decision
-            .ranking
-            .iter()
-            .map(|item| item.storylet_id.as_str())
-            .collect();
-        evaluation.candidates.sort_by(|left, right| {
-            let left_rank = ranked_ids.iter().position(|id| *id == left.storylet_id);
-            let right_rank = ranked_ids.iter().position(|id| *id == right.storylet_id);
-            match (left_rank, right_rank) {
-                (Some(a), Some(b)) => a.cmp(&b),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => right.storylet_id.cmp(&left.storylet_id),
-            }
-        });
-        let choice = decision
-            .ranking
-            .first()
-            .filter(|item| item.probability > decision.no_action_probability);
-        evaluation.selected = choice.map(|item| item.storylet_id.clone());
-        evaluation.decision = Some(decision);
-        Ok(evaluation)
-    }
-
-    /// Build and apply an uncalibrated semantic-baseline decision entirely in
-    /// the Rust engine. The host supplies vectors, never weights or eligibility.
-    pub fn rank_semantic(
-        &self,
-        session_id: &str,
-        target_tension_slope: f64,
-        request: SemanticRankingRequest,
-    ) -> Result<RuntimeEvaluation, RuntimeError> {
-        let evaluation = self.evaluate(session_id, target_tension_slope)?;
-        let session = self.session(session_id)?;
-        let invalid = |message: &str| RuntimeError::InvalidSessionState(message.to_owned());
-        if request.format_version != 1 {
-            return Err(invalid("unsupported semantic ranking format"));
-        }
-        if request.context_revision != session.world.revision {
-            return Err(RuntimeError::Engine(EngineError::RevisionConflict {
-                expected: request.context_revision,
-                actual: session.world.revision,
-            }));
-        }
-        if request.model_version.trim().is_empty() {
-            return Err(invalid("semantic ranking requires a model version"));
-        }
-        let dimensions = request.query_embedding.len();
-        if dimensions == 0 || dimensions > 4096 {
-            return Err(invalid(
-                "semantic vector dimension must be between 1 and 4096",
-            ));
-        }
-        let query = normalized_embedding(&request.query_embedding, dimensions)?;
-        let eligible: BTreeMap<_, _> = evaluation
-            .candidates
-            .iter()
-            .filter(|candidate| candidate.eligible)
-            .map(|candidate| (candidate.storylet_id.clone(), candidate.final_weight))
-            .collect();
-        let mut seen = std::collections::BTreeSet::new();
-        let expected_features = [
-            "semantic_relevance",
-            "urgency",
-            "pacing_arc_alignment",
-            "novelty",
-            "waiting_time",
-            "goal_progress",
-            "role_binding_quality",
-            "predicted_consequence_alignment",
-            "no_action",
-        ];
-        let head = request.ranking_head.as_ref();
-        if let Some(head) = head {
-            if head.schema_version != 1
-                || head.model_version.trim().is_empty()
-                || head
-                    .feature_names
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    != expected_features
-                || head.weights.len() != expected_features.len()
-                || expected_features.iter().any(|name| {
-                    head.weights
-                        .get(*name)
-                        .is_none_or(|weight| !weight.is_finite())
-                })
-                || !head.bias.is_finite()
-                || !head.no_action_bias.is_finite()
-                || !head.temperature.is_finite()
-                || head.temperature <= 0.0
-            {
-                return Err(invalid(
-                    "ranking head schema, weights, or calibration settings are invalid",
-                ));
-            }
-        }
-        let mut scores = Vec::with_capacity(request.candidates.len());
-        let mut no_action_score = 0.55;
-        let mut temperature = 0.12;
-        for candidate in &request.candidates {
-            let Some(base_weight) = eligible.get(&candidate.storylet_id) else {
-                return Err(invalid(
-                    "semantic vectors may only be supplied for eligible storylets",
-                ));
-            };
-            if !seen.insert(candidate.storylet_id.clone()) {
-                return Err(invalid("semantic ranking contains a duplicate storylet"));
-            }
-            let embedding = normalized_embedding(&candidate.embedding, dimensions)?;
-            let cosine = query
-                .iter()
-                .zip(&embedding)
-                .map(|(a, b)| a * b)
-                .sum::<f64>()
-                .clamp(-1.0, 1.0);
-            let semantic = (cosine + 1.0) / 2.0;
-            let heuristic = (base_weight / 100.0).clamp(0.0, 1.0);
-            let score = if let Some(head) = head {
-                if candidate.features.len() != expected_features.len()
-                    || expected_features.iter().any(|name| {
-                        candidate
-                            .features
-                            .get(*name)
-                            .is_none_or(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
-                    })
-                {
-                    return Err(invalid(
-                        "trained ranking requires a finite value from 0 to 1 for every candidate feature",
-                    ));
-                }
-                let mut value = head.bias;
-                for name in expected_features {
-                    let feature = if name == "semantic_relevance" {
-                        semantic
-                    } else {
-                        candidate.features[name]
-                    };
-                    value += head.weights[name] * feature;
-                }
-                value
-            } else {
-                0.75 * semantic + 0.25 * heuristic
-            };
-            scores.push((candidate.storylet_id.clone(), score));
-        }
-        if seen.len() != eligible.len() {
-            return Err(invalid(
-                "semantic ranking must include every eligible storylet",
-            ));
-        }
-
-        if let Some(head) = head {
-            no_action_score = head.bias + head.weights["no_action"] + head.no_action_bias;
-            temperature = head.temperature;
-        }
-        let mut logits: Vec<_> = scores
-            .iter()
-            .map(|(_, score)| score / temperature)
-            .collect();
-        let no_action_logit = no_action_score / temperature;
-        let max_logit = logits.iter().copied().fold(no_action_logit, f64::max);
-        let no_action_weight = (no_action_logit - max_logit).exp();
-        for logit in &mut logits {
-            *logit = (*logit - max_logit).exp();
-        }
-        let total = no_action_weight + logits.iter().sum::<f64>();
-        let no_action_probability = no_action_weight / total;
-        let ranking = scores
-            .into_iter()
-            .zip(logits)
-            .map(|((storylet_id, score), weight)| RankedStorylet {
-                storylet_id,
-                score,
-                probability: weight / total,
-            })
-            .collect();
-        self.apply_decision(
-            session_id,
-            target_tension_slope,
-            DecisionResult {
-                format_version: 1,
-                context_revision: request.context_revision,
-                source: if head.is_some() {
-                    "trained_ranking_head_uncalibrated"
-                } else {
-                    "embedding_baseline_uncalibrated"
-                }
-                .into(),
-                model_version: head.map_or(request.model_version.clone(), |head| {
-                    format!("{}+{}", request.model_version, head.model_version)
-                }),
-                confidence: 0.0,
-                no_action_probability,
-                ranking,
-            },
-        )
     }
 
     pub fn submit_command(
@@ -1022,18 +718,6 @@ fn event_kind(event_type: crate::EventType) -> &'static str {
         crate::EventType::Canon => "canon",
         crate::EventType::World => "world",
     }
-}
-
-fn normalized_embedding(values: &[f64], dimensions: usize) -> Result<Vec<f64>, RuntimeError> {
-    let invalid = || RuntimeError::InvalidSessionState("semantic embedding is invalid".into());
-    if values.len() != dimensions || values.iter().any(|value| !value.is_finite()) {
-        return Err(invalid());
-    }
-    let norm = values.iter().map(|value| value * value).sum::<f64>().sqrt();
-    if !norm.is_finite() || norm <= 1e-12 {
-        return Err(invalid());
-    }
-    Ok(values.iter().map(|value| value / norm).collect())
 }
 
 fn validate_command_references(

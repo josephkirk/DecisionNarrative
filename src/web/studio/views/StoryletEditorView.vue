@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useStoryletEditorViewModel } from "../view-models/storyletEditor.ts";
 import NarrativeGraphCanvas from "../components/NarrativeGraphCanvas.vue";
@@ -8,6 +8,7 @@ import { StudioApi } from "../api.ts";
 import type { CharacterRecord, LocationRecord, QualityRecord, StoryletRecord } from "../contracts.ts";
 import { buildGraphFromStorylet, compileGraphToStorylet, validateNarrativeGraph, type NarrativeGraph } from "../narrativeGraphTypes.ts";
 import { notify, studioState } from "../state.ts";
+import { interactionContextKey } from "../interactionContext.ts";
 
 const route = useRoute();
 const router = useRouter();
@@ -18,6 +19,34 @@ const selectedNodeId = ref<string | null>(null);
 const selectedNode = computed(() => currentGraph.value.nodes.find((node) => node.id === selectedNodeId.value) ?? null);
 const availableStorylets = ref<StoryletRecord[]>([]);
 const graphReady = ref(false);
+
+const interactionContext = inject(interactionContextKey);
+watch(() => [
+  draft.id,
+  draft.title,
+  JSON.stringify(draft),
+  selectedNode.value?.id,
+  selectedNode.value?.type,
+  route.query.item,
+  route.query.node,
+], () => {
+  const node = selectedNode.value;
+  const itemId = typeof route.query.item === "string" ? route.query.item : undefined;
+  const nodeId = typeof route.query.node === "string" ? route.query.node : undefined;
+  interactionContext?.setFocus({
+    entity: {
+      type: "storylet",
+      id: String(draft.id ?? "new-storylet"),
+      label: String(draft.title ?? "Untitled Storylet"),
+      data: JSON.parse(JSON.stringify(draft)),
+    },
+    selection: itemId
+      ? { type: "graph_item", id: itemId, data: { nodeId } }
+      : node
+        ? { type: "graph_node", id: node.id, label: node.type, data: node }
+        : null,
+  });
+}, { deep: true });
 const lastSavedSnapshot = ref("");
 
 onMounted(async () => {

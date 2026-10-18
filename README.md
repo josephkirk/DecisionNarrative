@@ -9,14 +9,14 @@ The platform couples a host-independent Rust decision core with a unified local 
 - **Narrative Core (`crates/storylet-engine`)**: Host-independent Rust library with zero I/O dependencies. Owns deterministic world state, precondition matching, role resolution, choices, and causal history. Exports a C ABI for native embedding (Unreal / Unity / Godot / .NET).
 - **Unified Local Service (`crates/storylet-engine-service`)**: Axum, Tokio, and rusqlite service providing single-store SQLite persistence, REST endpoints, Server-Sent Events (SSE) live streams, and stdio/HTTP Model Context Protocol (MCP) server.
 - **Authoring Studio (`src/web`)**: Vue 3 (Composition API) + Vite + Vue Router application. Card-grid storylet deck library, graph-only storylet editor with a contextual property inspector, inline tag editing, Tag Manager reference counts, Story Codex (qualities, characters, locations, NPC rules, events), and starting condition scenarios. Storylet preconditions combine quality checks with visited-location IDs/tags and met-character IDs/roles; each enabled category is required, while location and character choices are alternatives within their category.
-- **Drama Director & Ranking (`model/`)**: Deterministic priority/urgency selection with optional local embedding ranking (EmbeddingGemma 2 via Python service).
+- **Drama Director (`crates/storylet-engine`)**: Deterministic eligibility and selection in Rust; no embedding ranker or model dependency.
+- **Interaction Context (`src/web/studio/interactionContext.ts`)**: Shares the active studio view, project, focused entity/selection, and playtest revision with a local MCP agent. The agent works through MCP operations directly; the studio does not call a model or generate content.
 
 ## Requirements
 
 - Windows, macOS, or Linux with Rust 1.90 or later (edition 2024 support).
 - Bun 1.3.14 or later.
-- Python 3.11–3.13 and `uv` for model contract tests and optional embedding service.
-- Optional: A local Strata-compatible generation endpoint (default `http://127.0.0.1:8080/v1`) for model-assisted scene drafting. The studio, deterministic playtest, and project bundle workflows remain fully functional offline.
+- No AI service, Python runtime, model download, or generation endpoint is required.
 
 ## Quick start
 
@@ -28,20 +28,18 @@ bun run build
 bun run play
 ```
 
-Open `http://127.0.0.1:3001` in your browser (e.g. Microsoft Edge, Chrome, Safari). `bun run play` uses a fresh SQLite database at `data/storylet_studio_clean.db`; the default database and legacy imports remain untouched.
+Open `http://127.0.0.1:3000` in your browser (e.g. Microsoft Edge, Chrome, Safari). `bun run play` preserves the project database at `data/storylet_studio_v2.db`; the MCP server uses the same path.
 
-The service defaults to `data/storylet_studio_v2.db` when started directly, and imports existing project records from legacy databases on first launch. Set `STORYLET_STUDIO_DB_PATH` to choose another path or `:memory:` for isolated testing.
+`bun run play:fresh` opens the separate `data/storylet_studio_clean.db` workspace, skips legacy imports, and binds on port 3001; it does not modify the default v2 database. `STORYLET_STUDIO_DB_PATH` selects a different file or `:memory:` for isolated testing. The MCP process inherits that variable when the agent client passes it through.
 
 ## Environment configuration
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
-| `STORYLET_STUDIO_ADDR` | `127.0.0.1:3000` | HTTP service bind address |
+| `STORYLET_STUDIO_ADDR` | `127.0.0.1:3000` | HTTP service bind address (`play:fresh` defaults to port 3001) |
 | `STORYLET_STUDIO_DB_PATH` | `data/storylet_studio_v2.db` | Unified SQLite database file path |
-| `STORYLET_RESOURCE_ROOT` | `.` | Root directory for authoring craft skills |
-| `STRATA_BASE_URL` | `http://127.0.0.1:8080/v1` | Local LLM inference endpoint |
-| `STRATA_MODEL` | `strata-uncensored` | Model identifier for scene generation |
-| `EMBEDDING_SERVICE_URL` | `http://127.0.0.1:4318` | Optional Python embedding service endpoint |
+
+No AI service or model-provider environment variables are required.
 
 ## Build and test
 
@@ -56,7 +54,6 @@ bun run typecheck
 bun test
 cargo test --manifest-path crates/storylet-engine/Cargo.toml
 cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
-uv run --project model --no-sync python -m unittest discover -s model/tests -v
 ```
 
 ## Authoring and Starting Scenarios
@@ -66,22 +63,20 @@ uv run --project model --no-sync python -m unittest discover -s model/tests -v
 - **Starting Scenarios**: Scenarios configure only starting conditions (player start location policy, initial qualities overrides, actor population and location policies, and random seed). Scenarios do not lock in plot arcs, storylet deck membership, or run length. All approved storylets in the project remain eligible during playtest based on dynamic world preconditions and role availability.
 - **Tag Manager**: Browse role, location, emotion, and action tags by category, inspect reference counts, and open each referencing entity.
 - **Story Codex**: Central world bible managing Qualities (currencies, metrics, tools, territory, menaces), Characters (roles, agendas, red lines), Locations (tags, connectivity, coordinates), NPC Behaviors (autonomous rules), and Project Events (canon and world events).
-- **Playtest & Director**: Live playthrough view with current location, active scene prose, and choices. Contextual inspector exposes world qualities, candidate eligibility and rejection reasons, local encoder ranking, and causal event history with branch forking.
+- **Playtest & Director**: Live playthrough view with current location, active scene prose, and choices. Contextual inspector exposes world qualities, deterministic candidate eligibility and rejection reasons, and causal event history with branch forking.
 - **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v2) with transactional validation before replacement.
 
 ## Model Context Protocol (MCP)
 
-DecisionNarrative provides a first-class MCP server for LLM-assisted tools and agent workflows:
+DecisionNarrative exposes project data and deterministic playtest operations to local MCP agents. `workspace.context` identifies the active studio view and focused entity; the agent then works through MCP without UI automation. The MCP service shares the studio's local database. No generation or model-ranking tools are exposed:
 
 ```sh
-# Run MCP over stdio
+# Run MCP over stdio against the shared project database; this does not reset it
 cargo run --manifest-path crates/storylet-engine-service/Cargo.toml --bin storylet-engine-service -- --mcp
 ```
 
 Tools exposed:
-- `narrative_platform`: Manage project entities, run staged generation, execute playtest commands, and inspect runtime state.
-- `generate_storylet_content_batch`: Generate bounded batches (1–24) of candidate storylet records via local Strata.
-- `generate_storylet_ranking_batch`: Generate synthetic training pairs matching `ranking-example.schema.json`.
+- `narrative_platform`: Read active workspace context, inspect/validate project content, manage entities, and exercise deterministic Rust playtests.
 
 ## License
 
