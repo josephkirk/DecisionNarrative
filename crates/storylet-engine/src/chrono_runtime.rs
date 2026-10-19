@@ -159,9 +159,15 @@ impl SignalToken {
     }
 }
 
-/// Clamp a millisecond clock into the token's packed i32 range.
+/// Clamp a millisecond budget into the token's packed i32 range.
 fn clamp_token_ms(value: i64) -> i32 {
     value.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
+/// Absolute deferred deadlines must fit the packed token; overflowing would
+/// silently turn the deadline into "wake immediately".
+fn checked_token_ms(value: i64) -> Result<i32, GraphError> {
+    i32::try_from(value).map_err(|_| GraphError::TokenClockOverflow { value })
 }
 /// Host-consumable edge emitted when a passion crosses a configured threshold.
 /// Rollback emits the inverse edge; callers can activate or cancel the linked asset.
@@ -1037,8 +1043,8 @@ pub enum GraphError {
     MissionReentry {
         node_guid: u32,
     },
-    SceneReopenNotTail {
-        node_guid: u32,
+    TokenClockOverflow {
+        value: i64,
     },
     StartNodeNotFound {
         node_guid: u32,
@@ -1275,9 +1281,9 @@ impl fmt::Display for GraphError {
                 f,
                 "mission node {node_guid} cannot be re-entered after completion"
             ),
-            GraphError::SceneReopenNotTail { node_guid } => write!(
+            GraphError::TokenClockOverflow { value } => write!(
                 f,
-                "scene section {node_guid} can only be reopened while its completion is the history head"
+                "deferred token deadline {value} ms exceeds the packed token range"
             ),
             GraphError::StartNodeNotFound { node_guid } => {
                 write!(f, "start node {node_guid} is not in the asset")
@@ -2958,9 +2964,9 @@ impl FlowGraphInstance {
                 let deferred = &mut self.tokens[index];
                 deferred.set_active(false);
                 deferred.set_deferred(true);
-                deferred.deferred_until_ms = clamp_token_ms(
+                deferred.deferred_until_ms = checked_token_ms(
                     self.clock_ms.saturating_add(frame_budget_ms.max(1)),
-                );
+                )?;
                 continue;
             }
             // The token carries this token's share of the frame budget. The
@@ -3742,6 +3748,16 @@ impl FlowGraphInstance {
                 };
                 parts.push(make_part(event, activity, t_end - event.start_time_ms));
             }
+        }
+        if delta_ms < 0 {
+            // Only commands that actually won arbitration during forward play
+            // may write a pose on the way back.
+            parts.retain(|part| {
+                self.composer.applied.iter().any(|command| {
+                    command.node_guid == node_guid
+                        && command.event_id == part.event_ref.event_id
+                })
+            });
         }
         let previous_poses: BTreeMap<(u64, String), Option<String>> = parts
             .iter()
@@ -4826,15 +4842,14 @@ pub fn rebase_call_history(
     let mut rebased: Vec<CallHistoryEntry> = Vec::new();
     let mut previous: Option<u32> = None;
     for entry in saved {
-        if updated.node(entry.node_guid).is_none() {
+        let Some(def) = updated.node(entry.node_guid) else {
             continue;
-        }
+        };
         if let Some(storylet_id) = entry.chosen_storylet_id {
             if dispatcher.storylet(storylet_id).is_none() {
                 continue;
             }
         }
-        let def = updated.node(entry.node_guid).expect("node checked above");
         if !entry.executed_input_pin.is_empty()
             && updated
                 .input_pin_index(entry.node_guid, &entry.executed_input_pin)
@@ -5252,6 +5267,34 @@ mod tests {
         assert_eq!(clamp_token_ms(i64::MAX), i32::MAX);
         assert_eq!(clamp_token_ms(i64::MIN), i32::MIN);
         assert_eq!(clamp_token_ms(42), 42);
+    }
+
+    #[test]
+    fn deferred_deadline_overflow_is_typed() {
+        let mut node = node(
+            1,
+            NodeKind::Mutation {
+                op: MutationOp::default(),
+            },
+        );
+        node.cost_ms = 5;
+        let asset = FlowGraphAsset {
+            asset_id: "overflow".into(),
+            start_node_guid: 1,
+            nodes: vec![node],
+            edges: Vec::new(),
+        };
+        let mut instance = FlowGraphInstance::new(1, asset, 0).unwrap();
+        instance.start_at_node(1).unwrap();
+        instance.clock_ms = i64::from(i32::MAX);
+        let mut state = WorldStateTable::new();
+        let dispatcher = UnifiedDispatcher::new(Vec::new());
+        let mut ctx = RuntimeContext::new(&mut state, &dispatcher);
+
+        assert!(matches!(
+            instance.tick(&mut ctx, 0),
+            Err(GraphError::TokenClockOverflow { .. })
+        ));
     }
 
     #[test]

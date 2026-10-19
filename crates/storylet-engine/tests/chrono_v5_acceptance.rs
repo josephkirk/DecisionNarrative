@@ -1714,8 +1714,10 @@ fn concurrent_sections_arbitrate_in_one_composer_pass() {
         instance.execute_input(&mut ctx, guid, "In", &token).unwrap();
     }
 
+    let applied_before = instance.composer.applied.len();
     instance.tick(&mut ctx, 10).unwrap();
 
+    assert_eq!(instance.composer.applied.len(), applied_before + 1);
     assert_eq!(instance.composer.conflicts.len(), 1);
     let conflict = &instance.composer.conflicts[0];
     assert_eq!(conflict.winner.node_guid, 11);
@@ -1726,8 +1728,9 @@ fn concurrent_sections_arbitrate_in_one_composer_pass() {
         Some("pose.11")
     );
 
-    // Reverse the frame in descending GUID order; each section restores its
-    // own authored prior pose, so skipping either one fails.
+    // Reverse the frame in descending GUID order. The winner restores its
+    // prior pose; the loser never wrote one, so reversing it must not change
+    // the pose again.
     instance.process_time_window(11, -10).unwrap();
     assert_eq!(
         instance.composer.actor_pose.get("actor").map(String::as_str),
@@ -1736,7 +1739,7 @@ fn concurrent_sections_arbitrate_in_one_composer_pass() {
     instance.process_time_window(10, -10).unwrap();
     assert_eq!(
         instance.composer.actor_pose.get("actor").map(String::as_str),
-        Some("pose.prev.10")
+        Some("pose.prev.11")
     );
 }
 
@@ -2033,9 +2036,9 @@ fn macro_passions_clamp_to_the_spec_range() {
     let registry = PassionRegistry::compile(
         [StarNpcDef {
             npc_id: 0,
-            // Micro values clamp at 100; inertia pushes the raw macro to 150,
+            // Micro values clamp at 100; inertia pushes the raw macro to 101,
             // so only the spec clamp keeps the result at 100.
-            trust_inertia: 50.0,
+            trust_inertia: 1.0,
             micro_passions: vec![MicroPassionDef {
                 npc_id: 0,
                 passion_id: 1,
@@ -2112,6 +2115,25 @@ fn threshold_events_follow_the_value_transition() {
     assert_eq!(delta.threshold_events.len(), 1);
     assert!(delta.threshold_events[0].activated);
     assert!(flags.bit(bit));
+
+    // A below-threshold move emits nothing even when an external write left
+    // the tag set.
+    let mut quiet = WorldStateTable::new();
+    quiet.passions.active[1] = true;
+    quiet.global_tags.set_bit(bit).unwrap();
+    let mut quiet_flags = quiet.global_tags;
+    let quiet_delta = storylet_engine::chrono_state::apply_passion_mutation(
+        &mut quiet.passions,
+        &PassionMutation {
+            micro_deltas: vec![(1, 0.1)],
+            active_ops: vec![],
+        },
+        &passions,
+        &mut quiet_flags,
+    )
+    .unwrap();
+    assert!(quiet_delta.threshold_events.is_empty());
+    assert!(quiet_flags.bit(bit));
 }
 
 #[test]

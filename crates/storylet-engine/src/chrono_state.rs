@@ -846,7 +846,7 @@ impl PassionRegistry {
             }
             // Two rules owning one bit would fight over set/clear; reject the
             // ambiguous authoring instead of emitting contradictory events.
-            if !threshold_bits.insert((npc_id, rule.threshold_tag_bit)) {
+            if !threshold_bits.insert(rule.threshold_tag_bit) {
                 return Err(ChronoStateError::DuplicateThresholdRule {
                     metric_id: npc_id,
                     threshold_tag_bit: rule.threshold_tag_bit,
@@ -2169,7 +2169,7 @@ fn validate_star_npc(npc: &StarNpcDef) -> Result<(), ChronoStateError> {
     if npc.micro_passions.is_empty() {
         return Err(ChronoStateError::EmptyPassionPool { npc_id: npc.npc_id });
     }
-    if !npc.trust_inertia.is_finite() {
+    if !npc.trust_inertia.is_finite() || !(0.0..=1.0).contains(&npc.trust_inertia) {
         return Err(ChronoStateError::InvalidTrustInertia {
             npc_id: npc.npc_id,
             value: npc.trust_inertia,

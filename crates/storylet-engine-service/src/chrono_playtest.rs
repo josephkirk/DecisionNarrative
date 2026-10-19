@@ -271,8 +271,9 @@ impl PlaytestRequest for ChronoPlaytestRollbackRequest {
     }
 }
 
-/// Invoke a story to a POI node. `declaredRoutes` maps a node GUID to the output
-/// pin that was chosen on it, which `seek_backward` needs to walk the chain.
+/// Invoke a story to a POI node. `declaredRoutes` maps a node GUID to the input
+/// pin `seek_backward` should walk back through when that node has several
+/// incoming edges. (It selects an input pin, not the node's chosen output.)
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChronoPlaytestInvokeRequest {
@@ -2511,10 +2512,16 @@ mod tests {
                 kind: NodeKind::Choice {
                     default_output_pin: "choice_a".into(),
                 },
-                input_pins: vec![PinDefinition {
-                    pin_name: "In".into(),
-                    is_input: true,
-                }],
+                input_pins: vec![
+                    PinDefinition {
+                        pin_name: "In_0".into(),
+                        is_input: true,
+                    },
+                    PinDefinition {
+                        pin_name: "In_1".into(),
+                        is_input: true,
+                    },
+                ],
                 output_pins: vec![PinDefinition {
                     pin_name: "choice_a".into(),
                     is_input: false,
@@ -2528,7 +2535,7 @@ mod tests {
             token_id: 3,
             graph_instance_id: 42,
             target_node_guid: 1,
-            target_pin_name: "In".into(),
+            target_pin_name: "In_1".into(),
             time_budget_ms: 8,
             is_active: true,
             deferred_until_ms: 0,
@@ -2537,7 +2544,7 @@ mod tests {
         let pending = PendingState {
             nodes: vec![PendingNode {
                 node_guid: 1,
-                executed_input_pin: Some("In".into()),
+                executed_input_pin: Some("In_1".into()),
                 chosen_output_pin: None,
                 chosen_storylet_id: None,
                 section_clock_ms: 0,
@@ -2561,9 +2568,18 @@ mod tests {
             instance.node(1).unwrap().state,
             NodeExecutionState::ActiveLatent
         );
-        assert_eq!(instance.tokens.len(), 1);
-        assert_eq!(instance.tokens[0].token_id, 3);
-        assert_eq!(instance.tokens[0].target_pin_index, 0);
+        assert_eq!(
+            instance.tokens,
+            vec![SignalToken {
+                token_id: 3,
+                graph_instance_id: 42,
+                target_node_guid: 1,
+                target_pin_index: 1,
+                flags: TOKEN_ACTIVE,
+                time_budget_ms: 8,
+                deferred_until_ms: 0,
+            }]
+        );
         assert_eq!(instance.next_token_id, 4);
         assert_eq!(instance.clock_ms, 12);
         assert_eq!(instance.turn, 2);

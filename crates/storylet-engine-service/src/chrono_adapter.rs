@@ -575,9 +575,11 @@ fn compile_passion_registry(
                 }
             }
         }
-        if !character.trust_inertia.is_finite() {
+        if !character.trust_inertia.is_finite()
+            || !(0.0..=1.0).contains(&character.trust_inertia)
+        {
             return Err(format!(
-                "character {} trust inertia must be finite",
+                "character {} trust inertia must be finite and in [0, 1]",
                 character.id
             ));
         }
@@ -588,6 +590,11 @@ fn compile_passion_registry(
         ));
     }
 
+    let metric_threshold_bits: BTreeSet<u16> = tags
+        .threshold_rules()
+        .iter()
+        .map(|rule| rule.threshold_tag_bit)
+        .collect();
     let mut stars = Vec::new();
     let mut thresholds = Vec::new();
     for character in ordered {
@@ -675,6 +682,12 @@ fn compile_passion_registry(
             let threshold_tag_bit = tags
                 .id(&name)
                 .ok_or_else(|| format!("unregistered passion threshold tag {name}"))?;
+            if metric_threshold_bits.contains(&threshold_tag_bit) {
+                return Err(format!(
+                    "character {} threshold {name} shares a tag bit with a quality threshold",
+                    character.id
+                ));
+            }
             thresholds.push(PassionThresholdRule {
                 npc_id,
                 threshold_tag_bit,
@@ -1853,7 +1866,7 @@ mod tests {
                 {"passion_id": "fear", "current_value": -100.0, "weight": 1.0}
             ],
             "active_passions": ["loyalty"],
-            "trust_inertia": 10.0,
+            "trust_inertia": 1.0,
             "thresholds": [{
                 "threshold_id": "crisis", "trigger_value": 60.0,
                 "direction": "positive", "linked_graph_asset_id": "captain-crisis"
@@ -1879,7 +1892,7 @@ mod tests {
         let npc_id = seed.entity_indices["character:captain"] as usize;
         let loyalty_id = compiled.passion_indices[&("captain".into(), "loyalty".into())] as usize;
         let fear_id = compiled.passion_indices[&("captain".into(), "fear".into())] as usize;
-        assert_eq!(seed.state.passions.macro_values[npc_id], 70.0);
+        assert_eq!(seed.state.passions.macro_values[npc_id], 61.0);
         assert!(seed.state.passions.active[loyalty_id]);
         assert!(!seed.state.passions.active[fear_id]);
         let threshold_bit = compiled
