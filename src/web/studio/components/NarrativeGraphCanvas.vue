@@ -60,7 +60,7 @@ const contextMenu = ref<{ kind: "canvas" | "node" | "edge"; x: number; y: number
 const nodeSearch = ref("");
 const scissorStart = ref<{ x: number; y: number } | null>(null);
 const scissorEnd = ref<{ x: number; y: number } | null>(null);
-const nodeTypes: NodeType[] = ["start", "dialog", "choice", "variable", "conditional", "image", "teleport", "go_to_location", "end"];
+const nodeTypes: NodeType[] = ["start", "dialog", "choice", "variable", "conditional", "qbn_storylet_hub", "salience_selector", "waypoint_conversation", "waiter", "logic_all", "logic_any", "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "end"];
 
 const failedImageNodes = ref(new Set<string>());
 watch(
@@ -288,7 +288,7 @@ function addNode(type: NodeType) {
   const baseNode: NarrativeNode = {
     id: nextId,
     type,
-    title: type === "go_to_location" ? "Go To Location" : type.charAt(0).toUpperCase() + type.slice(1),
+    title: type.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" "),
     x,
     y,
     width: 260,
@@ -320,6 +320,41 @@ function addNode(type: NodeType) {
   } else if (type === "go_to_location") {
     baseNode.location_id = studioState.locations[0]?.id ?? "";
     baseNode.height = 100;
+  } else if (type === "qbn_storylet_hub") {
+    baseNode.deck_storylet_ids = [];
+    baseNode.hub_exit_storylet_id = "";
+    baseNode.height = 120;
+  } else if (type === "salience_selector") {
+    baseNode.candidate_pool_ids = [];
+    baseNode.height = 120;
+  } else if (type === "waypoint_conversation") {
+    baseNode.topic_nodes = [];
+    baseNode.topic_edges = [];
+    baseNode.initial_topic_id = "";
+    baseNode.npc_goal_topic_id = "";
+    baseNode.height = 120;
+  } else if (type === "waiter") {
+    baseNode.wait_event = "";
+    baseNode.height = 100;
+  } else if (type === "scene_section") {
+    baseNode.duration_ms = 10_000;
+    baseNode.timeline_events = [];
+    baseNode.height = 100;
+  } else if (type === "mission_sub_graph") {
+    baseNode.sub_graph_asset_id = "";
+    baseNode.height = 100;
+  } else if (type === "poi") {
+    baseNode.entity_path = "";
+    baseNode.height = 100;
+  } else if (type === "graph_transform") {
+    baseNode.rule = {
+      lhs: { vertices: [{ layer: "fact", vertex_id: "", attributes: [] }], edges: [] },
+      rhs: { add_vertices: [], remove_vertices: [], add_edges: [], remove_edges: [], set_attributes: [] },
+    };
+    baseNode.height = 160;
+  } else if (type === "passion_mutation") {
+    baseNode.op = { micro_deltas: [], active_ops: [] };
+    baseNode.height = 140;
   } else if (type === "end") {
     baseNode.is_terminal = true;
     baseNode.height = 80;
@@ -330,6 +365,18 @@ function addNode(type: NodeType) {
   selectNode(baseNode);
   emitUpdate();
 }
+
+function waypointExitPins(node: NarrativeNode): Array<{ id: string; label: string }> {
+  return (node.topic_nodes ?? []).flatMap((topic) => {
+    if (topic.triggers_scene_exit !== true || typeof topic.exit_output_pin !== "string" || !topic.exit_output_pin) return [];
+    return [{ id: topic.exit_output_pin, label: String(topic.topic_id ?? topic.exit_output_pin) }];
+  });
+}
+
+const conditionalBranchPins = [
+  { id: "true", label: "True" },
+  { id: "false", label: "False" },
+];
 
 // Calculate SVG Bezier Curve between ports
 function calculateBezier(x1: number, y1: number, x2: number, y2: number): string {
@@ -351,6 +398,12 @@ const computedEdges = computed(() => {
     if (fromNode.type === "choice" && edge.from_port.startsWith("choice_")) {
       const idx = parseInt(edge.from_port.replace("choice_", ""), 10);
       fromY = fromNode.y + 64 + idx * 35;
+    } else if (fromNode.type === "waypoint_conversation") {
+      const idx = waypointExitPins(fromNode).findIndex((pin) => pin.id === edge.from_port);
+      if (idx >= 0) fromY = fromNode.y + 72 + idx * 30;
+    } else if (fromNode.type === "conditional") {
+      const idx = conditionalBranchPins.findIndex((pin) => pin.id === edge.from_port);
+      if (idx >= 0) fromY = fromNode.y + 58 + idx * 30;
     }
 
     const startX = fromNode.x + fromNode.width;
@@ -465,7 +518,7 @@ const computedEdges = computed(() => {
         <div class="node-header" @mousedown="startNodeDrag($event, node)">
           <div class="node-header-title">
             <span class="node-icon">
-              {{ node.type === 'start' ? '▶' : node.type === 'dialog' ? '💬' : node.type === 'choice' ? '🔀' : node.type === 'image' ? '🎨' : node.type === 'go_to_location' ? '📍' : '⚙️' }}
+              {{ node.type === 'start' ? '▶' : node.type === 'dialog' ? '💬' : node.type === 'choice' ? '🔀' : node.type === 'image' ? '🎨' : node.type === 'go_to_location' ? '📍' : node.type === 'graph_transform' ? '🕸️' : node.type === 'passion_mutation' ? '💗' : '⚙️' }}
             </span>
             <input v-model="node.title" class="node-title-input" @input="emitUpdate" />
           </div>
@@ -527,6 +580,58 @@ const computedEdges = computed(() => {
             <div style="font-size:11px;">{{ studioState.locations.find((location) => location.id === node.location_id)?.name || 'Choose a location…' }}</div>
           </div>
 
+          <div v-else-if="node.type === 'qbn_storylet_hub'">
+            <div class="field-label">Eligible storylet deck</div>
+            <div style="font-size:11px;">{{ node.deck_storylet_ids?.length ?? 0 }} candidates · exit {{ node.hub_exit_storylet_id || 'unset' }}</div>
+          </div>
+          <div v-else-if="node.type === 'salience_selector'">
+            <div class="field-label">Automatic context match</div>
+            <div style="font-size:11px;">{{ node.candidate_pool_ids?.length ?? 0 }} candidates</div>
+          </div>
+          <div v-else-if="node.type === 'waypoint_conversation'">
+            <div class="field-label">Topic graph</div>
+            <div style="font-size:11px;">{{ node.topic_nodes?.length ?? 0 }} topics · {{ node.topic_edges?.length ?? 0 }} transitions</div>
+            <div v-for="(pin, index) in waypointExitPins(node)" :key="pin.id" class="choice-option-row">
+              <span style="font-size:11px; flex:1;">{{ pin.label }}</span>
+              <div class="socket output-socket choice-socket" :title="`Connect ${pin.label} exit`" @mousedown="startConnection($event, node, pin.id, 72 + index * 30)"></div>
+            </div>
+          </div>
+          <div v-else-if="node.type === 'waiter'">
+            <div class="field-label">Wait for gameplay event</div>
+            <div style="font-size:11px;">{{ node.wait_event || 'Configure event…' }}</div>
+          </div>
+          <div v-else-if="node.type === 'logic_all' || node.type === 'logic_any'">
+            <div class="field-label">{{ node.type === 'logic_all' ? 'All inputs required' : 'Any input routes' }}</div>
+          </div>
+          <div v-else-if="node.type === 'conditional'">
+            <div class="field-label">Condition branches</div>
+            <div v-for="(pin, index) in conditionalBranchPins" :key="pin.id" class="choice-option-row">
+              <span style="font-size:11px; flex:1;">{{ pin.label }}</span>
+              <div class="socket output-socket choice-socket" :title="`Connect ${pin.label} branch`" @mousedown="startConnection($event, node, pin.id, 58 + index * 30)"></div>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted);">{{ node.conditions?.length ?? 0 }} condition rules</div>
+          </div>
+          <div v-else-if="node.type === 'scene_section'">
+            <div class="field-label">Timeline section</div>
+            <div style="font-size:11px;">{{ node.duration_ms ?? 0 }} ms · {{ node.timeline_events?.length ?? 0 }} events</div>
+          </div>
+          <div v-else-if="node.type === 'mission_sub_graph'">
+            <div class="field-label">Scoped mission</div>
+            <div style="font-size:11px;">{{ node.sub_graph_asset_id || 'Choose subgraph…' }}</div>
+          </div>
+          <div v-else-if="node.type === 'poi'">
+            <div class="field-label">Point of interest</div>
+            <div style="font-size:11px;">{{ node.entity_path || 'Configure entity path…' }}</div>
+          </div>
+          <div v-else-if="node.type === 'graph_transform'">
+            <div class="field-label">Graph rewrite rule</div>
+            <div style="font-size:11px;">{{ node.rule?.lhs.vertices?.length ?? 0 }} vertex patterns · {{ node.rule?.lhs.edges?.length ?? 0 }} edge patterns</div>
+            <div style="font-size:11px;">{{ (node.rule?.rhs?.add_vertices?.length ?? 0) + (node.rule?.rhs?.remove_vertices?.length ?? 0) + (node.rule?.rhs?.add_edges?.length ?? 0) + (node.rule?.rhs?.remove_edges?.length ?? 0) + (node.rule?.rhs?.set_attributes?.length ?? 0) }} mutations</div>
+          </div>
+          <div v-else-if="node.type === 'passion_mutation'">
+            <div class="field-label">Passion state change</div>
+            <div style="font-size:11px;">{{ node.op?.micro_deltas?.length ?? 0 }} typed deltas · {{ node.op?.active_ops?.length ?? 0 }} active-pool ops</div>
+          </div>
           <!-- END -->
           <div v-else-if="node.type === 'end'">
             <div style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.jump_to_storylet || 'Terminal ending' }}</div>
@@ -545,7 +650,7 @@ const computedEdges = computed(() => {
 
         <!-- Default Output Socket (Right edge) -->
         <div
-          v-if="node.type !== 'choice' && node.type !== 'end'"
+          v-if="node.type !== 'choice' && node.type !== 'end' && node.type !== 'conditional' && (node.type !== 'waypoint_conversation' || waypointExitPins(node).length === 0)"
           class="socket output-socket"
           title="Output connection port"
           @mousedown="startConnection($event, node, 'output', 40)"
@@ -727,6 +832,8 @@ const computedEdges = computed(() => {
 .graph-node.choice .node-header { background: #a855f7; }
 .graph-node.image .node-header { background: #ec4899; }
 .graph-node.end .node-header { background: #f43f5e; }
+.graph-node.graph_transform .node-header { background: #2563eb; }
+.graph-node.passion_mutation .node-header { background: #db2777; }
 
 .node-header-title {
   display: flex;

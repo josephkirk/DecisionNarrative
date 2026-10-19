@@ -303,3 +303,34 @@ test("old scenario records without policies remain 100% backwards compatible", (
   expect(res.project.scenarios["legacy"].initial_qualities).toEqual({ gold: 50 });
   expect(res.project.scenarios["legacy"].seed).toBe(77);
 });
+
+test("quality categories, bounds, visibility, and crisis links survive project projection", () => {
+  const result = buildWorkspaceProject({
+    qualities: [
+      { name: "act.progress", type: "progress", value: 1, min_value: 0, max_value: 5, is_hidden: true },
+      { name: "threat.suspicion", type: "menace", value: 4, min_value: 0, max_value: 9, menace_crisis_storylet_id: "panic" },
+    ],
+    locations: [{ id: "room", name: "Room", description: "", connected_zones: [] }],
+    characters: [],
+    storylets: [],
+  }, "room");
+  expect(result.issues).toEqual([]);
+  expect(result.project.qualities["act.progress"]).toMatchObject({
+    kind: "progress",
+    min_value: 0,
+    max_value: 5,
+    is_hidden: true,
+  });
+  expect(result.project.qualities["threat.suspicion"]).toMatchObject({
+    kind: "menace",
+    menace_crisis_storylet_id: "panic",
+  });
+
+  const invalid = buildWorkspaceProject({
+    qualities: [{ name: "broken", type: "metric", value: 0, min_value: 9, max_value: 2 }],
+    locations: [{ id: "room", name: "Room", description: "", connected_zones: [] }],
+    characters: [],
+    storylets: [],
+  }, "room");
+  expect(invalid.issues).toContain("qualities.broken: value bounds must be finite and minimum must not exceed maximum");
+});

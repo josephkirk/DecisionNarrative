@@ -559,7 +559,7 @@ async fn service_startup_rejects_event_journal_that_disagrees_with_snapshot() {
 }
 
 #[tokio::test]
-async fn studio_graph_requires_one_complete_start_to_end_flow() {
+async fn studio_graph_is_validated_when_saved() {
     let app = test_app();
     let graph = json!({
         "nodes": [
@@ -573,28 +573,26 @@ async fn studio_graph_requires_one_complete_start_to_end_flow() {
         ],
         "local_variables": []
     });
-    for (id, edges, expected_status) in [
-        ("valid", graph["edges"].clone(), StatusCode::OK),
-        ("broken", json!([]), StatusCode::CONFLICT),
-    ] {
-        let mut candidate = graph.clone();
-        candidate["edges"] = edges;
-        let (status, saved) = request(&app, "POST", "/api/v2/content/storylets", Some(json!({
-            "id": id, "title": id, "created_at": 1, "content": { "text_template": "" }, "graph": candidate
-        }))).await;
-        assert_eq!(status, StatusCode::CREATED, "{saved}");
-        let (status, result) = request(
-            &app,
-            "POST",
-            &format!("/api/v2/storylets/{id}/approve"),
-            Some(json!({ "expectedRevision": 1 })),
-        )
-        .await;
-        assert_eq!(status, expected_status, "{result}");
-        if id == "broken" {
-            assert!(result["error"].as_str().unwrap().contains("path to End"));
-        }
-    }
+    let (status, saved) = request(&app, "POST", "/api/v2/content/storylets", Some(json!({
+        "id": "valid", "title": "valid", "created_at": 1, "content": { "text_template": "" }, "graph": graph
+    }))).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    let (status, result) = request(
+        &app,
+        "POST",
+        "/api/v2/storylets/valid/approve",
+        Some(json!({ "expectedRevision": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+
+    let mut invalid_graph = graph;
+    invalid_graph["edges"] = json!([]);
+    let (status, result) = request(&app, "POST", "/api/v2/content/storylets", Some(json!({
+        "id": "broken", "title": "broken", "created_at": 1, "content": { "text_template": "" }, "graph": invalid_graph
+    }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{result}");
+    assert!(result["error"].as_str().unwrap().contains("path to End"));
 }
 
 #[tokio::test]
@@ -891,4 +889,256 @@ async fn playtest_choice_http_maps_blank_missing_and_conflicting_requests() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn quality_save_persists_chronoflow_bounds_visibility_and_category() {
+    let app = test_app();
+    let payload = json!({
+        "name": "act.progress",
+        "type": "progress",
+        "value": 6,
+        "min_value": 0,
+        "max_value": 12,
+        "is_hidden": true,
+        "menace_crisis_storylet_id": null
+    });
+    let (status, saved) = request(&app, "POST", "/api/v2/content/qualities", Some(payload)).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["type"], "progress");
+    assert_eq!(saved["min_value"].as_f64(), Some(0.0));
+    assert_eq!(saved["max_value"].as_f64(), Some(12.0));
+    assert_eq!(saved["is_hidden"], true);
+
+    let (status, persisted) =
+        request(&app, "GET", "/api/v2/content/qualities/act.progress", None).await;
+    assert_eq!(status, StatusCode::OK, "{persisted}");
+    assert_eq!(persisted["max_value"].as_f64(), Some(12.0));
+
+    let invalid = json!({
+        "name": "broken",
+        "type": "metric",
+        "value": 0,
+        "min_value": 10,
+        "max_value": 5
+    });
+    let (status, error) = request(&app, "POST", "/api/v2/content/qualities", Some(invalid)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("minimum must not exceed maximum")
+    );
+}
+
+#[tokio::test]
+async fn crisis_storylet_reference_does_not_block_unrelated_storylet_save_or_allow_target_delete() {
+    let app = test_app();
+    let (status, saved) = request(
+        &app,
+        "POST",
+        "/api/v2/content/storylets",
+        Some(json!({
+            "id": "crisis-target",
+            "title": "Crisis Target",
+            "content": { "text_template": "A crisis." },
+            "effects": {},
+            "created_at": 1
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+
+    let (status, error) = request(
+        &app,
+        "POST",
+        "/api/v2/content/qualities",
+        Some(json!({
+            "name": "BadDoom",
+            "type": "metric",
+            "value": 0,
+            "min_value": 0,
+            "max_value": 5,
+            "menace_crisis_storylet_id": "crisis-target"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("only menace qualities")
+    );
+    let (status, error) = request(
+        &app,
+        "POST",
+        "/api/v2/content/qualities",
+        Some(json!({
+            "name": "OrphanDoom",
+            "type": "menace",
+            "value": 0,
+            "min_value": 0,
+            "max_value": 5,
+            "menace_crisis_storylet_id": "missing-storylet"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(error["error"].as_str().unwrap().contains("does not exist"));
+    let (status, saved) = request(
+        &app,
+        "POST",
+        "/api/v2/content/qualities",
+        Some(json!({
+            "name": "Doom",
+            "type": "menace",
+            "value": 0,
+            "min_value": 0,
+            "max_value": 5,
+            "menace_crisis_storylet_id": "crisis-target"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+
+    let (status, saved) = request(
+        &app,
+        "POST",
+        "/api/v2/content/storylets",
+        Some(json!({
+            "id": "unrelated-scene",
+            "title": "Unrelated Scene",
+            "content": { "text_template": "An unrelated scene." },
+            "effects": {},
+            "created_at": 2
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+
+    let (status, error) = request(
+        &app,
+        "DELETE",
+        "/api/v2/content/storylets/crisis-target",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{error}");
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("references it as its crisis storylet")
+    );
+}
+
+#[tokio::test]
+async fn character_passions_and_zero_sum_links_validate_and_persist() {
+    let app = test_app();
+    let (status, saved) = request(
+        &app,
+        "POST",
+        "/api/v2/content/storylets",
+        Some(json!({
+            "id": "crisis-scene",
+            "title": "Crisis",
+            "content": { "text_template": "A crisis." },
+            "effects": {},
+            "created_at": 1
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    let (status, saved) = request(
+        &app,
+        "POST",
+        "/api/v2/content/characters",
+        Some(json!({
+            "id": "rival",
+            "name": "Rival",
+            "role": "npc",
+            "home_location": "home",
+            "current_location": "home",
+            "passion_pool": [{
+                "passion_id": "Fear",
+                "current_value": 20,
+                "weight": 1,
+                "is_hidden": false
+            }],
+            "active_passions": ["Fear"],
+            "trust_inertia": 3
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+
+    let (status, saved) = request(
+        &app,
+        "POST",
+        "/api/v2/content/characters",
+        Some(json!({
+            "id": "star",
+            "name": "Star NPC",
+            "role": "npc",
+            "home_location": "home",
+            "current_location": "home",
+            "passion_pool": [{
+                "passion_id": "Resolve",
+                "current_value": -15,
+                "weight": 2,
+                "is_hidden": true
+            }],
+            "active_passions": ["Resolve"],
+            "thresholds": [{
+                "threshold_id": "resolve-high",
+                "trigger_value": 50,
+                "direction": "positive",
+                "linked_graph_asset_id": "crisis-scene"
+            }],
+            "zero_sum_passion_links": [{
+                "target_character_id": "rival",
+                "source_passion_id": "Resolve",
+                "target_passion_id": "Fear",
+                "weight": -1
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(
+        saved["passion_pool"][0]["current_value"].as_f64(),
+        Some(-15.0)
+    );
+    assert_eq!(
+        saved["zero_sum_passion_links"][0]["weight"].as_f64(),
+        Some(-1.0)
+    );
+    assert_eq!(saved["thresholds"][0]["threshold_id"], "resolve-high");
+
+    let (status, error) = request(
+        &app,
+        "POST",
+        "/api/v2/content/characters",
+        Some(json!({
+            "id": "duplicate",
+            "name": "Duplicate",
+            "role": "npc",
+            "home_location": "home",
+            "current_location": "home",
+            "passion_pool": [
+                { "passion_id": "same", "current_value": 1, "weight": 1 },
+                { "passion_id": "same", "current_value": 2, "weight": 1 }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("invalid or duplicate passion")
+    );
 }

@@ -1,5 +1,5 @@
 import type { ComputedRef, InjectionKey } from "vue";
-import type { PlaytestSnapshot, ProjectMetadata } from "./contracts.ts";
+import type { ChronoPlaytestSnapshot, PlaytestSnapshot, ProjectMetadata } from "./contracts.ts";
 
 export interface InteractionRoute {
   name: unknown;
@@ -91,9 +91,11 @@ export function buildInteractionContext(input: {
   project: ProjectMetadata | null;
   activePlaytestSessionId: string | null;
   activePlaytestSnapshot: PlaytestSnapshot | null;
+  activeChronoPlaytestSessionId?: string | null;
+  activeChronoPlaytestSnapshot?: ChronoPlaytestSnapshot | null;
   focus?: InteractionFocus | null;
 }): StudioInteractionContext {
-  const { route, project, activePlaytestSessionId, activePlaytestSnapshot, focus } = input;
+  const { route, project, activePlaytestSessionId, activePlaytestSnapshot, activeChronoPlaytestSessionId, activeChronoPlaytestSnapshot, focus } = input;
   const name = typeof route.name === "string" ? route.name : "unknown";
   const entity = focus?.entity === null ? undefined : focus?.entity ?? routeEntity(route);
   const nodeId = first(route.query.node);
@@ -101,7 +103,23 @@ export function buildInteractionContext(input: {
   const selection = focus?.selection === null ? undefined : focus?.selection
     ?? (nodeId ? { type: "graph_node" as const, id: nodeId }
       : itemId ? { type: "graph_item" as const, id: itemId } : undefined);
-  const snapshot = activePlaytestSessionId ? activePlaytestSnapshot : null;
+  const chronoSnapshot = activeChronoPlaytestSessionId ? activeChronoPlaytestSnapshot : null;
+  const legacySnapshot = activePlaytestSessionId ? activePlaytestSnapshot : null;
+  const playtest = chronoSnapshot && activeChronoPlaytestSessionId
+    ? {
+      sessionId: activeChronoPlaytestSessionId,
+      revision: chronoSnapshot.session.pinnedProjectRevision,
+      turn: chronoSnapshot.context.turn,
+      locationId: chronoSnapshot.context.world.currentLocation,
+    }
+    : legacySnapshot && activePlaytestSessionId
+      ? {
+        sessionId: activePlaytestSessionId,
+        revision: legacySnapshot.world.revision,
+        turn: legacySnapshot.world.turn,
+        locationId: legacySnapshot.world.current_location ?? null,
+      }
+      : null;
 
   return {
     capturedAt: Date.now(),
@@ -109,13 +127,6 @@ export function buildInteractionContext(input: {
     project,
     ...(entity ? { entity } : {}),
     ...(selection ? { selection } : {}),
-    ...(snapshot && activePlaytestSessionId ? {
-      playtest: {
-        sessionId: activePlaytestSessionId,
-        revision: snapshot.world.revision,
-        turn: snapshot.world.turn,
-        locationId: snapshot.world.current_location ?? null,
-      },
-    } : {}),
+    ...(playtest ? { playtest } : {}),
   };
 }

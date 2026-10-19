@@ -149,7 +149,11 @@ fn get_tool_definitions() -> Vec<Value> {
                         "scenarios.list", "scenarios.get", "scenarios.create", "scenarios.save", "scenarios.delete", "scenarios.preview",
                         "playtest.list", "playtest.create_from_workspace", "playtest.snapshot",
                         "playtest.director", "playtest.command", "playtest.choose", "playtest.fork",
-                        "playtest.events", "playtest.delete"
+                        "playtest.events", "playtest.delete",
+                        "chrono.playtest.list", "chrono.playtest.create", "chrono.playtest.snapshot",
+                        "chrono.playtest.tick", "chrono.playtest.signal", "chrono.playtest.choose",
+                        "chrono.playtest.divert", "chrono.playtest.invoke", "chrono.playtest.reconcile",
+                        "chrono.playtest.rollback", "chrono.playtest.scrub"
                     ]
                 },
                 "entity": {
@@ -161,6 +165,7 @@ fn get_tool_definitions() -> Vec<Value> {
                 "bundle": { "type": "object" },
                 "confirmReplace": { "type": "boolean" },
                 "expectedRevision": { "type": "integer", "minimum": 0 },
+                "expectedMutationRevision": { "type": "integer", "minimum": 0 },
                 "startLocationId": { "type": "string" },
                 "scenarioId": { "type": "string" },
                 "command": { "type": "object" },
@@ -169,7 +174,18 @@ fn get_tool_definitions() -> Vec<Value> {
                 "idempotencyKey": { "type": "string" },
                 "eventId": { "type": "string" },
                 "branchSessionId": { "type": "string" },
-                "targetTensionSlope": { "type": "number" }
+                "targetTensionSlope": { "type": "number" },
+                "sessionId": { "type": "string" },
+                "seed": { "type": "integer", "minimum": 0 },
+                "nodeGuid": { "type": "integer", "minimum": 1 },
+                "outputPin": { "type": "string" },
+                "edgeId": { "type": "string" },
+                "frameBudgetMs": { "type": "integer", "minimum": 0 },
+                "deltaMs": { "type": "integer" },
+                "idempotencyKey": { "type": "string" },
+                "declaredRoutes": { "type": "object", "additionalProperties": { "type": "string" } },
+                "eventName": { "type": "string" },
+                "history": { "type": "array", "items": { "type": "object" } }
             },
             "allOf": [
                 {
@@ -260,6 +276,52 @@ fn get_tool_definitions() -> Vec<Value> {
                         "required": ["operation"]
                     },
                     "then": { "required": ["id", "eventId"] }
+                },
+                {
+                    "if": { "properties": { "operation": { "const": "chrono.playtest.create" } }, "required": ["operation"] },
+                    "then": { "required": ["sessionId"] }
+                },
+                {
+                    "if": { "properties": { "operation": { "const": "chrono.playtest.snapshot" } }, "required": ["operation"] },
+                    "then": { "required": ["id"] }
+                },
+                {
+                    "if": { "properties": { "operation": { "const": "chrono.playtest.tick" } }, "required": ["operation"] },
+                    "then": { "required": ["id", "frameBudgetMs"] }
+                },
+                {
+                    "if": { "properties": { "operation": { "const": "chrono.playtest.choose" } }, "required": ["operation"] },
+                    "then": {
+                        "required": ["id", "nodeGuid"],
+                        "oneOf": [
+                            { "required": ["outputPin"] },
+                            { "required": ["storyletId"] }
+                        ]
+                    }
+                },
+                {
+                    "if": { "properties": { "operation": { "const": "chrono.playtest.invoke" } }, "required": ["operation"] },
+                    "then": { "required": ["id", "nodeGuid", "declaredRoutes"] }
+                },
+                {
+                    "if": { "properties": { "operation": { "const": "chrono.playtest.reconcile" } }, "required": ["operation"] },
+                    "then": { "required": ["id", "history"] }
+                },
+                {
+                    "if": { "properties": { "operation": { "const": "chrono.playtest.divert" } }, "required": ["operation"] },
+                    "then": { "required": ["id", "nodeGuid", "edgeId"] }
+                },
+                {
+                    "if": { "properties": { "operation": { "const": "chrono.playtest.signal" } }, "required": ["operation"] },
+                    "then": { "required": ["id", "eventName"] }
+                },
+                {
+                    "if": { "properties": { "operation": { "const": "chrono.playtest.rollback" } }, "required": ["operation"] },
+                    "then": { "required": ["id", "nodeGuid"] }
+                },
+                {
+                    "if": { "properties": { "operation": { "const": "chrono.playtest.scrub" } }, "required": ["operation"] },
+                    "then": { "required": ["id", "nodeGuid", "deltaMs"] }
                 }
             ]
         }
@@ -311,13 +373,17 @@ async fn dispatch_narrative_platform_op(
             let bundle_val = args
                 .get("bundle")
                 .ok_or_else(|| "Missing bundle payload".to_string())?;
-            service.import_bundle(bundle_val).await?;
+            let revision = service.import_bundle(bundle_val).await?;
             if let Err(e) = service.mark_interaction_context_stale().await {
                 eprintln!(
                     "Warning: failed to mark interaction context stale after workspace replace: {e}"
                 );
             }
-            Ok(json!({ "success": true, "message": "Project replaced successfully" }))
+            Ok(json!({
+                "success": true,
+                "message": "Project replaced successfully",
+                "revision": revision
+            }))
         }
         "content.list" => {
             let entity = args
@@ -362,7 +428,10 @@ async fn dispatch_narrative_platform_op(
                 .get("id")
                 .and_then(|i| i.as_str())
                 .ok_or_else(|| "Missing id".to_string())?;
-            let deleted = service.delete_content_item(entity, id).await?;
+            let deleted = service
+                .delete_content_item(entity, id)
+                .await
+                .map_err(|error| error.to_string())?;
             if let Err(e) = service.mark_interaction_context_stale().await {
                 eprintln!(
                     "Warning: failed to mark interaction context stale after content delete: {e}"
@@ -412,7 +481,10 @@ async fn dispatch_narrative_platform_op(
                 .get("id")
                 .and_then(|i| i.as_str())
                 .ok_or_else(|| "Missing id".to_string())?;
-            let deleted = service.delete_content_item("scenarios", id).await?;
+            let deleted = service
+                .delete_content_item("scenarios", id)
+                .await
+                .map_err(|error| error.to_string())?;
             if let Err(e) = service.mark_interaction_context_stale().await {
                 eprintln!(
                     "Warning: failed to mark interaction context stale after scenario delete: {e}"
@@ -544,6 +616,187 @@ async fn dispatch_narrative_platform_op(
                 );
             }
             Ok(json!({ "deleted": deleted }))
+        }
+        "chrono.playtest.list" => service
+            .list_chrono_playtests()
+            .await
+            .map_err(|e| e.to_string()),
+        "chrono.playtest.create" => {
+            let request = crate::chrono_playtest::parse_request::<
+                crate::chrono_playtest::CreateChronoPlaytestRequest,
+            >(args)
+            .map_err(|error| error.to_string())?;
+            let result = service
+                .create_chrono_playtest(&request)
+                .await
+                .map_err(|e| e.to_string())?;
+            service
+                .mark_interaction_context_stale()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(result)
+        }
+        "chrono.playtest.snapshot" => {
+            let id = args
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Missing id".to_string())?;
+            service
+                .chrono_playtest_snapshot(id)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "chrono.playtest.tick" => {
+            let id = args
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Missing id".to_string())?;
+            let request = crate::chrono_playtest::parse_request::<
+                crate::chrono_playtest::ChronoPlaytestTickRequest,
+            >(args)
+            .map_err(|error| error.to_string())?;
+            let result = service
+                .chrono_playtest_tick(id, &request)
+                .await
+                .map_err(|e| e.to_string())?;
+            service
+                .mark_interaction_context_stale()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(result)
+        }
+        "chrono.playtest.signal" => {
+            let id = args
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Missing id".to_string())?;
+            let request = crate::chrono_playtest::parse_request::<
+                crate::chrono_playtest::ChronoPlaytestSignalRequest,
+            >(args)
+            .map_err(|error| error.to_string())?;
+            let result = service
+                .chrono_playtest_signal(id, &request)
+                .await
+                .map_err(|e| e.to_string())?;
+            service
+                .mark_interaction_context_stale()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(result)
+        }
+        "chrono.playtest.divert" => {
+            let id = args
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Missing id".to_string())?;
+            let request = crate::chrono_playtest::parse_request::<
+                crate::chrono_playtest::ChronoPlaytestDivertRequest,
+            >(args)
+            .map_err(|error| error.to_string())?;
+            let result = service
+                .chrono_playtest_divert(id, &request)
+                .await
+                .map_err(|e| e.to_string())?;
+            service
+                .mark_interaction_context_stale()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(result)
+        }
+        "chrono.playtest.choose" => {
+            let id = args
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Missing id".to_string())?;
+            let request = crate::chrono_playtest::parse_request::<
+                crate::chrono_playtest::ChronoPlaytestChooseRequest,
+            >(args)
+            .map_err(|error| error.to_string())?;
+            let result = service
+                .chrono_playtest_choose(id, &request)
+                .await
+                .map_err(|e| e.to_string())?;
+            service
+                .mark_interaction_context_stale()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(result)
+        }
+        "chrono.playtest.invoke" => {
+            let id = args
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Missing id".to_string())?;
+            let request = crate::chrono_playtest::parse_request::<
+                crate::chrono_playtest::ChronoPlaytestInvokeRequest,
+            >(args)
+            .map_err(|error| error.to_string())?;
+            let result = service
+                .chrono_playtest_invoke(id, &request)
+                .await
+                .map_err(|e| e.to_string())?;
+            service
+                .mark_interaction_context_stale()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(result)
+        }
+        "chrono.playtest.scrub" => {
+            let id = args
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Missing id".to_string())?;
+            let request = crate::chrono_playtest::parse_request::<
+                crate::chrono_playtest::ChronoPlaytestScrubRequest,
+            >(args)
+            .map_err(|error| error.to_string())?;
+            let result = service
+                .chrono_playtest_scrub(id, &request)
+                .await
+                .map_err(|e| e.to_string())?;
+            service
+                .mark_interaction_context_stale()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(result)
+        }
+        "chrono.playtest.rollback" => {
+            let id = args
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Missing id".to_string())?;
+            let request = crate::chrono_playtest::parse_request::<
+                crate::chrono_playtest::ChronoPlaytestRollbackRequest,
+            >(args)
+            .map_err(|error| error.to_string())?;
+            let result = service
+                .chrono_playtest_rollback_mission(id, &request)
+                .await
+                .map_err(|e| e.to_string())?;
+            service
+                .mark_interaction_context_stale()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(result)
+        }
+        "chrono.playtest.reconcile" => {
+            let id = args
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Missing id".to_string())?;
+            let request = crate::chrono_playtest::parse_request::<
+                crate::chrono_playtest::ChronoPlaytestReconcileRequest,
+            >(args)
+            .map_err(|error| error.to_string())?;
+            let result = service
+                .chrono_playtest_reconcile(id, &request)
+                .await
+                .map_err(|e| e.to_string())?;
+            service
+                .mark_interaction_context_stale()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(result)
         }
         _ => Err(format!("Unknown narrative_platform operation: {op}")),
     }

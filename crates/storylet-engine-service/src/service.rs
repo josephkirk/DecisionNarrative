@@ -3,10 +3,12 @@
 use rusqlite::{OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, broadcast};
 
+use crate::chrono_playtest::ChronoPlaytestSession;
 use storylet_engine::{
     EngineError, ProjectBundle, RUNTIME_SESSION_FORMAT_VERSION, RuntimeError, RuntimeSessionState,
     StoryletRuntime, WorldCommand, WorldEvent,
@@ -37,24 +39,43 @@ impl std::fmt::Display for ChoiceOperationError {
     }
 }
 
+#[derive(Debug)]
+pub enum ContentDeleteError {
+    Conflict(String),
+    Persistence(String),
+}
+
+impl std::fmt::Display for ContentDeleteError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflict(message) | Self::Persistence(message) => formatter.write_str(message),
+        }
+    }
+}
+
+use crate::chrono_adapter::compile_chrono_dispatch_for_storylet_validation;
 use crate::contracts::{
-    AuthoringOptions, LibraryPageResult, LibraryQuery, ProjectBundleContent, ProjectBundleV2,
-    ProjectMetadata, ScenarioRecord, StoryletRecord,
+    AuthoringOptions, CharacterRecord, LibraryPageResult, LibraryQuery, ProjectBundleContent,
+    ProjectBundleV2, ProjectMetadata, ScenarioRecord, StoryletRecord,
 };
+use crate::narrative_graph::NarrativeGraph;
 use crate::projection::project_workspace;
 use crate::scenario::resolve_scenario_start;
 use crate::store::Store;
 
 #[derive(Clone)]
 pub struct StudioService {
-    inner: Arc<Mutex<StudioInner>>,
+    pub(crate) inner: Arc<Mutex<StudioInner>>,
     pub updates: broadcast::Sender<SessionChange>,
     pub resource_root: PathBuf,
 }
 
-struct StudioInner {
-    store: Store,
+pub(crate) struct StudioInner {
+    pub(crate) store: Store,
     runtime: StoryletRuntime,
+    /// Live ChronoFlow v5 playtest sessions (REQ-CH-02). The persisted rows are
+    /// the source of truth; these are the runtime instances rebuilt from them.
+    pub(crate) chrono_sessions: BTreeMap<String, ChronoPlaytestSession>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -155,7 +176,11 @@ impl StudioService {
         let res_root = resource_root.into();
 
         Ok(Self {
-            inner: Arc::new(Mutex::new(StudioInner { store, runtime })),
+            inner: Arc::new(Mutex::new(StudioInner {
+                store,
+                runtime,
+                chrono_sessions: BTreeMap::new(),
+            })),
             updates,
             resource_root: res_root,
         })
@@ -295,7 +320,7 @@ impl StudioService {
         Ok(issues)
     }
 
-    pub async fn import_bundle(&self, bundle_val: &Value) -> Result<(), String> {
+    pub async fn import_bundle(&self, bundle_val: &Value) -> Result<u64, String> {
         let bundle: ProjectBundleV2 = serde_json::from_value(bundle_val.clone())
             .map_err(|e| format!("Invalid bundle JSON: {e}"))?;
 
@@ -345,6 +370,21 @@ impl StudioService {
 
         let inner = self.inner.lock().await;
         let mut final_payload = payload.clone();
+        if entity == "storylets" {
+            let settings = match final_payload.get("chrono") {
+                None | Some(Value::Null) => crate::contracts::ChronoStoryletSettings::default(),
+                Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
+                    format!("Storylet Chrono settings validation failed: {error}")
+                })?,
+            };
+            final_payload
+                .as_object_mut()
+                .ok_or("Storylet payload must be a JSON object")?
+                .insert(
+                    "chrono".into(),
+                    serde_json::to_value(settings).map_err(|error| error.to_string())?,
+                );
+        }
         let (revision, approved_rev) = if entity == "storylets" {
             let existing_opt = inner.store.get_storylet(id).map_err(|e| e.to_string())?;
             let next_rev = match existing_opt {
@@ -367,6 +407,160 @@ impl StudioService {
             let app_rev = payload.get("approved_revision").and_then(|v| v.as_u64());
             (rev, app_rev)
         };
+        if entity == "qualities" {
+            let quality: crate::contracts::QualityRecord =
+                serde_json::from_value(final_payload.clone())
+                    .map_err(|error| format!("Quality validation failed: {error}"))?;
+            if quality.name.trim().is_empty()
+                || !matches!(
+                    quality.kind.as_str(),
+                    "currency" | "metric" | "tool" | "progress" | "menace" | "territory"
+                )
+            {
+                return Err(
+                    "Quality validation failed: name and supported category are required".into(),
+                );
+            }
+            if !quality.value.is_finite()
+                || !quality.min_value.is_finite()
+                || !quality.max_value.is_finite()
+                || quality.min_value > quality.max_value
+            {
+                return Err("Quality validation failed: value bounds must be finite and minimum must not exceed maximum".into());
+            }
+            if let Some(storylet_id) = &quality.menace_crisis_storylet_id {
+                if quality.kind != "menace" {
+                    return Err("Quality validation failed: only menace qualities can reference a crisis storylet".into());
+                }
+                if inner
+                    .store
+                    .get_content_json("storylets", storylet_id)
+                    .map_err(|error| error.to_string())?
+                    .is_none()
+                {
+                    return Err(format!(
+                        "Quality validation failed: crisis storylet '{storylet_id}' does not exist"
+                    ));
+                }
+            }
+            storylet_engine::chrono_state::MetricRegistry::compile([quality.name.clone()])
+                .map_err(|error| format!("Quality validation failed: {error}"))?;
+            final_payload = serde_json::to_value(quality).map_err(|error| error.to_string())?;
+        }
+        if entity == "characters" {
+            let character: CharacterRecord = serde_json::from_value(final_payload.clone())
+                .map_err(|error| format!("Character validation failed: {error}"))?;
+            let mut passion_ids = std::collections::BTreeSet::new();
+            for passion in &character.passion_pool {
+                if passion.passion_id.trim().is_empty()
+                    || !passion_ids.insert(passion.passion_id.as_str())
+                    || !passion.current_value.is_finite()
+                    || !(-100.0..=100.0).contains(&passion.current_value)
+                    || !passion.weight.is_finite()
+                    || passion.weight < 0.0
+                {
+                    return Err(format!(
+                        "Character validation failed: invalid or duplicate passion '{}'",
+                        passion.passion_id
+                    ));
+                }
+            }
+            let mut active_ids = std::collections::BTreeSet::new();
+            for passion_id in &character.active_passions {
+                if !active_ids.insert(passion_id.as_str())
+                    || !passion_ids.contains(passion_id.as_str())
+                {
+                    return Err(format!(
+                        "Character validation failed: active passion '{passion_id}' is missing or duplicated"
+                    ));
+                }
+            }
+            if !character.trust_inertia.is_finite() {
+                return Err("Character validation failed: trust inertia must be finite".into());
+            }
+            let mut threshold_ids = std::collections::BTreeSet::new();
+            for threshold in &character.thresholds {
+                if threshold.threshold_id.trim().is_empty()
+                    || !threshold_ids.insert(threshold.threshold_id.as_str())
+                    || !threshold.trigger_value.is_finite()
+                    || !(-100.0..=100.0).contains(&threshold.trigger_value)
+                    || !matches!(threshold.direction.as_str(), "positive" | "negative")
+                    || threshold.linked_graph_asset_id.trim().is_empty()
+                    || inner
+                        .store
+                        .get_content_json("storylets", &threshold.linked_graph_asset_id)
+                        .map_err(|error| error.to_string())?
+                        .is_none()
+                {
+                    return Err("Character validation failed: macro thresholds need a valid direction, value, and existing graph storylet".into());
+                }
+            }
+            let mut characters = inner
+                .store
+                .list_characters()
+                .map_err(|error| error.to_string())?;
+            characters.retain(|existing| existing.id != character.id);
+            characters.push(character.clone());
+            let mut links = std::collections::BTreeSet::new();
+            for link in &character.zero_sum_passion_links {
+                let target = characters
+                    .iter()
+                    .find(|target| target.id == link.target_character_id);
+                let link_key = (
+                    link.target_character_id.as_str(),
+                    link.source_passion_id.as_str(),
+                    link.target_passion_id.as_str(),
+                );
+                if link.target_character_id.trim().is_empty()
+                    || !passion_ids.contains(link.source_passion_id.as_str())
+                    || !link.weight.is_finite()
+                    || !links.insert(link_key)
+                    || target.is_none_or(|target| {
+                        !target
+                            .passion_pool
+                            .iter()
+                            .any(|passion| passion.passion_id == link.target_passion_id)
+                    })
+                {
+                    return Err(format!(
+                        "Character validation failed: invalid zero-sum passion link from '{}' to '{}'/'{}'",
+                        link.source_passion_id, link.target_character_id, link.target_passion_id
+                    ));
+                }
+            }
+            final_payload = serde_json::to_value(character).map_err(|error| error.to_string())?;
+        }
+        if entity == "storylets" {
+            let storylet: StoryletRecord = serde_json::from_value(final_payload.clone())
+                .map_err(|error| format!("Storylet validation failed: {error}"))?;
+            let graph = match storylet.graph.clone() {
+                Some(value) => serde_json::from_value::<NarrativeGraph>(value)
+                    .map_err(|error| format!("Storylet graph validation failed: {error}"))?,
+                None => NarrativeGraph::from_storylet(&storylet),
+            };
+            graph.validate().map_err(|issues| {
+                format!("Storylet graph validation failed: {}", issues.join("; "))
+            })?;
+            let qualities = inner
+                .store
+                .list_qualities()
+                .map_err(|error| error.to_string())?;
+            let locations = inner
+                .store
+                .list_locations()
+                .map_err(|error| error.to_string())?;
+            let characters = inner
+                .store
+                .list_characters()
+                .map_err(|error| error.to_string())?;
+            compile_chrono_dispatch_for_storylet_validation(
+                &[storylet],
+                &qualities,
+                &locations,
+                &characters,
+            )
+            .map_err(|error| format!("ChronoFlow storylet validation failed: {error}"))?;
+        }
 
         let json_str = serde_json::to_string(&final_payload).map_err(|e| e.to_string())?;
         inner
@@ -376,12 +570,31 @@ impl StudioService {
         Ok(final_payload)
     }
 
-    pub async fn delete_content_item(&self, entity: &str, id: &str) -> Result<bool, String> {
+    pub async fn delete_content_item(
+        &self,
+        entity: &str,
+        id: &str,
+    ) -> Result<bool, ContentDeleteError> {
         let inner = self.inner.lock().await;
+        if entity == "storylets" {
+            let qualities = inner
+                .store
+                .list_qualities()
+                .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
+            if let Some(quality) = qualities
+                .iter()
+                .find(|quality| quality.menace_crisis_storylet_id.as_deref() == Some(id))
+            {
+                return Err(ContentDeleteError::Conflict(format!(
+                    "Cannot delete storylet '{id}': menace quality '{}' references it as its crisis storylet",
+                    quality.name
+                )));
+            }
+        }
         inner
             .store
             .delete_content(entity, id)
-            .map_err(|e| e.to_string())
+            .map_err(|error| ContentDeleteError::Persistence(error.to_string()))
     }
 
     pub async fn approve_storylet(
@@ -420,8 +633,9 @@ impl StudioService {
                 "currency".into(),
                 "metric".into(),
                 "tool".into(),
-                "territory".into(),
+                "progress".into(),
                 "menace".into(),
+                "territory".into(),
             ],
             repeatability_modes: vec![
                 "always".into(),
@@ -430,10 +644,10 @@ impl StudioService {
                 "persistent".into(),
             ],
             cluster_types: vec![
-                "player_controlled_passage".into(),
-                "linear".into(),
-                "wheel".into(),
-                "aftermath".into(),
+                "player_passage".into(),
+                "linear_progression".into(),
+                "wheel_deck".into(),
+                "aftermath_accelerator".into(),
             ],
             policy_modes: vec!["fixed".into(), "random".into(), "by_attribute".into()],
             event_types: vec!["canon".into(), "world".into()],
@@ -926,7 +1140,7 @@ fn persist_session_to_store(inner: &mut StudioInner, session_id: &str) -> Result
     Ok(())
 }
 
-fn chrono_now_ms() -> i64 {
+pub(crate) fn chrono_now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

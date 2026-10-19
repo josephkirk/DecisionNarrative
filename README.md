@@ -6,7 +6,7 @@ The platform couples a host-independent Rust decision core with a unified local 
 
 ## Architecture
 
-- **Narrative Core (`crates/storylet-engine`)**: Host-independent Rust library with zero I/O dependencies. Owns deterministic world state, precondition matching, role resolution, choices, and causal history. Exports a C ABI for native embedding (Unreal / Unity / Godot / .NET).
+- **Narrative Core (`crates/storylet-engine`)**: Host-independent Rust library with zero I/O dependencies. ChronoFlow v5 uses data-oriented world state, fixed gameplay-tag bitsets, reversible mutation deltas, persistent call history, and deterministic QBN, salience, waypoint, token, timeline, invoke, and reconciliation runtime APIs. Exports a C ABI for native embedding (Unreal / Unity / Godot / .NET).
 - **Unified Local Service (`crates/storylet-engine-service`)**: Axum, Tokio, and rusqlite service providing single-store SQLite persistence, REST endpoints, Server-Sent Events (SSE) live streams, and stdio/HTTP Model Context Protocol (MCP) server.
 - **Authoring Studio (`src/web`)**: Vue 3 (Composition API) + Vite + Vue Router application. Card-grid storylet deck library, graph-only storylet editor with a contextual property inspector, inline tag editing, Tag Manager reference counts, Story Codex (qualities, characters, locations, NPC rules, events), and starting condition scenarios. Storylet preconditions combine quality checks with visited-location IDs/tags and met-character IDs/roles; each enabled category is required, while location and character choices are alternatives within their category.
 - **Drama Director (`crates/storylet-engine`)**: Deterministic eligibility and selection in Rust; no embedding ranker or model dependency.
@@ -63,7 +63,7 @@ cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 - **Starting Scenarios**: Scenarios configure only starting conditions (player start location policy, initial qualities overrides, actor population and location policies, and random seed). Scenarios do not lock in plot arcs, storylet deck membership, or run length. All approved storylets in the project remain eligible during playtest based on dynamic world preconditions and role availability.
 - **Tag Manager**: Browse role, location, emotion, and action tags by category, inspect reference counts, and open each referencing entity.
 - **Story Codex**: Central world bible managing Qualities (currencies, metrics, tools, territory, menaces), Characters (roles, agendas, red lines), Locations (tags, connectivity, coordinates), NPC Behaviors (autonomous rules), and Project Events (canon and world events).
-- **Playtest & Director**: Live playthrough view with current location, active scene prose, and choices. Contextual inspector exposes world qualities, deterministic candidate eligibility and rejection reasons, and causal event history with branch forking.
+- **Playtest & Director**: ChronoFlow v5 is the primary runtime surface. Tick authored flow graphs, inspect world state and active interactions, choose storylets, signal waiters, divert waypoint conversations, invoke a target POI, and reconcile history. The context view exposes node/token state, call histories, and passion-threshold Narrative Lego events.
 - **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v2) with transactional validation before replacement.
 
 ## Model Context Protocol (MCP)

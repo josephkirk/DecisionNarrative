@@ -13,6 +13,8 @@ import type {
 import type { RustProjectBundle } from "../engine/RustRuntimeClient.ts";
 import { buildGraphFromStorylet, validateNarrativeGraph } from "./studio/narrativeGraphTypes.ts";
 
+
+const QUALITY_CATEGORIES = new Set(["currency", "metric", "tool", "progress", "menace", "territory"]);
 interface WorkspaceRecords {
   qualities: QualityRecord[];
   locations: LocationRecord[];
@@ -356,6 +358,14 @@ export function buildWorkspaceProject(
   const storylets = [...records.storylets].sort((a, b) => a.id.localeCompare(b.id));
   const npcBehaviors = [...(records.npcBehaviors ?? [])].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id));
   const qualityIds = new Set(records.qualities.map((quality) => quality.name));
+  for (const quality of records.qualities) {
+    const min = quality.min_value ?? 0;
+    const max = quality.max_value ?? 100;
+    if (!QUALITY_CATEGORIES.has(quality.type)) issues.push(`qualities.${quality.name}.type: unsupported category`);
+    if (!Number.isFinite(quality.value) || !Number.isFinite(min) || !Number.isFinite(max) || min > max) {
+      issues.push(`qualities.${quality.name}: value bounds must be finite and minimum must not exceed maximum`);
+    }
+  }
   const usedIds = new Set([
     ...qualityIds,
     ...locations.map((location) => location.id),
@@ -383,6 +393,10 @@ export function buildWorkspaceProject(
     key: quality.name,
     kind: quality.type,
     default_value: quality.value,
+    min_value: quality.min_value ?? 0,
+    max_value: quality.max_value ?? 100,
+    is_hidden: quality.is_hidden ?? false,
+    menace_crisis_storylet_id: quality.menace_crisis_storylet_id,
     description: quality.description ?? "",
   }]));
   const locationIds = new Set(locations.map((location) => location.id));

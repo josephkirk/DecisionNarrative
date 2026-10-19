@@ -76,6 +76,34 @@ test("storylet graph must contain one reachable Start-to-End flow", () => {
   const disconnected = { ...graph, nodes: [...graph.nodes, { id: "orphan", type: "dialog" as const, title: "Orphan", x: 0, y: 150, width: 180, height: 100 }] };
   expect(validateNarrativeGraph(disconnected)).toContain("Every node must be reachable from Start.");
   expect(validateNarrativeGraph(disconnected)).toContain("Every node must have a path to End.");
+  const conditionalGraph: NarrativeGraph = {
+    nodes: [
+      graph.nodes[0]!,
+      {
+        id: "condition",
+        type: "conditional",
+        title: "Condition",
+        x: 150,
+        y: 0,
+        width: 180,
+        height: 120,
+        conditions: [{ scope: "global", variable: "trust", op: "gte", value: 1 }],
+      },
+      graph.nodes[2]!,
+    ],
+    edges: [
+      { id: "start-condition", from_node: "start", from_port: "output", to_node: "condition", to_port: "input" },
+      { id: "condition-true", from_node: "condition", from_port: "true", to_node: "end", to_port: "input" },
+      { id: "condition-false", from_node: "condition", from_port: "false", to_node: "end", to_port: "input" },
+    ],
+  };
+  expect(validateNarrativeGraph(conditionalGraph)).toEqual([]);
+  expect(validateNarrativeGraph({ ...conditionalGraph, edges: conditionalGraph.edges.slice(0, 2) }))
+    .toContain("Conditional node Condition must have exactly one 'false' branch.");
+  expect(validateNarrativeGraph({
+    ...conditionalGraph,
+    nodes: conditionalGraph.nodes.map((node) => node.type === "conditional" ? { ...node, conditions: [] } : node),
+  })).toContain("Conditional node Condition must have at least one condition.");
 });
 test("image URL validation matches Rust and graph validation reports unsafe nodes", () => {
   const cases: Array<[string, boolean]> = [

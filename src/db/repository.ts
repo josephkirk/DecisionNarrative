@@ -14,8 +14,12 @@ export interface ProjectMetadata {
 
 export interface QualityRecord {
   name: string;
-  type: "currency" | "metric" | "tool" | "territory" | "menace";
+  type: "currency" | "metric" | "tool" | "progress" | "territory" | "menace";
   value: number;
+  min_value?: number;
+  max_value?: number;
+  is_hidden?: boolean;
+  menace_crisis_storylet_id?: string;
   description?: string;
   metadata?: Record<string, unknown>;
 }
@@ -27,6 +31,7 @@ export interface StoryletRecord {
   title: string;
   ending?: boolean;
   graph?: unknown;
+  chrono?: Record<string, unknown>;
   location_tags: string[];
   group_tag?: string;
   cluster_type: "linear" | "player_controlled_passage" | "wheel" | "aftermath";
@@ -121,10 +126,33 @@ export interface ScenarioRecord {
   event_definitions?: ScenarioEventRecord[];
 }
 
+export interface MicroPassionRecord {
+  passion_id: string;
+  current_value: number;
+  weight: number;
+  is_hidden: boolean;
+}
+
+export interface MacroPassionThresholdRecord {
+  threshold_id: string;
+  trigger_value: number;
+  direction: "positive" | "negative";
+  linked_graph_asset_id: string;
+  is_currently_active?: boolean;
+}
+
+export interface ZeroSumPassionLinkRecord {
+  target_character_id: string;
+  source_passion_id: string;
+  target_passion_id: string;
+  weight: number;
+}
+
 export interface CharacterRecord {
   id: string;
   name: string;
   role: string;
+  faction_id?: string;
   home_location: string;
   current_location: string;
   status_axes: Record<string, unknown>;
@@ -133,6 +161,11 @@ export interface CharacterRecord {
   red_line: string;
   schedule?: Record<string, string>;
   qualities?: Record<string, unknown>;
+  passion_pool?: MicroPassionRecord[];
+  active_passions?: string[];
+  trust_inertia?: number;
+  thresholds?: MacroPassionThresholdRecord[];
+  zero_sum_passion_links?: ZeroSumPassionLinkRecord[];
   created_at?: number;
 }
 
@@ -511,11 +544,11 @@ export class StoryletRepository {
       INSERT INTO storylets (
         id, title, location_tags, group_tag, cluster_type, urgency_weight,
         repeatability, cooldown_turns, parameters, preconditions, content,
-        choices, effects, created_at, revision, approved_revision, ending, graph
+        choices, effects, created_at, revision, approved_revision, ending, graph, chrono
       ) VALUES (
         $id, $title, $location_tags, $group_tag, $cluster_type, $urgency_weight,
         $repeatability, $cooldown_turns, $parameters, $preconditions, $content,
-        $choices, $effects, $created_at, $revision, NULL, $ending, $graph
+        $choices, $effects, $created_at, $revision, NULL, $ending, $graph, $chrono
       )
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
@@ -532,6 +565,7 @@ export class StoryletRepository {
         effects = excluded.effects,
         ending = excluded.ending,
         graph = excluded.graph,
+        chrono = excluded.chrono,
         revision = excluded.revision,
         approved_revision = NULL;
     `);
@@ -553,6 +587,7 @@ export class StoryletRepository {
       $revision: revision,
       $ending: st.ending === true ? 1 : 0,
       $graph: st.graph == null ? null : JSON.stringify(st.graph),
+      $chrono: st.chrono == null ? null : JSON.stringify(st.chrono),
     });
     this.bumpProjectRevision();
     this.storyletsCache = null;
@@ -600,6 +635,7 @@ export class StoryletRepository {
       approved_revision: row.approved_revision,
       ending: row.ending === 1,
       graph: row.graph == null ? undefined : JSON.parse(row.graph),
+      chrono: row.chrono == null ? undefined : JSON.parse(row.chrono),
       title: row.title,
       location_tags: JSON.parse(row.location_tags ?? "[]"),
       group_tag: row.group_tag,

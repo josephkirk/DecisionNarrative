@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::contracts::{
-    ActorPopulationPolicy, CharacterRecord, EventRecord, LocationRecord, NpcBehaviorRecord,
-    ProjectMetadata, QualityRecord, ScenarioRecord, StartLocationPolicy, StoryletChoiceRecord,
-    StoryletContentRecord, StoryletParameterRecord, StoryletRecord,
+    ActorPopulationPolicy, CharacterRecord, ChronoStoryletSettings, EventRecord, LocationRecord,
+    NpcBehaviorRecord, ProjectMetadata, QualityRecord, ScenarioRecord, StartLocationPolicy,
+    StoryletChoiceRecord, StoryletContentRecord, StoryletParameterRecord, StoryletRecord,
 };
 use crate::store::Store;
 
@@ -137,11 +137,32 @@ pub fn maybe_import_legacy_database(
         let rows = stmt
             .query_map([], |r| {
                 let meta_str: Option<String> = r.get(4)?;
-                let metadata = meta_str.and_then(|s| serde_json::from_str(&s).ok());
+                let metadata: Option<serde_json::Value> =
+                    meta_str.and_then(|s| serde_json::from_str(&s).ok());
                 Ok(QualityRecord {
                     name: r.get(0)?,
                     kind: r.get(1)?,
                     value: r.get(2)?,
+                    min_value: metadata
+                        .as_ref()
+                        .and_then(|value| value.get("min_value"))
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(0.0),
+                    max_value: metadata
+                        .as_ref()
+                        .and_then(|value| value.get("max_value"))
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(100.0),
+                    is_hidden: metadata
+                        .as_ref()
+                        .and_then(|value| value.get("is_hidden"))
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                    menace_crisis_storylet_id: metadata
+                        .as_ref()
+                        .and_then(|value| value.get("menace_crisis_storylet_id"))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
                     description: r.get(3)?,
                     metadata,
                 })
@@ -176,6 +197,7 @@ pub fn maybe_import_legacy_database(
                     name: r.get(1)?,
                     role: r.get(2)?,
                     home_location: r.get(3)?,
+                    faction_id: None,
                     current_location: r.get(4)?,
                     status_axes: serde_json::from_str(&status_axes_str).unwrap_or(Value::Null),
                     needs: serde_json::from_str(&needs_str).unwrap_or(Value::Null),
@@ -183,6 +205,11 @@ pub fn maybe_import_legacy_database(
                     red_line: r.get(8)?,
                     schedule: sched_str.and_then(|s| serde_json::from_str(&s).ok()),
                     qualities: qual_str.and_then(|s| serde_json::from_str(&s).ok()),
+                    passion_pool: Vec::new(),
+                    active_passions: Vec::new(),
+                    trust_inertia: 0.0,
+                    thresholds: Vec::new(),
+                    zero_sum_passion_links: Vec::new(),
                     created_at: r.get(11)?,
                 })
             })
@@ -339,6 +366,7 @@ pub fn maybe_import_legacy_database(
                     position: None,
                     size: None,
                     local_variables: None,
+                    chrono: Some(ChronoStoryletSettings::default()),
                     graph: None,
                 })
             })
@@ -431,6 +459,7 @@ pub fn maybe_import_legacy_database(
                     initial_qualities,
                     actor_locations,
                     actor_population_policy: actor_policy,
+                    current_arc_phase: String::new(),
                 };
 
                 let scen_json = serde_json::to_string(&scenario_rec).unwrap();

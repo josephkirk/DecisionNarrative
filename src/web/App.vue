@@ -13,6 +13,8 @@ const interactionContext = computed(() => buildInteractionContext({
   route: { name: route.name, path: route.path, fullPath: route.fullPath, params: route.params, query: route.query },
   project: studioState.project,
   activePlaytestSessionId: studioState.activePlaytestSessionId,
+  activeChronoPlaytestSessionId: studioState.activeChronoPlaytestSessionId,
+  activeChronoPlaytestSnapshot: studioState.activeChronoPlaytestSnapshot,
   activePlaytestSnapshot: studioState.activePlaytestSnapshot,
   focus: interactionFocus.value,
 }));

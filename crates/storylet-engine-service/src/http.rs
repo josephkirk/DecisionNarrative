@@ -18,9 +18,14 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 
+use crate::chrono_playtest::{
+    ChronoPlaytestChooseRequest, ChronoPlaytestDivertRequest, ChronoPlaytestError,
+    ChronoPlaytestInvokeRequest, ChronoPlaytestReconcileRequest, ChronoPlaytestRollbackRequest,
+    ChronoPlaytestScrubRequest, ChronoPlaytestSignalRequest, ChronoPlaytestTickRequest,
+    CreateChronoPlaytestRequest,
+};
 use crate::contracts::LibraryQuery;
-use crate::service::StudioService;
-
+use crate::service::{ContentDeleteError, StudioService};
 pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -114,6 +119,7 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
             "/api/v1/playtests",
             get(list_playtests).post(create_playtest),
         )
+        .route("/api/v1/playtests/restore", post(restore_playtest))
         .route(
             "/api/v1/playtests/{id}",
             get(get_playtest_snapshot).delete(delete_playtest),
@@ -131,8 +137,41 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
         .route("/api/v1/playtests/{id}/stream", get(playtest_stream))
         .route("/api/v1/playtests/{id}/fork", post(fork_playtest))
         .route("/api/v1/playtests/{id}/export", get(export_playtest))
-        .route("/api/v1/playtests/restore", post(restore_playtest))
-        .route("/api/v1/playtests/{id}/restore", post(restore_playtest))
+        // ChronoFlow v5 playtests; this is the primary runtime surface.
+        .route(
+            "/api/v2/playtests",
+            get(list_chrono_playtests).post(create_chrono_playtest),
+        )
+        .route("/api/v2/playtests/{id}", get(get_chrono_playtest))
+        .route("/api/v2/playtests/{id}/tick", post(tick_chrono_playtest))
+        .route(
+            "/api/v2/playtests/{id}/signal",
+            post(signal_chrono_playtest),
+        )
+        .route(
+            "/api/v2/playtests/{id}/choose",
+            post(choose_chrono_playtest),
+        )
+        .route(
+            "/api/v2/playtests/{id}/divert",
+            post(divert_chrono_playtest),
+        )
+        .route(
+            "/api/v2/playtests/{id}/invoke",
+            post(invoke_chrono_playtest),
+        )
+        .route(
+            "/api/v2/playtests/{id}/rollback",
+            post(rollback_chrono_playtest),
+        )
+        .route(
+            "/api/v2/playtests/{id}/scrub",
+            post(scrub_chrono_playtest),
+        )
+        .route(
+            "/api/v2/playtests/{id}/reconcile",
+            post(reconcile_chrono_playtest),
+        )
         // MCP JSON-RPC
         .route("/mcp", post(handle_http_mcp))
         .layer(cors)
@@ -434,9 +473,13 @@ async fn import_bundle(
             .into_response();
     }
     match service.import_bundle(&payload.bundle).await {
-        Ok(_) => (
+        Ok(revision) => (
             StatusCode::OK,
-            Json(json!({ "success": true, "message": "Project replaced successfully" })),
+            Json(json!({
+                "success": true,
+                "message": "Project replaced successfully",
+                "revision": revision
+            })),
         )
             .into_response(),
         Err(e) => (
@@ -514,9 +557,12 @@ async fn delete_content(
 ) -> Response {
     match service.delete_content_item(&entity, &id).await {
         Ok(deleted) => (StatusCode::OK, Json(json!({ "deleted": deleted }))).into_response(),
-        Err(e) => (
+        Err(ContentDeleteError::Conflict(error)) => {
+            (StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response()
+        }
+        Err(ContentDeleteError::Persistence(error)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e })),
+            Json(json!({ "error": error })),
         )
             .into_response(),
     }
@@ -1099,5 +1145,131 @@ async fn handle_http_mcp(State(s): State<StudioService>, Json(msg): Json<Value>)
         (StatusCode::OK, Json(resp)).into_response()
     } else {
         (StatusCode::NO_CONTENT, Json(Value::Null)).into_response()
+    }
+}
+fn chrono_playtest_error_response(error: ChronoPlaytestError) -> Response {
+    let status = match &error {
+        ChronoPlaytestError::InvalidInput(_) => StatusCode::BAD_REQUEST,
+        ChronoPlaytestError::SessionNotFound(_) => StatusCode::NOT_FOUND,
+        ChronoPlaytestError::Conflict(_) | ChronoPlaytestError::RevisionConflict(_) => {
+            StatusCode::CONFLICT
+        }
+        ChronoPlaytestError::Runtime(_) => StatusCode::UNPROCESSABLE_ENTITY,
+        ChronoPlaytestError::Persistence(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (status, Json(json!({ "error": error.to_string() }))).into_response()
+}
+
+async fn list_chrono_playtests(State(service): State<StudioService>) -> Response {
+    match service.list_chrono_playtests().await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(error) => chrono_playtest_error_response(error),
+    }
+}
+
+async fn create_chrono_playtest(
+    State(service): State<StudioService>,
+    Json(request): Json<CreateChronoPlaytestRequest>,
+) -> Response {
+    match service.create_chrono_playtest(&request).await {
+        Ok(data) => (StatusCode::CREATED, Json(data)).into_response(),
+        Err(error) => chrono_playtest_error_response(error),
+    }
+}
+
+async fn get_chrono_playtest(
+    State(service): State<StudioService>,
+    Path(id): Path<String>,
+) -> Response {
+    match service.chrono_playtest_snapshot(&id).await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(error) => chrono_playtest_error_response(error),
+    }
+}
+
+async fn tick_chrono_playtest(
+    State(service): State<StudioService>,
+    Path(id): Path<String>,
+    Json(request): Json<ChronoPlaytestTickRequest>,
+) -> Response {
+    match service.chrono_playtest_tick(&id, &request).await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(error) => chrono_playtest_error_response(error),
+    }
+}
+async fn signal_chrono_playtest(
+    State(service): State<StudioService>,
+    Path(id): Path<String>,
+    Json(request): Json<ChronoPlaytestSignalRequest>,
+) -> Response {
+    match service.chrono_playtest_signal(&id, &request).await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(error) => chrono_playtest_error_response(error),
+    }
+}
+
+async fn divert_chrono_playtest(
+    State(service): State<StudioService>,
+    Path(id): Path<String>,
+    Json(request): Json<ChronoPlaytestDivertRequest>,
+) -> Response {
+    match service.chrono_playtest_divert(&id, &request).await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(error) => chrono_playtest_error_response(error),
+    }
+}
+
+async fn choose_chrono_playtest(
+    State(service): State<StudioService>,
+    Path(id): Path<String>,
+    Json(request): Json<ChronoPlaytestChooseRequest>,
+) -> Response {
+    match service.chrono_playtest_choose(&id, &request).await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(error) => chrono_playtest_error_response(error),
+    }
+}
+
+async fn invoke_chrono_playtest(
+    State(service): State<StudioService>,
+    Path(id): Path<String>,
+    Json(request): Json<ChronoPlaytestInvokeRequest>,
+) -> Response {
+    match service.chrono_playtest_invoke(&id, &request).await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(error) => chrono_playtest_error_response(error),
+    }
+}
+
+async fn scrub_chrono_playtest(
+    State(service): State<StudioService>,
+    Path(id): Path<String>,
+    Json(request): Json<ChronoPlaytestScrubRequest>,
+) -> Response {
+    match service.chrono_playtest_scrub(&id, &request).await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(error) => chrono_playtest_error_response(error),
+    }
+}
+
+async fn rollback_chrono_playtest(
+    State(service): State<StudioService>,
+    Path(id): Path<String>,
+    Json(request): Json<ChronoPlaytestRollbackRequest>,
+) -> Response {
+    match service.chrono_playtest_rollback_mission(&id, &request).await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(error) => chrono_playtest_error_response(error),
+    }
+}
+
+async fn reconcile_chrono_playtest(
+    State(service): State<StudioService>,
+    Path(id): Path<String>,
+    Json(request): Json<ChronoPlaytestReconcileRequest>,
+) -> Response {
+    match service.chrono_playtest_reconcile(&id, &request).await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(error) => chrono_playtest_error_response(error),
     }
 }

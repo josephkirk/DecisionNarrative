@@ -148,7 +148,7 @@ fn make_world(actors_count: usize, locations_count: usize) -> WorldState {
     world
 }
 
-fn make_definitions(count: usize, locations_count: usize) -> Vec<StoryletDefinition> {
+fn make_definitions(count: usize, _locations_count: usize) -> Vec<StoryletDefinition> {
     (0..count)
         .map(|index| StoryletDefinition {
             id: format!("storylet-{index:05}"),

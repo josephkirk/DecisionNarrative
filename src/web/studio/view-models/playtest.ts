@@ -1,138 +1,123 @@
-import { ref, reactive, computed } from "vue";
+import { computed, ref } from "vue";
 import { StudioApi } from "../api.ts";
-import type { PlaytestSnapshot, DirectorEvaluation } from "../contracts.ts";
+import type { ChronoPlaytestSnapshot, ChronoPlaytestSessionSummary } from "../contracts.ts";
 import { notify, studioState } from "../state.ts";
 
 export function usePlaytestViewModel() {
-  const activeTab = ref<"state" | "director" | "causality">("state");
-  const sessions = ref<Array<{ session_id: string; turn: number; revision: number; current_location?: string }>>([]);
-  const directorEval = ref<DirectorEvaluation | null>(null);
-  const events = ref<any[]>([]);
+  const activeTab = ref<"state" | "runtime" | "history">("runtime");
+  const sessions = ref<ChronoPlaytestSessionSummary[]>([]);
   const loading = ref(false);
+  const snapshot = computed(() => studioState.activeChronoPlaytestSnapshot);
+  const sessionId = computed(() => studioState.activeChronoPlaytestSessionId);
 
-  const snapshot = computed(() => studioState.activePlaytestSnapshot);
-  const sessionId = computed(() => studioState.activePlaytestSessionId);
+  function applySnapshot(next: ChronoPlaytestSnapshot) {
+    studioState.activeChronoPlaytestSessionId = next.session.sessionId;
+    studioState.activeChronoPlaytestSnapshot = next;
+    studioState.activePlaytestSessionId = null;
+    studioState.activePlaytestSnapshot = null;
+  }
 
   async function loadSessions() {
     try {
-      sessions.value = await StudioApi.listPlaytestSessions();
-    } catch (e) {
-      // Ignored
+      sessions.value = await StudioApi.listChronoPlaytests();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
     }
   }
 
   async function selectSession(id: string) {
+    if (!id) return;
     loading.value = true;
     try {
-      studioState.activePlaytestSessionId = id;
-      studioState.activePlaytestSnapshot = await StudioApi.getPlaytestSnapshot(id);
-      await Promise.all([refreshDirector(), refreshEvents()]);
-    } catch (e) {
-      notify(e instanceof Error ? e.message : String(e), "error");
+      applySnapshot(await StudioApi.getChronoPlaytest(id));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
     } finally {
       loading.value = false;
     }
   }
 
-  async function refreshDirector() {
-    if (!sessionId.value) return;
+  async function createSession(scenarioId?: string) {
+    loading.value = true;
     try {
-      directorEval.value = await StudioApi.evaluateDirector(sessionId.value);
-    } catch (e) {
-      // Ignored
-    }
-  }
-
-  async function refreshEvents() {
-    if (!sessionId.value) return;
-    try {
-      const res = await StudioApi.getPlaytestEvents(sessionId.value);
-      events.value = res.events;
-    } catch (e) {
-      // Ignored
-    }
-  }
-
-  async function waitTurn() {
-    if (!sessionId.value || !snapshot.value) return;
-    try {
-      const res: any = await StudioApi.submitPlaytestCommand(sessionId.value, {
-        idempotency_key: `cmd_${Date.now()}`,
-        expected_revision: snapshot.value.world.revision,
-        actor_id: "player",
-        action: "wait",
-        effects: [],
-        advance_turn: true,
+      const created = await StudioApi.createChronoPlaytest({
+        sessionId: crypto.randomUUID(),
+        ...(scenarioId ? { scenarioId } : {}),
       });
-      studioState.activePlaytestSnapshot!.world = res.world;
-      await Promise.all([refreshDirector(), refreshEvents()]);
-    } catch (e) {
-      notify(e instanceof Error ? e.message : String(e), "error");
+      applySnapshot(created);
+      await loadSessions();
+      notify("Started ChronoFlow playtest.", "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      loading.value = false;
     }
   }
 
-  async function moveToLocation(locId: string) {
-    if (!sessionId.value || !snapshot.value) return;
+  async function updateSession(run: () => Promise<ChronoPlaytestSnapshot>) {
+    if (!sessionId.value) return;
+    loading.value = true;
     try {
-      const res: any = await StudioApi.submitPlaytestCommand(sessionId.value, {
-        idempotency_key: `cmd_${Date.now()}`,
-        expected_revision: snapshot.value.world.revision,
-        actor_id: "player",
-        action: "move",
-        effects: [{ kind: "move_player", location_id: locId }],
-        advance_turn: true,
-      });
-      studioState.activePlaytestSnapshot!.world = res.world;
-      await Promise.all([refreshDirector(), refreshEvents()]);
-    } catch (e) {
-      notify(e instanceof Error ? e.message : String(e), "error");
+      applySnapshot(await run());
+      await loadSessions();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      loading.value = false;
     }
   }
 
-  async function chooseOption(storyletId: string, choiceId: string) {
-    if (!sessionId.value || !snapshot.value) return;
-    try {
-      const res: any = await StudioApi.submitPlaytestChoice(
-        sessionId.value,
-        storyletId,
-        choiceId,
-        snapshot.value.world.revision,
-        `choice_${Date.now()}`
-      );
-      studioState.activePlaytestSnapshot!.world = res.world;
-      await Promise.all([refreshDirector(), refreshEvents()]);
-    } catch (e) {
-      notify(e instanceof Error ? e.message : String(e), "error");
+  async function tick(frameBudgetMs = 16) {
+    if (sessionId.value) {
+      await updateSession(() => StudioApi.tickChronoPlaytest(sessionId.value!, frameBudgetMs));
     }
   }
 
-  async function forkPlaytest(srcSessionId: string, eventId: string) {
-    try {
-      const res = await StudioApi.forkPlaytest(srcSessionId, eventId);
-      notify(`Forked session '${res.sessionId.slice(0, 8)}'`, "success");
-      return res;
-    } catch (e) {
-      notify(e instanceof Error ? e.message : String(e), "error");
-      return null;
+  async function signal(eventName: string) {
+    if (sessionId.value && eventName.trim()) {
+      await updateSession(() => StudioApi.signalChronoPlaytest(sessionId.value!, eventName.trim()));
     }
   }
 
+  async function chooseOutput(nodeGuid: number, outputPin: string) {
+    if (sessionId.value) {
+      await updateSession(() => StudioApi.chooseChronoPlaytest(sessionId.value!, { nodeGuid, outputPin }));
+    }
+  }
+
+  async function chooseStorylet(nodeGuid: number, storyletId: string) {
+    if (sessionId.value) {
+      await updateSession(() => StudioApi.chooseChronoPlaytest(sessionId.value!, { nodeGuid, storyletId }));
+    }
+  }
+
+  async function divertTopic(nodeGuid: number, edgeId: string) {
+    if (sessionId.value) {
+      await updateSession(() => StudioApi.divertChronoPlaytest(sessionId.value!, nodeGuid, edgeId));
+    }
+  }
+
+  async function rollbackLatestCall() {
+    const history = snapshot.value?.context.globalCallHistory;
+    if (sessionId.value && history?.length) {
+      await updateSession(() => StudioApi.reconcileChronoPlaytest(sessionId.value!, history.slice(0, -1)));
+    }
+  }
 
   return {
     activeTab,
     sessions,
-    directorEval,
-    events,
     loading,
     snapshot,
     sessionId,
     loadSessions,
     selectSession,
-    refreshDirector,
-    refreshEvents,
-    waitTurn,
-    moveToLocation,
-    chooseOption,
-    forkPlaytest,
+    createSession,
+    tick,
+    signal,
+    chooseOutput,
+    chooseStorylet,
+    divertTopic,
+    rollbackLatestCall,
   };
 }

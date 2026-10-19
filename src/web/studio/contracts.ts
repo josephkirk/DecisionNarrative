@@ -6,16 +6,43 @@ export interface ProjectMetadata {
 
 export interface QualityRecord {
   name: string;
-  type: "currency" | "metric" | "tool" | "territory" | "menace";
+  type: "currency" | "metric" | "tool" | "progress" | "menace" | "territory";
   value: number;
+  min_value?: number;
+  max_value?: number;
+  is_hidden?: boolean;
+  menace_crisis_storylet_id?: string;
   description?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface MicroPassionRecord {
+  passion_id: string;
+  current_value: number;
+  weight: number;
+  is_hidden: boolean;
+}
+
+export interface MacroPassionThresholdRecord {
+  threshold_id: string;
+  trigger_value: number;
+  direction: "positive" | "negative";
+  linked_graph_asset_id: string;
+  is_currently_active?: boolean;
+}
+
+export interface ZeroSumPassionLinkRecord {
+  target_character_id: string;
+  source_passion_id: string;
+  target_passion_id: string;
+  weight: number;
 }
 
 export interface CharacterRecord {
   id: string;
   name: string;
   role: string;
+  faction_id?: string;
   home_location: string;
   current_location: string;
   status_axes?: Record<string, unknown>;
@@ -24,6 +51,11 @@ export interface CharacterRecord {
   red_line?: string;
   schedule?: Record<string, string>;
   qualities?: Record<string, unknown>;
+  passion_pool?: MicroPassionRecord[];
+  active_passions?: string[];
+  trust_inertia?: number;
+  thresholds?: MacroPassionThresholdRecord[];
+  zero_sum_passion_links?: ZeroSumPassionLinkRecord[];
   created_at?: number;
 }
 
@@ -102,10 +134,44 @@ export interface StoryletPreconditions {
   met_characters_any_of?: MetCharacterPrecondition[];
 }
 
+export interface ChronoQualityPredicate {
+  target_id: string;
+  subject: "metric" | "location" | "entity" | "visited" | "met_character";
+  operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
+  comparison_value: number;
+  specificity_weight: number;
+  entity_index?: number | null;
+}
+
+export interface ChronoStoryletEffect {
+  target_id: string;
+  value: number;
+  incremental: boolean;
+  add_tags: string[];
+  remove_tags: string[];
+}
+
+export interface ChronoStoryletSettings {
+  display_priority: number;
+  urgency_color_tag: string;
+  is_repeatable: boolean;
+  cooldown_ms: number;
+  preconditions: ChronoQualityPredicate[];
+  required_tags: string[];
+  required_any_tags: string[];
+  forbidden_tags: string[];
+  required_arc_phases: string[];
+  ideal_state_vector: Record<string, number>;
+  ideal_state_weights?: Record<string, number>;
+  salience_bonus_tags: string[];
+  effects_on_complete: ChronoStoryletEffect[];
+}
+
 export interface StoryletRecord {
   id: string;
   graph?: unknown;
   local_variables?: LocalVariableDefinition[];
+  chrono?: ChronoStoryletSettings;
   revision: number;
   approved_revision?: number | null;
   title: string;
@@ -114,7 +180,7 @@ export interface StoryletRecord {
   size?: [number, number];
   location_tags: string[];
   group_tag?: string | null;
-  cluster_type: "linear" | "player_controlled_passage" | "wheel" | "aftermath";
+  cluster_type: "linear_progression" | "player_passage" | "wheel_deck" | "aftermath_accelerator" | "linear" | "player_controlled_passage" | "wheel" | "aftermath";
   urgency_weight: number;
   repeatability: "once_ever" | "always" | "cooldown" | "persistent";
   cooldown_turns: number;
@@ -161,6 +227,7 @@ export interface ScenarioRecord {
   initial_qualities: Record<string, unknown>;
   actor_locations: Record<string, string>;
   actor_population_policy: ActorPopulationPolicy;
+  current_arc_phase?: string;
 }
 
 export interface ResolvedScenarioStart {
@@ -242,4 +309,90 @@ export interface CandidateEvaluation {
 export interface DirectorEvaluation {
   candidates: CandidateEvaluation[];
   selected?: string | null;
+}
+export interface ChronoPlaytestSessionSummary {
+  sessionId: string;
+  scenarioId: string | null;
+  startLocationId: string | null;
+  startStoryletId: string | null;
+  seed: number;
+  updatedAt: number;
+  live: boolean;
+  globalHistoryLength: number;
+}
+
+export interface ChronoSignalToken {
+  token_id: string;
+  graph_instance_id: string;
+  target_node_guid: number;
+  target_pin_name: string;
+  time_budget_ms: number;
+  is_active: boolean;
+  deferred_until_ms: number;
+  is_deferred: boolean;
+}
+
+export interface ChronoPlaytestSnapshot {
+  operation: string;
+  session: {
+    sessionId: string;
+    projectId: string;
+    pinnedProjectRevision: number;
+    scenarioId: string | null;
+    startLocationId: string | null;
+    startStoryletId: string | null;
+    seed: number;
+  };
+  context: {
+    instanceId: string;
+    assetId: string;
+    turn: number;
+    clockMs: number;
+    nodes: Array<{
+      nodeGuid: number;
+      nodeTypeId: string;
+      state: unknown;
+      storyletId: string | null;
+      outputPins: string[];
+      payload: { nodeData?: Record<string, unknown> } | null;
+    }>;
+    tokens: ChronoSignalToken[];
+    activeInteractions: Array<{
+      nodeGuid: number;
+      kind: "choice" | "qbn" | "waypoint";
+      options?: Array<{ outputPin: string; choiceId: string | null; label: string }>;
+      currentTopicId?: string;
+      topics?: Array<{
+        edgeId: string;
+        topicId: string;
+        playerOnly: boolean;
+        triggersSceneExit: boolean;
+        revealedClueQualityId: string | null;
+      }>;
+      eligibleStorylets?: Array<{
+        id: string;
+        title: string;
+        nodeGuid: number;
+        displayPriority: number;
+        urgencyColorTag: string;
+      }>;
+    }>;
+    world: {
+      currentLocation: string | null;
+      metrics: Record<string, number>;
+      globalTags: string[];
+      entities: Record<string, string[]>;
+      passions: {
+        micro: Record<string, number>;
+        macro: Record<string, number>;
+        active: string[];
+      };
+    };
+    storylets: Array<{ id: string; title: string }>;
+    globalCallHistory: unknown[];
+    scopedCallHistories: Record<string, unknown[]>;
+    passionEvents: unknown[];
+    passionThresholds: unknown[];
+  };
+  result: unknown;
 }

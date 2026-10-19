@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { inject, onMounted, ref, computed, watch } from "vue";
+import { computed, inject, onMounted, ref, watch } from "vue";
 import { usePlaytestViewModel } from "../view-models/playtest.ts";
-import { studioState, locationMap, characterMap } from "../state.ts";
+import { studioState, locationMap } from "../state.ts";
 import { StudioApi } from "../api.ts";
 import type { StoryletRecord } from "../contracts.ts";
 import { interactionContextKey } from "../interactionContext.ts";
@@ -9,296 +9,220 @@ import { interactionContextKey } from "../interactionContext.ts";
 const {
   activeTab,
   sessions,
-  directorEval,
-  events,
   loading,
   snapshot,
   sessionId,
   loadSessions,
   selectSession,
-  refreshDirector,
-  refreshEvents,
-  waitTurn,
-  moveToLocation,
-  chooseOption,
-  forkPlaytest,
+  createSession,
+  tick,
+  signal,
+  chooseOutput,
+  chooseStorylet,
+  divertTopic,
+  rollbackLatestCall,
 } = usePlaytestViewModel();
-const selectedStoryletRecord = ref<StoryletRecord | null>(null);
-const selectedEventId = ref<string | null>(null);
-const compareSessionId = ref<string>("");
-const comparisonReport = ref<string>("");
-
 const interactionContext = inject(interactionContextKey);
-watch(() => [sessionId.value, snapshot.value, selectedStoryletRecord.value, selectedEventId.value, events.value], () => {
-  const selectedEvent = events.value.find((event) => event.id === selectedEventId.value);
-  if (selectedEvent) {
-    interactionContext?.setFocus({
-      entity: null,
-      selection: { type: "playtest_event", id: selectedEvent.id, label: selectedEvent.action, data: selectedEvent },
-    });
-    return;
-  }
-  if (selectedStoryletRecord.value) {
-    const storylet = selectedStoryletRecord.value;
-    interactionContext?.setFocus({
-      entity: { type: "storylet", id: storylet.id, label: storylet.title, data: JSON.parse(JSON.stringify(storylet)) },
-      selection: { type: "playtest_scene", id: storylet.id, data: { sessionId: sessionId.value } },
-    });
-    return;
-  }
-  interactionContext?.setFocus(sessionId.value
-    ? { entity: { type: "playtest_session", id: sessionId.value, data: { snapshot: snapshot.value } }, selection: null }
-    : { entity: null, selection: null });
-}, { deep: true });
+const scenarioId = ref("");
+const eventName = ref("");
+const currentStorylet = ref<StoryletRecord | null>(null);
+
+const context = computed(() => snapshot.value?.context ?? null);
+const world = computed(() => context.value?.world ?? null);
+const currentLocation = computed(() => {
+  const id = world.value?.currentLocation;
+  return id ? locationMap.value.get(id) : null;
+});
+const currentStoryletId = computed(() => {
+  const nodes = context.value?.nodes ?? [];
+  return [...nodes].reverse().find((node) => node.storyletId)?.storyletId
+    ?? snapshot.value?.session.startStoryletId
+    ?? null;
+});
+const metricEntries = computed(() => Object.entries(world.value?.metrics ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+const entityEntries = computed(() => Object.entries(world.value?.entities ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+const interactionCount = computed(() => context.value?.activeInteractions.length ?? 0);
+const history = computed(() => context.value?.globalCallHistory ?? []);
 
 onMounted(async () => {
   await loadSessions();
-  if (sessionId.value) {
-    await selectSession(sessionId.value);
-  }
+  if (sessionId.value) await selectSession(sessionId.value);
 });
 
-watch(() => directorEval.value?.selected, async (selId) => {
-  if (selId) {
-    try {
-      selectedStoryletRecord.value = await StudioApi.getContent<StoryletRecord>("storylets", selId);
-    } catch {
-      selectedStoryletRecord.value = null;
+watch(currentStoryletId, async (id) => {
+  if (!id) {
+    currentStorylet.value = null;
+    return;
+  }
+  try {
+    currentStorylet.value = await StudioApi.getContent<StoryletRecord>("storylets", id);
+  } catch {
+    currentStorylet.value = null;
+  }
+}, { immediate: true });
+
+async function sendSignal() {
+  const event = eventName.value;
+  eventName.value = "";
+  await signal(event);
+}
+
+watch(() => [sessionId.value, snapshot.value, currentStorylet.value, activeTab.value], () => {
+  const storylet = currentStorylet.value;
+  const selectedInteraction = context.value?.activeInteractions[0];
+  interactionContext?.setFocus(sessionId.value
+    ? {
+      entity: storylet
+        ? { type: "storylet", id: storylet.id, label: storylet.title, data: storylet }
+        : { type: "playtest_session", id: sessionId.value, data: { snapshot: snapshot.value } },
+      selection: selectedInteraction
+        ? { type: "playtest_node", id: String(selectedInteraction.nodeGuid), label: selectedInteraction.kind, data: selectedInteraction }
+        : null,
     }
-  } else {
-    selectedStoryletRecord.value = null;
-  }
-});
-
-const currentLocRecord = computed(() => {
-  const locId = snapshot.value?.world.current_location;
-  return locId ? locationMap.value.get(locId) : null;
-});
-
-const connectedLocations = computed(() => {
-  const zones = currentLocRecord.value?.connected_zones ?? [];
-  return zones.map((zid) => locationMap.value.get(zid) ?? { id: zid, name: zid, description: "" });
-});
-
-async function handleFork() {
-  if (!sessionId.value || !selectedEventId.value) return;
-  const res = await forkPlaytest(sessionId.value, selectedEventId.value);
-  if (res?.sessionId) {
-    await loadSessions();
-    await selectSession(res.sessionId);
-  }
-}
-
-function handleCompare() {
-  if (!compareSessionId.value || !sessionId.value) return;
-  const curTurn = snapshot.value?.world.turn ?? 0;
-  comparisonReport.value = `Comparing active session turn ${curTurn} with branch ${compareSessionId.value.slice(0, 8)}. Branch history divergent.`;
-}
+    : { entity: null, selection: null });
+}, { deep: true });
 </script>
 
 <template>
   <div style="display:flex; flex-direction:column; height:100%;">
-    <!-- Playtest Toolbar -->
     <header class="view-header">
-      <div style="display:flex; align-items:center; gap:16px;">
-        <h1 class="view-title">Playtest Runtime</h1>
-        <div style="display:flex; align-items:center; gap:8px;">
-          <label style="font-size:12px; color:var(--text-muted);">Saved Runs:</label>
-          <select
-            :value="sessionId ?? ''"
-            class="form-select"
-            style="width: 200px;"
-            @change="selectSession(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="" disabled>Select a playtest session...</option>
-            <option v-for="s in sessions" :key="s.session_id" :value="s.session_id">
-              {{ s.session_id.slice(0, 8) }} (Turn {{ s.turn }})
-            </option>
-          </select>
-        </div>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <h1 class="view-title">ChronoFlow Playtest</h1>
+        <select :value="sessionId ?? ''" class="form-select" style="width:220px;" @change="selectSession(($event.target as HTMLSelectElement).value)">
+          <option value="">Select a run…</option>
+          <option v-for="run in sessions" :key="run.sessionId" :value="run.sessionId">
+            {{ run.sessionId.slice(0, 8) }} · {{ run.globalHistoryLength }} calls
+          </option>
+        </select>
+        <select v-model="scenarioId" class="form-select" style="width:190px;">
+          <option value="">Default start</option>
+          <option v-for="scenario in studioState.scenarios" :key="scenario.id" :value="scenario.id">{{ scenario.name }}</option>
+        </select>
+        <button class="btn btn-primary" :disabled="loading" @click="createSession(scenarioId || undefined)">New run</button>
       </div>
-
-      <div style="display:flex; align-items:center; gap:10px;">
-        <span v-if="snapshot" class="badge">
-          Turn {{ snapshot.world.turn }} · Rev {{ snapshot.world.revision }}
-        </span>
-        <button class="btn btn-secondary" :disabled="!sessionId" @click="waitTurn">
-          Wait 1 Turn
-        </button>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span v-if="snapshot" class="badge">Turn {{ context?.turn }} · {{ context?.clockMs }} ms</span>
+        <button class="btn btn-secondary" :disabled="!sessionId || loading" @click="tick(16)">Tick 16 ms</button>
+        <button class="btn btn-secondary" :disabled="!history.length || loading" @click="rollbackLatestCall">Undo call</button>
       </div>
     </header>
 
-    <!-- Workspace Split -->
-    <div style="display:flex; flex:1; overflow:hidden;">
-      <!-- Center: Scene & Choices & Movement Map -->
-      <div style="flex:1; padding:24px 32px; overflow-y:auto;">
+    <div style="display:flex; flex:1; min-height:0; overflow:hidden;">
+      <main style="flex:1; min-width:0; padding:24px 32px; overflow-y:auto;">
         <div v-if="!snapshot" style="padding:60px; text-align:center; color:var(--text-muted);">
-          <p style="font-size:15px; font-weight:600;">No active playtest session</p>
-          <p style="font-size:12px; margin-top:6px;">Select an existing session above or launch a run from Starting Scenarios.</p>
+          <strong style="display:block; color:var(--text-main); font-size:16px;">No ChronoFlow run selected</strong>
+          <span>Create a run to execute the authored graph with the deterministic runtime.</span>
         </div>
-
-        <div v-else style="max-width:720px;">
-          <!-- Location breadcrumb -->
-          <div style="font-size:12px; color:var(--accent); font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">
-            📍 {{ currentLocRecord?.name || snapshot.world.current_location || "Unknown Location" }}
+        <template v-else>
+          <div style="margin-bottom:18px; color:var(--accent); font-size:12px; font-weight:700; text-transform:uppercase;">
+            {{ currentLocation?.name || world?.currentLocation || "No current location" }}
           </div>
-
-          <!-- Scene Title & Prose -->
-          <div style="margin-bottom:24px;">
-            <h2 style="font-size:22px; font-weight:700; margin-bottom:12px;">
-              {{ selectedStoryletRecord?.title || directorEval?.selected || "No eligible scene" }}
-            </h2>
-
-            <p style="font-size:15px; line-height:1.65; color:var(--text-main); font-family:var(--font-serif, serif);">
-              {{ selectedStoryletRecord?.content?.sceneOpening || selectedStoryletRecord?.content?.text_template || "The drama director will surface scenes when trigger conditions and role participants align with current world state." }}
+          <section style="max-width:760px; margin-bottom:24px;">
+            <h2 style="font-size:24px; margin:0 0 8px;">{{ currentStorylet?.title || snapshot.session.startStoryletId || "Narrative graph" }}</h2>
+            <p style="font-size:14px; line-height:1.65; color:var(--text-muted);">
+              {{ currentStorylet?.content?.sceneOpening || currentStorylet?.content?.text_template || "Runtime state is driven by the active graph nodes and signal tokens." }}
             </p>
-          </div>
+          </section>
 
-          <!-- Storylet Choices -->
-          <div style="margin-bottom:32px;">
-            <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:10px; letter-spacing:0.5px;">AVAILABLE CHOICES</div>
-            <div v-if="selectedStoryletRecord && selectedStoryletRecord.choices.length > 0" style="display:flex; flex-direction:column; gap:10px;">
-              <button
-                v-for="choice in selectedStoryletRecord.choices"
-                :key="choice.choice_id"
-                class="btn btn-secondary"
-                style="justify-content:flex-start; text-align:left; padding:12px 16px; border-radius:10px;"
-                @click="chooseOption(selectedStoryletRecord.id, choice.choice_id)"
-              >
-                <span style="font-weight:600;">{{ choice.label }}</span>
-                <span v-if="choice.systemVerb" class="badge" style="margin-left:auto;">{{ choice.systemVerb }}</span>
-              </button>
+          <section style="max-width:760px; margin-bottom:24px;">
+            <h3 style="font-size:12px; text-transform:uppercase; color:var(--text-muted);">Pending graph interactions · {{ interactionCount }}</h3>
+            <div v-if="!interactionCount" class="chrono-empty">No player choice is pending. Tick the graph or send a signal event.</div>
+            <div v-for="interaction in context?.activeInteractions ?? []" :key="interaction.nodeGuid" class="chrono-card">
+              <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                <strong>{{ interaction.kind === 'qbn' ? 'QBN storylet deck' : interaction.kind === 'waypoint' ? 'Waypoint topic' : 'Choice node' }}</strong>
+                <code>node {{ interaction.nodeGuid }}</code>
+              </div>
+              <template v-if="interaction.kind === 'choice'">
+                <button v-for="option in interaction.options ?? []" :key="option.outputPin" class="btn btn-secondary chrono-option" :disabled="loading" @click="chooseOutput(interaction.nodeGuid, option.outputPin)">
+                  <span>{{ option.label }}</span><code>{{ option.outputPin }}</code>
+                </button>
+              </template>
+              <template v-else-if="interaction.kind === 'qbn'">
+                <button v-for="storylet in interaction.eligibleStorylets ?? []" :key="storylet.id" class="btn btn-secondary chrono-option" :disabled="loading" @click="chooseStorylet(interaction.nodeGuid, storylet.id)">
+                  <span>{{ storylet.title }} <small>{{ storylet.id }}</small></span>
+                  <span class="badge">{{ storylet.urgencyColorTag }} · Priority {{ storylet.displayPriority }}</span>
+                </button>
+                <div v-if="!interaction.eligibleStorylets?.length" class="chrono-empty">No storylet currently satisfies this deck.</div>
+              </template>
+              <template v-else>
+                <div class="chrono-empty">Current topic: {{ interaction.currentTopicId }}</div>
+                <button v-for="topic in interaction.topics ?? []" :key="topic.edgeId" class="btn btn-secondary chrono-option" :disabled="loading" @click="divertTopic(interaction.nodeGuid, topic.edgeId)">
+                  <span>{{ topic.topicId }} <small>{{ topic.edgeId }}<span v-if="topic.revealedClueQualityId"> · reveals {{ topic.revealedClueQualityId }}</span></small></span>
+                  <span class="badge">{{ topic.triggersSceneExit ? 'Exit' : topic.playerOnly ? 'Player trigger' : 'Topic' }}</span>
+                </button>
+                <div v-if="!interaction.topics?.length" class="chrono-empty">No adjacent topic transitions.</div>
+              </template>
             </div>
-            <div v-else style="font-size:13px; color:var(--text-muted); padding:12px; background:var(--bg-card); border-radius:8px; border:1px solid var(--border-subtle);">
-              No choices offered in this scene. You may move or wait to change world conditions.
-            </div>
-          </div>
+          </section>
 
-          <!-- Movement / Connected Locations -->
-          <div>
-            <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:10px; letter-spacing:0.5px;">CONNECTED LOCATIONS</div>
-            <div v-if="connectedLocations.length > 0" style="display:flex; gap:10px; flex-wrap:wrap;">
-              <button
-                v-for="loc in connectedLocations"
-                :key="loc.id"
-                class="btn btn-secondary"
-                @click="moveToLocation(loc.id)"
-              >
-                Move to {{ loc.name }}
-              </button>
-            </div>
-            <div v-else style="font-size:13px; color:var(--text-muted);">
-              No routes connected to this location.
-            </div>
-          </div>
-        </div>
-      </div>
+          <section style="max-width:760px;">
+            <h3 style="font-size:12px; text-transform:uppercase; color:var(--text-muted);">Send signal event</h3>
+            <form style="display:flex; gap:8px;" @submit.prevent="sendSignal">
+              <input v-model="eventName" class="form-input" placeholder="Event name" aria-label="Signal event name">
+              <button class="btn btn-secondary" :disabled="!eventName.trim() || loading">Signal</button>
+            </form>
+          </section>
+        </template>
+      </main>
 
-      <!-- Right Inspector Panel -->
-      <div style="width:360px; border-left:1px solid var(--border-subtle); display:flex; flex-direction:column; background:var(--bg-card);">
-        <div style="display:flex; border-bottom:1px solid var(--border-subtle); padding:6px 8px; gap:4px;">
-          <button :class="['tab-btn', activeTab === 'state' ? 'active' : '']" @click="activeTab = 'state'">State</button>
-          <button :class="['tab-btn', activeTab === 'director' ? 'active' : '']" @click="activeTab = 'director'">Director</button>
-          <button :class="['tab-btn', activeTab === 'causality' ? 'active' : '']" @click="activeTab = 'causality'">Causality</button>
-        </div>
-
+      <aside style="width:360px; flex:none; border-left:1px solid var(--border-subtle); display:flex; flex-direction:column; background:var(--bg-card);">
+        <nav style="display:flex; border-bottom:1px solid var(--border-subtle); padding:6px; gap:4px;">
+          <button :class="['tab-btn', activeTab === 'runtime' ? 'active' : '']" @click="activeTab = 'runtime'">Runtime</button>
+          <button :class="['tab-btn', activeTab === 'state' ? 'active' : '']" @click="activeTab = 'state'">World state</button>
+          <button :class="['tab-btn', activeTab === 'history' ? 'active' : '']" @click="activeTab = 'history'">Call history</button>
+        </nav>
         <div style="flex:1; overflow-y:auto; padding:16px; font-size:12px;">
-          <!-- STATE TAB -->
-          <div v-if="activeTab === 'state'">
-            <div style="font-weight:700; margin-bottom:8px; text-transform:uppercase; color:var(--text-muted);">World Qualities</div>
-            <div v-if="snapshot" style="display:grid; gap:4px; margin-bottom:16px;">
-              <div
-                v-for="(val, qk) in snapshot.world.qualities"
-                :key="qk"
-                style="display:flex; justify-content:space-between; padding:4px 8px; background:var(--bg-input); border-radius:6px;"
-              >
-                <span style="font-family:var(--font-mono);">{{ qk }}</span>
-                <strong>{{ val }}</strong>
-              </div>
+          <template v-if="activeTab === 'runtime'">
+            <h3 class="chrono-heading">Graph nodes</h3>
+            <div v-for="node in context?.nodes ?? []" :key="node.nodeGuid" class="chrono-row">
+              <div><strong>{{ node.nodeTypeId }}</strong><code> #{{ node.nodeGuid }}</code></div>
+              <div style="color:var(--text-muted);">{{ JSON.stringify(node.state) }}<span v-if="node.storyletId"> · {{ node.storyletId }}</span></div>
             </div>
+            <h3 class="chrono-heading">Pending tokens · {{ context?.tokens.length ?? 0 }}</h3>
+            <pre class="chrono-json">{{ JSON.stringify(context?.tokens ?? [], null, 2) }}</pre>
+          </template>
 
-            <div style="font-weight:700; margin-bottom:8px; text-transform:uppercase; color:var(--text-muted);">Actors Present</div>
-            <div v-if="snapshot" style="display:grid; gap:6px;">
-              <div
-                v-for="(act, aid) in snapshot.world.actors"
-                :key="aid"
-                style="padding:6px 8px; background:var(--bg-input); border-radius:6px;"
-              >
-                <div style="font-weight:600;">{{ characterMap.get(aid)?.name || aid }}</div>
-                <div style="font-size:11px; color:var(--text-muted);">At: {{ locationMap.get(act.current_location)?.name || act.current_location }}</div>
-              </div>
-            </div>
-          </div>
+          <template v-else-if="activeTab === 'state'">
+            <h3 class="chrono-heading">Qualities</h3>
+            <div v-for="([name, value]) in metricEntries" :key="name" class="chrono-row"><span>{{ name }}</span><strong>{{ value }}</strong></div>
+            <h3 class="chrono-heading">Global tags</h3>
+            <div v-if="!world?.globalTags.length" class="chrono-empty">No global tags.</div>
+            <div v-for="tag in world?.globalTags ?? []" :key="tag" class="chrono-row">{{ tag }}</div>
+            <h3 class="chrono-heading">Entities</h3>
+            <div v-for="([id, tags]) in entityEntries" :key="id" class="chrono-row"><strong>{{ id }}</strong><div>{{ tags.join(', ') || 'No tags' }}</div></div>
+            <h3 class="chrono-heading">Passions</h3>
+            <pre class="chrono-json">{{ JSON.stringify(world?.passions ?? {}, null, 2) }}</pre>
+            <h3 class="chrono-heading">Narrative Lego transitions</h3>
+            <div v-if="!context?.passionEvents.length" class="chrono-empty">No passion threshold transitions yet.</div>
+            <pre v-else class="chrono-json">{{ JSON.stringify(context.passionEvents, null, 2) }}</pre>
+            <h3 class="chrono-heading">Configured passion thresholds</h3>
+            <pre class="chrono-json">{{ JSON.stringify(context?.passionThresholds ?? [], null, 2) }}</pre>
+          </template>
 
-          <!-- DIRECTOR TAB -->
-          <div v-else-if="activeTab === 'director'">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <span style="font-weight:700; text-transform:uppercase; color:var(--text-muted);">Candidate Pool</span>
+          <template v-else>
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <h3 class="chrono-heading">Global call history · {{ history.length }}</h3>
+              <button class="btn btn-secondary" :disabled="!history.length || loading" @click="rollbackLatestCall">Undo latest</button>
             </div>
-
-            <div v-for="c in directorEval?.candidates ?? []" :key="c.storylet_id" style="margin-bottom:10px; padding:8px 10px; background:var(--bg-input); border-radius:8px;">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-weight:600;">{{ c.storylet_id }}</span>
-                <span :class="['badge', c.eligible ? 'approved' : '']">{{ c.eligible ? 'Eligible' : 'Rejected' }}</span>
-              </div>
-              <div v-if="!c.eligible && c.rejection" style="color:var(--status-danger); font-size:11px; margin-top:4px;">
-                Reason: {{ c.rejection.reason }}
-              </div>
-              <div v-if="c.eligible && Object.keys(c.bound_roles).length" style="color:var(--text-muted); font-size:11px; margin-top:4px;">
-                Roles: {{ JSON.stringify(c.bound_roles) }}
-              </div>
+            <div v-for="(entry, index) in history" :key="index" class="chrono-row">
+              <strong>{{ index + 1 }}. {{ (entry as Record<string, unknown>).node_guid ?? 'Node call' }}</strong>
+              <pre class="chrono-json">{{ JSON.stringify(entry, null, 2) }}</pre>
             </div>
-          </div>
-
-          <!-- CAUSALITY TAB -->
-          <div v-else-if="activeTab === 'causality'">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <span style="font-weight:700; text-transform:uppercase; color:var(--text-muted);">Event Causal Trace</span>
-              <button
-                class="btn btn-secondary"
-                :disabled="!selectedEventId"
-                style="font-size:11px; padding:3px 8px;"
-                @click="handleFork"
-              >
-                Fork From Event
-              </button>
-            </div>
-
-            <div v-for="ev in events" :key="ev.id"
-              :style="{
-                padding: '8px 10px',
-                borderRadius: '8px',
-                marginBottom: '6px',
-                cursor: 'pointer',
-                background: selectedEventId === ev.id ? 'var(--accent-subtle)' : 'var(--bg-input)',
-                border: selectedEventId === ev.id ? '1px solid var(--accent)' : '1px solid transparent'
-              }"
-              @click="selectedEventId = ev.id"
-            >
-              <div style="display:flex; justify-content:space-between;">
-                <strong>Turn {{ ev.turn }}: {{ ev.actor_id }}</strong>
-                <span style="color:var(--text-dim); font-size:10px;">{{ ev.id.slice(0, 8) }}</span>
-              </div>
-              <div style="color:var(--text-muted); font-size:11px; margin-top:2px;">{{ ev.action }}</div>
-            </div>
-
-            <!-- Branch compare -->
-            <div style="margin-top:20px; padding-top:14px; border-top:1px solid var(--border-subtle);">
-              <label class="form-label">Compare with branch</label>
-              <div style="display:flex; gap:8px;">
-                <select v-model="compareSessionId" class="form-select" style="flex:1;">
-                  <option value="">Select branch run...</option>
-                  <option v-for="s in sessions.filter(s => s.session_id !== sessionId)" :key="s.session_id" :value="s.session_id">
-                    {{ s.session_id.slice(0, 8) }}
-                  </option>
-                </select>
-                <button class="btn btn-secondary" :disabled="!compareSessionId" @click="handleCompare">Compare</button>
-              </div>
-              <p v-if="comparisonReport" style="margin-top:8px; font-size:11px; color:var(--text-muted);">{{ comparisonReport }}</p>
-            </div>
-          </div>
+            <div v-if="!history.length" class="chrono-empty">No completed calls to reconcile.</div>
+          </template>
         </div>
-      </div>
+      </aside>
     </div>
   </div>
 </template>
+
+<style scoped>
+.chrono-card { padding: 14px; margin: 10px 0; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-card); }
+.chrono-option { width: 100%; display: flex; justify-content: space-between; gap: 10px; text-align: left; margin-top: 7px; }
+.chrono-option small { display: block; color: var(--text-muted); font-size: 10px; }
+.chrono-empty { padding: 12px; border-radius: 8px; color: var(--text-muted); background: var(--bg-input); }
+.chrono-heading { margin: 14px 0 8px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; }
+.chrono-row { display: grid; gap: 4px; margin-bottom: 6px; padding: 8px; border-radius: 7px; background: var(--bg-input); overflow-wrap: anywhere; }
+.chrono-row code { color: var(--text-muted); font-size: 10px; }
+.chrono-json { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; color: var(--text-muted); }
+</style>

@@ -16,6 +16,10 @@ fn a_new_project_starts_empty_and_builds_a_generic_scenario_world() {
             kind: QualityType::Currency,
             default_value: json!(8),
             description: "Meals in the communal pantry".into(),
+            min_value: 0.0,
+            max_value: 100.0,
+            is_hidden: false,
+            menace_crisis_storylet_id: None,
         },
     );
     project.locations.insert(

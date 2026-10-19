@@ -3,6 +3,16 @@
     "decisionnarrative": {
       "command": "cargo",
       "args": ["run", "--manifest-path", "crates/storylet-engine-service/Cargo.toml", "--bin", "storylet-engine-service", "--", "--mcp"]
+    },
+    "graphicle": {
+      "command": "graphicle",
+      "args": [
+        "mcp",
+        "--project",
+        ".",
+        "--tools",
+        "essentials"
+      ]
     }
   }
 }

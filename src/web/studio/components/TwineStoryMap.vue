@@ -175,7 +175,7 @@ async function createPassageAt(x: number, y: number) {
     title: `Passage ${nextIdx}`,
     ending: false,
     location_tags: [],
-    cluster_type: "player_controlled_passage",
+    cluster_type: "player_passage",
     urgency_weight: 50,
     repeatability: "always",
     cooldown_turns: 0,

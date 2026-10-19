@@ -44,6 +44,7 @@ pub fn project_workspace(
             "currency" => QualityType::Currency,
             "metric" => QualityType::Metric,
             "tool" => QualityType::Tool,
+            "progress" => QualityType::Progress,
             "territory" => QualityType::Territory,
             "menace" => QualityType::Menace,
             _ => QualityType::Custom,
@@ -55,6 +56,10 @@ pub fn project_workspace(
                 kind,
                 default_value: Value::from(q.value),
                 description: q.description.clone().unwrap_or_default(),
+                min_value: q.min_value,
+                max_value: q.max_value,
+                is_hidden: q.is_hidden,
+                menace_crisis_storylet_id: q.menace_crisis_storylet_id.clone(),
             },
         );
     }
@@ -211,9 +216,9 @@ pub fn project_workspace(
         };
 
         let cluster_type = match st.cluster_type.as_str() {
-            "linear" => storylet_engine::ClusterType::Linear,
-            "wheel" => storylet_engine::ClusterType::Wheel,
-            "aftermath" => storylet_engine::ClusterType::Aftermath,
+            "linear" | "linear_progression" => storylet_engine::ClusterType::Linear,
+            "wheel" | "wheel_deck" => storylet_engine::ClusterType::Wheel,
+            "aftermath" | "aftermath_accelerator" => storylet_engine::ClusterType::Aftermath,
             _ => storylet_engine::ClusterType::PlayerControlledPassage,
         };
 
@@ -392,7 +397,7 @@ pub fn project_workspace(
     }
 }
 
-fn parse_role_query(query: &str) -> Option<String> {
+pub(crate) fn parse_role_query(query: &str) -> Option<String> {
     let trimmed = query.trim();
     // Accept the canonical role predicate plus legacy predicates emitted by the tag editor.
     let re = regex::Regex::new(

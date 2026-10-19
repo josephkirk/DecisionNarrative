@@ -16,7 +16,7 @@ export function useStoryletEditorViewModel(storyletId?: string) {
     ending: false,
     location_tags: [],
     group_tag: null,
-    cluster_type: "player_controlled_passage",
+    cluster_type: "player_passage",
     urgency_weight: 50,
     repeatability: "always",
     cooldown_turns: 0,

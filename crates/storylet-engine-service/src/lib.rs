@@ -1,5 +1,8 @@
 //! HTTP and persistence host for the host-independent storylet engine.
 
+pub mod chrono_adapter;
+pub mod chrono_graph_adapter;
+pub mod chrono_playtest;
 pub mod contracts;
 pub mod http;
 pub mod legacy_import;

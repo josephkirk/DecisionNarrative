@@ -5,6 +5,7 @@ import type {
   EventRecord,
   LocationRecord,
   NpcBehaviorRecord,
+  ChronoPlaytestSnapshot,
   PlaytestSnapshot,
   ProjectMetadata,
   QualityRecord,
@@ -20,6 +21,8 @@ export interface GlobalStudioState {
   npcBehaviors: NpcBehaviorRecord[];
   events: EventRecord[];
   scenarios: ScenarioRecord[];
+  activeChronoPlaytestSessionId: string | null;
+  activeChronoPlaytestSnapshot: ChronoPlaytestSnapshot | null;
   activePlaytestSessionId: string | null;
   activePlaytestSnapshot: PlaytestSnapshot | null;
   notification: { message: string; type: "info" | "success" | "error" } | null;
@@ -34,6 +37,8 @@ export const studioState = reactive<GlobalStudioState>({
   npcBehaviors: [],
   events: [],
   scenarios: [],
+  activeChronoPlaytestSessionId: null,
+  activeChronoPlaytestSnapshot: null,
   activePlaytestSessionId: null,
   activePlaytestSnapshot: null,
   notification: null,

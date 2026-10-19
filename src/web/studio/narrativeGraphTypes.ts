@@ -16,9 +16,20 @@ export type NodeType =
   | "choice"
   | "variable"
   | "conditional"
+  | "qbn_storylet_hub"
+  | "salience_selector"
+  | "waypoint_conversation"
+  | "waiter"
+  | "logic_all"
+  | "logic_any"
+  | "scene_section"
+  | "mission_sub_graph"
+  | "poi"
   | "image"
   | "teleport"
   | "go_to_location"
+  | "graph_transform"
+  | "passion_mutation"
   | "end";
 
 export interface DialogueLineItem {
@@ -74,6 +85,98 @@ export interface ConditionRule {
   value: string | number | boolean;
 }
 
+export type GraphLayer = "location" | "character" | "item" | "fact";
+
+export type AttributeOp = "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
+
+export type AttributeValueType = "int" | "float" | "bool" | "string" | "tag";
+
+export type AttributeValue =
+  | { type: "int"; value: number }
+  | { type: "float"; value: number }
+  | { type: "bool"; value: boolean }
+  | { type: "string"; value: string }
+  | { type: "tag"; value: number };
+
+export type GraphBinding =
+  | { type: "literal"; id: string }
+  | { type: "vertex_pattern"; index: number };
+
+export interface AttributePredicate {
+  key: string;
+  op: AttributeOp;
+  value: AttributeValue;
+}
+
+export interface VertexPattern {
+  layer: GraphLayer;
+  vertex_id?: string;
+  attributes: AttributePredicate[];
+}
+
+export interface EdgePattern {
+  edge_id?: string;
+  relation_type?: string;
+  source?: GraphBinding;
+  target?: GraphBinding;
+}
+
+export interface GraphPattern {
+  vertices: VertexPattern[];
+  edges: EdgePattern[];
+}
+
+export interface VertexTemplate {
+  id: GraphBinding;
+  layer: GraphLayer;
+  attributes: Record<string, AttributeValue>;
+}
+
+export interface EdgeTemplate {
+  id: GraphBinding;
+  source: GraphBinding;
+  target: GraphBinding;
+  relation_type: string;
+  weight: number;
+}
+
+export interface AttributeAssignment {
+  vertex: GraphBinding;
+  key: string;
+  value: AttributeValue;
+}
+
+export interface GraphMutation {
+  add_vertices: VertexTemplate[];
+  remove_vertices: GraphBinding[];
+  add_edges: EdgeTemplate[];
+  remove_edges: GraphBinding[];
+  set_attributes: AttributeAssignment[];
+}
+
+export interface GraphTransformRule {
+  lhs: GraphPattern;
+  rhs: GraphMutation;
+}
+
+export interface PassionMutation {
+  micro_deltas: Array<[number, number]>;
+  active_ops: Array<[number, boolean]>;
+}
+
+export function isGraphTransformNode(node: NarrativeNode): node is NarrativeNode & { rule: GraphTransformRule } {
+  const rule = node.rule;
+  if (node.type !== "graph_transform" || !rule?.lhs || !rule?.rhs) return false;
+  const rhs = rule.rhs;
+  return Array.isArray(rule.lhs.vertices) && Array.isArray(rule.lhs.edges) &&
+    Array.isArray(rhs.add_vertices) && Array.isArray(rhs.remove_vertices) &&
+    Array.isArray(rhs.add_edges) && Array.isArray(rhs.remove_edges) && Array.isArray(rhs.set_attributes);
+}
+
+export function isPassionMutationNode(node: NarrativeNode): node is NarrativeNode & { op: PassionMutation } {
+  const op = node.op;
+  return node.type === "passion_mutation" && !!op && Array.isArray(op.micro_deltas) && Array.isArray(op.active_ops);
+}
 export interface NarrativeNode {
   id: string;
   type: NodeType;
@@ -82,7 +185,6 @@ export interface NarrativeNode {
   y: number;
   width: number;
   height: number;
-  // Node specific data
   speaker_role?: string;
   text?: string;
   quip?: string;
@@ -90,11 +192,26 @@ export interface NarrativeNode {
   choices?: ChoiceOption[];
   assignments?: VariableAssignment[];
   conditions?: ConditionRule[];
+  rule?: GraphTransformRule;
+  op?: PassionMutation;
   image_url?: string;
   destination_storylet?: string;
   location_id?: string;
   is_terminal?: boolean;
   jump_to_storylet?: string;
+  deck_storylet_ids?: string[];
+  hub_exit_storylet_id?: string;
+  candidate_pool_ids?: string[];
+  fallback_storylet_id?: string;
+  topic_nodes?: Array<Record<string, unknown>>;
+  topic_edges?: Array<Record<string, unknown>>;
+  initial_topic_id?: string;
+  npc_goal_topic_id?: string;
+  wait_event?: string;
+  duration_ms?: number;
+  timeline_events?: Array<Record<string, unknown>>;
+  sub_graph_asset_id?: string;
+  entity_path?: string;
 }
 
 export interface NarrativeEdge {
@@ -260,19 +377,114 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
 export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
   const issues: string[] = [];
   if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return ["Graph must contain node and edge arrays."];
-  const allowedTypes = new Set<NodeType>(["start", "dialog", "choice", "variable", "conditional", "image", "teleport", "go_to_location", "end"]);
+  const allowedTypes = new Set<NodeType>([
+    "start", "dialog", "choice", "variable", "conditional", "qbn_storylet_hub",
+    "salience_selector", "waypoint_conversation", "waiter", "logic_all", "logic_any",
+    "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "end",
+  ]);
   if (graph.nodes.some((node) => !node || typeof node !== "object" || typeof node.id !== "string" || !node.id.trim() || !allowedTypes.has(node.type))) {
     return ["Graph nodes must have nonempty IDs and recognized types."];
   }
   for (const node of graph.nodes) {
-    if (node.type === "go_to_location" && !node.location_id?.trim()) {
-      issues.push("Go To Location nodes must select a location.");
+    if (node.type === "go_to_location" && !node.location_id?.trim()) issues.push("Go To Location nodes must select a location.");
+    if (node.type === "image" && !isSafeImageUrl(node.image_url)) issues.push(`Image node ${node.title} must have a safe HTTP(S) URL or project-relative path.`);
+    if (node.type === "qbn_storylet_hub") {
+      if (!(node.deck_storylet_ids?.length)) issues.push(`QBN hub ${node.title} must have a nonempty storylet deck.`);
+      if (!node.hub_exit_storylet_id?.trim() || !node.deck_storylet_ids?.includes(node.hub_exit_storylet_id)) {
+        issues.push(`QBN hub ${node.title} must select its exit storylet from its deck.`);
+      }
     }
-    if (node.type === "image" && !isSafeImageUrl(node.image_url)) {
-      issues.push(`Image node ${node.title} must have a safe HTTP(S) URL or project-relative path.`);
+    if (node.type === "salience_selector" && !(node.candidate_pool_ids?.length)) {
+      issues.push(`Salience selector ${node.title} must have a nonempty candidate pool.`);
+    }
+    if (node.type === "waiter" && !node.wait_event?.trim()) issues.push(`Waiter ${node.title} must name a gameplay event.`);
+    if (node.type === "mission_sub_graph" && !node.sub_graph_asset_id?.trim()) issues.push(`Mission ${node.title} must select a subgraph asset.`);
+    if (node.type === "poi" && !node.entity_path?.trim()) issues.push(`POI ${node.title} must bind an entity path.`);
+    if (node.type === "scene_section") {
+      if (!Number.isSafeInteger(node.duration_ms) || (node.duration_ms ?? -1) < 0) {
+        issues.push(`Scene Section ${node.title} must have a nonnegative integer duration.`);
+      }
+      for (const event of node.timeline_events ?? []) {
+        const start = event.start_time_ms;
+        const duration = event.duration_ms;
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(duration) || (start as number) < 0 || (duration as number) < 0 ||
+          (start as number) + (duration as number) > (node.duration_ms ?? 0)) {
+          issues.push(`Scene Section ${node.title} has a timeline event outside its duration.`);
+        }
+      }
+    }
+    if (node.type === "waypoint_conversation") {
+      const topics = node.topic_nodes ?? [];
+      const topicIds = new Set(topics.map((topic) => topic.topic_id).filter((id): id is string => typeof id === "string"));
+      const exitPins = topics.filter((topic) => topic.triggers_scene_exit === true).map((topic) => topic.exit_output_pin);
+      if (!node.initial_topic_id || !topicIds.has(node.initial_topic_id)) issues.push(`Waypoint ${node.title} must have a valid initial topic.`);
+      if (!node.npc_goal_topic_id || !topicIds.has(node.npc_goal_topic_id)) issues.push(`Waypoint ${node.title} must have a valid NPC goal topic.`);
+      if (!exitPins.length || exitPins.some((pin) => typeof pin !== "string" || !pin.trim()) || new Set(exitPins).size !== exitPins.length) {
+        issues.push(`Waypoint ${node.title} must define unique output pins for its scene-exit topics.`);
+      }
+      for (const edge of node.topic_edges ?? []) {
+        if (typeof edge.from_topic_id !== "string" || typeof edge.to_topic_id !== "string" ||
+          !topicIds.has(edge.from_topic_id) || !topicIds.has(edge.to_topic_id) ||
+          typeof edge.base_cost !== "number" || !Number.isFinite(edge.base_cost) || edge.base_cost < 0) {
+          issues.push(`Waypoint ${node.title} has an invalid topic transition.`);
+          break;
+        }
+      }
+    }
+    if (node.type === "graph_transform") {
+      if (!isGraphTransformNode(node)) {
+        issues.push(`Graph Transform ${node.title} must define a left-hand side pattern and a right-hand side mutation.`);
+      } else {
+        const rule = node.rule;
+        const rhs = rule.rhs;
+        if (!(rule.lhs.vertices.length || rule.lhs.edges.length)) issues.push(`Graph Transform ${node.title} must match at least one graph pattern.`);
+        if (!(rhs.add_vertices.length || rhs.remove_vertices.length || rhs.add_edges.length || rhs.remove_edges.length || rhs.set_attributes.length)) {
+          issues.push(`Graph Transform ${node.title} must apply at least one mutation.`);
+        }
+        const values = [
+          ...rule.lhs.vertices.flatMap((vertex) => vertex.attributes.map((predicate) => predicate.value)),
+          ...rhs.add_vertices.flatMap((vertex) => Object.values(vertex.attributes)),
+          ...rhs.set_attributes.map((assignment) => assignment.value),
+        ];
+        if (values.some((value) => value.type === "float" && !Number.isFinite(value.value))) {
+          issues.push(`Graph Transform ${node.title} has a non-finite attribute value.`);
+        }
+        if (rule.lhs.vertices.some((vertex) => vertex.attributes.some((predicate) =>
+          (predicate.op === "gt" || predicate.op === "gte" || predicate.op === "lt" || predicate.op === "lte") &&
+          predicate.value.type !== "int" && predicate.value.type !== "float"))) {
+          issues.push(`Graph Transform ${node.title} has an ordered attribute predicate without a numeric value.`);
+        }
+        const bindings = [
+          ...rule.lhs.edges.flatMap((edge) => [edge.source, edge.target].filter((binding): binding is GraphBinding => !!binding)),
+          ...rhs.add_vertices.map((vertex) => vertex.id),
+          ...rhs.add_edges.flatMap((edge) => [edge.id, edge.source, edge.target]),
+          ...rhs.remove_vertices,
+          ...rhs.remove_edges,
+          ...rhs.set_attributes.map((assignment) => assignment.vertex),
+        ];
+        if (bindings.some((binding) => binding.type === "vertex_pattern" && binding.index >= rule.lhs.vertices.length)) {
+          issues.push(`Graph Transform ${node.title} binds a vertex pattern outside its left-hand side.`);
+        }
+      }
+    }
+    if (node.type === "passion_mutation") {
+      if (!isPassionMutationNode(node)) {
+        issues.push(`Passion Mutation ${node.title} must define typed passion deltas and active-pool operations.`);
+      } else {
+        const op = node.op;
+        if (!(op.micro_deltas.length || op.active_ops.length)) {
+          issues.push(`Passion Mutation ${node.title} must apply at least one typed delta or active-pool operation.`);
+        }
+        if (op.micro_deltas.some(([id]) => !Number.isInteger(id) || id < 0 || id > 65535) ||
+          op.active_ops.some(([id]) => !Number.isInteger(id) || id < 0 || id > 65535)) {
+          issues.push(`Passion Mutation ${node.title} has a passion index outside the u16 range.`);
+        }
+        if (op.micro_deltas.some(([, delta]) => !Number.isFinite(delta))) issues.push(`Passion Mutation ${node.title} has a non-finite passion delta.`);
+      }
     }
   }
-  if (graph.edges.some((edge) => !edge || typeof edge !== "object" || typeof edge.id !== "string" || !edge.id.trim() || typeof edge.from_node !== "string" || typeof edge.from_port !== "string" || typeof edge.to_node !== "string" || typeof edge.to_port !== "string")) {
+  if (graph.edges.some((edge) => !edge || typeof edge !== "object" || typeof edge.id !== "string" || !edge.id.trim() ||
+    typeof edge.from_node !== "string" || typeof edge.from_port !== "string" || typeof edge.to_node !== "string" || typeof edge.to_port !== "string")) {
     return ["Graph edges must have nonempty IDs and valid endpoint fields."];
   }
   const starts = graph.nodes.filter((node) => node.type === "start");
@@ -282,7 +494,8 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
   if (ends.length !== 1) issues.push("Graph must have exactly one End node.");
   if (ids.size !== graph.nodes.length) issues.push("Node IDs must be unique.");
   if (starts.length !== 1 || ends.length !== 1 || ids.size !== graph.nodes.length) return issues;
-  const outgoing = new Map<string, string[]>(); const incoming = new Map<string, string[]>();
+  const outgoing = new Map<string, string[]>();
+  const incoming = new Map<string, string[]>();
   const edgeIds = new Set<string>();
   for (const edge of graph.edges) {
     if (edgeIds.has(edge.id)) issues.push("Edge IDs must be unique.");
@@ -292,10 +505,14 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
     outgoing.set(edge.from_node, [...(outgoing.get(edge.from_node) ?? []), edge.to_node]);
     incoming.set(edge.to_node, [...(incoming.get(edge.to_node) ?? []), edge.from_node]);
   }
-  const start = starts[0]!.id; const end = ends[0]!.id;
+  const start = starts[0]!.id;
   if ((incoming.get(start)?.length ?? 0) || (outgoing.get(start)?.length ?? 0) !== 1) issues.push("Start must have no incoming edges and exactly one outgoing edge.");
-  const walk = (seed: string, links: Map<string, string[]>): Set<string> => { const seen = new Set<string>(); const stack = [seed]; while (stack.length) { const id = stack.pop()!; if (seen.has(id)) continue; seen.add(id); stack.push(...(links.get(id) ?? [])); } return seen; };
-  const reachable = walk(start, outgoing); const reachesEnd = walk(end, incoming);
+  const walk = (seed: string, links: Map<string, string[]>): Set<string> => {
+    const seen = new Set<string>(); const stack = [seed];
+    while (stack.length) { const id = stack.pop()!; if (seen.has(id)) continue; seen.add(id); stack.push(...(links.get(id) ?? [])); }
+    return seen;
+  };
+  const reachable = walk(start, outgoing); const reachesEnd = walk(ends[0]!.id, incoming);
   if (graph.nodes.some((node) => !reachable.has(node.id))) issues.push("Every node must be reachable from Start.");
   if (graph.nodes.some((node) => !reachesEnd.has(node.id))) issues.push("Every node must have a path to End.");
   for (const node of graph.nodes) {
@@ -306,18 +523,38 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
         if (edges.filter((edge) => edge.from_port === `choice_${index}`).length !== 1) issues.push(`Choice ${index + 1} on ${node.title} must have exactly one outgoing branch.`);
       }
       if (edges.some((edge) => !expectedPorts.has(edge.from_port))) issues.push(`Choice node ${node.title} has an edge from an unknown output port.`);
+    } else if (node.type === "conditional") {
+      if (!(node.conditions?.length)) issues.push(`Conditional node ${node.title} must have at least one condition.`);
+      const expectedPorts = ["true", "false"];
+      for (const port of expectedPorts) {
+        if (edges.filter((edge) => edge.from_port === port).length !== 1) {
+          issues.push(`Conditional node ${node.title} must have exactly one '${port}' branch.`);
+        }
+      }
+      if (edges.some((edge) => !expectedPorts.includes(edge.from_port))) {
+        issues.push(`Conditional node ${node.title} has an edge from an unknown branch.`);
+      }
+    } else if (node.type === "waypoint_conversation") {
+      const expectedPorts = new Set((node.topic_nodes ?? []).filter((topic) => topic.triggers_scene_exit === true).map((topic) => topic.exit_output_pin));
+      for (const port of expectedPorts) {
+        if (typeof port === "string" && edges.filter((edge) => edge.from_port === port).length !== 1) {
+          issues.push(`Waypoint exit ${port} on ${node.title} must have exactly one outgoing edge.`);
+        }
+      }
+      if (edges.some((edge) => !expectedPorts.has(edge.from_port))) issues.push(`Waypoint ${node.title} has an edge from an unknown exit pin.`);
     } else if (node.type === "go_to_location") {
       const incomingEdges = graph.edges.filter((edge) => edge.to_node === node.id);
       if (incomingEdges.some((edge) => graph.nodes.find((source) => source.id === edge.from_node)?.type !== "choice")) {
         issues.push(`Go To Location node ${node.title} may only be targeted directly by a Choice branch.`);
       }
-      if (edges.length !== 1 || edges[0]?.from_port !== "output") {
-        issues.push(`Go To Location node ${node.title} must have exactly one outgoing edge from its output port.`);
-      }
+      if (edges.length !== 1 || edges[0]?.from_port !== "output") issues.push(`Go To Location node ${node.title} must have exactly one outgoing edge from its output port.`);
     } else if (node.type === "end") {
       if (edges.length) issues.push("End cannot have outgoing edges.");
     } else if (edges.length !== 1 || edges[0]?.from_port !== "output") {
       issues.push(`${node.type} node ${node.title} must have exactly one outgoing edge from its output port.`);
+    }
+    if ((node.type === "logic_all" || node.type === "logic_any") && (incoming.get(node.id)?.length ?? 0) < 2) {
+      issues.push(`${node.type} node ${node.title} must have at least two incoming branches.`);
     }
   }
   return issues;

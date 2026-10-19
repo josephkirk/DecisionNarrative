@@ -76,15 +76,59 @@ pub enum NarrativeNodeData {
         sections: Vec<DialogueSection>,
     },
     Choice {
+        #[serde(default)]
         choices: Vec<ChoiceOption>,
     },
     Variable {
+        #[serde(default)]
         assignments: Vec<VariableAssignment>,
     },
-    Conditional {
-        conditions: Vec<ConditionRule>,
+    QbnStoryletHub {
         #[serde(default)]
-        default_route: bool,
+        deck_storylet_ids: Vec<String>,
+        #[serde(default)]
+        hub_exit_storylet_id: String,
+    },
+    SalienceSelector {
+        #[serde(default)]
+        candidate_pool_ids: Vec<String>,
+        /// Storylet used when every candidate is gated (spec §11.3).
+        #[serde(default)]
+        fallback_storylet_id: String,
+    },
+    WaypointConversation {
+        #[serde(default)]
+        topic_nodes: Vec<Value>,
+        #[serde(default)]
+        topic_edges: Vec<Value>,
+        #[serde(default)]
+        initial_topic_id: String,
+        #[serde(default)]
+        npc_goal_topic_id: String,
+    },
+    Waiter {
+        #[serde(default)]
+        wait_event: String,
+    },
+    LogicAll {},
+    LogicAny {},
+    Conditional {
+        #[serde(default)]
+        conditions: Vec<ConditionRule>,
+    },
+    SceneSection {
+        #[serde(default)]
+        duration_ms: u64,
+        #[serde(default)]
+        events: Vec<Value>,
+    },
+    MissionSubGraph {
+        #[serde(default)]
+        sub_graph_asset_id: String,
+    },
+    Poi {
+        #[serde(default)]
+        entity_path: String,
     },
     Image {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -95,6 +139,14 @@ pub enum NarrativeNodeData {
     },
     GoToLocation {
         location_id: String,
+    },
+    GraphTransform {
+        #[serde(default)]
+        rule: GraphTransformRule,
+    },
+    PassionMutation {
+        #[serde(default)]
+        op: PassionMutation,
     },
     End {
         #[serde(default)]
@@ -144,6 +196,155 @@ pub struct LocalVariableDefinition {
     pub default_value: Value,
 }
 
+// ChronoFlow v5 authoring model. Field names mirror `storylet_engine::chrono_state`
+// so the graph adapter can compile these records into runtime rules. `GraphBinding`
+// and `AttributeValue` use struct variants because internally tagged enums cannot
+// round-trip newtype variants through JSON.
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphLayer {
+    #[default]
+    Location,
+    Character,
+    Item,
+    Fact,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AttributeValue {
+    Int { value: i64 },
+    Float { value: f64 },
+    Bool { value: bool },
+    String { value: String },
+    Tag { value: u16 },
+}
+
+impl Default for AttributeValue {
+    fn default() -> Self {
+        Self::String {
+            value: String::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttributeOp {
+    #[default]
+    Eq,
+    Neq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GraphBinding {
+    Literal { id: String },
+    VertexPattern { index: usize },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AttributePredicate {
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub op: AttributeOp,
+    pub value: AttributeValue,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct VertexPattern {
+    #[serde(default)]
+    pub layer: GraphLayer,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertex_id: Option<String>,
+    #[serde(default)]
+    pub attributes: Vec<AttributePredicate>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct EdgePattern {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relation_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<GraphBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<GraphBinding>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GraphPattern {
+    #[serde(default)]
+    pub vertices: Vec<VertexPattern>,
+    #[serde(default)]
+    pub edges: Vec<EdgePattern>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VertexTemplate {
+    pub id: GraphBinding,
+    #[serde(default)]
+    pub layer: GraphLayer,
+    #[serde(default)]
+    pub attributes: BTreeMap<String, AttributeValue>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EdgeTemplate {
+    pub id: GraphBinding,
+    pub source: GraphBinding,
+    pub target: GraphBinding,
+    #[serde(default)]
+    pub relation_type: String,
+    #[serde(default)]
+    pub weight: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AttributeAssignment {
+    pub vertex: GraphBinding,
+    #[serde(default)]
+    pub key: String,
+    pub value: AttributeValue,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GraphMutation {
+    #[serde(default)]
+    pub add_vertices: Vec<VertexTemplate>,
+    #[serde(default)]
+    pub remove_vertices: Vec<GraphBinding>,
+    #[serde(default)]
+    pub add_edges: Vec<EdgeTemplate>,
+    #[serde(default)]
+    pub remove_edges: Vec<GraphBinding>,
+    #[serde(default)]
+    pub set_attributes: Vec<AttributeAssignment>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GraphTransformRule {
+    #[serde(default)]
+    pub lhs: GraphPattern,
+    #[serde(default)]
+    pub rhs: GraphMutation,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PassionMutation {
+    #[serde(default)]
+    pub micro_deltas: Vec<(u16, f32)>,
+    #[serde(default)]
+    pub active_ops: Vec<(u16, bool)>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NarrativeNode {
     pub id: String,
@@ -179,11 +380,30 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::Dialog { .. } => "Dialog",
         NarrativeNodeData::Choice { .. } => "Choice",
         NarrativeNodeData::Variable { .. } => "Variable",
+        NarrativeNodeData::QbnStoryletHub { .. } => "QBN Storylet Hub",
+        NarrativeNodeData::SalienceSelector { .. } => "Salience Selector",
+        NarrativeNodeData::WaypointConversation { .. } => "Waypoint Conversation",
+        NarrativeNodeData::Waiter { .. } => "Waiter",
+        NarrativeNodeData::LogicAll { .. } => "Logic All",
+        NarrativeNodeData::LogicAny { .. } => "Logic Any",
+        NarrativeNodeData::SceneSection { .. } => "Scene Section",
+        NarrativeNodeData::MissionSubGraph { .. } => "Mission Subgraph",
+        NarrativeNodeData::Poi { .. } => "POI",
         NarrativeNodeData::Conditional { .. } => "Conditional",
         NarrativeNodeData::Image { .. } => "Image",
         NarrativeNodeData::Teleport { .. } => "Teleport",
         NarrativeNodeData::GoToLocation { .. } => "Go To Location",
+        NarrativeNodeData::GraphTransform { .. } => "Graph Transform",
+        NarrativeNodeData::PassionMutation { .. } => "Passion Mutation",
         NarrativeNodeData::End { .. } => "End",
+    }
+}
+
+fn require_default_output(issues: &mut Vec<String>, title: &str, edges: &[&NarrativeEdge]) {
+    if edges.len() != 1 || edges.first().is_some_and(|edge| edge.from_port != "output") {
+        issues.push(format!(
+            "Node {title} must have exactly one outgoing edge from its output port."
+        ));
     }
 }
 
@@ -204,6 +424,83 @@ fn is_safe_image_url(image_url: &str) -> bool {
         }
         None => true,
     }
+}
+
+fn ordered_attribute_op(op: &AttributeOp) -> bool {
+    matches!(
+        op,
+        AttributeOp::Gt | AttributeOp::Gte | AttributeOp::Lt | AttributeOp::Lte
+    )
+}
+
+fn is_numeric_attribute_value(value: &AttributeValue) -> bool {
+    matches!(
+        value,
+        AttributeValue::Int { .. } | AttributeValue::Float { .. }
+    )
+}
+
+fn is_finite_attribute_value(value: &AttributeValue) -> bool {
+    match value {
+        AttributeValue::Float { value } => value.is_finite(),
+        _ => true,
+    }
+}
+
+fn binding_resolves(binding: &GraphBinding, lhs: &GraphPattern) -> bool {
+    match binding {
+        GraphBinding::VertexPattern { index } => *index < lhs.vertices.len(),
+        GraphBinding::Literal { .. } => true,
+    }
+}
+
+fn graph_mutation_is_empty(mutation: &GraphMutation) -> bool {
+    mutation.add_vertices.is_empty()
+        && mutation.remove_vertices.is_empty()
+        && mutation.add_edges.is_empty()
+        && mutation.remove_edges.is_empty()
+        && mutation.set_attributes.is_empty()
+}
+
+fn rule_bindings(rule: &GraphTransformRule) -> Vec<&GraphBinding> {
+    let mut bindings = Vec::new();
+    for pattern in &rule.lhs.edges {
+        bindings.extend(
+            [pattern.source.as_ref(), pattern.target.as_ref()]
+                .into_iter()
+                .flatten(),
+        );
+    }
+    for template in &rule.rhs.add_vertices {
+        bindings.push(&template.id);
+    }
+    for template in &rule.rhs.add_edges {
+        bindings.extend([&template.id, &template.source, &template.target]);
+    }
+    bindings.extend(
+        rule.rhs
+            .remove_vertices
+            .iter()
+            .chain(rule.rhs.remove_edges.iter()),
+    );
+    for assignment in &rule.rhs.set_attributes {
+        bindings.push(&assignment.vertex);
+    }
+    bindings
+}
+
+fn rule_attribute_values(rule: &GraphTransformRule) -> Vec<&AttributeValue> {
+    let mut values = Vec::new();
+    for vertex in &rule.lhs.vertices {
+        values.extend(vertex.attributes.iter().map(|predicate| &predicate.value));
+    }
+    for template in &rule.rhs.add_vertices {
+        values.extend(template.attributes.values());
+    }
+    for assignment in &rule.rhs.set_attributes {
+        values.push(&assignment.value);
+    }
+    values
 }
 
 impl NarrativeGraph {
@@ -335,6 +632,204 @@ impl NarrativeGraph {
                         issues.push(format!("Go To Location node {} must have exactly one outgoing edge from its output port.", node.title));
                     }
                 }
+                NarrativeNodeData::QbnStoryletHub {
+                    deck_storylet_ids,
+                    hub_exit_storylet_id,
+                } => {
+                    if deck_storylet_ids.is_empty() {
+                        issues.push(format!(
+                            "QBN hub {} must have a nonempty storylet deck.",
+                            node.title
+                        ));
+                    }
+                    if hub_exit_storylet_id.trim().is_empty()
+                        || !deck_storylet_ids.contains(hub_exit_storylet_id)
+                    {
+                        issues.push(format!(
+                            "QBN hub {} must select its exit storylet from its deck.",
+                            node.title
+                        ));
+                    }
+                    require_default_output(&mut issues, &node.title, &edges);
+                }
+                NarrativeNodeData::SalienceSelector {
+                    candidate_pool_ids,
+                    fallback_storylet_id,
+                } => {
+                    if candidate_pool_ids.is_empty() {
+                        issues.push(format!(
+                            "Salience selector {} must have a nonempty candidate pool.",
+                            node.title
+                        ));
+                    }
+                    if !fallback_storylet_id.trim().is_empty()
+                        && !candidate_pool_ids
+                            .iter()
+                            .any(|id| id == fallback_storylet_id)
+                    {
+                        issues.push(format!(
+                            "Salience selector {} fallback {} is not in its candidate pool.",
+                            node.title, fallback_storylet_id
+                        ));
+                    }
+                    require_default_output(&mut issues, &node.title, &edges);
+                }
+                NarrativeNodeData::WaypointConversation {
+                    topic_nodes,
+                    topic_edges,
+                    initial_topic_id,
+                    npc_goal_topic_id,
+                } => {
+                    let topic_ids: BTreeSet<&str> = topic_nodes
+                        .iter()
+                        .filter_map(|topic| topic.get("topic_id").and_then(Value::as_str))
+                        .collect();
+                    let exit_pins: Vec<&str> = topic_nodes
+                        .iter()
+                        .filter(|topic| {
+                            topic.get("triggers_scene_exit").and_then(Value::as_bool) == Some(true)
+                        })
+                        .filter_map(|topic| topic.get("exit_output_pin").and_then(Value::as_str))
+                        .collect();
+                    if !topic_ids.contains(initial_topic_id.as_str()) {
+                        issues.push(format!(
+                            "Waypoint {} must have a valid initial topic.",
+                            node.title
+                        ));
+                    }
+                    if !topic_ids.contains(npc_goal_topic_id.as_str()) {
+                        issues.push(format!(
+                            "Waypoint {} must have a valid NPC goal topic.",
+                            node.title
+                        ));
+                    }
+                    let unique_pins: BTreeSet<_> = exit_pins.iter().copied().collect();
+                    if exit_pins.is_empty()
+                        || unique_pins.len() != exit_pins.len()
+                        || topic_nodes.iter().any(|topic| {
+                            topic.get("triggers_scene_exit").and_then(Value::as_bool) == Some(true)
+                                && topic
+                                    .get("exit_output_pin")
+                                    .and_then(Value::as_str)
+                                    .is_none_or(str::is_empty)
+                        })
+                    {
+                        issues.push(format!(
+                            "Waypoint {} must define unique output pins for its scene-exit topics.",
+                            node.title
+                        ));
+                    }
+                    for edge in topic_edges {
+                        let from = edge.get("from_topic_id").and_then(Value::as_str);
+                        let to = edge.get("to_topic_id").and_then(Value::as_str);
+                        let cost = edge.get("base_cost").and_then(Value::as_f64);
+                        if from.is_none_or(|id| !topic_ids.contains(id))
+                            || to.is_none_or(|id| !topic_ids.contains(id))
+                            || cost.is_none_or(|value| !value.is_finite() || value < 0.0)
+                        {
+                            issues.push(format!(
+                                "Waypoint {} has an invalid topic transition.",
+                                node.title
+                            ));
+                            break;
+                        }
+                    }
+                    for pin in &unique_pins {
+                        if edges.iter().filter(|edge| edge.from_port == *pin).count() != 1 {
+                            issues.push(format!(
+                                "Waypoint exit {pin} on {} must have exactly one outgoing edge.",
+                                node.title
+                            ));
+                        }
+                    }
+                    if edges
+                        .iter()
+                        .any(|edge| !unique_pins.contains(edge.from_port.as_str()))
+                    {
+                        issues.push(format!(
+                            "Waypoint {} has an edge from an unknown exit pin.",
+                            node.title
+                        ));
+                    }
+                }
+                NarrativeNodeData::Waiter { wait_event } => {
+                    if wait_event.trim().is_empty() {
+                        issues.push(format!("Waiter {} must name a gameplay event.", node.title));
+                    }
+                    require_default_output(&mut issues, &node.title, &edges);
+                }
+                NarrativeNodeData::LogicAll {} | NarrativeNodeData::LogicAny {} => {
+                    if incoming.get(&node.id).map_or(0, Vec::len) < 2 {
+                        issues.push(format!(
+                            "{} node {} must have at least two incoming branches.",
+                            node_type_name(&node.data),
+                            node.title
+                        ));
+                    }
+                    require_default_output(&mut issues, &node.title, &edges);
+                }
+                NarrativeNodeData::Conditional { conditions } => {
+                    if conditions.is_empty() {
+                        issues.push(format!(
+                            "Conditional node {} must have at least one condition.",
+                            node.title
+                        ));
+                    }
+                    let expected_ports = ["true", "false"];
+                    for port in expected_ports {
+                        if edges.iter().filter(|edge| edge.from_port == port).count() != 1 {
+                            issues.push(format!(
+                                "Conditional node {} must have exactly one '{port}' branch.",
+                                node.title
+                            ));
+                        }
+                    }
+                    if edges
+                        .iter()
+                        .any(|edge| !expected_ports.contains(&edge.from_port.as_str()))
+                    {
+                        issues.push(format!(
+                            "Conditional node {} has an edge from an unknown branch.",
+                            node.title
+                        ));
+                    }
+                }
+                NarrativeNodeData::SceneSection {
+                    duration_ms,
+                    events,
+                } => {
+                    for event in events {
+                        let start = event.get("start_time_ms").and_then(Value::as_u64);
+                        let duration = event.get("duration_ms").and_then(Value::as_u64);
+                        if start.zip(duration).is_none_or(|(start, duration)| {
+                            start
+                                .checked_add(duration)
+                                .is_none_or(|end| end > *duration_ms)
+                        }) {
+                            issues.push(format!(
+                                "Scene Section {} has a timeline event outside its duration.",
+                                node.title
+                            ));
+                            break;
+                        }
+                    }
+                    require_default_output(&mut issues, &node.title, &edges);
+                }
+                NarrativeNodeData::MissionSubGraph { sub_graph_asset_id } => {
+                    if sub_graph_asset_id.trim().is_empty() {
+                        issues.push(format!(
+                            "Mission {} must select a subgraph asset.",
+                            node.title
+                        ));
+                    }
+                    require_default_output(&mut issues, &node.title, &edges);
+                }
+                NarrativeNodeData::Poi { entity_path } => {
+                    if entity_path.trim().is_empty() {
+                        issues.push(format!("POI {} must bind an entity path.", node.title));
+                    }
+                    require_default_output(&mut issues, &node.title, &edges);
+                }
                 NarrativeNodeData::Choice { choices } => {
                     let expected_ports: BTreeSet<String> = (0..choices.len())
                         .map(|index| format!("choice_{index}"))
@@ -363,6 +858,69 @@ impl NarrativeGraph {
                     if !edges.is_empty() {
                         issues.push("End cannot have outgoing edges.".into());
                     }
+                }
+                NarrativeNodeData::GraphTransform { rule } => {
+                    if rule.lhs.vertices.is_empty() && rule.lhs.edges.is_empty() {
+                        issues.push(format!(
+                            "Graph Transform {} must match at least one graph pattern.",
+                            node.title
+                        ));
+                    }
+                    if graph_mutation_is_empty(&rule.rhs) {
+                        issues.push(format!(
+                            "Graph Transform {} must apply at least one mutation.",
+                            node.title
+                        ));
+                    }
+                    if rule_attribute_values(rule)
+                        .into_iter()
+                        .any(|value| !is_finite_attribute_value(value))
+                    {
+                        issues.push(format!(
+                            "Graph Transform {} has a non-finite attribute value.",
+                            node.title
+                        ));
+                    }
+                    if rule
+                        .lhs
+                        .vertices
+                        .iter()
+                        .flat_map(|vertex| &vertex.attributes)
+                        .any(|predicate| {
+                            ordered_attribute_op(&predicate.op)
+                                && !is_numeric_attribute_value(&predicate.value)
+                        })
+                    {
+                        issues.push(format!(
+                            "Graph Transform {} has an ordered attribute predicate without a numeric value.",
+                            node.title
+                        ));
+                    }
+                    if rule_bindings(rule)
+                        .into_iter()
+                        .any(|binding| !binding_resolves(binding, &rule.lhs))
+                    {
+                        issues.push(format!(
+                            "Graph Transform {} binds a vertex pattern outside its left-hand side.",
+                            node.title
+                        ));
+                    }
+                    require_default_output(&mut issues, &node.title, &edges);
+                }
+                NarrativeNodeData::PassionMutation { op } => {
+                    if op.micro_deltas.is_empty() && op.active_ops.is_empty() {
+                        issues.push(format!(
+                            "Passion Mutation {} must apply at least one typed delta or active-pool operation.",
+                            node.title
+                        ));
+                    }
+                    if op.micro_deltas.iter().any(|(_, delta)| !delta.is_finite()) {
+                        issues.push(format!(
+                            "Passion Mutation {} has a non-finite passion delta.",
+                            node.title
+                        ));
+                    }
+                    require_default_output(&mut issues, &node.title, &edges);
                 }
                 _ => {
                     if edges.len() != 1
@@ -850,7 +1408,13 @@ mod graph_wire_contract_tests {
             assert_eq!(super::is_safe_image_url(url), expected, "{url:?}");
         }
 
-        for url in ["", "javascript:alert(1)", "//example.com/image.png", "https:x", "\u{7f}x"] {
+        for url in [
+            "",
+            "javascript:alert(1)",
+            "//example.com/image.png",
+            "https:x",
+            "\u{7f}x",
+        ] {
             let mut payload = studio_graph();
             payload["nodes"][1]["type"] = json!("image");
             payload["nodes"][1]["image_url"] = json!(url);
@@ -863,7 +1427,9 @@ mod graph_wire_contract_tests {
         payload["nodes"][1]["type"] = json!("image");
         payload["nodes"][1]["image_url"] = json!("assets/a:b.png");
         let graph: NarrativeGraph = serde_json::from_value(payload).unwrap();
-        graph.validate().expect("project-relative image paths are allowed");
+        graph
+            .validate()
+            .expect("project-relative image paths are allowed");
     }
     #[test]
     fn graph_rejects_multiple_edges_from_one_output_port() {
@@ -939,5 +1505,27 @@ mod graph_wire_contract_tests {
         let graph: NarrativeGraph = serde_json::from_value(payload).unwrap();
         let issues = graph.validate().unwrap_err().join(" ");
         assert!(issues.contains("Every node must have a path to End."));
+    }
+    #[test]
+    fn conditional_requires_authored_conditions_and_exact_true_false_branches() {
+        let mut payload = studio_graph();
+        payload["nodes"][1]["type"] = json!("conditional");
+        payload["nodes"][1]["conditions"] = json!([
+            { "scope": "global", "variable": "trust", "op": "gte", "value": 1 }
+        ]);
+        payload["edges"] = json!([
+            { "id": "start-condition", "from_node": "start", "from_port": "output", "to_node": "dialog", "to_port": "input" },
+            { "id": "condition-true", "from_node": "dialog", "from_port": "true", "to_node": "end", "to_port": "input" },
+            { "id": "condition-false", "from_node": "dialog", "from_port": "false", "to_node": "end", "to_port": "input" }
+        ]);
+        let graph: NarrativeGraph = serde_json::from_value(payload.clone()).unwrap();
+        graph
+            .validate()
+            .expect("a conditional with both branches should validate");
+
+        payload["edges"].as_array_mut().unwrap().pop();
+        let graph: NarrativeGraph = serde_json::from_value(payload).unwrap();
+        let issues = graph.validate().unwrap_err().join(" ");
+        assert!(issues.contains("must have exactly one 'false' branch"));
     }
 }

@@ -17,6 +17,10 @@ fn project() -> ProjectBundle {
             kind: QualityType::Custom,
             default_value: json!(false),
             description: "Whether the missing receipt has been found".into(),
+            min_value: 0.0,
+            max_value: 100.0,
+            is_hidden: false,
+            menace_crisis_storylet_id: None,
         },
     );
     project.qualities.insert(
@@ -26,6 +30,10 @@ fn project() -> ProjectBundle {
             kind: QualityType::Custom,
             default_value: json!(false),
             description: "Whether the receipt has been read".into(),
+            min_value: 0.0,
+            max_value: 100.0,
+            is_hidden: false,
+            menace_crisis_storylet_id: None,
         },
     );
     for (id, name) in [("market", "Covered Market"), ("archive", "Night Archive")] {
@@ -194,6 +202,10 @@ fn scenario_canon_and_world_events_fire_after_their_turn_and_are_recorded() {
             kind: QualityType::Metric,
             default_value: json!(0),
             description: "Ambient pressure".into(),
+            min_value: 0.0,
+            max_value: 100.0,
+            is_hidden: false,
+            menace_crisis_storylet_id: None,
         },
     );
     authored.events.insert(
@@ -357,6 +369,10 @@ fn replaying_a_player_command_does_not_replay_its_npc_cascade() {
             kind: QualityType::Custom,
             default_value: json!(0),
             description: "Number of times Nora acted".into(),
+            min_value: 0.0,
+            max_value: 100.0,
+            is_hidden: false,
+            menace_crisis_storylet_id: None,
         },
     );
     authored.npc_behaviors.insert(

@@ -7,10 +7,10 @@
     "build": "vite build",
     "dev": "vite",
     "typecheck": "vue-tsc --noEmit",
-    "play": "bun run build && cargo run --target-dir target/play-clean --manifest-path crates/storylet-engine-service/Cargo.toml --bin storylet-engine-service -- --fresh-database",
+    "play": "bun run build && cargo run --target-dir target/play-clean --manifest-path crates/storylet-engine-service/Cargo.toml --bin storylet-engine-service",
+    "play:fresh": "bun run build && cargo run --target-dir target/play-clean --manifest-path crates/storylet-engine-service/Cargo.toml --bin storylet-engine-service -- --fresh-database",
     "serve": "bun run play",
     "engine:service": "cargo run --manifest-path crates/storylet-engine-service/Cargo.toml --bin storylet-engine-service",
-    "smoke:semantic-director": "bun run scripts/smoke-semantic-director.ts",
     "smoke:native-host": "pwsh -NoProfile -File scripts/run-native-host.ps1",
     "test": "bun test",
     "bench": "cargo run --release --manifest-path crates/storylet-engine/Cargo.toml --bin storylet-engine-bench --"
@@ -24,6 +24,7 @@
     "vue-tsc": "^3.3.13"
   },
   "dependencies": {
+    "@oh-my-pi/pi-natives": "^18.12.1",
     "pi": "^2.0.5",
     "vue": "^3.5.44",
     "vue-router": "^5.4.0"

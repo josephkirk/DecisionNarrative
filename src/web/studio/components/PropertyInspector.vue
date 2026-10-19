@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import type { NarrativeNode, NarrativeGraph, DialogueSection, DialogueItem, LocalVariableDefinition } from "../narrativeGraphTypes.ts";
-import { applyJumpPreconditions } from "../narrativeGraphTypes.ts";
-import type { MetCharacterPrecondition, QualityCondition, StoryletRecord, VisitedLocationPrecondition } from "../contracts.ts";
+import type { NarrativeNode, NarrativeGraph, DialogueSection, DialogueItem, LocalVariableDefinition, GraphLayer, AttributeOp, AttributeValueType, AttributeValue, GraphBinding, VertexPattern } from "../narrativeGraphTypes.ts";
+import { applyJumpPreconditions, isGraphTransformNode, isPassionMutationNode } from "../narrativeGraphTypes.ts";
+import type { ChronoQualityPredicate, MetCharacterPrecondition, QualityCondition, StoryletRecord, VisitedLocationPrecondition } from "../contracts.ts";
 import TagEditor from "./TagEditor.vue";
 import { normalizeTagName, uniqueTagNames, buildTagIndex } from "../tagData.ts";
 import { studioState, notify } from "../state.ts";
@@ -67,6 +67,140 @@ const requiredRoleNames = computed({
 const locationTags = computed({
   get: () => uniqueTagNames(props.storylet.location_tags ?? []),
   set: (values: string[]) => { props.storylet.location_tags = uniqueTagNames(values); emit("update-storylet"); },
+});
+const chronoUrgencyColorTag = computed({
+  get: () => props.storylet.chrono?.urgency_color_tag ?? "Standard",
+  set: (value: string) => {
+    ensureChrono().urgency_color_tag = normalizeTagName(value);
+    emit("update-storylet");
+  },
+});
+function ensureChrono() {
+  if (!props.storylet.chrono) props.storylet.chrono = {
+    display_priority: 0,
+    urgency_color_tag: "Standard",
+    is_repeatable: props.storylet.repeatability !== "once_ever",
+    cooldown_ms: 0,
+    preconditions: [],
+    required_tags: [],
+    required_any_tags: [],
+    forbidden_tags: [],
+    required_arc_phases: [],
+    ideal_state_vector: {},
+    ideal_state_weights: {},
+    salience_bonus_tags: [],
+    effects_on_complete: [],
+  };
+  return props.storylet.chrono;
+}
+const chronoArcPhases = computed({
+  get: () => uniqueTagNames(props.storylet.chrono?.required_arc_phases ?? []),
+  set: (values: string[]) => { ensureChrono().required_arc_phases = uniqueTagNames(values); emit("update-storylet"); },
+});
+const chronoRequiredTags = computed({
+  get: () => uniqueTagNames(props.storylet.chrono?.required_tags ?? []),
+  set: (values: string[]) => { ensureChrono().required_tags = uniqueTagNames(values); emit("update-storylet"); },
+});
+const chronoRequiredAnyTags = computed({
+  get: () => uniqueTagNames(props.storylet.chrono?.required_any_tags ?? []),
+  set: (values: string[]) => { ensureChrono().required_any_tags = uniqueTagNames(values); emit("update-storylet"); },
+});
+const chronoForbiddenTags = computed({
+  get: () => uniqueTagNames(props.storylet.chrono?.forbidden_tags ?? []),
+  set: (values: string[]) => { ensureChrono().forbidden_tags = uniqueTagNames(values); emit("update-storylet"); },
+});
+type ChronoJsonField = "ideal_state_vector" | "ideal_state_weights" | "effects_on_complete";
+function chronoJson(field: ChronoJsonField) {
+  const emptyValue = field === "effects_on_complete" ? [] : {};
+  return JSON.stringify(props.storylet.chrono?.[field] ?? emptyValue, null, 2);
+}
+function updateChronoJson(field: ChronoJsonField, event: Event) {
+  const target = event.target as HTMLTextAreaElement;
+  try {
+    const value: unknown = JSON.parse(target.value);
+    if (field === "effects_on_complete" ? !Array.isArray(value) : !value || Array.isArray(value) || typeof value !== "object") {
+      throw new Error(field === "effects_on_complete" ? "Expected a JSON array" : "Expected a JSON object");
+    }
+    (ensureChrono() as unknown as Record<string, unknown>)[field] = value;
+    target.setCustomValidity("");
+    emit("update-storylet");
+  } catch (error) {
+    target.setCustomValidity(error instanceof Error ? error.message : "Invalid JSON");
+    target.reportValidity();
+  }
+}
+
+function eventValue(event: Event): string {
+  return (event.currentTarget as HTMLInputElement).value;
+}
+function addChronoPredicate() {
+  const target = globalQualities.value[0] ?? locationTagOptions.value[0] ?? "";
+  if (!target) {
+    notify("Add a quality or location tag before defining a ChronoFlow predicate", "info");
+    return;
+  }
+  ensureChrono().preconditions.push({
+    target_id: target,
+    subject: globalQualities.value.includes(target) ? "metric" : "location",
+    operator: "gte",
+    comparison_value: 1,
+    specificity_weight: 1,
+  });
+  emit("update-storylet");
+}
+function setChronoPredicate(
+  index: number,
+  field: keyof ChronoQualityPredicate,
+  value: string | number,
+) {
+  if (typeof value === "number" && !Number.isFinite(value)) return;
+  const predicates = [...ensureChrono().preconditions];
+  const predicate = predicates[index];
+  if (!predicate) return;
+  const updated = { ...predicate, [field]: value } as ChronoQualityPredicate;
+  if (field === "subject" && updated.subject !== "metric") {
+    updated.operator = "eq";
+    updated.comparison_value = 1;
+  }
+  predicates[index] = updated;
+  ensureChrono().preconditions = predicates;
+  emit("update-storylet");
+}
+function removeChronoPredicate(index: number) {
+  ensureChrono().preconditions = ensureChrono().preconditions.filter((_, current) => current !== index);
+  emit("update-storylet");
+}
+function updateChronoNumber(field: "display_priority" | "cooldown_ms", event: Event) {
+  const input = event.target as HTMLInputElement;
+  const value = Number(input.value);
+  const validInteger = Number.isSafeInteger(value);
+  const validRange = field === "display_priority"
+    ? value >= -2147483648 && value <= 2147483647
+    : value >= 0;
+  if (!validInteger || !validRange) {
+    input.setCustomValidity(field === "display_priority"
+      ? "Priority must be a signed 32-bit integer"
+      : "Cooldown must be a non-negative integer");
+    input.reportValidity();
+    return;
+  }
+  input.setCustomValidity("");
+  ensureChrono()[field] = value;
+  emit("update-storylet");
+}
+function updateChronoRepeatable(event: Event) {
+  ensureChrono().is_repeatable = (event.target as HTMLInputElement).checked;
+  emit("update-storylet");
+}
+function initializeChronoOnOpen(event: Event) {
+  if ((event.currentTarget as HTMLDetailsElement).open && !props.storylet.chrono) {
+    ensureChrono();
+    emit("update-storylet");
+  }
+}
+const chronoSalienceTags = computed({
+  get: () => uniqueTagNames(props.storylet.chrono?.salience_bonus_tags ?? []),
+  set: (values: string[]) => { ensureChrono().salience_bonus_tags = uniqueTagNames(values); emit("update-storylet"); },
 });
 function updatePreconditions(values: Partial<StoryletRecord["preconditions"]>) {
   props.storylet.preconditions = { ...props.storylet.preconditions, ...values };
@@ -290,6 +424,106 @@ function removeConditionRule(node: NarrativeNode, idx: number) {
   emitGraphUpdate();
 }
 
+// Graph Transform Node (ChronoFlow v5)
+const graphLayers: GraphLayer[] = ["location", "character", "item", "fact"];
+const attributeOps: AttributeOp[] = ["eq", "neq", "gt", "gte", "lt", "lte"];
+const attributeValueTypes: AttributeValueType[] = ["int", "float", "bool", "string", "tag"];
+const bindingTypes: Array<"literal" | "vertex_pattern"> = ["literal", "vertex_pattern"];
+type GraphPatternList = "vertices" | "edges";
+type GraphMutationList = "add_vertices" | "remove_vertices" | "add_edges" | "remove_edges" | "set_attributes";
+
+function attributeValueFrom(type: string, raw: string): AttributeValue {
+  const numeric = Number(raw);
+  if (type === "bool") return { type: "bool", value: raw === "true" };
+  if (type === "string") return { type: "string", value: raw };
+  if (type === "tag") return { type: "tag", value: Number.isInteger(numeric) ? numeric : 0 };
+  if (type === "float") return { type: "float", value: Number.isFinite(numeric) ? numeric : 0 };
+  return { type: "int", value: Number.isInteger(numeric) ? numeric : 0 };
+}
+
+function bindingRaw(binding: GraphBinding | undefined): string {
+  if (!binding) return "";
+  return binding.type === "literal" ? binding.id : String(binding.index);
+}
+
+function setAttributeValue(node: NarrativeNode, assign: (value: AttributeValue) => void, type: string, raw: string) {
+  assign(attributeValueFrom(type, raw));
+  emitGraphUpdate(node);
+}
+
+function setBinding(node: NarrativeNode, assign: (binding: GraphBinding) => void, type: string, raw: string) {
+  const numeric = Number(raw);
+  assign(type === "vertex_pattern"
+    ? { type: "vertex_pattern", index: Number.isInteger(numeric) ? numeric : 0 }
+    : { type: "literal", id: raw });
+  emitGraphUpdate(node);
+}
+
+function addGraphPatternEntry(node: NarrativeNode, list: GraphPatternList) {
+  if (!isGraphTransformNode(node)) return;
+  const entries: unknown[] = node.rule.lhs[list];
+  entries.push(list === "vertices"
+    ? { layer: "fact", attributes: [] }
+    : { source: { type: "literal", id: "" }, target: { type: "vertex_pattern", index: 0 } });
+  emitGraphUpdate(node);
+}
+
+function addGraphMutationEntry(node: NarrativeNode, list: GraphMutationList) {
+  if (!isGraphTransformNode(node)) return;
+  const binding: GraphBinding = { type: "literal", id: "" };
+  const entries: unknown[] = node.rule.rhs[list];
+  if (list === "add_vertices") entries.push({ id: binding, layer: "fact", attributes: {} });
+  else if (list === "add_edges") entries.push({ id: binding, source: { type: "literal", id: "" }, target: { type: "vertex_pattern", index: 0 }, relation_type: "", weight: 1 });
+  else if (list === "set_attributes") entries.push({ vertex: binding, key: "", value: { type: "int", value: 0 } });
+  else entries.push(binding);
+  emitGraphUpdate(node);
+}
+
+function addAttributePredicate(node: NarrativeNode, pattern: VertexPattern) {
+  pattern.attributes.push({ key: "", op: "eq", value: { type: "bool", value: false } });
+  emitGraphUpdate(node);
+}
+
+function addRecordAttribute(node: NarrativeNode, attributes: Record<string, AttributeValue>) {
+  attributes[`attribute${Object.keys(attributes).length + 1}`] = { type: "bool", value: false };
+  emitGraphUpdate(node);
+}
+
+function renameRecordAttribute(node: NarrativeNode, attributes: Record<string, AttributeValue>, key: string, nextKey: string) {
+  const name = nextKey.trim();
+  if (!name || name === key) return;
+  const value = attributes[key];
+  delete attributes[key];
+  attributes[name] = value;
+  emitGraphUpdate(node);
+}
+
+function removeRecordAttribute(node: NarrativeNode, attributes: Record<string, AttributeValue>, key: string) {
+  delete attributes[key];
+  emitGraphUpdate(node);
+}
+
+// Passion Mutation Node (ChronoFlow v5)
+function addPassionRow(node: NarrativeNode, list: "micro_deltas" | "active_ops") {
+  if (!isPassionMutationNode(node)) return;
+  const entries: unknown[] = node.op[list];
+  entries.push(list === "micro_deltas" ? [0, 0] : [0, false]);
+  emitGraphUpdate(node);
+}
+
+function setPassionRow(node: NarrativeNode, row: [number, number | boolean], index: number, raw: string) {
+  const numeric = Number(raw);
+  if (index === 0) row[0] = Number.isInteger(numeric) ? numeric : 0;
+  else if (typeof row[1] === "boolean") row[1] = raw === "true";
+  else row[1] = Number.isFinite(numeric) ? numeric : 0;
+  emitGraphUpdate(node);
+}
+
+function removeEntry(node: NarrativeNode, entries: unknown[], index: number) {
+  entries.splice(index, 1);
+  emitGraphUpdate(node);
+}
+
 // End Node Jump Precondition Auto-Sync
 function autoSetJumpPreconditions(node: NarrativeNode) {
   if (!node.jump_to_storylet) return;
@@ -313,6 +547,22 @@ function handleJumpTargetChange(node: NarrativeNode) {
     autoSetJumpPreconditions(node);
   } else {
     emit("update-storylet");
+  }
+}
+function setNodeStringArray(node: NarrativeNode, field: "deck_storylet_ids" | "candidate_pool_ids", event: Event) {
+  const select = event.target as HTMLSelectElement;
+  node[field] = Array.from(select.selectedOptions, (option) => option.value);
+  emitGraphUpdate(node);
+}
+function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edges" | "timeline_events", event: Event) {
+  const textarea = event.target as HTMLTextAreaElement;
+  try {
+    const value: unknown = JSON.parse(textarea.value);
+    if (!Array.isArray(value)) throw new Error("Expected a JSON array.");
+    node[field] = value as Array<Record<string, unknown>>;
+    emitGraphUpdate(node);
+  } catch (error) {
+    notify(`Invalid JSON array: ${error instanceof Error ? error.message : String(error)}`, "error");
   }
 }
 </script>
@@ -558,6 +808,264 @@ function handleJumpTargetChange(node: NarrativeNode) {
         </div>
       </div>
 
+      <!-- GRAPH TRANSFORM NODE -->
+      <div v-else-if="isGraphTransformNode(selectedNode)">
+        <div class="field-row-heading"><label class="field-label">Left-Hand Side Pattern</label></div>
+
+        <div class="field-row-heading">
+          <label class="field-sublabel">Vertex Patterns</label>
+          <button class="btn-micro" @click="addGraphPatternEntry(selectedNode, 'vertices')">+ Add Vertex</button>
+        </div>
+        <div v-for="(vertex, index) in selectedNode.rule.lhs.vertices" :key="index" class="graph-pattern-row">
+          <select v-model="vertex.layer" class="form-select micro" style="width:85px;" @change="emitGraphUpdate(selectedNode)">
+            <option v-for="layer in graphLayers" :key="layer" :value="layer">{{ layer }}</option>
+          </select>
+          <input v-model="vertex.vertex_id" class="form-input micro" style="flex:1;" placeholder="vertex id (blank matches any)" @input="emitGraphUpdate(selectedNode)" />
+          <button class="btn-micro" @click="addAttributePredicate(selectedNode, vertex)">+ Predicate</button>
+          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.lhs.vertices, index)">✕</button>
+          <div v-for="(predicate, predicateIndex) in vertex.attributes" :key="predicateIndex" class="attribute-row">
+            <input v-model="predicate.key" class="form-input micro" style="width:110px;" placeholder="attribute key" @input="emitGraphUpdate(selectedNode)" />
+            <select v-model="predicate.op" class="form-select micro" style="width:55px;" @change="emitGraphUpdate(selectedNode)">
+              <option v-for="op in attributeOps" :key="op" :value="op">{{ op }}</option>
+            </select>
+            <select class="form-select micro" style="width:65px;" :value="predicate.value.type" @change="setAttributeValue(selectedNode, (value) => { predicate.value = value; }, eventValue($event), String(predicate.value.value))">
+              <option v-for="valueType in attributeValueTypes" :key="valueType" :value="valueType">{{ valueType }}</option>
+            </select>
+            <input class="form-input micro" style="width:80px;" :value="String(predicate.value.value)" @input="setAttributeValue(selectedNode, (value) => { predicate.value = value; }, predicate.value.type, eventValue($event))" />
+            <button class="btn-micro danger" @click="removeEntry(selectedNode, vertex.attributes, predicateIndex)">✕</button>
+          </div>
+        </div>
+
+        <div class="field-row-heading">
+          <label class="field-sublabel">Edge Patterns</label>
+          <button class="btn-micro" @click="addGraphPatternEntry(selectedNode, 'edges')">+ Add Edge</button>
+        </div>
+        <div v-for="(pattern, index) in selectedNode.rule.lhs.edges" :key="index" class="graph-pattern-row">
+          <input v-model="pattern.edge_id" class="form-input micro" style="width:110px;" placeholder="edge id (blank matches any)" @input="emitGraphUpdate(selectedNode)" />
+          <input v-model="pattern.relation_type" class="form-input micro" style="width:110px;" placeholder="relation type" @input="emitGraphUpdate(selectedNode)" />
+          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.lhs.edges, index)">✕</button>
+          <div class="binding-row">
+            <label class="field-sublabel">source</label>
+            <select class="form-select micro" style="width:105px;" :value="pattern.source?.type ?? 'literal'" @change="setBinding(selectedNode, (binding) => { pattern.source = binding; }, eventValue($event), bindingRaw(pattern.source))">
+              <option v-for="bindingType in bindingTypes" :key="bindingType" :value="bindingType">{{ bindingType }}</option>
+            </select>
+            <input class="form-input micro" style="flex:1;" :value="bindingRaw(pattern.source)" @input="setBinding(selectedNode, (binding) => { pattern.source = binding; }, pattern.source?.type ?? 'literal', eventValue($event))" />
+          </div>
+          <div class="binding-row">
+            <label class="field-sublabel">target</label>
+            <select class="form-select micro" style="width:105px;" :value="pattern.target?.type ?? 'vertex_pattern'" @change="setBinding(selectedNode, (binding) => { pattern.target = binding; }, eventValue($event), bindingRaw(pattern.target))">
+              <option v-for="bindingType in bindingTypes" :key="bindingType" :value="bindingType">{{ bindingType }}</option>
+            </select>
+            <input class="form-input micro" style="flex:1;" :value="bindingRaw(pattern.target)" @input="setBinding(selectedNode, (binding) => { pattern.target = binding; }, pattern.target?.type ?? 'vertex_pattern', eventValue($event))" />
+          </div>
+        </div>
+
+        <div class="field-row-heading"><label class="field-label">Right-Hand Side Mutations</label></div>
+
+        <div class="field-row-heading">
+          <label class="field-sublabel">Add Vertices</label>
+          <button class="btn-micro" @click="addGraphMutationEntry(selectedNode, 'add_vertices')">+ Add Vertex</button>
+        </div>
+        <div v-for="(template, index) in selectedNode.rule.rhs.add_vertices" :key="index" class="graph-pattern-row">
+          <div class="binding-row">
+            <label class="field-sublabel">id</label>
+            <select class="form-select micro" style="width:105px;" :value="template.id.type" @change="setBinding(selectedNode, (binding) => { template.id = binding; }, eventValue($event), bindingRaw(template.id))">
+              <option v-for="bindingType in bindingTypes" :key="bindingType" :value="bindingType">{{ bindingType }}</option>
+            </select>
+            <input class="form-input micro" style="flex:1;" :value="bindingRaw(template.id)" @input="setBinding(selectedNode, (binding) => { template.id = binding; }, template.id.type, eventValue($event))" />
+            <select v-model="template.layer" class="form-select micro" style="width:85px;" @change="emitGraphUpdate(selectedNode)">
+              <option v-for="layer in graphLayers" :key="layer" :value="layer">{{ layer }}</option>
+            </select>
+            <button class="btn-micro" @click="addRecordAttribute(selectedNode, template.attributes)">+ Attribute</button>
+            <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.rhs.add_vertices, index)">✕</button>
+          </div>
+          <div v-for="(value, key) in template.attributes" :key="key" class="attribute-row">
+            <input :value="key" class="form-input micro" style="width:110px;" placeholder="attribute key" @change="renameRecordAttribute(selectedNode, template.attributes, key, eventValue($event))" />
+            <select class="form-select micro" style="width:65px;" :value="value.type" @change="setAttributeValue(selectedNode, (next) => { template.attributes[key] = next; }, eventValue($event), String(value.value))">
+              <option v-for="valueType in attributeValueTypes" :key="valueType" :value="valueType">{{ valueType }}</option>
+            </select>
+            <input class="form-input micro" style="width:80px;" :value="String(value.value)" @input="setAttributeValue(selectedNode, (next) => { template.attributes[key] = next; }, value.type, eventValue($event))" />
+            <button class="btn-micro danger" @click="removeRecordAttribute(selectedNode, template.attributes, key)">✕</button>
+          </div>
+        </div>
+
+        <div class="field-row-heading">
+          <label class="field-sublabel">Remove Vertices</label>
+          <button class="btn-micro" @click="addGraphMutationEntry(selectedNode, 'remove_vertices')">+ Add Binding</button>
+        </div>
+        <div v-for="(binding, index) in selectedNode.rule.rhs.remove_vertices" :key="index" class="mutation-row">
+          <select class="form-select micro" style="width:105px;" :value="binding.type" @change="setBinding(selectedNode!, (next) => { selectedNode!.rule!.rhs.remove_vertices[index] = next; }, eventValue($event), bindingRaw(binding))">
+            <option v-for="bindingType in bindingTypes" :key="bindingType" :value="bindingType">{{ bindingType }}</option>
+          </select>
+          <input class="form-input micro" style="flex:1;" :value="bindingRaw(binding)" @input="setBinding(selectedNode!, (next) => { selectedNode!.rule!.rhs.remove_vertices[index] = next; }, binding.type, eventValue($event))" />
+          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.rhs.remove_vertices, index)">✕</button>
+        </div>
+
+        <div class="field-row-heading">
+          <label class="field-sublabel">Add Edges</label>
+          <button class="btn-micro" @click="addGraphMutationEntry(selectedNode, 'add_edges')">+ Add Edge</button>
+        </div>
+        <div v-for="(edge, index) in selectedNode.rule.rhs.add_edges" :key="index" class="graph-pattern-row">
+          <div class="binding-row">
+            <label class="field-sublabel">id</label>
+            <select class="form-select micro" style="width:105px;" :value="edge.id.type" @change="setBinding(selectedNode, (binding) => { edge.id = binding; }, eventValue($event), bindingRaw(edge.id))">
+              <option v-for="bindingType in bindingTypes" :key="bindingType" :value="bindingType">{{ bindingType }}</option>
+            </select>
+            <input class="form-input micro" style="flex:1;" :value="bindingRaw(edge.id)" @input="setBinding(selectedNode, (binding) => { edge.id = binding; }, edge.id.type, eventValue($event))" />
+          </div>
+          <div class="binding-row">
+            <label class="field-sublabel">source</label>
+            <select class="form-select micro" style="width:105px;" :value="edge.source.type" @change="setBinding(selectedNode, (binding) => { edge.source = binding; }, eventValue($event), bindingRaw(edge.source))">
+              <option v-for="bindingType in bindingTypes" :key="bindingType" :value="bindingType">{{ bindingType }}</option>
+            </select>
+            <input class="form-input micro" style="flex:1;" :value="bindingRaw(edge.source)" @input="setBinding(selectedNode, (binding) => { edge.source = binding; }, edge.source.type, eventValue($event))" />
+          </div>
+          <div class="binding-row">
+            <label class="field-sublabel">target</label>
+            <select class="form-select micro" style="width:105px;" :value="edge.target.type" @change="setBinding(selectedNode, (binding) => { edge.target = binding; }, eventValue($event), bindingRaw(edge.target))">
+              <option v-for="bindingType in bindingTypes" :key="bindingType" :value="bindingType">{{ bindingType }}</option>
+            </select>
+            <input class="form-input micro" style="flex:1;" :value="bindingRaw(edge.target)" @input="setBinding(selectedNode, (binding) => { edge.target = binding; }, edge.target.type, eventValue($event))" />
+          </div>
+          <input v-model="edge.relation_type" class="form-input micro" style="width:110px;" placeholder="relation type" @input="emitGraphUpdate(selectedNode)" />
+          <input type="number" class="form-input micro" style="width:70px;" :value="edge.weight" @input="edge.weight = Number.isFinite(Number(eventValue($event))) ? Number(eventValue($event)) : 0; emitGraphUpdate(selectedNode)" />
+          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.rhs.add_edges, index)">✕</button>
+        </div>
+
+        <div class="field-row-heading">
+          <label class="field-sublabel">Set Attributes</label>
+          <button class="btn-micro" @click="addGraphMutationEntry(selectedNode, 'set_attributes')">+ Add Assignment</button>
+        </div>
+        <div v-for="(assignment, index) in selectedNode.rule.rhs.set_attributes" :key="index" class="mutation-row">
+          <select class="form-select micro" style="width:105px;" :value="assignment.vertex.type" @change="setBinding(selectedNode, (binding) => { assignment.vertex = binding; }, eventValue($event), bindingRaw(assignment.vertex))">
+            <option v-for="bindingType in bindingTypes" :key="bindingType" :value="bindingType">{{ bindingType }}</option>
+          </select>
+          <input class="form-input micro" style="width:110px;" :value="bindingRaw(assignment.vertex)" @input="setBinding(selectedNode, (binding) => { assignment.vertex = binding; }, assignment.vertex.type, eventValue($event))" />
+          <input v-model="assignment.key" class="form-input micro" style="width:110px;" placeholder="attribute key" @input="emitGraphUpdate(selectedNode)" />
+          <select class="form-select micro" style="width:65px;" :value="assignment.value.type" @change="setAttributeValue(selectedNode, (value) => { assignment.value = value; }, eventValue($event), String(assignment.value.value))">
+            <option v-for="valueType in attributeValueTypes" :key="valueType" :value="valueType">{{ valueType }}</option>
+          </select>
+          <input class="form-input micro" style="width:80px;" :value="String(assignment.value.value)" @input="setAttributeValue(selectedNode, (value) => { assignment.value = value; }, assignment.value.type, eventValue($event))" />
+          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.rhs.set_attributes, index)">✕</button>
+        </div>
+
+        <p class="field-help">The left-hand side matches graph vertices and edges; the right-hand side applies the rewrite. Pattern indexes refer to matched left-hand side vertices.</p>
+      </div>
+
+      <!-- PASSION MUTATION NODE -->
+      <div v-else-if="isPassionMutationNode(selectedNode)">
+        <div class="field-row-heading">
+          <label class="field-label">Micro Passion Deltas</label>
+          <button class="btn-micro" @click="addPassionRow(selectedNode, 'micro_deltas')">+ Add Delta</button>
+        </div>
+        <div v-for="(delta, index) in selectedNode.op.micro_deltas" :key="index" class="mutation-row">
+          <input type="number" class="form-input micro" style="width:70px;" :value="delta[0]" @input="setPassionRow(selectedNode, delta, 0, eventValue($event))" />
+          <input type="number" class="form-input micro" style="flex:1;" :value="delta[1]" @input="setPassionRow(selectedNode, delta, 1, eventValue($event))" />
+          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.op.micro_deltas, index)">✕</button>
+        </div>
+
+        <div class="field-row-heading">
+          <label class="field-label">Active Pool Operations</label>
+          <button class="btn-micro" @click="addPassionRow(selectedNode, 'active_ops')">+ Add Operation</button>
+        </div>
+        <div v-for="(operation, index) in selectedNode.op.active_ops" :key="index" class="mutation-row">
+          <input type="number" class="form-input micro" style="width:70px;" :value="operation[0]" @input="setPassionRow(selectedNode, operation, 0, eventValue($event))" />
+          <select class="form-select micro" style="width:105px;" :value="operation[1] ? 'true' : 'false'" @change="setPassionRow(selectedNode, operation, 1, eventValue($event))">
+            <option value="true">activate</option>
+            <option value="false">deactivate</option>
+          </select>
+          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.op.active_ops, index)">✕</button>
+        </div>
+
+        <p class="field-help">Passion ids are u16 metric indices; deltas and active-pool flags apply through the runtime passion model.</p>
+      </div>
+
+      <div v-else-if="selectedNode.type === 'qbn_storylet_hub'">
+        <div class="form-group">
+          <label class="field-label">QBN Storylet Deck</label>
+          <select multiple class="form-select" :value="selectedNode.deck_storylet_ids ?? []" @change="setNodeStringArray(selectedNode, 'deck_storylet_ids', $event)">
+            <option v-for="item in props.storylets" :key="item.id" :value="item.id">{{ item.title }} ({{ item.id }})</option>
+          </select>
+          <p class="field-help">Eligible storylets appear in authored priority order.</p>
+        </div>
+        <div class="form-group">
+          <label class="field-label">Hub Exit Storylet</label>
+          <select v-model="selectedNode.hub_exit_storylet_id" class="form-select" @change="emitGraphUpdate(selectedNode)">
+            <option value="">Choose the gate storylet…</option>
+            <option v-for="item in props.storylets" :key="item.id" :value="item.id">{{ item.title }} ({{ item.id }})</option>
+          </select>
+        </div>
+      </div>
+
+      <div v-else-if="selectedNode.type === 'salience_selector'">
+        <div class="form-group">
+          <label class="field-label">Salience Candidate Pool</label>
+          <select multiple class="form-select" :value="selectedNode.candidate_pool_ids ?? []" @change="setNodeStringArray(selectedNode, 'candidate_pool_ids', $event)">
+            <option v-for="item in props.storylets" :key="item.id" :value="item.id">{{ item.title }} ({{ item.id }})</option>
+          </select>
+          <p class="field-help">The runtime selects the highest-scoring eligible storylet.</p>
+        </div>
+      </div>
+
+      <div v-else-if="selectedNode.type === 'waypoint_conversation'">
+        <div class="form-group">
+          <label class="field-label">Initial Topic</label>
+          <input v-model="selectedNode.initial_topic_id" class="form-input" @input="emitGraphUpdate(selectedNode)" />
+        </div>
+        <div class="form-group">
+          <label class="field-label">NPC Goal Topic</label>
+          <input v-model="selectedNode.npc_goal_topic_id" class="form-input" @input="emitGraphUpdate(selectedNode)" />
+        </div>
+        <div class="form-group">
+          <label class="field-label">Topic Nodes (JSON array)</label>
+          <textarea class="form-input" rows="6" :value="JSON.stringify(selectedNode.topic_nodes ?? [], null, 2)" @change="setNodeJsonArray(selectedNode, 'topic_nodes', $event)"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="field-label">Topic Edges (JSON array)</label>
+          <textarea class="form-input" rows="6" :value="JSON.stringify(selectedNode.topic_edges ?? [], null, 2)" @change="setNodeJsonArray(selectedNode, 'topic_edges', $event)"></textarea>
+        </div>
+      </div>
+
+      <div v-else-if="selectedNode.type === 'waiter'">
+        <div class="form-group">
+          <label class="field-label">Gameplay Event</label>
+          <input v-model="selectedNode.wait_event" class="form-input" placeholder="e.g. player_interacted" @input="emitGraphUpdate(selectedNode)" />
+          <p class="field-help">The signal pauses here until the host submits this event.</p>
+        </div>
+      </div>
+
+      <div v-else-if="selectedNode.type === 'logic_all' || selectedNode.type === 'logic_any'">
+        <p class="field-help">{{ selectedNode.type === 'logic_all' ? 'Continue after all incoming branches complete.' : 'Continue after the selected incoming branch completes.' }}</p>
+      </div>
+
+      <div v-else-if="selectedNode.type === 'scene_section'">
+        <div class="form-group">
+          <label class="field-label">Duration (milliseconds)</label>
+          <input v-model.number="selectedNode.duration_ms" type="number" min="0" class="form-input" @input="emitGraphUpdate(selectedNode)" />
+        </div>
+        <div class="form-group">
+          <label class="field-label">Timeline Events (JSON array)</label>
+          <textarea class="form-input" rows="8" :value="JSON.stringify(selectedNode.timeline_events ?? [], null, 2)" @change="setNodeJsonArray(selectedNode, 'timeline_events', $event)"></textarea>
+        </div>
+      </div>
+
+      <div v-else-if="selectedNode.type === 'mission_sub_graph'">
+        <div class="form-group">
+          <label class="field-label">Mission Storylet</label>
+          <select v-model="selectedNode.sub_graph_asset_id" class="form-select" @change="emitGraphUpdate(selectedNode)">
+            <option value="">Choose a storylet graph…</option>
+            <option v-for="story in props.storylets.filter((item) => item.id !== props.storylet.id)" :key="story.id" :value="story.id">{{ story.title }} ({{ story.id }})</option>
+          </select>
+        </div>
+      </div>
+
+      <div v-else-if="selectedNode.type === 'poi'">
+        <div class="form-group">
+          <label class="field-label">Entity Path</label>
+          <input v-model="selectedNode.entity_path" class="form-input" placeholder="Location/actor binding" @input="emitGraphUpdate(selectedNode)" />
+        </div>
+      </div>
+
       <!-- END NODE -->
       <div v-else-if="selectedNode.type === 'end'">
         <div class="form-group">
@@ -609,10 +1117,14 @@ function handleJumpTargetChange(node: NarrativeNode) {
         <div class="form-group">
           <label class="field-label">Cluster Type</label>
           <select v-model="storylet.cluster_type" class="form-select" @change="$emit('update-storylet')">
-            <option value="player_controlled_passage">Passage</option>
-            <option value="linear">Linear</option>
-            <option value="wheel">Wheel</option>
-            <option value="aftermath">Aftermath</option>
+            <option value="player_passage">Player Passage</option>
+            <option value="linear_progression">Linear Progression</option>
+            <option value="wheel_deck">Wheel Deck</option>
+            <option value="aftermath_accelerator">Aftermath Accelerator</option>
+            <option value="player_controlled_passage">Passage (legacy)</option>
+            <option value="linear">Linear (legacy)</option>
+            <option value="wheel">Wheel (legacy)</option>
+            <option value="aftermath">Aftermath (legacy)</option>
           </select>
         </div>
 
@@ -626,6 +1138,67 @@ function handleJumpTargetChange(node: NarrativeNode) {
           </select>
         </div>
       </div>
+
+      <details class="form-group chrono-settings" @toggle="initializeChronoOnOpen">
+        <summary class="field-label">ChronoFlow Settings</summary>
+        <p class="precondition-help">Authored QBN surfacing, salience, and timeline settings used by ChronoFlow.</p>
+        <div class="chrono-fields">
+          <label>Priority<input :value="storylet.chrono?.display_priority ?? 0" type="number" min="-2147483648" max="2147483647" step="1" class="form-input micro" @input="updateChronoNumber('display_priority', $event)" /></label>
+          <label class="field-sublabel">Urgency color tag</label>
+          <TagEditor v-model="chronoUrgencyColorTag" :options="tagIndex.map((tag) => tag.name)" :multiple="false" label="Urgency color tag" placeholder="Choose or create urgency tag" />
+          <label>Cooldown (ms)<input :value="storylet.chrono?.cooldown_ms ?? 0" type="number" min="0" step="1" class="form-input micro" @input="updateChronoNumber('cooldown_ms', $event)" /></label>
+          <label class="chrono-checkbox"><input :checked="storylet.chrono?.is_repeatable ?? storylet.repeatability !== 'once_ever'" type="checkbox" @change="updateChronoRepeatable" /> Repeatable</label>
+        </div>
+        <label class="field-sublabel">Required tags (all)</label>
+        <TagEditor v-model="chronoRequiredTags" :options="tagIndex.map((tag) => tag.name)" label="Required tags" placeholder="Choose or create required tags" />
+        <label class="field-sublabel">Required tags (any)</label>
+        <TagEditor v-model="chronoRequiredAnyTags" :options="tagIndex.map((tag) => tag.name)" label="Required-any tags" placeholder="Choose or create required tags" />
+        <label class="field-sublabel">Forbidden tags</label>
+        <TagEditor v-model="chronoForbiddenTags" :options="tagIndex.map((tag) => tag.name)" label="Forbidden tags" placeholder="Choose or create forbidden tags" />
+        <label class="field-sublabel">Required arc phases</label>
+        <TagEditor v-model="chronoArcPhases" label="Required arc phases" placeholder="Choose or create phases" />
+        <label class="field-sublabel">Salience bonus tags</label>
+        <TagEditor v-model="chronoSalienceTags" label="Salience bonus tags" placeholder="Choose or create tags" />
+        <details class="precondition-options">
+          <summary>Advanced predicates and effects</summary>
+          <div class="chrono-predicate-heading">
+            <label class="field-sublabel">Additional predicates</label>
+            <button type="button" class="btn-micro" @click="addChronoPredicate">+</button>
+          </div>
+          <div v-for="(predicate, index) in (storylet.chrono?.preconditions ?? [])" :key="index" class="chrono-predicate-row">
+            <select :value="predicate.subject" class="form-select micro" :aria-label="'Predicate ' + (index + 1) + ' subject'" @change="setChronoPredicate(index, 'subject', ($event.target as HTMLSelectElement).value)">
+              <option value="metric">Quality / passion</option>
+              <option value="location">Current location</option>
+              <option value="visited">Visited location</option>
+              <option value="met_character">Met character</option>
+              <option value="entity">Entity tag</option>
+            </select>
+            <input :value="predicate.target_id" class="form-input micro" :list="'chrono-targets-' + index" :aria-label="'Predicate ' + (index + 1) + ' target'" @change="setChronoPredicate(index, 'target_id', ($event.target as HTMLInputElement).value)" />
+            <datalist :id="'chrono-targets-' + index">
+              <option v-for="quality in globalQualities" :key="'q:' + quality" :value="quality" />
+              <option v-for="tag in tagIndex" :key="'t:' + tag.name" :value="tag.name" />
+              <option v-for="location in studioState.locations" :key="'l:' + location.id" :value="'location.' + location.id" />
+              <option v-for="character in studioState.characters" :key="'c:' + character.id" :value="'character.' + character.id" />
+            </datalist>
+            <select :value="predicate.operator" class="form-select micro" :aria-label="'Predicate ' + (index + 1) + ' operator'" @change="setChronoPredicate(index, 'operator', ($event.target as HTMLSelectElement).value)">
+              <option value="eq">=</option><option value="neq">≠</option>
+              <option v-if="predicate.subject === 'metric'" value="gt">&gt;</option>
+              <option v-if="predicate.subject === 'metric'" value="gte">≥</option>
+              <option v-if="predicate.subject === 'metric'" value="lt">&lt;</option>
+              <option v-if="predicate.subject === 'metric'" value="lte">≤</option>
+            </select>
+            <input :value="predicate.comparison_value" type="number" step="any" class="form-input micro" :aria-label="'Predicate ' + (index + 1) + ' comparison value'" @change="setChronoPredicate(index, 'comparison_value', Number(($event.target as HTMLInputElement).value))" />
+            <input v-if="predicate.subject === 'entity'" :value="predicate.entity_index ?? 0" type="number" min="0" max="255" class="form-input micro" aria-label="Entity row index" @change="setChronoPredicate(index, 'entity_index', Number(($event.target as HTMLInputElement).value))" />
+            <button type="button" class="btn-micro danger" :aria-label="'Remove predicate ' + (index + 1)" @click="removeChronoPredicate(index)">×</button>
+          </div>
+          <label class="field-sublabel">Ideal state vector (JSON object)</label>
+          <textarea :value="chronoJson('ideal_state_vector')" class="form-textarea chrono-json" spellcheck="false" @change="updateChronoJson('ideal_state_vector', $event)"></textarea>
+          <label class="field-sublabel">Ideal state weights (JSON object, default 1.0)</label>
+          <textarea :value="chronoJson('ideal_state_weights')" class="form-textarea chrono-json" spellcheck="false" @change="updateChronoJson('ideal_state_weights', $event)"></textarea>
+          <label class="field-sublabel">Completion effects (JSON array)</label>
+          <textarea :value="chronoJson('effects_on_complete')" class="form-textarea chrono-json" spellcheck="false" @change="updateChronoJson('effects_on_complete', $event)"></textarea>
+        </details>
+      </details>
 
       <!-- LOCAL VARIABLES -->
       <div class="form-group" style="background:rgba(0,0,0,0.2); padding:10px; border-radius:8px; border:1px solid var(--border-subtle);">
@@ -766,6 +1339,8 @@ function handleJumpTargetChange(node: NarrativeNode) {
 .type-badge.image { background: #ec4899; }
 .type-badge.teleport { background: #06b6d4; }
 .type-badge.end { background: #f43f5e; }
+.type-badge.graph_transform { background: #2563eb; }
+.type-badge.passion_mutation { background: #db2777; }
 
 .field-label {
   font-size: 11px;
@@ -817,6 +1392,20 @@ function handleJumpTargetChange(node: NarrativeNode) {
   flex-direction: column;
   gap: 8px;
 }
+
+.chrono-settings {
+  padding: 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+}
+.chrono-settings > summary { cursor: pointer; }
+.chrono-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
+.chrono-fields label { color: var(--text-muted); font-size: 10px; }
+.chrono-predicate-heading { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 4px; }
+.chrono-predicate-row { display: grid; grid-template-columns: 1fr 1.2fr 44px 56px 52px 22px; gap: 3px; align-items: center; }
+.chrono-checkbox { display: flex; align-items: center; gap: 6px; }
+.chrono-json { min-height: 72px; font-family: monospace; font-size: 10px; }
 
 .field-help { color: var(--text-muted); font-size: 12px; }
 .field-row-heading { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
@@ -874,5 +1463,24 @@ function handleJumpTargetChange(node: NarrativeNode) {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 4px;
   margin-bottom: 4px;
+}
+
+.graph-pattern-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+
+.attribute-row,
+.binding-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
 }
 </style>

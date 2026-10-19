@@ -1,6 +1,7 @@
 //! Single SQLite store implementation for DecisionNarrative Storylet Studio.
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::narrative_graph::NarrativeGraph;
@@ -87,8 +88,87 @@ impl Store {
              CREATE TABLE IF NOT EXISTS store_metadata (
                  key TEXT PRIMARY KEY,
                  value TEXT NOT NULL
+             );
+
+             CREATE TABLE IF NOT EXISTS chrono_playtest_sessions (
+                 session_id TEXT PRIMARY KEY,
+                 project_id TEXT NOT NULL,
+                 pinned_project_revision INTEGER NOT NULL,
+                 scenario_id TEXT NOT NULL,
+                 start_location_id TEXT NOT NULL,
+                 start_storylet_id TEXT NOT NULL,
+                 start_node_guid INTEGER NOT NULL,
+                 seed INTEGER NOT NULL,
+                 pinned_id_space_json TEXT NOT NULL,
+                 global_call_history_json TEXT NOT NULL,
+                 scoped_call_histories_json TEXT NOT NULL,
+                 pending_state_json TEXT NOT NULL DEFAULT '{}',
+                 last_idempotency_key TEXT NOT NULL DEFAULT '',
+                 last_result_json TEXT NOT NULL DEFAULT '',
+                 mutation_revision INTEGER NOT NULL DEFAULT 0,
+                 created_at INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL
              );",
         )?;
+
+        // Migration: mutation retries must return the original payload, and
+        // optimistic concurrency needs a per-session mutation counter.
+        for (column, declaration) in [
+            ("last_idempotency_key", "TEXT NOT NULL DEFAULT ''"),
+            ("last_result_json", "TEXT NOT NULL DEFAULT ''"),
+            ("mutation_revision", "INTEGER NOT NULL DEFAULT 0"),
+        ] {
+            let present: bool = {
+                let mut stmt = self
+                    .conn
+                    .prepare("PRAGMA table_info(chrono_playtest_sessions)")?;
+                let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+                let mut found = false;
+                for col in rows {
+                    if col? == column {
+                        found = true;
+                        break;
+                    }
+                }
+                found
+            };
+            if !present {
+                let tx = self.conn.unchecked_transaction()?;
+                tx.execute(
+                    &format!(
+                        "ALTER TABLE chrono_playtest_sessions ADD COLUMN {column} {declaration}"
+                    ),
+                    [],
+                )?;
+                tx.commit()?;
+            }
+        }
+
+        // Migration: pending latent interactions are persisted alongside the
+        // call history so a rebuilt session can resume a paused Choice, QBN,
+        // Waiter, or scene section.
+        let has_pending_state: bool = {
+            let mut stmt = self
+                .conn
+                .prepare("PRAGMA table_info(chrono_playtest_sessions)")?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut found = false;
+            for col in rows {
+                if col? == "pending_state_json" {
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+        if !has_pending_state {
+            let tx = self.conn.unchecked_transaction()?;
+            tx.execute(
+                "ALTER TABLE chrono_playtest_sessions ADD COLUMN pending_state_json TEXT NOT NULL DEFAULT '{}'",
+                [],
+            )?;
+            tx.commit()?;
+        }
 
         // Migration: add is_stale to interaction_context if absent in existing DBs
         let has_is_stale: bool = {
@@ -577,14 +657,25 @@ impl Store {
         &mut self,
         meta: &ProjectMetadata,
         content: &ProjectBundleContent,
-    ) -> Result<(), rusqlite::Error> {
+    ) -> Result<u64, rusqlite::Error> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM content_records", [])?;
+        // A bundle can carry the revision it was exported at. Importing it must
+        // still move the counter forward so live sessions see new content.
+        let current_revision: i64 = tx
+            .query_row(
+                "SELECT revision FROM project_metadata WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(0);
+        let next_revision = (current_revision + 1).max(meta.revision as i64);
         tx.execute(
             "UPDATE project_metadata SET project_id = ?1, name = ?2, revision = ?3 WHERE singleton = 1",
-            params![meta.id, meta.name, meta.revision as i64],
+            params![meta.id, meta.name, next_revision],
         )?;
 
         let now = chrono_now_ms();
@@ -638,8 +729,136 @@ impl Store {
             )?;
         }
         tx.commit()?;
+        Ok(next_revision as u64)
+    }
+
+    /// ChronoFlow v5 playtest sessions (REQ-CH-02): only the call-history
+    /// arrays, the random seed, and pinned authoring metadata are stored — never
+    /// a serialized runtime instance or world snapshot. This table is additive;
+    /// the legacy `runtime_sessions` rows are never read or rewritten by it.
+    pub fn save_chrono_playtest_row(&self, row: &ChronoPlaytestRow) -> Result<(), rusqlite::Error> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO chrono_playtest_sessions (
+                session_id, project_id, pinned_project_revision, scenario_id,
+                start_location_id, start_storylet_id, start_node_guid, seed,
+                pinned_id_space_json, global_call_history_json,
+                scoped_call_histories_json, pending_state_json,
+                last_idempotency_key, last_result_json, mutation_revision,
+                created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+             ON CONFLICT(session_id) DO UPDATE SET
+                pinned_project_revision = excluded.pinned_project_revision,
+                pinned_id_space_json = excluded.pinned_id_space_json,
+                global_call_history_json = excluded.global_call_history_json,
+                scoped_call_histories_json = excluded.scoped_call_histories_json,
+                pending_state_json = excluded.pending_state_json,
+                last_idempotency_key = excluded.last_idempotency_key,
+                last_result_json = excluded.last_result_json,
+                mutation_revision = excluded.mutation_revision,
+                updated_at = excluded.updated_at",
+            params![
+                row.session_id,
+                row.project_id,
+                row.pinned_project_revision,
+                row.scenario_id,
+                row.start_location_id,
+                row.start_storylet_id,
+                row.start_node_guid,
+                row.seed,
+                row.pinned_id_space_json,
+                row.global_call_history_json,
+                row.scoped_call_histories_json,
+                row.pending_state_json,
+                row.last_idempotency_key,
+                row.last_result_json,
+                row.mutation_revision as i64,
+                row.created_at,
+                row.updated_at
+            ],
+        )?;
+        tx.commit()?;
         Ok(())
     }
+
+    pub fn get_chrono_playtest_row(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<ChronoPlaytestRow>, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT session_id, project_id, pinned_project_revision, scenario_id,
+                start_location_id, start_storylet_id, start_node_guid, seed,
+                pinned_id_space_json, global_call_history_json,
+                scoped_call_histories_json, pending_state_json, last_idempotency_key, last_result_json, mutation_revision, created_at, updated_at
+             FROM chrono_playtest_sessions WHERE session_id = ?1",
+        )?;
+        let row = stmt
+            .query_row(params![session_id], chrono_playtest_row_from_row)
+            .optional()?;
+        Ok(row)
+    }
+
+    pub fn list_chrono_playtest_rows(&self) -> Result<Vec<ChronoPlaytestRow>, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT session_id, project_id, pinned_project_revision, scenario_id,
+                start_location_id, start_storylet_id, start_node_guid, seed,
+                pinned_id_space_json, global_call_history_json,
+                scoped_call_histories_json, pending_state_json, last_idempotency_key, last_result_json, mutation_revision, created_at, updated_at
+             FROM chrono_playtest_sessions ORDER BY session_id",
+        )?;
+        let rows = stmt
+            .query_map([], chrono_playtest_row_from_row)?
+            .collect::<Result<Vec<_>, rusqlite::Error>>()?;
+        Ok(rows)
+    }
+}
+
+/// One persisted ChronoFlow playtest session. JSON columns hold the global call
+/// history, the per-mission scoped call histories, and the pinned ID-space
+/// fingerprint; the runtime is rebuilt from them on load (REQ-CH-03).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChronoPlaytestRow {
+    pub session_id: String,
+    pub project_id: String,
+    pub pinned_project_revision: i64,
+    pub scenario_id: String,
+    pub start_location_id: String,
+    pub start_storylet_id: String,
+    pub start_node_guid: i64,
+    pub seed: i64,
+    pub pinned_id_space_json: String,
+    pub global_call_history_json: String,
+    pub scoped_call_histories_json: String,
+    /// Latent node descriptors and active tokens, so a rebuilt session resumes
+    /// a paused interaction instead of replaying to an idle graph.
+    pub pending_state_json: String,
+    pub last_idempotency_key: String,
+    pub last_result_json: String,
+    pub mutation_revision: u64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn chrono_playtest_row_from_row(row: &rusqlite::Row) -> Result<ChronoPlaytestRow, rusqlite::Error> {
+    Ok(ChronoPlaytestRow {
+        session_id: row.get(0)?,
+        project_id: row.get(1)?,
+        pinned_project_revision: row.get(2)?,
+        scenario_id: row.get(3)?,
+        start_location_id: row.get(4)?,
+        start_storylet_id: row.get(5)?,
+        start_node_guid: row.get(6)?,
+        seed: row.get(7)?,
+        pinned_id_space_json: row.get(8)?,
+        global_call_history_json: row.get(9)?,
+        scoped_call_histories_json: row.get(10)?,
+        pending_state_json: row.get(11)?,
+        last_idempotency_key: row.get(12)?,
+        last_result_json: row.get(13)?,
+        mutation_revision: row.get::<_, i64>(14)? as u64,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
+    })
 }
 
 fn chrono_now_ms() -> i64 {

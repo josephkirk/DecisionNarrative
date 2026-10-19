@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-use crate::contracts::{StoryletChoiceRecord, StoryletContentRecord, StoryletRecord};
+use crate::contracts::{
+    ChronoStoryletSettings, StoryletChoiceRecord, StoryletContentRecord, StoryletRecord,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TwineLink {
@@ -521,7 +523,7 @@ pub fn twee_story_to_storylets(story: &TweeStory) -> Vec<StoryletRecord> {
             size: p.size.map(|(w, h)| [w, h]),
             location_tags,
             group_tag,
-            cluster_type: "player_controlled_passage".into(),
+            cluster_type: "player_passage".into(),
             urgency_weight: 50.0,
             repeatability: "always".into(),
             cooldown_turns: 0,
@@ -536,6 +538,7 @@ pub fn twee_story_to_storylets(story: &TweeStory) -> Vec<StoryletRecord> {
             choices,
             effects: json!({}),
             local_variables: None,
+            chrono: Some(ChronoStoryletSettings::default()),
             graph: None,
             created_at: now,
         });

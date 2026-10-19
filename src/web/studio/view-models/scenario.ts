@@ -66,11 +66,16 @@ export function useScenarioViewModel() {
 
   async function startPlaytestFromScenario() {
     try {
-      const res = await StudioApi.createPlaytestFromWorkspace(undefined, activeScenario.id);
-      studioState.activePlaytestSessionId = res.sessionId;
-      studioState.activePlaytestSnapshot = res.snapshot;
-      notify(`Started playtest session '${res.sessionId.slice(0, 8)}'`, "success");
-      return res.sessionId;
+      const res = await StudioApi.createChronoPlaytest({
+        sessionId: crypto.randomUUID(),
+        scenarioId: activeScenario.id,
+      });
+      studioState.activeChronoPlaytestSessionId = res.session.sessionId;
+      studioState.activeChronoPlaytestSnapshot = res;
+      studioState.activePlaytestSessionId = null;
+      studioState.activePlaytestSnapshot = null;
+      notify(`Started ChronoFlow run '${res.session.sessionId.slice(0, 8)}'`, "success");
+      return res.session.sessionId;
     } catch (e) {
       notify(e instanceof Error ? e.message : String(e), "error");
       return null;

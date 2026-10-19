@@ -1,6 +1,8 @@
 import type {
   AuthoringOptions,
   CharacterRecord,
+  ChronoPlaytestSessionSummary,
+  ChronoPlaytestSnapshot,
   DirectorEvaluation,
   EventRecord,
   LibraryPageResult,
@@ -174,5 +176,53 @@ export const StudioApi = {
   },
   getPlaytestEvents(sessionId: string): Promise<{ events: unknown[] }> {
     return request(`/api/v1/playtests/${encodeURIComponent(sessionId)}/events`);
+  },
+  listChronoPlaytests(): Promise<ChronoPlaytestSessionSummary[]> {
+    return request<{ sessions: ChronoPlaytestSessionSummary[] }>("/api/v2/playtests").then((result) => result.sessions);
+  },
+  createChronoPlaytest(payload: { sessionId: string; scenarioId?: string; startLocationId?: string; storyletId?: string; seed?: number }): Promise<ChronoPlaytestSnapshot> {
+    return request<ChronoPlaytestSnapshot>("/api/v2/playtests", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  getChronoPlaytest(sessionId: string): Promise<ChronoPlaytestSnapshot> {
+    return request<ChronoPlaytestSnapshot>(`/api/v2/playtests/${encodeURIComponent(sessionId)}`);
+  },
+  tickChronoPlaytest(sessionId: string, frameBudgetMs: number): Promise<ChronoPlaytestSnapshot> {
+    return request<ChronoPlaytestSnapshot>(`/api/v2/playtests/${encodeURIComponent(sessionId)}/tick`, {
+      method: "POST",
+      body: JSON.stringify({ frameBudgetMs }),
+    });
+  },
+  signalChronoPlaytest(sessionId: string, eventName: string): Promise<ChronoPlaytestSnapshot> {
+    return request<ChronoPlaytestSnapshot>(`/api/v2/playtests/${encodeURIComponent(sessionId)}/signal`, {
+      method: "POST",
+      body: JSON.stringify({ eventName }),
+    });
+  },
+  divertChronoPlaytest(sessionId: string, nodeGuid: number, edgeId: string): Promise<ChronoPlaytestSnapshot> {
+    return request<ChronoPlaytestSnapshot>(`/api/v2/playtests/${encodeURIComponent(sessionId)}/divert`, {
+      method: "POST",
+      body: JSON.stringify({ nodeGuid, edgeId }),
+    });
+  },
+  chooseChronoPlaytest(sessionId: string, payload: { nodeGuid: number; outputPin?: string; storyletId?: string }): Promise<ChronoPlaytestSnapshot> {
+    return request<ChronoPlaytestSnapshot>(`/api/v2/playtests/${encodeURIComponent(sessionId)}/choose`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  invokeChronoPlaytest(sessionId: string, payload: { nodeGuid: number; declaredRoutes: Record<string, string> }): Promise<ChronoPlaytestSnapshot> {
+    return request<ChronoPlaytestSnapshot>(`/api/v2/playtests/${encodeURIComponent(sessionId)}/invoke`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  reconcileChronoPlaytest(sessionId: string, history: unknown[]): Promise<ChronoPlaytestSnapshot> {
+    return request<ChronoPlaytestSnapshot>(`/api/v2/playtests/${encodeURIComponent(sessionId)}/reconcile`, {
+      method: "POST",
+      body: JSON.stringify({ history }),
+    });
   },
 };

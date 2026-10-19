@@ -54,6 +54,7 @@ pub enum QualityType {
     Currency,
     Metric,
     Tool,
+    Progress,
     Territory,
     Menace,
     Custom,
@@ -65,6 +66,18 @@ pub struct QualityDefinition {
     pub kind: QualityType,
     pub default_value: Value,
     pub description: String,
+    #[serde(default)]
+    pub min_value: f64,
+    #[serde(default = "default_quality_max")]
+    pub max_value: f64,
+    #[serde(default)]
+    pub is_hidden: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub menace_crisis_storylet_id: Option<String>,
+}
+
+fn default_quality_max() -> f64 {
+    100.0
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -189,6 +202,17 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
                     "quality default must be finite",
                 );
             }
+        }
+        if !quality.min_value.is_finite()
+            || !quality.max_value.is_finite()
+            || quality.min_value > quality.max_value
+        {
+            issue(
+                &mut issues,
+                format!("{path}.min_value"),
+                "invalid_bounds",
+                "quality bounds must be finite and minimum must not exceed maximum",
+            );
         }
     }
 
