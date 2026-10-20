@@ -50,7 +50,7 @@ pub struct TriggerRow {
     pub priority: i16,
     pub predicate_index: Option<u16>,
     pub enabled: bool,
-    pub scope_filter: Option<u16>,
+    pub scope_filter: Option<u64>,
     pub generation: u32,
     pub subscription_index: u32,
     pub stable_key: Option<String>,
@@ -85,7 +85,7 @@ impl TriggerTable {
         storylet_index: StoryletIndex,
         once: bool,
         priority: i16,
-        scope_filter: Option<u16>,
+        scope_filter: Option<u64>,
     ) -> Result<u32, TriggerError> {
         self.insert_inner(
             event_kind,
@@ -106,7 +106,7 @@ impl TriggerTable {
         storylet_index: StoryletIndex,
         once: bool,
         priority: i16,
-        scope_filter: Option<u16>,
+        scope_filter: Option<u64>,
     ) -> Result<u32, TriggerError> {
         self.insert_inner(
             event_kind,
@@ -126,7 +126,7 @@ impl TriggerTable {
         storylet_index: StoryletIndex,
         once: bool,
         priority: i16,
-        scope_filter: Option<u16>,
+        scope_filter: Option<u64>,
         stable_key: Option<String>,
     ) -> Result<u32, TriggerError> {
         if self.rows.len() >= MAX_TRIGGER_SUBSCRIPTIONS {
@@ -216,7 +216,7 @@ impl TriggerTable {
 pub struct TriggerEvent {
     pub kind: EventKind,
     pub key: u16,
-    pub source_scope: u16,
+    pub source_scope: u64,
     pub source_instance: u32,
     pub old_value: f32,
     pub new_value: f32,
@@ -235,7 +235,7 @@ impl EventQueue {
         Self::default()
     }
 
-    pub fn push(&mut self, kind: EventKind, key: u16, source_scope: u16) -> u32 {
+    pub fn push(&mut self, kind: EventKind, key: u16, source_scope: u64) -> u32 {
         let sequence = self.next_sequence;
         self.next_sequence = self.next_sequence.wrapping_add(1);
         self.events.push_back(TriggerEvent {
@@ -290,10 +290,10 @@ impl TriggerTable {
         &self,
         queue: &mut EventQueue,
         fired: &mut TriggerFireTable,
-        active: &BTreeSet<(u16, StoryletIndex)>,
+        active: &BTreeSet<(u64, StoryletIndex)>,
         cursor: &mut TriggerCursor,
         max_starts: u32,
-        mut start: impl FnMut(u16, StoryletIndex) -> bool,
+        mut start: impl FnMut(u64, StoryletIndex) -> bool,
     ) -> TriggerTickReport {
         let mut report = TriggerTickReport::default();
         let mut started = active.clone();
@@ -361,7 +361,7 @@ impl TriggerTable {
 /// records its subscription index in the call entry.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TriggerFireTable {
-    fired: BTreeSet<(u16, u32)>,
+    fired: BTreeSet<(u64, u32)>,
 }
 
 impl TriggerFireTable {
@@ -369,15 +369,15 @@ impl TriggerFireTable {
         Self::default()
     }
 
-    pub fn mark(&mut self, scope: u16, subscription_index: u32) {
+    pub fn mark(&mut self, scope: u64, subscription_index: u32) {
         self.fired.insert((scope, subscription_index));
     }
 
-    pub fn is_fired(&self, scope: u16, subscription_index: u32) -> bool {
+    pub fn is_fired(&self, scope: u64, subscription_index: u32) -> bool {
         self.fired.contains(&(scope, subscription_index))
     }
 
-    pub fn clear_scope(&mut self, scope: u16) {
+    pub fn clear_scope(&mut self, scope: u64) {
         self.fired.retain(|(entry_scope, _)| *entry_scope != scope);
     }
 
@@ -390,7 +390,7 @@ impl TriggerFireTable {
     }
 
     /// Runtime convenience: rebuild directly from canonical commit entries.
-    pub fn rebuild_history(entries: &[CallHistoryEntry], scope: u16) -> Self {
+    pub fn rebuild_history(entries: &[CallHistoryEntry], scope: u64) -> Self {
         let mut table = Self::new();
         for entry in entries {
             if entry.scope_index == scope {

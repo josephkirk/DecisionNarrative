@@ -365,7 +365,7 @@ pub struct CallHistoryEntry {
     #[serde(default)]
     pub chosen_storylet_id: Option<u16>,
     #[serde(default)]
-    pub scope_index: u16,
+    pub scope_index: u64,
     #[serde(default)]
     pub instance_index: u32,
     #[serde(default)]
@@ -382,6 +382,9 @@ pub struct CallHistoryEntry {
     pub tick: u32,
     #[serde(default)]
     pub completed: bool,
+    /// Canonical authored choice identity: `(node_guid << 16) | choice_index`.
+    #[serde(default)]
+    pub choice_key: Option<u64>,
 }
 
 /// One save-replay record: a call-history entry plus the frame it was played on.
@@ -1757,6 +1760,10 @@ pub struct FlowGraphInstance {
     /// Dense storylet index -> stable authoring key, supplied by the loader.
     #[serde(default)]
     pub storylet_keys: BTreeMap<u16, String>,
+    /// Dense scope row for call-history/feature projection. Root is 0; mission
+    /// children get a deterministic derived scope.
+    #[serde(default)]
+    pub scope_index: u64,
     /// Local variable store for typed assignments (REQ-VAR).
     pub variables: VariableStore,
     /// Asset ids from the root instance down to this instance, used to reject
@@ -1809,6 +1816,7 @@ impl FlowGraphInstance {
             last_completed_ms: BTreeMap::new(),
             completed_storylets: StoryletBitset::new(),
             storylet_keys: BTreeMap::new(),
+            scope_index: 0,
             variables: VariableStore::default(),
             mission_asset_path,
             pending_passion_events: Vec::new(),
@@ -2573,7 +2581,12 @@ impl FlowGraphInstance {
                 storylet_key: plan
                     .storylet_id
                     .and_then(|id| self.storylet_keys.get(&id).cloned()),
-                scope_index: 0,
+                choice_key: plan.output_pin.as_deref().and_then(|pin| {
+                    pin.strip_prefix("choice_")
+                        .and_then(|value| value.parse::<u16>().ok())
+                        .map(|choice| ((plan.node_guid as u64) << 16) | u64::from(choice))
+                }),
+                scope_index: self.scope_index,
                 completed: plan.storylet_id.is_some(),
                 ..CallHistoryEntry::default()
             };
@@ -3366,6 +3379,7 @@ impl FlowGraphInstance {
                 executed_input_pin: input_pin,
                 chosen_output_pin: DEFAULT_OUTPUT_PIN.to_string(),
                 chosen_storylet_id: None,
+                scope_index: self.scope_index,
                 ..CallHistoryEntry::default()
             };
             self.record_call(&entry, &BijectiveDelta::default())?;
@@ -3895,6 +3909,7 @@ impl FlowGraphInstance {
                     .unwrap_or_else(|| DEFAULT_INPUT_PIN.to_string()),
                 chosen_output_pin: DEFAULT_OUTPUT_PIN.to_string(),
                 chosen_storylet_id: self.nodes[index].chosen_storylet_id,
+                scope_index: self.scope_index,
                 ..CallHistoryEntry::default()
             };
             if record_completion {
@@ -4122,6 +4137,7 @@ impl FlowGraphInstance {
             mix64(self.instance_id ^ (node_guid as u64).wrapping_add(0x9e37_79b9_7f4a_7755));
         let mut child = Self::new_at_path(instance_id, child_asset.clone(), seed, path)?;
         child.storylet_keys = self.storylet_keys.clone();
+        child.scope_index = instance_id.max(1);
         self.nodes[index].sub_graph = Some(Box::new(child));
         Ok(())
     }

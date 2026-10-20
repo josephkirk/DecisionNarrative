@@ -94,7 +94,7 @@ impl ItemIndex {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChoiceHistoryIndex {
-    counts: Vec<u16>,
+    counts: std::collections::BTreeMap<u64, u16>,
 }
 
 impl Default for ChoiceHistoryIndex {
@@ -106,23 +106,21 @@ impl Default for ChoiceHistoryIndex {
 impl ChoiceHistoryIndex {
     pub fn new() -> Self {
         Self {
-            counts: vec![0; MAX_CHOICES],
+            counts: std::collections::BTreeMap::new(),
         }
     }
 
-    pub fn record(&mut self, choice_key: u16) -> bool {
-        if choice_key as usize >= MAX_CHOICES {
-            return false;
-        }
-        self.counts[choice_key as usize] = self.counts[choice_key as usize].saturating_add(1);
+    pub fn record(&mut self, choice_key: u64) -> bool {
+        let entry = self.counts.entry(choice_key).or_insert(0);
+        *entry = entry.saturating_add(1);
         true
     }
 
-    pub fn count(&self, choice_key: u16) -> u16 {
-        self.counts.get(choice_key as usize).copied().unwrap_or(0)
+    pub fn count(&self, choice_key: u64) -> u16 {
+        self.counts.get(&choice_key).copied().unwrap_or(0)
     }
 
-    pub fn rebuild(rows: &[u16]) -> Self {
+    pub fn rebuild(rows: &[u64]) -> Self {
         let mut index = Self::new();
         for key in rows {
             index.record(*key);
@@ -177,7 +175,7 @@ impl FeatureIndex {
     pub fn rebuild(
         traits: &[(u16, u16, i8)],
         item_rows: &[(u16, u16, u32)],
-        choices: &[u16],
+        choices: &[u64],
         stages: &[u16],
     ) -> Self {
         let mut index = Self::new();
@@ -213,8 +211,8 @@ impl FeatureIndex {
     /// call-history path for one scope. Unknown relation types are ignored.
     pub fn rebuild_from_state(
         state: &WorldStateTable,
-        _history: &[CallHistoryEntry],
-        _scope: u16,
+        history: &[CallHistoryEntry],
+        scope: u64,
     ) -> Result<Self, FeatureError> {
         let mut index = Self::new();
         for edge in &state.edges {
@@ -237,6 +235,14 @@ impl FeatureIndex {
             };
             if !index.items.set_quantity(owner, item, quantity) {
                 return Err(FeatureError::OutOfRange);
+            }
+        }
+
+        for entry in history {
+            if entry.scope_index == scope
+                && let Some(key) = entry.choice_key
+            {
+                index.choices.record(key);
             }
         }
 
@@ -266,12 +272,9 @@ impl FeatureIndex {
 
     /// Record an authored choice key. Choice identity must be supplied by the
     /// recording site; output-pin ordinals are not stable choice keys.
-    pub fn record_choice(&mut self, choice_key: u16) -> Result<(), FeatureError> {
-        if self.choices.record(choice_key) {
-            Ok(())
-        } else {
-            Err(FeatureError::OutOfRange)
-        }
+    pub fn record_choice(&mut self, choice_key: u64) -> Result<(), FeatureError> {
+        self.choices.record(choice_key);
+        Ok(())
     }
 }
 
@@ -330,6 +333,34 @@ mod tests {
     }
 
     #[test]
+    fn canonical_choice_keys_do_not_collide_across_nodes() {
+        let history = vec![
+            CallHistoryEntry {
+                node_guid: 1,
+                choice_key: Some((1u64 << 16) | 0),
+                scope_index: 0,
+                ..CallHistoryEntry::default()
+            },
+            CallHistoryEntry {
+                node_guid: 65_537,
+                choice_key: Some((65_537u64 << 16) | 0),
+                scope_index: 0,
+                ..CallHistoryEntry::default()
+            },
+            CallHistoryEntry {
+                node_guid: 1,
+                choice_key: Some((1u64 << 16) | 1),
+                scope_index: 99,
+                ..CallHistoryEntry::default()
+            },
+        ];
+        let index = FeatureIndex::rebuild_from_state(&WorldStateTable::new(), &history, 0).unwrap();
+        assert_eq!(index.choices.count((1u64 << 16) | 0), 1);
+        assert_eq!(index.choices.count((65_537u64 << 16) | 0), 1);
+        assert_eq!(index.choices.count((1u64 << 16) | 1), 0);
+    }
+
+    #[test]
     fn rebuild_matches_incremental() {
         let traits = [(1, 2, 7), (3, 4, -2)];
         let items = [(0, 5, 2), (6, 7, 9)];
@@ -344,7 +375,7 @@ mod tests {
             incremental.items.set_quantity(owner, item, quantity);
         }
         for choice in choices {
-            incremental.choices.record(choice);
+            incremental.choices.record(u64::from(choice));
         }
         for stage in stages {
             incremental.world_stage.set(stage);
