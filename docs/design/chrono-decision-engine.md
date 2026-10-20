@@ -190,6 +190,44 @@ Feature indexes are materialized views over authoritative state:
 
 Indexes are rebuildable from `WorldStateTable` and the resolved call-history path. Feature predicate compilation and transactional updates remain the next integration step.
 
+### 3.11 Execution semantics retained from the v5 design
+
+The dense contracts sit under the existing token runtime; they do not replace it.
+
+#### Token and budget execution
+
+- `FlowGraphAsset` is immutable topology. `FlowGraphInstance` is one execution with node state, a flat `SignalToken` vector, a fixed-point millisecond clock, and call history.
+- A `SignalToken` carries token ID, graph instance ID, target node GUID, target pin, time budget, and active/deferred state.
+- Every node implements three interfaces:
+  - `ExecuteNormal`: normal execution;
+  - `ForceComplete`: one-frame execution for save/load and Story Invoke;
+  - `CancelAndRevert`: one-frame inverse execution from the node's cached rollback record.
+- Tokens are consumed in deterministic token-ID order. Zero-cost cycles are rejected at asset validation; a per-tick execution cap prevents bypassed assets from hanging the frame loop.
+- A token that exceeds its budget is deferred; it keeps its budget and resumes on the next tick.
+- Node categories are `MUTATOR`, `WAITER`, `LOGIC_GATE`, `DYNAMIC_DISPATCHER`, and `SCOPED_CONTAINER`.
+
+#### QBN, salience, and waypoint behavior
+
+- **QBN hub**: evaluates a deck of authored storylet IDs, filters exact eligibility and completion locks, orders by display priority, and presents the deck. The player may execute eligible storylets in any order until the hub's exit storylet is chosen.
+- **Salience selector**: exact eligibility first; candidates without a matching dramatic-arc phase fail closed; score combines predicate specificity, present bonus tags, and negative weighted distance to the authored ideal state vector; ties use a deterministic saved seed.
+- **Waypoint conversation**: a directed topic graph with an NPC goal. NPC movement is Dijkstra from current topic to goal, excluding player-only trigger topics, with an added penalty for previously used edges. Player diversion moves to an adjacent topic and then the NPC re-routes. A scene-exit topic emits its declared output pin; visiting a topic may unlock a clue quality.
+- QBN, salience, and waypoint nodes record the chosen storylet, output pin, and edge/mission history so `CancelAndRevert` restores state and node-local records.
+
+#### Scene sections and timeline composer
+
+- A scene section owns `section_clock_ms` and a bounded event list.
+- Forward playback evaluates the left-inclusive/right-exclusive window `[t0, t1)`. Backward scrubbing evaluates the inverted window `(t1, t0]`.
+- Overlapping events decompose into `START`, `REGULAR`, and `END` action parts, sorted by action priority and target entity.
+- `SceneComposer` arbitrates concurrent commands per actor and caches the previous pose. Rollback restores that pose and the prior section clock exactly.
+- Scene-section completion can record a call-history entry and a completion commit.
+
+#### Invoke, reconcile, and patch rebase
+
+- **Story Invoke**: seek backward from a target POI. At an ALL gate, include every upstream branch; at ANY/Choice/Waypoint nodes, follow the declared route pin; at a QBN hub, resolve the exit storylet's prerequisite chain in topological order. Then `ForceComplete` the collected path in forward order and execute the target POI.
+- **Reconcile**: find the lowest common ancestor of current and target history, `CancelAndRevert` the current branch back to it, then `ForceComplete` the target branch forward.
+- **Patch rebase**: drop entries whose node/storylet no longer exists, preserve stable keys, and splice the shortest bridge path between consecutive surviving nodes when the updated asset inserted nodes. Ambiguous keys fail load.
+- The commit tree is a DAG; every rollback/reconcile operation moves one commit head and leaves abandoned branches intact for inspection.
+
 ## 4. Implementation status
 
 | Contract | Status | Evidence |
@@ -217,6 +255,7 @@ These are implementation limits, not hidden behavior.
 - Per-node completion sets remain `BTreeSet`s; instance eligibility uses the bitset.
 - Rollback still updates bits from node-set membership and does not always rebuild solely from the remaining commit path.
 - QBN prerequisite chains still consult node-local completion sets.
+- `UnifiedDispatcher::storylet` rebuilds its dense index on deserialize and on length changes. In-place mutation of an existing `storylet_id` without a length change requires an explicit `rebuild_index()`; otherwise a lookup can miss until rebuild.
 
 ### 5.2 Persistence
 
