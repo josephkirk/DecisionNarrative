@@ -275,54 +275,65 @@ pub struct TriggerTickReport {
     pub capped: bool,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TriggerCursor {
+    /// Sequence of the event currently being drained, if any.
+    pub sequence: Option<u32>,
+    /// Next candidate offset in that event's CSR bucket.
+    pub offset: usize,
+}
+
 impl TriggerTable {
-    /// Deterministic event processing. The caller owns instance creation; the
-    /// callback returns whether a start actually occurred.
+    /// Deterministic event processing. `cursor` must persist across ticks so a
+    /// capped event resumes at the next candidate instead of blocking forever.
     pub fn process_tick(
         &self,
         queue: &mut EventQueue,
         fired: &mut TriggerFireTable,
         active: &BTreeSet<(u16, StoryletIndex)>,
+        cursor: &mut TriggerCursor,
         max_starts: u32,
         mut start: impl FnMut(u16, StoryletIndex) -> bool,
     ) -> TriggerTickReport {
         let mut report = TriggerTickReport::default();
         let mut started = active.clone();
-        while let Some(event) = queue.peek().cloned() {
+        loop {
+            let Some(event) = queue.peek().cloned() else {
+                cursor.sequence = None;
+                cursor.offset = 0;
+                break;
+            };
+            if cursor.sequence != Some(event.sequence) {
+                cursor.sequence = Some(event.sequence);
+                cursor.offset = 0;
+            }
             let candidates = self.candidates(event.kind, event.key);
-            let mut distinct = BTreeSet::new();
-            for subscription in candidates {
-                let row = &self.rows[*subscription as usize];
-                if row.enabled
-                    && row.scope_filter.is_none_or(|scope| scope == event.source_scope)
-                    && !(row.once && fired.is_fired(event.source_scope, row.subscription_index))
-                    && !started.contains(&(event.source_scope, row.storylet_index))
-                {
-                    distinct.insert((event.source_scope, row.storylet_index));
-                }
-            }
-            if report.starts.saturating_add(distinct.len() as u32) > max_starts {
-                report.capped = true;
-                return report;
-            }
-            queue.pop();
-            report.events_processed += 1;
-            for subscription in candidates {
-                let row = &self.rows[*subscription as usize];
+            let mut completed = true;
+            while cursor.offset < candidates.len() {
+                let row = &self.rows[candidates[cursor.offset] as usize];
                 if !row.enabled {
+                    cursor.offset += 1;
                     continue;
                 }
                 if let Some(scope) = row.scope_filter
                     && scope != event.source_scope
                 {
+                    cursor.offset += 1;
                     continue;
                 }
                 if row.once && fired.is_fired(event.source_scope, row.subscription_index) {
+                    cursor.offset += 1;
                     continue;
                 }
                 let key = (event.source_scope, row.storylet_index);
                 if started.contains(&key) {
+                    cursor.offset += 1;
                     continue;
+                }
+                if report.starts >= max_starts {
+                    report.capped = true;
+                    completed = false;
+                    break;
                 }
                 if start(event.source_scope, row.storylet_index) {
                     report.starts += 1;
@@ -331,6 +342,15 @@ impl TriggerTable {
                         fired.mark(event.source_scope, row.subscription_index);
                     }
                 }
+                cursor.offset += 1;
+            }
+            if completed {
+                queue.pop();
+                cursor.sequence = None;
+                cursor.offset = 0;
+                report.events_processed += 1;
+            } else {
+                break;
             }
         }
         report
@@ -430,10 +450,12 @@ mod tests {
         let mut queue = EventQueue::new();
         queue.push(EventKind::Tag, 1, 0);
         let mut fired = TriggerFireTable::new();
-        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), 0, |_, _| true);
+        let mut cursor = TriggerCursor::default();
+        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut cursor, 0, |_, _| true);
         assert!(report.capped);
         assert_eq!(queue.len(), 1);
         assert_eq!(report.starts, 0);
+        assert_eq!(cursor.offset, 0);
     }
 
     #[test]
@@ -446,7 +468,7 @@ mod tests {
         queue.push(EventKind::Tag, 1, 0);
         let mut fired = TriggerFireTable::new();
         let mut starts = 0;
-        table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), 8, |_, _| {
+        table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut TriggerCursor::default(), 8, |_, _| {
             starts += 1;
             true
         });
@@ -463,11 +485,39 @@ mod tests {
         queue.push(EventKind::Tag, 1, 0);
         let mut fired = TriggerFireTable::new();
         let mut starts = 0;
-        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), 1, |_, _| {
+        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut TriggerCursor::default(), 1, |_, _| {
             starts += 1;
             true
         });
         assert_eq!(starts, 1);
+        assert!(!report.capped);
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn process_tick_resumes_two_targets_across_ticks() {
+        let mut table = TriggerTable::new();
+        table.insert(EventKind::Tag, 1, 5, false, 1, None).unwrap();
+        table.insert(EventKind::Tag, 1, 6, false, 0, None).unwrap();
+        table.build();
+        let mut queue = EventQueue::new();
+        queue.push(EventKind::Tag, 1, 0);
+        let mut fired = TriggerFireTable::new();
+        let mut cursor = TriggerCursor::default();
+        let mut first = Vec::new();
+        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut cursor, 1, |_, id| {
+            first.push(id);
+            true
+        });
+        assert_eq!(first, vec![5]);
+        assert!(report.capped);
+        assert_eq!(queue.len(), 1);
+        let mut second = Vec::new();
+        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut cursor, 1, |_, id| {
+            second.push(id);
+            true
+        });
+        assert_eq!(second, vec![6]);
         assert!(!report.capped);
         assert!(queue.is_empty());
     }
@@ -483,7 +533,7 @@ mod tests {
         queue.push(EventKind::Tag, 1, 0);
         let mut fired = TriggerFireTable::new();
         let mut starts = Vec::new();
-        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), 8, |scope, id| {
+        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut TriggerCursor::default(), 8, |scope, id| {
             starts.push((scope, id));
             true
         });
