@@ -213,8 +213,8 @@ impl FeatureIndex {
     /// call-history path for one scope. Unknown relation types are ignored.
     pub fn rebuild_from_state(
         state: &WorldStateTable,
-        history: &[CallHistoryEntry],
-        scope: u16,
+        _history: &[CallHistoryEntry],
+        _scope: u16,
     ) -> Result<Self, FeatureError> {
         let mut index = Self::new();
         for edge in &state.edges {
@@ -240,29 +240,6 @@ impl FeatureIndex {
             }
         }
 
-        for (actor, value) in state.passions.macro_values.iter().enumerate() {
-            if actor >= MAX_ACTORS {
-                return Err(FeatureError::OutOfRange);
-            }
-            if !index.actor_traits.set(actor as u16, 1, value.clamp(-127.0, 127.0) as i8) {
-                return Err(FeatureError::OutOfRange);
-            }
-        }
-
-        for entry in history {
-            if entry.scope_index != scope {
-                continue;
-            }
-            if let Some(key) = entry
-                .chosen_output_pin
-                .strip_prefix("choice_")
-                .and_then(|value| value.parse::<u16>().ok())
-                && !index.choices.record(key)
-            {
-                return Err(FeatureError::OutOfRange);
-            }
-        }
-
         for bit in 0..crate::chrono_state::MAX_TAGS as u16 {
             if state.global_tags.bit(bit) && !index.world_stage.set(bit) {
                 return Err(FeatureError::OutOfRange);
@@ -270,6 +247,31 @@ impl FeatureIndex {
         }
 
         Ok(index)
+    }
+
+    /// Record an authored actor-trait binding. Trait identity is not inferred
+    /// from passion storage; the project must supply the stable binding.
+    pub fn record_actor_trait(
+        &mut self,
+        actor: u16,
+        trait_id: u16,
+        value: i8,
+    ) -> Result<(), FeatureError> {
+        if self.actor_traits.set(actor, trait_id, value) {
+            Ok(())
+        } else {
+            Err(FeatureError::OutOfRange)
+        }
+    }
+
+    /// Record an authored choice key. Choice identity must be supplied by the
+    /// recording site; output-pin ordinals are not stable choice keys.
+    pub fn record_choice(&mut self, choice_key: u16) -> Result<(), FeatureError> {
+        if self.choices.record(choice_key) {
+            Ok(())
+        } else {
+            Err(FeatureError::OutOfRange)
+        }
     }
 }
 
@@ -317,15 +319,14 @@ mod tests {
             weight: 1.0,
         });
         state.global_tags.set_bit(4).unwrap();
-        let history = vec![CallHistoryEntry {
-            scope_index: 0,
-            chosen_output_pin: "choice_9".into(),
-            ..CallHistoryEntry::default()
-        }];
-        let index = FeatureIndex::rebuild_from_state(&state, &history, 0).unwrap();
+        let mut index = FeatureIndex::rebuild_from_state(&state, &[], 0).unwrap();
         assert_eq!(index.items.quantity(1, 2), 3);
-        assert_eq!(index.choices.count(9), 1);
+        assert_eq!(index.choices.count(9), 0);
         assert!(index.world_stage.contains(4));
+        index.record_choice(9).unwrap();
+        index.record_actor_trait(1, 2, 7).unwrap();
+        assert_eq!(index.choices.count(9), 1);
+        assert_eq!(index.actor_traits.get(1, 2), 7);
     }
 
     #[test]
