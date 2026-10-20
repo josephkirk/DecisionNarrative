@@ -1,5 +1,4 @@
-//! Selection profiles, gates, fallback/terminal policy, and weighted choice
-//! (REQ-DO-06, REQ-DO-08, REQ-DO-09).
+//! Selection profiles, gates, fallback/terminal policy, and weighted choice.
 
 use std::collections::BTreeMap;
 

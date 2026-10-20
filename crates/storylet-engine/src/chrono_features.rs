@@ -1,4 +1,4 @@
-//! Derived feature indexes (REQ-DO-11).
+//! Derived feature indexes.
 //!
 //! These are dense projections of authoritative state. Rebuild is the source of
 //! truth for verification; incremental updates are an optimization.

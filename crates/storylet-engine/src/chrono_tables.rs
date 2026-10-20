@@ -1,4 +1,4 @@
-//! Dense runtime tables (REQ-DO-01): storylet instances and scopes.
+//! Dense runtime tables: storylet instances and scopes.
 //!
 //! The table is deliberately independent of the scheduler. It provides the
 //! allocation, generation, free-list, and per-scope completion storage that a

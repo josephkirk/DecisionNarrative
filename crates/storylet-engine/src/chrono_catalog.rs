@@ -1,4 +1,4 @@
-//! Stable authoring keys and the dense storylet catalog (REQ-DO-02 / REQ-DO-10).
+//! Stable authoring keys and the dense storylet catalog.
 //!
 //! Authoring and persistence use stable keys. Runtime selection uses dense
 //! `StoryletIndex` values resolved once at load. The catalog is the load-time
@@ -139,7 +139,7 @@ impl StoryletSpace {
 }
 
 /// Catalog metadata needed by selection and working-set loading. The catalog is
-/// the registry from REQ-DO-02 plus payload/profile metadata; it is not a
+/// the storylet registry plus payload/profile metadata; it is not a
 /// parallel registry.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StoryletCatalog {

@@ -1,7 +1,7 @@
-//! Standalone validation prototype for the dense-runtime backlog.
+//! Standalone validation prototype for the dense runtime design.
 //!
 //! This is **not** production engine code and does not use the engine tables.
-//! It models the layouts proposed in `docs/featuresbacklog/chrono-decision-engine/dense-runtime`
+//! It models the layouts proposed in `docs/design/chrono-decision-engine.md`
 //! to measure:
 //! - dense storylet-completion bitset vs `BTreeSet`
 //! - CSR trigger bucket lookup vs full subscription scan

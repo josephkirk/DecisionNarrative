@@ -1,4 +1,4 @@
-//! Effect transactions and write-set conflict detection (REQ-DO-07).
+//! Effect transactions and write-set conflict detection.
 
 use std::error::Error;
 use std::fmt;

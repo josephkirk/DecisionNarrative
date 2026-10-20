@@ -1,4 +1,4 @@
-//! Engine-type probe for the dense-runtime backlog.
+//! Engine-type probe for the dense runtime design.
 //!
 //! Validates two seams that a synthetic benchmark cannot:
 //! - `FlowGraphInstance` call history can rebuild completed-storylet bits.

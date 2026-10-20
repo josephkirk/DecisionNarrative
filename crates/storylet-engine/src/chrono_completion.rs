@@ -1,5 +1,4 @@
-//! Per-scope completion bitsets and canonical call-history entries
-//! (REQ-DO-03 / REQ-DO-04).
+//! Per-scope completion bitsets and canonical call-history entries.
 //!
 //! The bitset is derived state. Call history is the canonical replay record;
 //! the runtime rebuilds completion bits by folding the commit path.

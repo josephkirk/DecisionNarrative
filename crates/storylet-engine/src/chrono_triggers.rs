@@ -1,4 +1,4 @@
-//! Indexed trigger events and derived fired state (REQ-DO-05).
+//! Indexed trigger events and derived fired state.
 //!
 //! The table is an index over content; the event queue is runtime state. Fired
 //! state is derived from call history, not independent saved state.

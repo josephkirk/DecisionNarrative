@@ -12,6 +12,7 @@ External MCP agents remain supported. The Vue studio publishes the active view, 
 - `crates/storylet-engine-service/`: local HTTP/MCP service and SQLite project/session persistence.
 - `src/web/studio/`: Vue authoring UI, interaction-context provider, storylet graph editor, tag manager, Codex, scenarios, playtest, and project interchange.
 - `src/web/studio/interactionContext.ts`: typed model-free snapshot of route, project revision, focused entity/selection, and active playtest context.
+- `docs/design/chrono-decision-engine.md`: runtime architecture, dense contracts, implementation status, and limitations.
 - `docs/design/storylet-studio.md`: current product boundaries and MCP context contract.
 - `docs/guides/storylet-authoring.md`: manual authoring and review workflow.
 
