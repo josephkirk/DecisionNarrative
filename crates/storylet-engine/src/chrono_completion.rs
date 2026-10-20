@@ -2,7 +2,7 @@
 //! (REQ-DO-03 / REQ-DO-04).
 //!
 //! The bitset is derived state. Call history is the canonical replay record;
-//! `rebuild_completed` is the only rebuild rule used by this contract.
+//! the runtime rebuilds completion bits by folding the commit path.
 
 use std::error::Error;
 use std::fmt;
