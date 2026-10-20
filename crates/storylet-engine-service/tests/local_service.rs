@@ -72,6 +72,31 @@ fn empty_project() -> Value {
     })
 }
 
+fn bundle_with_storylet(graph: Value, ending: bool) -> Value {
+    json!({
+        "format": "decision-narrative-project",
+        "schema_version": 2,
+        "project": { "id": "bundle-project", "name": "Bundle Project", "revision": 1 },
+        "content": {
+            "qualities": [],
+            "locations": [],
+            "characters": [],
+            "storylets": [{
+                "id": "bundle-story",
+                "title": "Bundle Story",
+                "ending": ending,
+                "content": { "text_template": "" },
+                "effects": {},
+                "created_at": 1,
+                "graph": graph
+            }],
+            "npcBehaviors": [],
+            "events": [],
+            "scenarios": []
+        }
+    })
+}
+
 #[tokio::test]
 async fn rust_http_service_creates_and_advances_a_generic_playtest() {
     let app = test_app();
@@ -1215,4 +1240,90 @@ async fn character_passions_and_zero_sum_links_validate_and_persist() {
             .unwrap()
             .contains("invalid or duplicate passion")
     );
+}
+
+
+#[tokio::test]
+async fn bundle_validation_rejects_a_graph_without_an_end_before_import() {
+    let app = test_app();
+    let valid_graph = json!({
+        "nodes": [
+            { "id": "start", "title": "Start", "type": "start", "x": 0, "y": 0, "width": 100, "height": 80, "text": "Begin" },
+            { "id": "end", "title": "End", "type": "end", "x": 200, "y": 0, "width": 100, "height": 80, "is_terminal": true }
+        ],
+        "edges": [
+            { "id": "start-end", "from_node": "start", "from_port": "output", "to_node": "end", "to_port": "input" }
+        ]
+    });
+    let (status, _) = request(&app, "POST", "/api/v2/content/storylets", Some(json!({
+        "id": "seeded", "title": "Seeded", "created_at": 1, "content": { "text_template": "" }, "graph": valid_graph
+    }))).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let graph = json!({
+        "nodes": [
+            { "id": "start", "title": "Start", "type": "start", "x": 0, "y": 0, "width": 100, "height": 80, "text": "Begin" }
+        ],
+        "edges": []
+    });
+    let bundle = bundle_with_storylet(graph, false);
+    let (status, result) = request(&app, "POST", "/api/v2/project-bundle/validate", Some(json!({ "bundle": bundle }))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(result["valid"], false);
+    assert!(result["issues"].as_array().unwrap().iter().any(|issue| issue.as_str().unwrap().contains("at least one End")));
+
+    let (status, result) = request(&app, "POST", "/api/v2/project-bundle/import", Some(json!({
+        "bundle": bundle, "confirmReplace": true
+    }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(result["error"].as_str().unwrap().contains("at least one End"));
+    let (status, storylets) = request(&app, "GET", "/api/v2/content/storylets", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let storylets = storylets.as_array().unwrap();
+    assert_eq!(storylets.len(), 1);
+    assert_eq!(storylets[0]["id"], "seeded");
+}
+
+#[tokio::test]
+async fn bundle_import_derives_ending_from_the_graph() {
+    let path = std::env::temp_dir().join(format!(
+        "dn-bundle-{}-{}.db",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let app = router(
+        RuntimeService::from_connection(Connection::open(&path).unwrap()).unwrap(),
+    );
+    let graph = json!({
+        "nodes": [
+            { "id": "start", "title": "Start", "type": "start", "x": 0, "y": 0, "width": 100, "height": 80, "text": "Begin" },
+            { "id": "end", "title": "End", "type": "end", "x": 200, "y": 0, "width": 100, "height": 80, "is_terminal": true }
+        ],
+        "edges": [
+            { "id": "start-end", "from_node": "start", "from_port": "output", "to_node": "end", "to_port": "input" }
+        ]
+    });
+    let bundle = bundle_with_storylet(graph, false);
+    let (status, result) = request(&app, "POST", "/api/v2/project-bundle/import", Some(json!({
+        "bundle": bundle, "confirmReplace": true
+    }))).await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+
+    // Read the stored row directly; the HTTP GET intentionally renormalizes it.
+    let conn = Connection::open(&path).unwrap();
+    let raw: String = conn
+        .query_row(
+            "SELECT data_json FROM content_records WHERE entity = 'storylets' AND id = 'bundle-story'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let stored: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(stored["ending"], true);
+    drop(conn);
+    drop(app);
+    let _ = std::fs::remove_file(path);
 }
