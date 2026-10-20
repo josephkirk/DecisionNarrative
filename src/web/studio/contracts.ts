@@ -95,6 +95,7 @@ export interface EventRecord {
 export interface StoryletParameterRecord {
   param_name: string;
   query: string;
+  location_policy?: "current" | "any";
 }
 
 export interface StoryletChoiceRecord {

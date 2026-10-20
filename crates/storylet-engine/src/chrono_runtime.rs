@@ -20,6 +20,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::chrono_completion::StoryletBitset;
 use crate::chrono_dispatch::{DispatchError, UnifiedDispatcher, WaypointStep, WaypointTopicGraph};
 use crate::chrono_state::{
     apply_mutation, apply_mutation_with_registry, apply_passion_mutation, revert_delta,
@@ -363,6 +364,24 @@ pub struct CallHistoryEntry {
     pub chosen_output_pin: String,
     #[serde(default)]
     pub chosen_storylet_id: Option<u16>,
+    #[serde(default)]
+    pub scope_index: u16,
+    #[serde(default)]
+    pub instance_index: u32,
+    #[serde(default)]
+    pub storylet_key: Option<String>,
+    #[serde(default)]
+    pub trigger_key: Option<String>,
+    #[serde(default)]
+    pub trigger_subscription: Option<u32>,
+    #[serde(default)]
+    pub effect_transaction: Option<u32>,
+    #[serde(default)]
+    pub content_revision: u64,
+    #[serde(default)]
+    pub tick: u32,
+    #[serde(default)]
+    pub completed: bool,
 }
 
 /// One save-replay record: a call-history entry plus the frame it was played on.
@@ -1734,7 +1753,7 @@ pub struct FlowGraphInstance {
     /// Once-only lock across every dispatcher node in this instance, not just
     /// the node that completed the storylet (REQ-BB-02).
     #[serde(default)]
-    pub completed_storylets: BTreeSet<u16>,
+    pub completed_storylets: StoryletBitset,
     /// Local variable store for typed assignments (REQ-VAR).
     pub variables: VariableStore,
     /// Asset ids from the root instance down to this instance, used to reject
@@ -1785,7 +1804,7 @@ impl FlowGraphInstance {
             turn: 0,
             ms_per_turn: None,
             last_completed_ms: BTreeMap::new(),
-            completed_storylets: BTreeSet::new(),
+            completed_storylets: StoryletBitset::new(),
             variables: VariableStore::default(),
             mission_asset_path,
             pending_passion_events: Vec::new(),
@@ -1823,7 +1842,7 @@ impl FlowGraphInstance {
         self.next_token_id = 0;
         self.turn = 0;
         self.last_completed_ms.clear();
-        self.completed_storylets.clear();
+        self.completed_storylets.clear_all();
         self.pending_passion_events.clear();
     }
     /// Non-empty scoped mission arrays anywhere in this instance tree, keyed by
@@ -1902,6 +1921,24 @@ impl FlowGraphInstance {
 
     pub fn call_history(&self) -> &[CallHistoryEntry] {
         &self.global_call_history
+    }
+
+    /// Rebuild the materialized completion bitset from the canonical commit path.
+    pub fn rebuild_completed_bitset(&self) -> Result<StoryletBitset, GraphError> {
+        let mut bits = StoryletBitset::new();
+        for entry in self.history.call_history()? {
+            if entry.completed {
+                if let Some(storylet_id) = entry.chosen_storylet_id {
+                    let _ = bits.set(storylet_id);
+                }
+            }
+        }
+        Ok(bits)
+    }
+
+    /// Debug/checkpoint verification: the live bitset equals the rebuilt path.
+    pub fn verify_completed_bitset(&self) -> Result<bool, GraphError> {
+        Ok(self.completed_storylets == self.rebuild_completed_bitset()?)
     }
     /// Deliver an external gameplay verb and immediately release every matching
     /// latent waiter, regardless of its timeout or required-tag condition.
@@ -2336,7 +2373,7 @@ impl FlowGraphInstance {
                                 .collect()
                         };
                         ctx.dispatcher
-                            .try_match_most_salient(
+                            .try_match_most_salient_bitset(
                                 &candidates,
                                 ctx.state,
                                 &self.completed_storylets,
@@ -2521,6 +2558,9 @@ impl FlowGraphInstance {
                 executed_input_pin: plan.input_pin.clone(),
                 chosen_output_pin: plan.output_pin.clone().unwrap_or_default(),
                 chosen_storylet_id: plan.storylet_id,
+                scope_index: 0,
+                completed: plan.storylet_id.is_some(),
+                ..CallHistoryEntry::default()
             };
             if plan.commit {
                 self.record_call(&entry, &plan.delta)?;
@@ -2610,7 +2650,7 @@ impl FlowGraphInstance {
         }
         if let Some(storylet_id) = plan.storylet_id {
             self.last_completed_ms.insert(storylet_id, self.clock_ms);
-            self.completed_storylets.insert(storylet_id);
+            let _ = self.completed_storylets.set(storylet_id);
         }
         let mut emitted = Vec::new();
         if plan.emit && plan.completed {
@@ -3117,11 +3157,11 @@ impl FlowGraphInstance {
             let eligible = match ctx.dispatcher.storylet(storylet_id) {
                 Some(storylet) => {
                     ctx.dispatcher
-                        .try_is_playable(storylet, ctx.state, &completed)
+                        .try_is_playable_bitset(storylet, ctx.state, &completed)
                         .map_err(GraphError::Dispatch)?
                         && self.off_cooldown(ctx, storylet_id)
                 }
-                None => false,
+                _ => false,
             };
             if !eligible {
                 return Err(GraphError::StoryletNotPlayable {
@@ -3168,7 +3208,7 @@ impl FlowGraphInstance {
         };
         Ok(ctx
             .dispatcher
-            .try_query_qbn_deck(deck, ctx.state, &self.completed_storylets)
+            .try_query_qbn_deck_bitset(deck, ctx.state, &self.completed_storylets)
             .map_err(GraphError::Dispatch)?
             .into_iter()
             .filter(|storylet_id| self.off_cooldown(ctx, *storylet_id))
@@ -3248,13 +3288,13 @@ impl FlowGraphInstance {
             let Some(def) = ctx.dispatcher.storylet(storylet_id) else {
                 continue;
             };
-            // Same fail-closed arc-phase rule as `match_most_salient`.
+            // Same fail-closed arc-phase and ending exclusion as selection.
             if def.required_arc_phases.is_empty() {
                 continue;
             }
             if ctx
                 .dispatcher
-                .try_is_playable(def, ctx.state, completed)
+                .try_is_playable_bitset(def, ctx.state, completed)
                 .map_err(GraphError::Dispatch)?
             {
                 eligible.push(storylet_id);
@@ -3311,6 +3351,7 @@ impl FlowGraphInstance {
                 executed_input_pin: input_pin,
                 chosen_output_pin: DEFAULT_OUTPUT_PIN.to_string(),
                 chosen_storylet_id: None,
+                ..CallHistoryEntry::default()
             };
             self.record_call(&entry, &BijectiveDelta::default())?;
             let node = &mut self.nodes[index];
@@ -3519,7 +3560,7 @@ impl FlowGraphInstance {
                     .iter()
                     .any(|node| node.completed_storylets.contains(storylet_id))
                 {
-                    self.completed_storylets.remove(storylet_id);
+                    let _ = self.completed_storylets.clear(*storylet_id);
                 }
                 match previous_completed_ms {
                     Some(clock) => {
@@ -3839,6 +3880,7 @@ impl FlowGraphInstance {
                     .unwrap_or_else(|| DEFAULT_INPUT_PIN.to_string()),
                 chosen_output_pin: DEFAULT_OUTPUT_PIN.to_string(),
                 chosen_storylet_id: self.nodes[index].chosen_storylet_id,
+                ..CallHistoryEntry::default()
             };
             if record_completion {
                 self.record_call(&entry, &BijectiveDelta::default())?;
@@ -4671,6 +4713,7 @@ impl FlowGraphInstance {
                     executed_input_pin: input_pin,
                     chosen_output_pin: output_pin,
                     chosen_storylet_id: None,
+                    ..CallHistoryEntry::default()
                 };
                 entries.push(base);
                 continue;
@@ -4875,6 +4918,7 @@ pub fn rebase_call_history(
                         executed_input_pin: input_pin,
                         chosen_output_pin: output_pin,
                         chosen_storylet_id: None,
+                        ..CallHistoryEntry::default()
                     });
                 }
             }

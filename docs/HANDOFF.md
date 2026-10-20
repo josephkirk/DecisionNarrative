@@ -17,8 +17,8 @@ External MCP agents remain supported. The Vue studio publishes the active view, 
 
 ## Current authoring rules
 
-- Storylets target location tags; preconditions support quality conditions and visited-location/met-character IDs or tags/roles.
-- Graphs require exactly one Start and one End, with every node on a complete Start-to-End path. Save validates before writing and approval checks the saved revision.
+- Storylets may target location tags; a storylet with no location tags is not location-gated. Preconditions support quality conditions and visited-location/met-character IDs or tags/roles. Role parameters default to current-location binding; `location_policy: "any"` allows remote/abstract actors via JSON/MCP.
+- Graphs require exactly one Start and one or more End nodes, with every node reachable from Start and able to reach an End. Each End is terminal or a jump to another storylet; a jump takes precedence, and a dedicated ending requires every End to be terminal with no jump. Save validates before writing and approval checks the saved revision.
 - Go To Location is a Choice-branch action and selects an existing project location.
 - Tag editing is inline with suggestions; Tag Manager shows tag references and opens the referenced record.
 - Content is authored in the studio or by a requested MCP agent. Approval remains an explicit user decision.

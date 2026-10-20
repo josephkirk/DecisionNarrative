@@ -98,9 +98,8 @@ pub fn compile_narrative_graphs(
     let mut edges = Vec::new();
     let mut mission_assets = BTreeMap::new();
     for (storylet, graph, node_guids) in &sources {
-        let storylet_index = *compiled
-            .storylet_indices
-            .get(&storylet.id)
+        let storylet_index = compiled
+            .storylet_index(&storylet.id)
             .ok_or_else(|| format!("storylet {} was not compiled into dispatch", storylet.id))?;
         let asset = compile_storylet_asset(
             storylet,
@@ -235,14 +234,19 @@ pub fn bind_storylet_start_nodes(
     compiled: &mut CompiledChronoDispatch,
     graphs: &CompiledNarrativeGraphs,
 ) -> Result<(), String> {
-    for storylet in &mut compiled.dispatcher.storylets {
-        let id = compiled
-            .storylet_ids
-            .get(storylet.storylet_id as usize)
-            .ok_or_else(|| format!("storylet index {} has no source id", storylet.storylet_id))?;
+    let keys: Vec<Option<String>> = compiled
+        .dispatcher
+        .storylets
+        .iter()
+        .map(|storylet| compiled.storylet_key(storylet.storylet_id).map(str::to_owned))
+        .collect();
+    for (storylet, key) in compiled.dispatcher.storylets.iter_mut().zip(keys) {
+        let id = key.ok_or_else(|| {
+            format!("storylet index {} has no source id", storylet.storylet_id)
+        })?;
         storylet.payload_node_guid = *graphs
             .storylet_start_nodes
-            .get(id)
+            .get(&id)
             .ok_or_else(|| format!("storylet {id} has no compiled graph entry"))?;
     }
     Ok(())
@@ -461,6 +465,8 @@ fn compile_node_kind(
         NarrativeNodeData::End {
             jump_to_storylet, ..
         } => {
+            // A jump is a transition. If an author leaves the default terminal
+            // flag set while choosing a destination, the jump wins.
             let destination = jump_to_storylet
                 .as_deref()
                 .map(|id| storylet_index_for(compiled, id))
@@ -701,9 +707,7 @@ fn map_output_port(port: &str) -> String {
 
 fn storylet_index_for(compiled: &CompiledChronoDispatch, id: &str) -> Result<u16, String> {
     compiled
-        .storylet_indices
-        .get(id)
-        .copied()
+        .storylet_index(id)
         .ok_or_else(|| format!("graph references unknown storylet {id}"))
 }
 
@@ -1158,6 +1162,223 @@ mod tests {
                 .any(|entry| entry.node_guid == poi_guid)
         );
     }
+    #[test]
+    fn jump_wins_over_a_terminal_flag() {
+        use crate::narrative_graph::{NarrativeGraph, NarrativeNode, NarrativeNodeData};
+        use storylet_engine::chrono_runtime::NodeKind;
+
+        let mut storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
+            "id": "terminal-jump", "title": "Terminal Jump",
+            "content": { "text_template": "End." }, "effects": {}, "created_at": 1
+        }))
+        .unwrap();
+        let graph = NarrativeGraph {
+            local_variables: Vec::new(),
+            nodes: vec![
+                NarrativeNode {
+                    id: "start".into(), title: "Start".into(), x: 0, y: 0, width: 100, height: 80,
+                    data: NarrativeNodeData::Start { label: "Begin".into() },
+                },
+                NarrativeNode {
+                    id: "end".into(), title: "End".into(), x: 200, y: 0, width: 100, height: 80,
+                    data: NarrativeNodeData::End {
+                        is_terminal: true,
+                        jump_to_storylet: Some("terminal-jump".into()),
+                    },
+                },
+            ],
+            edges: vec![crate::narrative_graph::NarrativeEdge {
+                id: "start-end".into(), from_node: "start".into(), from_port: "output".into(),
+                to_node: "end".into(), to_port: "input".into(),
+            }],
+        };
+        storylet.graph = Some(serde_json::to_value(graph).unwrap());
+        let compiled = compile_chrono_dispatch(std::slice::from_ref(&storylet), &[], &[], &[]).unwrap();
+        let graphs = compile_narrative_graphs(
+            "terminal-jump", std::slice::from_ref(&storylet), &compiled, &std::collections::BTreeMap::new()
+        ).unwrap();
+        let end = graphs.asset.nodes.iter().find(|node| node.payload["nodeId"] == "end").unwrap();
+        assert!(matches!(end.kind, NodeKind::End { jump_to_storylet: Some(_) }));
+    }
+
+    #[test]
+    fn multiple_end_graph_executes_terminal_and_jump_branches() {
+        use crate::narrative_graph::{
+            ChoiceOption, NarrativeEdge, NarrativeGraph, NarrativeNode, NarrativeNodeData,
+        };
+        use storylet_engine::chrono_runtime::NodeKind;
+
+        let node = |id: &str, data: NarrativeNodeData| NarrativeNode {
+            id: id.into(),
+            title: id.into(),
+            x: 0,
+            y: 0,
+            width: 160,
+            height: 80,
+            data,
+        };
+        let mut first: StoryletRecord = serde_json::from_value(serde_json::json!({
+            "id": "a-first", "title": "First", "content": { "text_template": "First." },
+            "effects": {}, "created_at": 1
+        }))
+        .unwrap();
+        first.graph = Some(
+            serde_json::to_value(NarrativeGraph {
+                local_variables: Vec::new(),
+                nodes: vec![
+                    node(
+                        "start",
+                        NarrativeNodeData::Start {
+                            label: "Begin".into(),
+                        },
+                    ),
+                    node(
+                        "choice",
+                        NarrativeNodeData::Choice {
+                            choices: vec![
+                                ChoiceOption {
+                                    id: "stay".into(),
+                                    text: "Stay".into(),
+                                    system_verb: None,
+                                    effects: None,
+                                },
+                                ChoiceOption {
+                                    id: "go".into(),
+                                    text: "Go".into(),
+                                    system_verb: None,
+                                    effects: None,
+                                },
+                            ],
+                        },
+                    ),
+                    node(
+                        "end-terminal",
+                        NarrativeNodeData::End {
+                            is_terminal: true,
+                            jump_to_storylet: None,
+                        },
+                    ),
+                    node(
+                        "end-jump",
+                        NarrativeNodeData::End {
+                            is_terminal: false,
+                            jump_to_storylet: Some("b-next".into()),
+                        },
+                    ),
+                ],
+                edges: vec![
+                    NarrativeEdge {
+                        id: "start-choice".into(),
+                        from_node: "start".into(),
+                        from_port: "output".into(),
+                        to_node: "choice".into(),
+                        to_port: "input".into(),
+                    },
+                    NarrativeEdge {
+                        id: "choice-stay".into(),
+                        from_node: "choice".into(),
+                        from_port: "choice_0".into(),
+                        to_node: "end-terminal".into(),
+                        to_port: "input".into(),
+                    },
+                    NarrativeEdge {
+                        id: "choice-go".into(),
+                        from_node: "choice".into(),
+                        from_port: "choice_1".into(),
+                        to_node: "end-jump".into(),
+                        to_port: "input".into(),
+                    },
+                ],
+            })
+            .unwrap(),
+        );
+        let next: StoryletRecord = serde_json::from_value(serde_json::json!({
+            "id": "b-next", "title": "Next", "content": { "text_template": "Next." },
+            "effects": {}, "created_at": 1
+        }))
+        .unwrap();
+        let storylets = [first, next];
+        let mut dispatch = compile_chrono_dispatch(&storylets, &[], &[], &[]).unwrap();
+        let graphs = compile_narrative_graphs(
+            "multi-end-project",
+            &storylets,
+            &dispatch,
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        bind_storylet_start_nodes(&mut dispatch, &graphs).unwrap();
+
+        let mut state = WorldStateTable::default();
+        let mut context =
+            RuntimeContext::with_registry(&mut state, &dispatch.dispatcher, &dispatch.registry);
+        let choice_guid = graphs
+            .asset
+            .nodes
+            .iter()
+            .find(|node| node.payload["nodeId"] == "choice")
+            .unwrap()
+            .node_guid;
+        let terminal_guid = graphs
+            .asset
+            .nodes
+            .iter()
+            .find(|node| node.payload["nodeId"] == "end-terminal")
+            .unwrap()
+            .node_guid;
+        let jump_guid = graphs
+            .asset
+            .nodes
+            .iter()
+            .find(|node| node.payload["nodeId"] == "end-jump")
+            .unwrap()
+            .node_guid;
+        assert_eq!(
+            graphs
+                .asset
+                .nodes
+                .iter()
+                .filter(|node| matches!(node.kind, NodeKind::End { .. }))
+                .count(),
+            3,
+            "two authored Ends and the next storylet's End are compiled"
+        );
+
+        let mut terminal = FlowGraphInstance::new(11, graphs.asset.clone(), 7).unwrap();
+        terminal
+            .start_at_node(graphs.storylet_start_nodes["a-first"])
+            .unwrap();
+        terminal.tick(&mut context, 100).unwrap();
+        terminal
+            .choose(&mut context, choice_guid, "choice_0")
+            .unwrap();
+        terminal.tick(&mut context, 100).unwrap();
+        assert!(
+            terminal
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == terminal_guid)
+        );
+
+        let mut jump = FlowGraphInstance::new(12, graphs.asset.clone(), 7).unwrap();
+        jump.start_at_node(graphs.storylet_start_nodes["a-first"])
+            .unwrap();
+        jump.tick(&mut context, 100).unwrap();
+        jump.choose(&mut context, choice_guid, "choice_1").unwrap();
+        for _ in 0..6 {
+            jump.tick(&mut context, 100).unwrap();
+        }
+        assert!(
+            jump.global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == jump_guid)
+        );
+        assert!(
+            jump.global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == graphs.storylet_start_nodes["b-next"])
+        );
+    }
+
     #[test]
     fn mission_nodes_run_the_selected_storylet_in_an_isolated_child_instance() {
         use crate::narrative_graph::{NarrativeGraph, NarrativeNode, NarrativeNodeData};

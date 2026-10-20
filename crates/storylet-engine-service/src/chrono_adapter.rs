@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use storylet_engine::chrono_catalog::{StoryletCatalog, MAX_STORYLETS};
 use storylet_engine::chrono_dispatch::{
     EffectKind, IdealMetricTarget, PredicateOperator, PredicateSubject, QualityPredicate,
     RoleRequirement, StoryletClusterType, StoryletDef, StoryletEffect, UnifiedDispatcher,
@@ -26,11 +27,28 @@ pub struct CompiledChronoDispatch {
     pub registry: GameplayTagRegistry,
     pub metrics: MetricRegistry,
     pub dispatcher: UnifiedDispatcher,
-    pub storylet_ids: Vec<String>,
-    pub storylet_indices: BTreeMap<String, u16>,
+    catalog: StoryletCatalog,
     pub metric_indices: BTreeMap<String, u16>,
     pub passion_registry: PassionRegistry,
     pub passion_indices: BTreeMap<(String, String), u16>,
+}
+
+impl CompiledChronoDispatch {
+    pub fn storylet_index(&self, id: &str) -> Option<u16> {
+        self.catalog.resolve(id)
+    }
+
+    pub fn storylet_key(&self, index: u16) -> Option<&str> {
+        self.catalog.key(index)
+    }
+
+    pub fn storylet_catalog(&self) -> &StoryletCatalog {
+        &self.catalog
+    }
+
+    pub fn storylet_count(&self) -> usize {
+        self.catalog.len()
+    }
 }
 
 fn menace_crisis_tag(quality_name: &str) -> String {
@@ -67,13 +85,19 @@ fn compile_chrono_dispatch_inner(
 ) -> Result<CompiledChronoDispatch, String> {
     let mut ordered_storylets: Vec<&StoryletRecord> = storylets.iter().collect();
     ordered_storylets.sort_by(|left, right| left.id.cmp(&right.id));
-    const MAX_DISPATCHABLE_STORYLETS: usize = u16::MAX as usize + 1;
-    if ordered_storylets.len() > MAX_DISPATCHABLE_STORYLETS {
+    if ordered_storylets.len() > MAX_STORYLETS {
         return Err(format!(
-            "ChronoFlow supports at most {MAX_DISPATCHABLE_STORYLETS} dispatchable storylets; got {}",
+            "ChronoFlow supports at most {MAX_STORYLETS} dispatchable storylets; got {}",
             ordered_storylets.len()
         ));
     }
+    let mut catalog = StoryletCatalog::new();
+    for storylet in &ordered_storylets {
+        catalog
+            .insert(&storylet.id, storylet.ending, 0, 0.0)
+            .map_err(|error| format!("storylet catalog: {error}"))?;
+    }
+    catalog.freeze(0).map_err(|error| format!("storylet catalog: {error}"))?;
 
     let mut names = BTreeSet::new();
     names.insert("location.current".into());
@@ -144,15 +168,7 @@ fn compile_chrono_dispatch_inner(
         metric_indices.insert(quality.name.clone(), metric_id);
     }
 
-    let storylet_ids: Vec<String> = ordered_storylets
-        .iter()
-        .map(|storylet| storylet.id.clone())
-        .collect();
-    let storylet_indices: BTreeMap<String, u16> = storylet_ids
-        .iter()
-        .enumerate()
-        .map(|(index, id)| (id.clone(), index as u16))
-        .collect();
+
     let mut threshold_rules = Vec::new();
     for quality in qualities {
         let Some(crisis_storylet_id) = &quality.menace_crisis_storylet_id else {
@@ -164,7 +180,7 @@ fn compile_chrono_dispatch_inner(
                 quality.name
             ));
         }
-        if strict_crisis_targets && !storylet_indices.contains_key(crisis_storylet_id) {
+        if strict_crisis_targets && catalog.resolve(crisis_storylet_id).is_none() {
             return Err(format!(
                 "menace quality {} references unknown crisis storylet {}",
                 quality.name, crisis_storylet_id
@@ -198,8 +214,10 @@ fn compile_chrono_dispatch_inner(
     let mut definitions = Vec::with_capacity(ordered_storylets.len());
     for (storylet_index, storylet) in ordered_storylets.iter().enumerate() {
         let settings = storylet.chrono.as_ref();
+        debug_assert_eq!(catalog.key(storylet_index as u16), Some(storylet.id.as_str()));
         let mut definition = StoryletDef {
             storylet_id: storylet_index as u16,
+            is_ending: storylet.ending,
             display_priority: settings
                 .map(|settings| settings.display_priority)
                 .unwrap_or(0),
@@ -238,9 +256,19 @@ fn compile_chrono_dispatch_inner(
                             )
                         },
                     )?;
+                    let location_tag = match parameter.location_policy.trim() {
+                        "" | "current" => Some("location.current".into()),
+                        "any" => None,
+                        other => {
+                            return Err(format!(
+                                "storylet {} parameter {} has unsupported location_policy '{other}'",
+                                storylet.id, parameter.param_name
+                            ));
+                        }
+                    };
                     Ok(RoleRequirement {
                         role_tag: role,
-                        location_tag: Some("location.current".into()),
+                        location_tag,
                         ..RoleRequirement::default()
                     })
                 })
@@ -485,8 +513,7 @@ fn compile_chrono_dispatch_inner(
         registry,
         metrics,
         dispatcher,
-        storylet_ids,
-        storylet_indices,
+        catalog,
         metric_indices,
         passion_registry,
         passion_indices,
@@ -1518,6 +1545,71 @@ mod tests {
     use super::compile_chrono_dispatch;
     use crate::contracts::{CharacterRecord, LocationRecord, QualityRecord, StoryletRecord};
     use storylet_engine::chrono_state::{MutationOp, apply_mutation_with_registry, revert_delta};
+
+    #[test]
+    fn catalog_rejects_duplicate_keys_and_is_frozen_after_compile() {
+        let storylet = || {
+            serde_json::from_value::<StoryletRecord>(serde_json::json!({
+                "id": "scene-a",
+                "title": "Scene A",
+                "content": { "text_template": "A scene." },
+                "effects": {},
+                "created_at": 1
+            }))
+            .expect("valid storylet fixture")
+        };
+        let error = compile_chrono_dispatch(&[storylet(), storylet()], &[], &[], &[])
+            .expect_err("duplicate storylet keys must fail load");
+        assert!(error.contains("duplicate storylet key"), "{error}");
+
+        let compiled = compile_chrono_dispatch(&[storylet()], &[], &[], &[])
+            .expect("unique storylet compiles");
+        assert!(compiled.storylet_catalog().is_frozen());
+        assert_eq!(compiled.storylet_index("scene-a"), Some(0));
+        assert_eq!(compiled.storylet_key(0), Some("scene-a"));
+        assert_eq!(compiled.storylet_count(), 1);
+    }
+
+    #[test]
+    fn role_location_policy_defaults_to_current_and_can_be_any() {
+        let current: StoryletRecord = serde_json::from_value(serde_json::json!({
+            "id": "current-role",
+            "title": "Current Role",
+            "content": { "text_template": "A scene." },
+            "parameters": [{ "param_name": "guide", "query": "role == \"Role.Guide\"" }],
+            "effects": {},
+            "created_at": 1
+        }))
+        .expect("valid storylet fixture");
+        let any: StoryletRecord = serde_json::from_value(serde_json::json!({
+            "id": "any-role",
+            "title": "Any Role",
+            "content": { "text_template": "A scene." },
+            "parameters": [{
+                "param_name": "guide",
+                "query": "role == \"Role.Guide\"",
+                "location_policy": "any"
+            }],
+            "effects": {},
+            "created_at": 1
+        }))
+        .expect("valid storylet fixture");
+
+        let current =
+            compile_chrono_dispatch(&[current], &[], &[], &[]).expect("current policy compiles");
+        assert_eq!(
+            current.dispatcher.storylets[0].required_roles[0]
+                .location_tag
+                .as_deref(),
+            Some("location.current")
+        );
+
+        let any = compile_chrono_dispatch(&[any], &[], &[], &[]).expect("any policy compiles");
+        assert_eq!(
+            any.dispatcher.storylets[0].required_roles[0].location_tag,
+            None
+        );
+    }
 
     #[test]
     fn compiles_each_independent_legacy_precondition_group() {

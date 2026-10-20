@@ -389,7 +389,12 @@ impl CompiledIdSpace {
             .zip(0..compiled.registry.tag_count() as u16)
             .collect();
         CompiledIdSpace {
-            storylets: compiled.storylet_indices.clone(),
+            storylets: compiled
+                .storylet_catalog()
+                .space()
+                .iter()
+                .map(|(index, key)| (key.to_owned(), index))
+                .collect(),
             metrics: compiled.metric_indices.clone(),
             passions,
             entities: entity_indices.clone(),
@@ -1047,7 +1052,8 @@ fn context_view(session: &ChronoPlaytestSession, prepared: &Prepared) -> Value {
                     let eligible_storylets = prepared
                         .compiled
                         .dispatcher
-                        .query_qbn_deck(deck, &session.world, &instance.completed_storylets)
+                        .try_query_qbn_deck_bitset(deck, &session.world, &instance.completed_storylets)
+                        .unwrap_or_default()
                         .into_iter()
                         .filter(|storylet_id| {
                             prepared

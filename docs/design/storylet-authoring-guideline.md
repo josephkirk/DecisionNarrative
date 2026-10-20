@@ -13,8 +13,8 @@ A storylet is both authored prose and a deterministic operator on project state.
 
 ## Storylet graph requirements
 
-- Exactly one Start and one End node.
-- Every node lies on a complete path from Start to End.
+- Exactly one Start and one or more End nodes.
+- Every node is reachable from Start and can reach an End node.
 - Every Choice target and effect refers to a valid project record or supported operation.
 - A Go To Location node must be targeted directly by a Choice and select an existing project location.
 - Conditions and variables use the correct global or storylet-local scope.

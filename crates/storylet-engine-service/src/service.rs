@@ -85,6 +85,18 @@ pub struct SessionChange {
     pub snapshot: Value,
 }
 
+fn normalize_storylet_ending(value: &mut Value) {
+    let Some(graph) = value.get("graph").cloned() else {
+        return;
+    };
+    let Ok(graph) = serde_json::from_value::<NarrativeGraph>(graph) else {
+        return;
+    };
+    if let Some(object) = value.as_object_mut() {
+        object.insert("ending".into(), Value::Bool(graph.ending_from_graph()));
+    }
+}
+
 impl StudioService {
     pub fn open(
         db_path: impl AsRef<Path>,
@@ -339,10 +351,15 @@ impl StudioService {
             .store
             .list_content_json(entity)
             .map_err(|e| e.to_string())?;
-        let items: Vec<Value> = list
+        let mut items: Vec<Value> = list
             .into_iter()
             .filter_map(|s| serde_json::from_str(&s).ok())
             .collect();
+        if entity == "storylets" {
+            for item in &mut items {
+                normalize_storylet_ending(item);
+            }
+        }
         Ok(Value::Array(items))
     }
 
@@ -352,8 +369,13 @@ impl StudioService {
             .store
             .get_content_json(entity, id)
             .map_err(|e| e.to_string())?;
-        opt.and_then(|s| serde_json::from_str(&s).ok())
-            .ok_or_else(|| format!("{entity} item '{id}' not found"))
+        let mut value: Option<Value> = opt.and_then(|s| serde_json::from_str(&s).ok());
+        if entity == "storylets"
+            && let Some(item) = value.as_mut()
+        {
+            normalize_storylet_ending(item);
+        }
+        value.ok_or_else(|| format!("{entity} item '{id}' not found"))
     }
 
     pub async fn save_content_item(&self, entity: &str, payload: &Value) -> Result<Value, String> {
@@ -531,7 +553,7 @@ impl StudioService {
             final_payload = serde_json::to_value(character).map_err(|error| error.to_string())?;
         }
         if entity == "storylets" {
-            let storylet: StoryletRecord = serde_json::from_value(final_payload.clone())
+            let mut storylet: StoryletRecord = serde_json::from_value(final_payload.clone())
                 .map_err(|error| format!("Storylet validation failed: {error}"))?;
             let graph = match storylet.graph.clone() {
                 Some(value) => serde_json::from_value::<NarrativeGraph>(value)
@@ -541,6 +563,11 @@ impl StudioService {
             graph.validate().map_err(|issues| {
                 format!("Storylet graph validation failed: {}", issues.join("; "))
             })?;
+            storylet.ending = graph.ending_from_graph();
+            final_payload
+                .as_object_mut()
+                .ok_or("Storylet payload must be a JSON object")?
+                .insert("ending".into(), Value::Bool(storylet.ending));
             let qualities = inner
                 .store
                 .list_qualities()

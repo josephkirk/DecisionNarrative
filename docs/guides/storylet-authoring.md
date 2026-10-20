@@ -18,11 +18,11 @@ Use the shared inline tag editor: type inside the tag container to filter existi
 
 ## Review each storylet
 
-- Confirm the bound roles can plausibly be present and act in the scene.
+- Confirm the bound roles can plausibly be present and act in the scene. Role parameters default to `location_policy: "current"`; JSON/MCP authoring can set `"any"` for remote or abstract actors. The studio does not yet expose this control.
 - Check that each choice is understandable and its conditions and effects match the intended outcome.
 - Check who can observe each event and which characters can learn from it.
-- Ensure every graph has exactly one Start and one End, with every node reachable from Start and able to reach End. Save validates the graph before writing; approval validates the saved revision.
-- Use storylet location tags instead of binding a storylet to one location ID. A storylet with matching tags is eligible at any location sharing at least one tag.
+- Ensure every graph has exactly one Start and one or more End nodes, with every node reachable from Start and able to reach an End. An End marked terminal closes the run; an End with a jump transitions to another storylet and the jump takes precedence. A storylet is a dedicated ending only when every End is terminal with no jump. Save validates the graph before writing; approval validates the saved revision.
+- Use optional storylet location tags instead of binding a storylet to one location ID. A storylet with matching tags is eligible at any location sharing at least one tag; a storylet with no location tags is not location-gated.
 - A Go To Location node must be targeted directly by a Choice and name an existing project location.
 - Approve the exact content revision only when it is ready for playtest.
 

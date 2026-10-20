@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { StoryletRecord } from "../../src/web/studio/contracts.ts";
-import { applyJumpPreconditions, isSafeImageUrl, validateNarrativeGraph, type NarrativeGraph } from "../../src/web/studio/narrativeGraphTypes.ts";
+import { applyJumpPreconditions, compileGraphToStorylet, isSafeImageUrl, validateNarrativeGraph, type NarrativeGraph } from "../../src/web/studio/narrativeGraphTypes.ts";
 
 test("jump preconditions produce effect values that satisfy supported operators", () => {
   const target = {
@@ -37,7 +37,7 @@ test("jump preconditions produce effect values that satisfy supported operators"
 });
 
 
-test("storylet graph must contain one reachable Start-to-End flow", () => {
+test("storylet graph requires one Start and at least one reachable End", () => {
   const graph: NarrativeGraph = {
     nodes: [
       { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
@@ -70,12 +70,24 @@ test("storylet graph must contain one reachable Start-to-End flow", () => {
   const wrongInputPort = { ...graph, edges: graph.edges.map((edge) => edge.id === "dialog-end" ? { ...edge, to_port: "output" } : edge) };
   expect(validateNarrativeGraph(wrongInputPort)).toContain("Edge dialog-end must target an input port.");
   expect(validateNarrativeGraph({ ...graph, nodes: graph.nodes.filter((node) => node.type !== "end"), edges: graph.edges.filter((edge) => edge.to_node !== "end") }))
-    .toContain("Graph must have exactly one End node.");
-  expect(validateNarrativeGraph({ ...graph, nodes: [...graph.nodes, { ...graph.nodes[2]!, id: "end-2" }] }))
-    .toContain("Graph must have exactly one End node.");
+    .toContain("Graph must have at least one End node.");
+  const multipleEnds: NarrativeGraph = {
+    nodes: [
+      graph.nodes[0]!,
+      { id: "choice", type: "choice", title: "Choice", x: 150, y: 0, width: 180, height: 100, choices: [{ id: "a", text: "A" }, { id: "b", text: "B" }] },
+      { id: "end-a", type: "end", title: "End A", x: 400, y: 0, width: 100, height: 80, is_terminal: true },
+      { id: "end-b", type: "end", title: "End B", x: 400, y: 120, width: 100, height: 80, jump_to_storylet: "next" },
+    ],
+    edges: [
+      { id: "start-choice", from_node: "start", from_port: "output", to_node: "choice", to_port: "input" },
+      { id: "choice-a", from_node: "choice", from_port: "choice_0", to_node: "end-a", to_port: "input" },
+      { id: "choice-b", from_node: "choice", from_port: "choice_1", to_node: "end-b", to_port: "input" },
+    ],
+  };
+  expect(validateNarrativeGraph(multipleEnds)).toEqual([]);
   const disconnected = { ...graph, nodes: [...graph.nodes, { id: "orphan", type: "dialog" as const, title: "Orphan", x: 0, y: 150, width: 180, height: 100 }] };
   expect(validateNarrativeGraph(disconnected)).toContain("Every node must be reachable from Start.");
-  expect(validateNarrativeGraph(disconnected)).toContain("Every node must have a path to End.");
+  expect(validateNarrativeGraph(disconnected)).toContain("Every node must have a path to an End node.");
   const conditionalGraph: NarrativeGraph = {
     nodes: [
       graph.nodes[0]!,
@@ -105,6 +117,59 @@ test("storylet graph must contain one reachable Start-to-End flow", () => {
     nodes: conditionalGraph.nodes.map((node) => node.type === "conditional" ? { ...node, conditions: [] } : node),
   })).toContain("Conditional node Condition must have at least one condition.");
 });
+
+test("only terminal End nodes mark a storylet as an ending", () => {
+  const makeStorylet = () => ({
+    id: "storylet",
+    revision: 1,
+    approved_revision: null,
+    title: "Storylet",
+    ending: false,
+    location_tags: [],
+    cluster_type: "player_passage",
+    urgency_weight: 50,
+    repeatability: "always",
+    cooldown_turns: 0,
+    parameters: [],
+    preconditions: { all_of: [], any_of: [], visited_locations_any_of: [], met_characters_any_of: [] },
+    content: { text_template: "", sceneOpening: "", dialogue_quips: [] },
+    choices: [],
+    effects: {},
+    created_at: 0,
+  } as StoryletRecord);
+  const graph: NarrativeGraph = {
+    nodes: [
+      { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
+      { id: "end", type: "end", title: "End", x: 400, y: 0, width: 100, height: 80, is_terminal: false, jump_to_storylet: "next" },
+    ],
+    edges: [{ id: "start-end", from_node: "start", from_port: "output", to_node: "end", to_port: "input" }],
+  };
+  const storylet = makeStorylet();
+  compileGraphToStorylet(graph, storylet);
+  expect(storylet.ending).toBe(false);
+
+  graph.nodes[1] = { ...graph.nodes[1]!, is_terminal: true, jump_to_storylet: undefined };
+  compileGraphToStorylet(graph, storylet);
+  expect(storylet.ending).toBe(true);
+
+  const mixed: NarrativeGraph = {
+    nodes: [
+      { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
+      { id: "choice", type: "choice", title: "Choice", x: 150, y: 0, width: 180, height: 100, choices: [{ id: "stay", text: "Stay" }, { id: "go", text: "Go" }] },
+      { id: "end-stay", type: "end", title: "Stay End", x: 400, y: 0, width: 100, height: 80, is_terminal: true },
+      { id: "end-go", type: "end", title: "Go End", x: 400, y: 120, width: 100, height: 80, jump_to_storylet: "next" },
+    ],
+    edges: [
+      { id: "start-choice", from_node: "start", from_port: "output", to_node: "choice", to_port: "input" },
+      { id: "choice-stay", from_node: "choice", from_port: "choice_0", to_node: "end-stay", to_port: "input" },
+      { id: "choice-go", from_node: "choice", from_port: "choice_1", to_node: "end-go", to_port: "input" },
+    ],
+  };
+  const mixedStorylet = makeStorylet();
+  compileGraphToStorylet(mixed, mixedStorylet);
+  expect(mixedStorylet.ending).toBe(false);
+});
+
 test("image URL validation matches Rust and graph validation reports unsafe nodes", () => {
   const cases: Array<[string, boolean]> = [
     ["assets/a:b.png", true],

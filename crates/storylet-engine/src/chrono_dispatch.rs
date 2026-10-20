@@ -21,6 +21,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::chrono_completion::StoryletBitset;
 use crate::chrono_state::{
     GameplayTagRegistry, MetricRegistry, MutationOp, TagBitset, WorldStateTable, MAX_TAGS,
 };
@@ -225,6 +226,9 @@ pub struct RoleBinding {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StoryletDef {
     pub storylet_id: u16,
+    /// Authoring marker: this storylet is a dedicated ending candidate.
+    #[serde(default)]
+    pub is_ending: bool,
     /// Ranks storylets in a large QBN deck; higher first.
     #[serde(default)]
     pub display_priority: i32,
@@ -525,19 +529,89 @@ impl Error for DispatchError {}
 // Dispatcher
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct UnifiedDispatcher {
     #[serde(default)]
     pub storylets: Vec<StoryletDef>,
+    /// Dense ID -> row lookup. Skipped in JSON; rebuilt by `new`/`rebuild_index`.
+    #[serde(skip, default)]
+    index_by_id: Vec<Option<u32>>,
+    #[serde(skip, default)]
+    indexed_count: usize,
+}
+
+impl PartialEq for UnifiedDispatcher {
+    fn eq(&self, other: &Self) -> bool {
+        self.storylets == other.storylets
+    }
+}
+
+impl<'de> Deserialize<'de> for UnifiedDispatcher {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            #[serde(default)]
+            storylets: Vec<StoryletDef>,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        let mut dispatcher = Self {
+            storylets: wire.storylets,
+            index_by_id: Vec::new(),
+            indexed_count: 0,
+        };
+        dispatcher.rebuild_index();
+        Ok(dispatcher)
+    }
 }
 
 impl UnifiedDispatcher {
     pub fn new(storylets: Vec<StoryletDef>) -> Self {
-        Self { storylets }
+        let mut dispatcher = Self {
+            storylets,
+            index_by_id: Vec::new(),
+            indexed_count: 0,
+        };
+        dispatcher.rebuild_index();
+        dispatcher
     }
 
-    /// Look up one storylet by ID. Declaration order defines the result.
+    /// Rebuild the dense ID index after direct mutation of `storylets`.
+    pub fn rebuild_index(&mut self) {
+        let max_id = self
+            .storylets
+            .iter()
+            .map(|def| def.storylet_id as usize)
+            .max()
+            .map(|id| id + 1)
+            .unwrap_or(0);
+        self.index_by_id = vec![None; max_id];
+        self.indexed_count = self.storylets.len();
+        for (row, def) in self.storylets.iter().enumerate() {
+            let slot = def.storylet_id as usize;
+            if slot < self.index_by_id.len() && self.index_by_id[slot].is_none() {
+                self.index_by_id[slot] = Some(row as u32);
+            }
+        }
+    }
+
+    /// Look up one storylet by ID. Declaration order defines the first match.
+    /// A built index is authoritative for hits and misses; the linear fallback
+    /// exists only for an index that was never built or became stale.
     pub fn storylet(&self, storylet_id: u16) -> Option<&StoryletDef> {
+        if !self.index_by_id.is_empty() && self.indexed_count == self.storylets.len() {
+            if let Some(Some(row)) = self.index_by_id.get(storylet_id as usize) {
+                if let Some(def) = self.storylets.get(*row as usize) {
+                    if def.storylet_id == storylet_id {
+                        return Some(def);
+                    }
+                }
+            } else {
+                return None;
+            }
+        }
         self.storylets
             .iter()
             .find(|def| def.storylet_id == storylet_id)
@@ -833,6 +907,19 @@ impl UnifiedDispatcher {
         self.try_is_eligible(def, table)
     }
 
+    /// Bitset form used by the per-scope completion contract.
+    pub fn try_is_playable_bitset(
+        &self,
+        def: &StoryletDef,
+        table: &WorldStateTable,
+        completed: &StoryletBitset,
+    ) -> Result<bool, DispatchError> {
+        if !def.is_repeatable && completed.contains(def.storylet_id) {
+            return Ok(false);
+        }
+        self.try_is_eligible(def, table)
+    }
+
     /// QBN deck query: filter the deck IDs to playable storylets and order them by
     /// `display_priority` descending, then by storylet ID ascending. Unknown deck IDs
     /// are skipped, and a repeated ID appears once.
@@ -863,6 +950,67 @@ impl UnifiedDispatcher {
                 continue;
             };
             if self.try_is_playable(def, table, completed)? {
+                eligible.push(def);
+            }
+        }
+        eligible.sort_by(|a, b| {
+            b.display_priority
+                .cmp(&a.display_priority)
+                .then(a.storylet_id.cmp(&b.storylet_id))
+        });
+        Ok(eligible.into_iter().map(|def| def.storylet_id).collect())
+    }
+
+    /// Bitset deck query with an explicit ending opt-in. The default normal
+    /// profile passes `false`; an ending profile is fetched from its own pool.
+    pub fn try_query_qbn_deck_bitset_with_ending(
+        &self,
+        deck: &[u16],
+        table: &WorldStateTable,
+        completed: &StoryletBitset,
+        include_ending: bool,
+    ) -> Result<Vec<u16>, DispatchError> {
+        let mut seen = BTreeSet::new();
+        let mut eligible = Vec::new();
+        for &id in deck {
+            if !seen.insert(id) {
+                continue;
+            }
+            let Some(def) = self.storylet(id) else {
+                continue;
+            };
+            if def.is_ending && !include_ending {
+                continue;
+            }
+            if self.try_is_playable_bitset(def, table, completed)? {
+                eligible.push(def);
+            }
+        }
+        eligible.sort_by(|a, b| {
+            b.display_priority
+                .cmp(&a.display_priority)
+                .then(a.storylet_id.cmp(&b.storylet_id))
+        });
+        Ok(eligible.into_iter().map(|def| def.storylet_id).collect())
+    }
+
+    /// Bitset form of `try_query_qbn_deck`.
+    pub fn try_query_qbn_deck_bitset(
+        &self,
+        deck: &[u16],
+        table: &WorldStateTable,
+        completed: &StoryletBitset,
+    ) -> Result<Vec<u16>, DispatchError> {
+        let mut seen = BTreeSet::new();
+        let mut eligible = Vec::new();
+        for &id in deck {
+            if !seen.insert(id) {
+                continue;
+            }
+            let Some(def) = self.storylet(id) else {
+                continue;
+            };
+            if self.try_is_playable_bitset(def, table, completed)? {
                 eligible.push(def);
             }
         }
@@ -1150,6 +1298,49 @@ impl UnifiedDispatcher {
                 continue;
             }
             if !self.try_is_playable(def, table, completed)? {
+                continue;
+            }
+            let score = self.salience_score(def, table)?;
+            if (score - highest).abs() < SALIENCE_TIE_EPSILON {
+                best.push(id);
+            } else if score > highest {
+                highest = score;
+                best.clear();
+                best.push(id);
+            }
+        }
+        if best.is_empty() {
+            return Ok(None);
+        }
+        if best.len() == 1 {
+            return Ok(Some(best[0]));
+        }
+        Ok(Some(best[deterministic_index(seed, best.len())]))
+    }
+
+
+    /// Bitset form of `try_match_most_salient`.
+    pub fn try_match_most_salient_bitset(
+        &self,
+        pool: &[u16],
+        table: &WorldStateTable,
+        completed: &StoryletBitset,
+        seed: u64,
+    ) -> Result<Option<u16>, DispatchError> {
+        let mut seen = BTreeSet::new();
+        let mut best: Vec<u16> = Vec::new();
+        let mut highest = f64::NEG_INFINITY;
+        for &id in pool {
+            if !seen.insert(id) {
+                continue;
+            }
+            let Some(def) = self.storylet(id) else {
+                continue;
+            };
+            if def.required_arc_phases.is_empty() {
+                continue;
+            }
+            if !self.try_is_playable_bitset(def, table, completed)? {
                 continue;
             }
             let score = self.salience_score(def, table)?;
@@ -1528,4 +1719,39 @@ fn deterministic_index(seed: u64, count: usize) -> usize {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf03_8538_4dc2_d6fc);
     z = (z ^ (z >> 27)).wrapping_mul(0x85eb_ca6b_1b31_10d2);
     (z ^ (z >> 31)) as usize % count
+}
+
+
+#[cfg(test)]
+mod dense_lookup_tests {
+    use super::*;
+
+    #[test]
+    fn dense_id_lookup_and_rebuild() {
+        let mut dispatcher = UnifiedDispatcher::new(vec![
+            StoryletDef { storylet_id: 7, ..Default::default() },
+            StoryletDef { storylet_id: 2, ..Default::default() },
+            StoryletDef { storylet_id: 7, ..Default::default() },
+        ]);
+        assert_eq!(dispatcher.storylet(2).unwrap().storylet_id, 2);
+        assert_eq!(dispatcher.storylet(7).unwrap().storylet_id, 7);
+        assert!(dispatcher.storylet(9).is_none());
+
+        // Deserialization skips the dense index; lookup must still work.
+        let encoded = serde_json::to_string(&dispatcher).unwrap();
+        let decoded: UnifiedDispatcher = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.storylet(7).unwrap().storylet_id, 7);
+        assert_eq!(decoded, dispatcher);
+
+        dispatcher.storylets.push(StoryletDef { storylet_id: 9, ..Default::default() });
+        dispatcher.rebuild_index();
+        assert_eq!(dispatcher.storylet(9).unwrap().storylet_id, 9);
+        assert!(dispatcher.storylet(8).is_none());
+
+        // A stale cache falls back to a scan rather than reporting a false miss.
+        let mut stale = dispatcher.clone();
+        stale.storylets.reverse();
+        assert!(stale.storylet(2).is_some());
+        assert!(stale.storylet(7).is_some());
+    }
 }

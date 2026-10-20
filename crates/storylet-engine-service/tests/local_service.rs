@@ -592,7 +592,81 @@ async fn studio_graph_is_validated_when_saved() {
         "id": "broken", "title": "broken", "created_at": 1, "content": { "text_template": "" }, "graph": invalid_graph
     }))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{result}");
-    assert!(result["error"].as_str().unwrap().contains("path to End"));
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .contains("path to an End node")
+    );
+}
+
+#[tokio::test]
+async fn storylet_with_multiple_end_nodes_saves_and_approves() {
+    let app = test_app();
+    let graph = json!({
+        "nodes": [
+            { "id": "start", "title": "Start", "type": "start", "x": 0, "y": 0, "width": 160, "height": 80, "text": "Begin" },
+            { "id": "choice", "title": "Choice", "type": "choice", "x": 180, "y": 0, "width": 220, "height": 140,
+              "choices": [{ "id": "stay", "text": "Stay" }, { "id": "go", "text": "Go" }] },
+            { "id": "end-stay", "title": "Stay End", "type": "end", "x": 440, "y": 0, "width": 160, "height": 80, "is_terminal": true },
+            { "id": "end-go", "title": "Go End", "type": "end", "x": 440, "y": 120, "width": 160, "height": 80, "jump_to_storylet": "next" }
+        ],
+        "edges": [
+            { "id": "start-choice", "from_node": "start", "from_port": "output", "to_node": "choice", "to_port": "input" },
+            { "id": "choice-stay", "from_node": "choice", "from_port": "choice_0", "to_node": "end-stay", "to_port": "input" },
+            { "id": "choice-go", "from_node": "choice", "from_port": "choice_1", "to_node": "end-go", "to_port": "input" }
+        ],
+        "local_variables": []
+    });
+    let (status, saved) = request(
+        &app,
+        "POST",
+        "/api/v2/content/storylets",
+        Some(json!({
+            "id": "multi-end", "title": "multi-end", "created_at": 1, "ending": true,
+            "content": { "text_template": "" }, "graph": graph
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(
+        saved["ending"], false,
+        "mixed exits are not a dedicated ending"
+    );
+    let (status, result) = request(
+        &app,
+        "POST",
+        "/api/v2/storylets/multi-end/approve",
+        Some(json!({ "expectedRevision": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+
+    let terminal_graph = json!({
+        "nodes": [
+            { "id": "start", "title": "Start", "type": "start", "x": 0, "y": 0, "width": 160, "height": 80, "text": "Begin" },
+            { "id": "end", "title": "End", "type": "end", "x": 440, "y": 0, "width": 160, "height": 80, "is_terminal": true }
+        ],
+        "edges": [
+            { "id": "start-end", "from_node": "start", "from_port": "output", "to_node": "end", "to_port": "input" }
+        ],
+        "local_variables": []
+    });
+    let (status, saved) = request(
+        &app,
+        "POST",
+        "/api/v2/content/storylets",
+        Some(json!({
+            "id": "terminal-end", "title": "terminal-end", "created_at": 1, "ending": false,
+            "content": { "text_template": "" }, "graph": terminal_graph
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(
+        saved["ending"], true,
+        "all-terminal exits are a dedicated ending"
+    );
 }
 
 #[tokio::test]

@@ -303,14 +303,6 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
             &format!("{path}.trigger"),
             &storylet.trigger,
         );
-        if storylet.ending && storylet.choices.is_empty() {
-            issue(
-                &mut issues,
-                format!("{path}.choices"),
-                "ending_without_choice",
-                "ending storylets must have at least one choice",
-            );
-        }
         let mut choices = BTreeSet::new();
         for (index, choice) in storylet.choices.iter().enumerate() {
             let choice_path = format!("{path}.choices[{index}]");

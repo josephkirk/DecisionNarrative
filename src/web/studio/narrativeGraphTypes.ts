@@ -491,9 +491,9 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
   const ends = graph.nodes.filter((node) => node.type === "end");
   const ids = new Set(graph.nodes.map((node) => node.id));
   if (starts.length !== 1) issues.push("Graph must have exactly one Start node.");
-  if (ends.length !== 1) issues.push("Graph must have exactly one End node.");
+  if (!ends.length) issues.push("Graph must have at least one End node.");
   if (ids.size !== graph.nodes.length) issues.push("Node IDs must be unique.");
-  if (starts.length !== 1 || ends.length !== 1 || ids.size !== graph.nodes.length) return issues;
+  if (starts.length !== 1 || !ends.length || ids.size !== graph.nodes.length) return issues;
   const outgoing = new Map<string, string[]>();
   const incoming = new Map<string, string[]>();
   const edgeIds = new Set<string>();
@@ -512,9 +512,11 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
     while (stack.length) { const id = stack.pop()!; if (seen.has(id)) continue; seen.add(id); stack.push(...(links.get(id) ?? [])); }
     return seen;
   };
-  const reachable = walk(start, outgoing); const reachesEnd = walk(ends[0]!.id, incoming);
+  const reachable = walk(start, outgoing);
+  const reachesEnd = new Set<string>();
+  for (const end of ends) for (const id of walk(end.id, incoming)) reachesEnd.add(id);
   if (graph.nodes.some((node) => !reachable.has(node.id))) issues.push("Every node must be reachable from Start.");
-  if (graph.nodes.some((node) => !reachesEnd.has(node.id))) issues.push("Every node must have a path to End.");
+  if (graph.nodes.some((node) => !reachesEnd.has(node.id))) issues.push("Every node must have a path to an End node.");
   for (const node of graph.nodes) {
     const edges = graph.edges.filter((edge) => edge.from_node === node.id);
     if (node.type === "choice") {
@@ -563,7 +565,8 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
 export function compileGraphToStorylet(graph: NarrativeGraph, st: StoryletRecord) {
   const proseParts: string[] = [];
   const choices: StoryletChoiceRecord[] = [];
-  let isEnding = false;
+  const endNodes = graph.nodes.filter((node) => node.type === "end");
+  let isEnding = endNodes.length > 0 && endNodes.every((node) => node.is_terminal === true && !node.jump_to_storylet);
   const effects = { ...st.effects };
 
   // Sync local variables back to storylet
@@ -633,10 +636,6 @@ export function compileGraphToStorylet(graph: NarrativeGraph, st: StoryletRecord
         if (a.scope === "global") {
           effects[a.quality] = a.value;
         }
-      }
-    } else if (node.type === "end") {
-      if (node.is_terminal || node.jump_to_storylet) {
-        isEnding = true;
       }
     }
   }

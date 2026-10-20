@@ -1175,6 +1175,7 @@ fn reconcile_diverges_at_the_lowest_common_ancestor() {
         executed_input_pin: "In".to_owned(),
         chosen_output_pin: "Out".to_owned(),
         chosen_storylet_id: None,
+        ..CallHistoryEntry::default()
     });
 
     let new_head = instance.reconcile_history(&mut ctx, &target).unwrap();
@@ -1379,12 +1380,14 @@ fn bridge_path_walks_every_hop_and_orders_pins() {
             executed_input_pin: "In".to_owned(),
             chosen_output_pin: "Out".to_owned(),
             chosen_storylet_id: None,
+            ..CallHistoryEntry::default()
         },
         CallHistoryEntry {
             node_guid: 3,
             executed_input_pin: "In".to_owned(),
             chosen_output_pin: "Out".to_owned(),
             chosen_storylet_id: None,
+            ..CallHistoryEntry::default()
         },
     ];
     let rebased = rebase_call_history(&graph, &dispatcher, &saved).unwrap();

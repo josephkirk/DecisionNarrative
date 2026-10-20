@@ -542,6 +542,11 @@ function autoSetJumpPreconditions(node: NarrativeNode) {
   }
 }
 function handleJumpTargetChange(node: NarrativeNode) {
+  if (node.jump_to_storylet) {
+    // Jump and terminal are mutually exclusive; choosing a destination clears
+    // the default terminal flag so the transition is not silently ignored.
+    node.is_terminal = false;
+  }
   emitGraphUpdate(node);
   if (node.jump_to_storylet) {
     autoSetJumpPreconditions(node);

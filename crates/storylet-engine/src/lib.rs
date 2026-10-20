@@ -10,8 +10,15 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod chrono_catalog;
+pub mod chrono_completion;
+pub mod chrono_features;
+pub mod chrono_tables;
+pub mod chrono_transactions;
+pub mod chrono_triggers;
 pub mod chrono_dispatch;
 pub mod chrono_runtime;
+pub mod chrono_selection;
 pub mod chrono_state;
 
 /// Serializable world state shared by the studio, native hosts, and replay.

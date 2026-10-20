@@ -6,6 +6,8 @@
 
 **Writing Standard:** ASD-STE100 (Simplified Technical English)
 
+**Dense runtime backlog:** [Storylet instances, triggers, completion bitsets, endings, transactions](dense-runtime/README.md)
+
 **Target Audience:** Autonomous Code Agents, Systems Architects, Narrative Engineers
 
 ## 1. PURPOSE AND SCOPE

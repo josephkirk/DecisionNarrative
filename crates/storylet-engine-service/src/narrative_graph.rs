@@ -525,17 +525,16 @@ impl NarrativeGraph {
         if starts.len() != 1 {
             issues.push("Graph must have exactly one Start node.".to_string());
         }
-        if ends.len() != 1 {
-            issues.push("Graph must have exactly one End node.".to_string());
+        if ends.is_empty() {
+            issues.push("Graph must have at least one End node.".to_string());
         }
         if ids.len() != self.nodes.len() {
             issues.push("Node IDs must be unique.".to_string());
         }
-        if starts.len() != 1 || ends.len() != 1 || ids.len() != self.nodes.len() {
+        if starts.len() != 1 || ends.is_empty() || ids.len() != self.nodes.len() {
             return Err(issues);
         }
         let start = starts[0].id.as_str();
-        let end = ends[0].id.as_str();
         let mut outgoing: BTreeMap<String, Vec<String>> = BTreeMap::new();
         let mut incoming: BTreeMap<String, Vec<String>> = BTreeMap::new();
         let mut edge_ids = BTreeSet::new();
@@ -564,8 +563,10 @@ impl NarrativeGraph {
         {
             issues.push("Start must have no incoming edges and exactly one outgoing edge.".into());
         }
-        if outgoing.get(end).is_some_and(|nodes| !nodes.is_empty()) {
-            issues.push("End cannot have outgoing edges.".into());
+        for end in &ends {
+            if outgoing.get(&end.id).is_some_and(|nodes| !nodes.is_empty()) {
+                issues.push("End cannot have outgoing edges.".into());
+            }
         }
         let walk = |seed: &str, links: &BTreeMap<String, Vec<String>>| {
             let mut seen = BTreeSet::new();
@@ -580,7 +581,10 @@ impl NarrativeGraph {
             seen
         };
         let reachable = walk(start, &outgoing);
-        let reaches_end = walk(end, &incoming);
+        let mut reaches_end = BTreeSet::new();
+        for end in &ends {
+            reaches_end.extend(walk(&end.id, &incoming));
+        }
         if self.nodes.iter().any(|node| !reachable.contains(&node.id)) {
             issues.push("Every node must be reachable from Start.".into());
         }
@@ -589,7 +593,7 @@ impl NarrativeGraph {
             .iter()
             .any(|node| !reaches_end.contains(&node.id))
         {
-            issues.push("Every node must have a path to End.".into());
+            issues.push("Every node must have a path to an End node.".into());
         }
         for node in &self.nodes {
             let edges: Vec<_> = self
@@ -1144,11 +1148,30 @@ impl NarrativeGraph {
         }
     }
 
+    /// A storylet is a dedicated ending only when it has at least one End and
+    /// every End is terminal. A graph with a jump exit remains in the normal
+    /// path; taking a terminal branch can still end that branch at runtime.
+    pub fn ending_from_graph(&self) -> bool {
+        let mut has_end = false;
+        for node in &self.nodes {
+            if let NarrativeNodeData::End {
+                is_terminal,
+                jump_to_storylet,
+            } = &node.data
+            {
+                has_end = true;
+                if !*is_terminal || jump_to_storylet.is_some() {
+                    return false;
+                }
+            }
+        }
+        has_end
+    }
+
     /// Compile this node graph back into storylet prose, choices, and effects
     pub fn compile_to_storylet_content(&self, st: &mut StoryletRecord) {
         let mut prose_parts = Vec::new();
         let mut choices = Vec::new();
-        let mut is_terminal = false;
         let mut compiled_effects = match st.effects.as_object() {
             Some(obj) => obj.clone(),
             None => serde_json::Map::new(),
@@ -1268,19 +1291,7 @@ impl NarrativeGraph {
                         }
                     }
                 }
-                NarrativeNodeData::End {
-                    is_terminal: term,
-                    jump_to_storylet,
-                } => {
-                    if *term {
-                        is_terminal = true;
-                    }
-                    if let Some(dest) = jump_to_storylet {
-                        if !dest.trim().is_empty() {
-                            is_terminal = true;
-                        }
-                    }
-                }
+                NarrativeNodeData::End { .. } => {}
                 _ => {}
             }
         }
@@ -1296,7 +1307,7 @@ impl NarrativeGraph {
         }
 
         st.choices = choices;
-        st.ending = is_terminal;
+        st.ending = self.ending_from_graph();
 
         st.effects = Value::Object(compiled_effects);
     }
@@ -1504,7 +1515,7 @@ mod graph_wire_contract_tests {
         ]);
         let graph: NarrativeGraph = serde_json::from_value(payload).unwrap();
         let issues = graph.validate().unwrap_err().join(" ");
-        assert!(issues.contains("Every node must have a path to End."));
+        assert!(issues.contains("Every node must have a path to an End node."));
     }
     #[test]
     fn conditional_requires_authored_conditions_and_exact_true_false_branches() {
@@ -1527,5 +1538,99 @@ mod graph_wire_contract_tests {
         let graph: NarrativeGraph = serde_json::from_value(payload).unwrap();
         let issues = graph.validate().unwrap_err().join(" ");
         assert!(issues.contains("must have exactly one 'false' branch"));
+    }
+
+    #[test]
+    fn multiple_end_nodes_validate_and_only_terminal_ends_mark_a_storylet_ending() {
+        use crate::contracts::StoryletRecord;
+
+        let base = json!({
+            "nodes": [
+                { "id": "start", "title": "Start", "type": "start", "x": 10, "y": 20, "width": 160, "height": 80, "text": "Begin" },
+                { "id": "branch", "title": "Branch", "type": "conditional", "x": 220, "y": 20, "width": 220, "height": 100,
+                  "conditions": [{ "scope": "global", "variable": "trust", "op": "gte", "value": 1 }] },
+                { "id": "end-a", "title": "End A", "type": "end", "x": 500, "y": 0, "width": 160, "height": 90, "is_terminal": false, "jump_to_storylet": "next" },
+                { "id": "end-b", "title": "End B", "type": "end", "x": 500, "y": 140, "width": 160, "height": 90, "is_terminal": true }
+            ],
+            "edges": [
+                { "id": "start-branch", "from_node": "start", "from_port": "output", "to_node": "branch", "to_port": "input" },
+                { "id": "branch-true", "from_node": "branch", "from_port": "true", "to_node": "end-a", "to_port": "input" },
+                { "id": "branch-false", "from_node": "branch", "from_port": "false", "to_node": "end-b", "to_port": "input" }
+            ],
+            "local_variables": []
+        });
+        let graph: NarrativeGraph = serde_json::from_value(base.clone()).unwrap();
+        graph
+            .validate()
+            .expect("multiple End nodes should validate");
+
+        let mut storylet: StoryletRecord = serde_json::from_value(json!({
+            "id": "multi-end", "title": "Multi End", "content": { "text_template": "Choose." }, "created_at": 0
+        })).unwrap();
+        graph.compile_to_storylet_content(&mut storylet);
+        assert!(
+            !storylet.ending,
+            "a mixed storylet remains in the normal path"
+        );
+
+        let mut all_terminal = base.clone();
+        all_terminal["nodes"][2]
+            .as_object_mut()
+            .unwrap()
+            .remove("jump_to_storylet");
+        all_terminal["nodes"][2]["is_terminal"] = json!(true);
+        let graph: NarrativeGraph = serde_json::from_value(all_terminal).unwrap();
+        graph
+            .validate()
+            .expect("all-terminal End nodes should validate");
+        let mut storylet = storylet;
+        graph.compile_to_storylet_content(&mut storylet);
+        assert!(
+            storylet.ending,
+            "all-terminal End nodes mark the storylet as an ending"
+        );
+
+        let jump_only = json!({
+            "nodes": [
+                { "id": "start", "title": "Start", "type": "start", "x": 10, "y": 20, "width": 160, "height": 80, "text": "Begin" },
+                { "id": "branch", "title": "Branch", "type": "conditional", "x": 220, "y": 20, "width": 220, "height": 100,
+                  "conditions": [{ "scope": "global", "variable": "trust", "op": "gte", "value": 1 }] },
+                { "id": "end-a", "title": "End A", "type": "end", "x": 500, "y": 0, "width": 160, "height": 90, "jump_to_storylet": "next" },
+                { "id": "end-b", "title": "End B", "type": "end", "x": 500, "y": 140, "width": 160, "height": 90, "jump_to_storylet": "other" }
+            ],
+            "edges": [
+                { "id": "start-branch", "from_node": "start", "from_port": "output", "to_node": "branch", "to_port": "input" },
+                { "id": "branch-true", "from_node": "branch", "from_port": "true", "to_node": "end-a", "to_port": "input" },
+                { "id": "branch-false", "from_node": "branch", "from_port": "false", "to_node": "end-b", "to_port": "input" }
+            ],
+            "local_variables": []
+        });
+        let graph: NarrativeGraph = serde_json::from_value(jump_only).unwrap();
+        graph
+            .validate()
+            .expect("multiple jump exits should validate");
+        let mut storylet: StoryletRecord = serde_json::from_value(json!({
+            "id": "jump-only", "title": "Jump Only", "content": { "text_template": "Continue." }, "created_at": 0
+        })).unwrap();
+        graph.compile_to_storylet_content(&mut storylet);
+        assert!(
+            !storylet.ending,
+            "jump-only exits are transitions, not endings"
+        );
+    }
+
+    #[test]
+    fn graph_without_an_end_is_rejected() {
+        let mut payload = studio_graph();
+        payload["nodes"] = json!([
+            { "id": "start", "title": "Start", "type": "start", "x": 10, "y": 20, "width": 160, "height": 80, "text": "Begin" },
+            { "id": "dialog", "title": "Dialog", "type": "dialog", "x": 200, "y": 20, "width": 280, "height": 160, "text": "The scene", "sections": [] }
+        ]);
+        payload["edges"] = json!([
+            { "id": "start-dialog", "from_node": "start", "from_port": "output", "to_node": "dialog", "to_port": "input" }
+        ]);
+        let graph: NarrativeGraph = serde_json::from_value(payload).unwrap();
+        let issues = graph.validate().unwrap_err().join(" ");
+        assert!(issues.contains("Graph must have at least one End node."));
     }
 }

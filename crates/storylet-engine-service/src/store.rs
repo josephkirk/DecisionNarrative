@@ -12,6 +12,18 @@ use crate::contracts::{
     ScenarioRecord, StoryletRecord,
 };
 
+/// Older records may carry an `ending` flag written before the graph became
+/// authoritative. Normalize on read so library filters and approvals see the
+/// same value the next save will persist.
+fn normalize_storylet_ending(mut storylet: StoryletRecord) -> StoryletRecord {
+    if let Some(value) = storylet.graph.clone()
+        && let Ok(graph) = serde_json::from_value::<NarrativeGraph>(value)
+    {
+        storylet.ending = graph.ending_from_graph();
+    }
+    storylet
+}
+
 pub struct Store {
     pub conn: Connection,
 }
@@ -401,12 +413,15 @@ impl Store {
         Ok(json_list
             .into_iter()
             .filter_map(|s| serde_json::from_str(&s).ok())
+            .map(normalize_storylet_ending)
             .collect())
     }
 
     pub fn get_storylet(&self, id: &str) -> Result<Option<StoryletRecord>, rusqlite::Error> {
         let json_opt = self.get_content_json("storylets", id)?;
-        Ok(json_opt.and_then(|s| serde_json::from_str(&s).ok()))
+        Ok(json_opt
+            .and_then(|s| serde_json::from_str::<StoryletRecord>(&s).ok())
+            .map(normalize_storylet_ending))
     }
 
     pub fn save_storylet(&self, st: &StoryletRecord) -> Result<(), rusqlite::Error> {

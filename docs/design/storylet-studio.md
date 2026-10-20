@@ -30,7 +30,7 @@ The Rust service provides the local HTTP and MCP surfaces and stores project/run
 
 ### Web studio
 
-The Vue 3 application provides a storylet library and graph editor, Codex, tag manager, starting scenarios, playtest, and project interchange. The graph editor validates before save and approval. Storylets use location tags and preconditions; Go To Location actions select existing project locations and are entered through a Choice branch.
+The Vue 3 application provides a storylet library and graph editor, Codex, tag manager, starting scenarios, playtest, and project interchange. The graph editor validates before save and approval. Storylets use optional location tags and preconditions; Go To Location actions select existing project locations and are entered through a Choice branch. A storylet with no location tags is not location-gated.
 
 ### Interaction context and MCP agents
 
@@ -48,7 +48,7 @@ The `workspace.context` MCP operation returns that snapshot together with a fres
 
 Designers author text, tags, storylet graph rules, preconditions, choices, and effects directly. The platform does not generate drafts; review and approval remain explicit author decisions.
 
-A valid storylet graph has exactly one Start and one End, and every node is on a complete Start-to-End path. References and effects are project-validated. Each save validates graph structure; approval validates the exact saved revision. A Go To Location node must be targeted directly by a Choice and refer to an existing location.
+A valid storylet graph has exactly one Start and one or more End nodes. Every node must be reachable from Start and able to reach an End. Each End is terminal (ends the run) or a jump to another storylet. A jump takes precedence over a leftover terminal flag; a storylet is a dedicated ending only when every End is terminal and has no jump. References and effects are project-validated. Each save validates graph structure; approval validates the exact saved revision. A Go To Location node must be targeted directly by a Choice and refer to an existing location.
 
 Tags are unique within their category, normalized for comparison, and shared through inline tag editing and the Tag Manager. Location tags determine where a storylet can be eligible; visited-location and met-character preconditions can refer to either IDs or tags/roles.
 

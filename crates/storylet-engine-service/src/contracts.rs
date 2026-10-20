@@ -152,6 +152,21 @@ pub struct EventRecord {
 pub struct StoryletParameterRecord {
     pub param_name: String,
     pub query: String,
+    /// Role binding scope: `current` keeps the actor at the player's current
+    /// location; `any` allows a role to bind a remote or abstract actor.
+    #[serde(
+        default = "default_role_location_policy",
+        skip_serializing_if = "is_default_role_location_policy"
+    )]
+    pub location_policy: String,
+}
+
+fn default_role_location_policy() -> String {
+    "current".into()
+}
+
+fn is_default_role_location_policy(value: &str) -> bool {
+    value == "current"
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
