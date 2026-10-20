@@ -262,143 +262,11 @@ pub struct PersistedCallEntry {
     pub completed: bool,
 }
 
-/// Runtime history uses dense indices only for the current content revision.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DenseCallEntry {
-    pub commit_index: u32,
-    pub commit_parent: Option<u32>,
-    pub scope_index: u16,
-    pub storylet_index: Option<StoryletIndex>,
-    pub completed: bool,
-    pub trigger_subscription: Option<u32>,
-    pub chosen_output_pin: String,
-}
-
-/// Resolve persisted stable keys into dense runtime history. A missing storylet
-/// key is a typed load error; dense indices are never trusted from disk.
-pub fn resolve_persisted(
-    entries: &[PersistedCallEntry],
-    storylets: &crate::chrono_catalog::StoryletSpace,
-    mut scope_index_for: impl FnMut(&str) -> Option<u16>,
-) -> Result<Vec<DenseCallEntry>, CompletionError> {
-    let mut seen = std::collections::BTreeSet::new();
-    entries
-        .iter()
-        .map(|entry| {
-            let scope_index = scope_index_for(&entry.scope_key).ok_or_else(|| {
-                CompletionError::UnknownScopeKey {
-                    key: entry.scope_key.clone(),
-                }
-            })?;
-            if !seen.insert((scope_index, entry.commit_index)) {
-                return Err(CompletionError::DuplicateCommit {
-                    scope: scope_index,
-                    commit_index: entry.commit_index,
-                });
-            }
-            let key = entry
-                .storylet_key
-                .as_deref()
-                .or(entry.chosen_storylet_key.as_deref());
-            let storylet_index = key
-                .map(|key| {
-                    storylets
-                        .resolve(key)
-                        .ok_or_else(|| CompletionError::UnknownStoryletKey {
-                            key: key.to_owned(),
-                        })
-                })
-                .transpose()?;
-            Ok(DenseCallEntry {
-                commit_index: entry.commit_index,
-                commit_parent: entry.commit_parent,
-                scope_index,
-                storylet_index,
-                completed: entry.completed,
-                trigger_subscription: None,
-                chosen_output_pin: entry.chosen_output_pin.clone(),
-            })
-        })
-        .collect()
-}
-
-/// Rebuild the completion bitset for one scope by walking the commit path from
-/// `head` through `commit_parent`. Effects are not replayed here.
-/// Resolve one scope's commit path from `head` to root. This is the only
-/// traversal used by derived-history rebuilds.
-pub fn commit_path<'a>(
-    scope: u16,
-    entries: &'a [DenseCallEntry],
-    head: Option<u32>,
-) -> Result<Vec<&'a DenseCallEntry>, CompletionError> {
-    let Some(head) = head else {
-        return Ok(Vec::new());
-    };
-    let by_commit: std::collections::BTreeMap<u32, &DenseCallEntry> = entries
-        .iter()
-        .filter(|entry| entry.scope_index == scope)
-        .map(|entry| (entry.commit_index, entry))
-        .collect();
-    let mut path = Vec::new();
-    let mut current = Some(head);
-    let mut guard = 0usize;
-    while let Some(index) = current {
-        guard += 1;
-        if guard > by_commit.len() + 1 {
-            return Err(CompletionError::InvalidCommitPath { head, scope });
-        }
-        let entry = by_commit
-            .get(&index)
-            .copied()
-            .ok_or(CompletionError::InvalidCommitPath { head, scope })?;
-        path.push(entry);
-        current = entry.commit_parent;
-    }
-    Ok(path)
-}
-
-pub fn rebuild_completed(
-    scope: u16,
-    entries: &[DenseCallEntry],
-    head: Option<u32>,
-) -> Result<StoryletBitset, CompletionError> {
-    let path = commit_path(scope, entries, head)?;
-    let mut bits = StoryletBitset::new();
-    for entry in path.into_iter().rev() {
-        if entry.completed {
-            if let Some(index) = entry.storylet_index {
-                bits.set(index)?;
-            }
-        }
-    }
-    Ok(bits)
-}
-
-/// Total rebuild check used by debug verification.
-pub fn verify_completed(
-    bits: &StoryletBitset,
-    scope: u16,
-    entries: &[DenseCallEntry],
-    head: u32,
-) -> Result<bool, CompletionError> {
-    Ok(bits == &rebuild_completed(scope, entries, Some(head))?)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn entry(commit: u32, parent: Option<u32>, scope: u16, storylet: u16) -> DenseCallEntry {
-        DenseCallEntry {
-            commit_index: commit,
-            commit_parent: parent,
-            scope_index: scope,
-            storylet_index: Some(storylet),
-            completed: true,
-            trigger_subscription: None,
-            chosen_output_pin: "output".into(),
-        }
-    }
+
 
     #[test]
     fn bitset_set_clear_contains_all_and_roundtrip() {
@@ -438,33 +306,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rebuild_matches_history_and_ignores_non_completions() {
-        let entries = vec![
-            entry(0, None, 0, 1),
-            DenseCallEntry {
-                completed: false,
-                ..entry(1, Some(0), 0, 2)
-            },
-            entry(2, Some(1), 0, 3),
-        ];
-        let bits = rebuild_completed(0, &entries, Some(2)).unwrap();
-        assert!(bits.contains(1));
-        assert!(!bits.contains(2));
-        assert!(bits.contains(3));
-        assert!(verify_completed(&bits, 0, &entries, 2).unwrap());
 
-        // The sibling scope is isolated even when its entries are in the same arena.
-        assert!(rebuild_completed(1, &entries, Some(2)).is_err());
-    }
 
-    #[test]
-    fn rollback_path_excludes_abandoned_entries() {
-        let entries = vec![entry(0, None, 0, 1), entry(1, Some(0), 0, 2)];
-        let bits = rebuild_completed(0, &entries, Some(0)).unwrap();
-        assert!(bits.contains(1));
-        assert!(!bits.contains(2));
-    }
+
 
     #[test]
     fn inheritance_is_opt_in_and_does_not_copy_parent_bits() {
@@ -489,38 +333,7 @@ mod tests {
         assert!(!child.visible_contains(4, &[parent, child]).unwrap());
     }
 
-    #[test]
-    fn persisted_keys_resolve_and_unknown_keys_fail() {
-        let mut space = crate::chrono_catalog::StoryletSpace::new();
-        let a = space.insert("stl.a").unwrap();
-        let persisted = vec![PersistedCallEntry {
-            scope_key: "scope.0".into(),
-            instance_key: "instance.0".into(),
-            node_guid: 1,
-            executed_input_pin: "In".into(),
-            chosen_output_pin: "Out".into(),
-            storylet_key: Some("stl.a".into()),
-            chosen_storylet_key: None,
-            trigger_key: None,
-            content_revision: 1,
-            commit_index: 0,
-            commit_parent: None,
-            tick: 0,
-            completed: true,
-        }];
-        let dense = resolve_persisted(&persisted, &space, |_| Some(0)).unwrap();
-        assert_eq!(dense[0].storylet_index, Some(a));
-        assert!(rebuild_completed(0, &dense, Some(0)).unwrap().contains(a));
 
-        let mut unknown = persisted.clone();
-        unknown[0].storylet_key = Some("missing".into());
-        assert_eq!(
-            resolve_persisted(&unknown, &space, |_| Some(0)),
-            Err(CompletionError::UnknownStoryletKey {
-                key: "missing".into()
-            })
-        );
-    }
 
     #[test]
     fn word_count_is_1024() {

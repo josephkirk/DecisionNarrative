@@ -85,6 +85,31 @@ pub struct SessionChange {
     pub snapshot: Value,
 }
 
+fn validate_and_normalize_bundle(bundle: &mut ProjectBundleV2) -> Vec<String> {
+    let mut issues = Vec::new();
+    for storylet in &mut bundle.content.storylets {
+        let graph = match storylet.graph.clone() {
+            Some(value) => match serde_json::from_value::<NarrativeGraph>(value) {
+                Ok(graph) => graph,
+                Err(error) => {
+                    issues.push(format!("storylet {} graph is invalid: {error}", storylet.id));
+                    continue;
+                }
+            },
+            None => NarrativeGraph::from_storylet(storylet),
+        };
+        match graph.validate() {
+            Ok(()) => storylet.ending = graph.ending_from_graph(),
+            Err(errors) => issues.push(format!(
+                "storylet {} graph is invalid: {}",
+                storylet.id,
+                errors.join("; ")
+            )),
+        }
+    }
+    issues
+}
+
 fn normalize_storylet_ending(value: &mut Value) {
     let Some(graph) = value.get("graph").cloned() else {
         return;
@@ -296,13 +321,14 @@ impl StudioService {
     pub async fn validate_bundle(&self, bundle_val: &Value) -> Result<Vec<String>, String> {
         let mut issues = Vec::new();
 
-        let bundle: ProjectBundleV2 = match serde_json::from_value(bundle_val.clone()) {
+        let mut bundle: ProjectBundleV2 = match serde_json::from_value(bundle_val.clone()) {
             Ok(b) => b,
             Err(e) => {
                 issues.push(format!("Bundle does not match schema version 2: {e}"));
                 return Ok(issues);
             }
         };
+        issues.extend(validate_and_normalize_bundle(&mut bundle));
 
         if bundle.format != "decision-narrative-project" {
             issues.push(format!("Unsupported format '{}'", bundle.format));
@@ -333,8 +359,12 @@ impl StudioService {
     }
 
     pub async fn import_bundle(&self, bundle_val: &Value) -> Result<u64, String> {
-        let bundle: ProjectBundleV2 = serde_json::from_value(bundle_val.clone())
+        let mut bundle: ProjectBundleV2 = serde_json::from_value(bundle_val.clone())
             .map_err(|e| format!("Invalid bundle JSON: {e}"))?;
+        let issues = validate_and_normalize_bundle(&mut bundle);
+        if !issues.is_empty() {
+            return Err(issues.join("; "));
+        }
 
         let mut inner = self.inner.lock().await;
         inner

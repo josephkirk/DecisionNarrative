@@ -6,7 +6,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::chrono_catalog::StoryletIndex;
-use crate::chrono_completion::{CompletionError, DenseCallEntry, commit_path};
 use crate::chrono_runtime::CallHistoryEntry;
 
 pub const MAX_TRIGGER_SUBSCRIPTIONS: usize = 8192;
@@ -210,26 +209,6 @@ impl TriggerFireTable {
         self.fired.retain(|(entry_scope, _)| *entry_scope != scope);
     }
 
-    /// Rebuild from the canonical call-history path. This is the only rebuild
-    /// rule; fired state is not saved independently. Abandoned branches are
-    /// excluded by walking `commit_parent` from `head`.
-    pub fn rebuild(
-        scope: u16,
-        entries: &[DenseCallEntry],
-        head: Option<u32>,
-    ) -> Result<Self, CompletionError> {
-        let path = commit_path(scope, entries, head)?;
-        let mut table = Self::new();
-        for entry in path.into_iter().rev() {
-            if entry.scope_index == scope {
-                if let Some(subscription) = entry.trigger_subscription {
-                    table.mark(scope, subscription);
-                }
-            }
-        }
-        Ok(table)
-    }
-
     pub fn len(&self) -> usize {
         self.fired.len()
     }
@@ -281,30 +260,21 @@ mod tests {
     #[test]
     fn fired_state_rebuilds_from_history_and_clears_with_scope() {
         let entries = vec![
-            DenseCallEntry {
-                commit_index: 0,
-                commit_parent: None,
-                scope_index: 0,
-                storylet_index: Some(1),
-                completed: true,
+            CallHistoryEntry {
                 trigger_subscription: Some(7),
-                chosen_output_pin: "Out".into(),
+                completed: true,
+                ..CallHistoryEntry::default()
             },
-            DenseCallEntry {
-                commit_index: 1,
-                commit_parent: Some(0),
-                scope_index: 1,
-                storylet_index: None,
-                completed: false,
-                trigger_subscription: None,
-                chosen_output_pin: "Out".into(),
+            CallHistoryEntry {
+                ..CallHistoryEntry::default()
             },
         ];
-        let table = TriggerFireTable::rebuild(0, &entries, Some(0)).unwrap();
+        let table = TriggerFireTable::rebuild_history(&entries, 0);
         assert!(table.is_fired(0, 7));
         assert!(!table.is_fired(1, 7));
         let mut table = table;
         table.clear_scope(0);
         assert!(table.is_empty());
     }
+
 }
