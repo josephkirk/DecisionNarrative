@@ -2,7 +2,8 @@
 
 **Status:** Current implementation design and delivery record  
 **Scope:** The deterministic narrative runtime behind DecisionNarrative's storylet studio  
-**Supersedes:** `docs/featuresbacklog/chrono-decision-engine/` (v3/v4/v5 specifications and the dense-runtime backlog)
+**Supersedes:** `docs/featuresbacklog/chrono-decision-engine/` (v3/v4/v5 specifications and the dense-runtime backlog)  
+**Related:** [Entity, trait, and quality model](entity-trait-quality.md) (target state model)
 
 ## 1. Summary
 
