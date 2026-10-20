@@ -197,19 +197,20 @@ The dense contracts sit under the existing token runtime; they do not replace it
 #### Token and budget execution
 
 - `FlowGraphAsset` is immutable topology. `FlowGraphInstance` is one execution with node state, a flat `SignalToken` vector, a fixed-point millisecond clock, and call history.
-- A `SignalToken` carries token ID, graph instance ID, target node GUID, target pin, time budget, and active/deferred state.
+- A `SignalToken` carries token ID, graph instance ID, target node GUID, target pin index, time budget, and active/deferred state.
 - Every node implements three interfaces:
   - `ExecuteNormal`: normal execution;
   - `ForceComplete`: one-frame execution for save/load and Story Invoke;
   - `CancelAndRevert`: one-frame inverse execution from the node's cached rollback record.
-- Tokens are consumed in deterministic token-ID order. Zero-cost cycles are rejected at asset validation; a per-tick execution cap prevents bypassed assets from hanging the frame loop.
-- A token that exceeds its budget is deferred; it keeps its budget and resumes on the next tick.
+- Tokens are consumed in deterministic token-ID order. Zero-cost cycles are rejected at asset validation, except cycles through interactive Choice/QBN nodes. A per-tick execution cap prevents malformed assets from hanging the frame loop.
+- Inside `tick` with a positive frame budget, the first runnable token may overrun the frame when its node costs more than the remaining frame budget. Later tokens that cannot fit are parked until `deferred_until_ms`; they do not carry the unused frame remainder as a token budget. A parked token is revived when the clock reaches that deadline.
+- Direct `execute_input` calls are strict: a supplied token budget below the node cost returns `InsufficientBudget`.
 - Node categories are `MUTATOR`, `WAITER`, `LOGIC_GATE`, `DYNAMIC_DISPATCHER`, and `SCOPED_CONTAINER`.
 
 #### QBN, salience, and waypoint behavior
 
 - **QBN hub**: evaluates a deck of authored storylet IDs, filters exact eligibility and completion locks, orders by display priority, and presents the deck. The player may execute eligible storylets in any order until the hub's exit storylet is chosen.
-- **Salience selector**: exact eligibility first; candidates without a matching dramatic-arc phase fail closed; score combines predicate specificity, present bonus tags, and negative weighted distance to the authored ideal state vector; ties use a deterministic saved seed.
+- **Salience selector**: exact eligibility first; candidates with an empty or mismatched dramatic-arc phase mask fail closed; score combines predicate specificity, present bonus tags, and negative weighted distance to the authored ideal state vector; ties use a deterministic saved seed. If nothing matches, the authored fallback storylet is used; without one, the node returns `NoSalienceMatch`.
 - **Waypoint conversation**: a directed topic graph with an NPC goal. NPC movement is Dijkstra from current topic to goal, excluding player-only trigger topics, with an added penalty for previously used edges. Player diversion moves to an adjacent topic and then the NPC re-routes. A scene-exit topic emits its declared output pin; visiting a topic may unlock a clue quality.
 - QBN, salience, and waypoint nodes record the chosen storylet, output pin, and edge/mission history so `CancelAndRevert` restores state and node-local records.
 
@@ -223,9 +224,9 @@ The dense contracts sit under the existing token runtime; they do not replace it
 
 #### Invoke, reconcile, and patch rebase
 
-- **Story Invoke**: seek backward from a target POI. At an ALL gate, include every upstream branch; at ANY/Choice/Waypoint nodes, follow the declared route pin; at a QBN hub, resolve the exit storylet's prerequisite chain in topological order. Then `ForceComplete` the collected path in forward order and execute the target POI.
+- **Story Invoke**: seek backward from a target POI. At an ALL gate, include every upstream branch; at ANY/Choice/Waypoint nodes, follow the declared route pin, falling back to the first incoming edge in deterministic order; at a QBN hub, greedily select deck storylets that become eligible and contribute tags the exit still needs, ordered by display priority then storylet ID, then append the exit. The path is simulated before mutation, `ForceComplete` runs it in forward order, and the target POI completes last.
 - **Reconcile**: find the lowest common ancestor of current and target history, `CancelAndRevert` the current branch back to it, then `ForceComplete` the target branch forward.
-- **Patch rebase**: drop entries whose node/storylet no longer exists, preserve stable keys, and splice the shortest bridge path between consecutive surviving nodes when the updated asset inserted nodes. Ambiguous keys fail load.
+- **Patch rebase**: drop entries whose node, storylet, input pin, or output pin no longer exists, then splice the shortest bridge path between consecutive surviving nodes when the updated asset inserted nodes. Rebase matches the persisted GUID/dense-ID records; service-level stable-key save/load migration remains incomplete. Catalog construction rejects duplicate stable keys.
 - The commit tree is a DAG; every rollback/reconcile operation moves one commit head and leaves abandoned branches intact for inspection.
 
 ## 4. Implementation status
