@@ -1754,6 +1754,9 @@ pub struct FlowGraphInstance {
     /// the node that completed the storylet (REQ-BB-02).
     #[serde(default)]
     pub completed_storylets: StoryletBitset,
+    /// Dense storylet index -> stable authoring key, supplied by the loader.
+    #[serde(default)]
+    pub storylet_keys: BTreeMap<u16, String>,
     /// Local variable store for typed assignments (REQ-VAR).
     pub variables: VariableStore,
     /// Asset ids from the root instance down to this instance, used to reject
@@ -1805,6 +1808,7 @@ impl FlowGraphInstance {
             ms_per_turn: None,
             last_completed_ms: BTreeMap::new(),
             completed_storylets: StoryletBitset::new(),
+            storylet_keys: BTreeMap::new(),
             variables: VariableStore::default(),
             mission_asset_path,
             pending_passion_events: Vec::new(),
@@ -1921,6 +1925,14 @@ impl FlowGraphInstance {
 
     pub fn call_history(&self) -> &[CallHistoryEntry] {
         &self.global_call_history
+    }
+
+    /// Bind dense storylet indices to stable keys. Call once after content load.
+    pub fn bind_storylet_keys(
+        &mut self,
+        keys: impl IntoIterator<Item = (u16, String)>,
+    ) {
+        self.storylet_keys = keys.into_iter().collect();
     }
 
     /// Rebuild the materialized completion bitset from the canonical commit path.
@@ -2558,6 +2570,9 @@ impl FlowGraphInstance {
                 executed_input_pin: plan.input_pin.clone(),
                 chosen_output_pin: plan.output_pin.clone().unwrap_or_default(),
                 chosen_storylet_id: plan.storylet_id,
+                storylet_key: plan
+                    .storylet_id
+                    .and_then(|id| self.storylet_keys.get(&id).cloned()),
                 scope_index: 0,
                 completed: plan.storylet_id.is_some(),
                 ..CallHistoryEntry::default()
@@ -4105,7 +4120,8 @@ impl FlowGraphInstance {
         path.push(child_asset.asset_id.clone());
         let instance_id =
             mix64(self.instance_id ^ (node_guid as u64).wrapping_add(0x9e37_79b9_7f4a_7755));
-        let child = Self::new_at_path(instance_id, child_asset.clone(), seed, path)?;
+        let mut child = Self::new_at_path(instance_id, child_asset.clone(), seed, path)?;
+        child.storylet_keys = self.storylet_keys.clone();
         self.nodes[index].sub_graph = Some(Box::new(child));
         Ok(())
     }

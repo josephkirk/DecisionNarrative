@@ -18,11 +18,11 @@ These are not claimed as end-to-end runtime behavior. They compile and have focu
 | Contract | Implemented module | Deferred integration |
 |---|---|---|
 | REQ-DO-01 | `chrono_tables::{StoryletInstanceTable, ScopeTable}` | scheduler does not yet allocate from these tables; per-node `completed_storylets` remains a `BTreeSet`; arena columns deferred |
-| REQ-DO-04 | `PersistedCallEntry`; runtime `CallHistoryEntry` + `PersistentHistoryEngine` rebuild | SQLite persistence/compaction/rebase migration remains deferred; stable trigger keys not resolved; trigger fired state uses subscription indices |
-| REQ-DO-05 | `chrono_triggers::{TriggerTable, EventQueue, TriggerFireTable}` | trigger index/queue not yet replacing runtime subscriptions; fired state not yet rebuilt at load |
+| REQ-DO-04 | `PersistedCallEntry`; runtime `CallHistoryEntry` + `PersistentHistoryEngine` rebuild; playtest binds catalog keys | SQLite persistence/compaction/rebase migration remains deferred; trigger fired state uses subscription indices |
+| REQ-DO-05 | `chrono_triggers::{TriggerTable, EventQueue, TriggerFireTable}` | CSR/stable keys/process_tick implemented; runtime subscriptions not replaced and fired state not rebuilt at load |
 | REQ-DO-07 | `chrono_transactions::{EffectTransaction, WriteSet}` | existing `MutationOp` path still commits directly; conflict policy not enabled in service |
 | REQ-DO-06/08/09 | `chrono_selection::{SelectionProfile, SelectionGate, FallbackPolicy, weighted_pick_one}`; `StoryletDef.is_ending` and default deck exclusion | ending profile is not yet wired into playtest selection; service still uses its existing deck path; selection record/replay and distribution tests incomplete |
-| REQ-DO-11 | `chrono_features::{FeatureIndex, ActorTraitIndex, ItemIndex, ChoiceHistoryIndex, WorldStageIndex}` | indexes are not yet updated transactionally by the runtime |
+| REQ-DO-11 | `chrono_features::{FeatureIndex, ActorTraitIndex, ItemIndex, ChoiceHistoryIndex, WorldStageIndex}` | state/call-history rebuild implemented; predicate and transactional wiring deferred |
 
 ## Deliberate non-goals
 
@@ -39,12 +39,12 @@ These are known gaps in the current implementation. They are recorded so no revi
 
 - **REQ-DO-01:** `StoryletInstanceTable` does not yet store variable/cast arenas or interleave policy. `ScopeTable` release/reuse is implemented, but the scheduler still uses `FlowGraphInstance`.
 - **REQ-DO-03:** `FlowGraphInstance.completed_storylets` is a bitset, but per-node completion sets remain `BTreeSet`s. Rollback still clears bits from node-set membership; it does not yet rebuild solely from the remaining commit path. QBN prerequisite chains still consult node sets.
-- **REQ-DO-04:** `CallHistoryEntry` is now the canonical runtime record, and completion/trigger rebuilds fold the commit path. `PersistedCallEntry` remains a persistence contract; SQLite still stores the old shape, stable trigger keys are not resolved, and trigger fired state uses dense subscription indices.
-- **REQ-DO-05:** `TriggerTable` uses per-key `Vec` buckets, not CSR arrays; `process_tick`/start caps/event crossing semantics are not implemented. Trigger subscription keys are dense insertion order, not stable keys.
+- **REQ-DO-04:** `CallHistoryEntry` is the canonical runtime record. The playtest loader binds dense storylet indices to stable keys, and completion/trigger rebuilds fold the commit path. `PersistedCallEntry` remains a persistence contract; SQLite still stores the old shape and trigger fired state uses dense subscription indices.
+- **REQ-DO-05:** `TriggerTable` builds CSR buckets, supports stable subscription keys, and has deterministic `process_tick` with once/scope/active/cap handling and queued-event retention at cap. Event crossing predicates, full event payload production, and scheduler wiring remain deferred.
 - **REQ-DO-07:** `WriteSet` conflict bitsets and single-op commit/revert exist, but there is no open-transaction table, conflict-policy resolution, write-set closure from indirect effects, or multi-op transaction body.
 - **REQ-DO-08/09:** Selection profile, fallback, floor, gate validation, and weighted pick exist. Runtime selection still uses the v5 deck path; selection records/replay and distribution tests are incomplete. Gate failure returns a typed rejection rather than applying fallback; fallback is reserved for empty eligible sets.
 - **REQ-DO-10:** Catalog/working-set metadata is partial (`is_ending`, payload ref, duration); location/role/gate masks and lazy payload loading are not wired. Runtime still compiles all storylet definitions. Dense lookup is sized to the maximum ID and rebuilt on deserialize.
-- **REQ-DO-11:** Dense feature indexes exist, but they are not derived from `WorldStateTable`/call history and are not integrated into predicate compilation or transactional updates.
+- **REQ-DO-11:** Feature indexes have a `rebuild_from_state` projection over item edges, macro passions, choice pins, and global-stage tags. Predicate compilation and transactional updates remain deferred. Runtime call-history entries currently carry `scope_index: 0`, and choice pins use per-node ordinals, so cross-scope choice keys remain a deferred schema issue.
 - **REQ-DO-06:** `StoryletDef.is_ending` is wired. Default deck exclusion is deferred with the ending-profile wiring; playtest currently keeps ending rows selectable. A terminal End with a jump target is treated as a jump (jump wins), and the studio clears terminal when a jump is chosen.
 
 - **REQ-DO-12:** the legacy `ending_without_choice` rule was removed, content reads normalize storylet `ending`, and bundle import/validation now validates graphs and derives `ending`.

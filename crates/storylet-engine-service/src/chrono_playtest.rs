@@ -691,6 +691,7 @@ fn prepare(
             session.seed,
         )
         .map_err(runtime_error)?;
+        bind_catalog_keys(&mut rebuilt, &compiled);
         rebuilt
             .attach_mission_assets(&graphs.mission_assets, session.seed)
             .map_err(runtime_error)?;
@@ -798,6 +799,7 @@ fn load_session(
         row.seed as u64,
     )
     .map_err(runtime_error)?;
+    bind_catalog_keys(&mut instance, &compiled);
     instance
         .attach_mission_assets(&graphs.mission_assets, row.seed as u64)
         .map_err(runtime_error)?;
@@ -856,6 +858,19 @@ fn load_session(
 
 fn call_history_value(entries: &[CallHistoryEntry]) -> Value {
     serde_json::to_value(entries).unwrap_or(Value::Null)
+}
+
+fn bind_catalog_keys(
+    instance: &mut FlowGraphInstance,
+    compiled: &crate::chrono_adapter::CompiledChronoDispatch,
+) {
+    instance.bind_storylet_keys(
+        compiled
+            .storylet_catalog()
+            .space()
+            .iter()
+            .map(|(index, key)| (index, key.to_owned())),
+    );
 }
 
 fn owning_instance(instance: &FlowGraphInstance, instance_id: u64) -> &FlowGraphInstance {
@@ -1785,6 +1800,7 @@ impl StudioService {
             seed_value,
         )
         .map_err(runtime_error)?;
+        bind_catalog_keys(&mut instance, &compiled);
         instance
             .attach_mission_assets(&graphs.mission_assets, seed_value)
             .map_err(runtime_error)?;

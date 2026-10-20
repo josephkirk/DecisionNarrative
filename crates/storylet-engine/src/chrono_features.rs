@@ -3,7 +3,8 @@
 //! These are dense projections of authoritative state. Rebuild is the source of
 //! truth for verification; incremental updates are an optimization.
 
-use crate::chrono_state::TagBitset;
+use crate::chrono_runtime::CallHistoryEntry;
+use crate::chrono_state::{AttributeValue, TagBitset, WorldStateTable};
 
 pub const MAX_ACTORS: usize = 256;
 pub const MAX_TRAITS: usize = 256;
@@ -192,6 +193,86 @@ impl FeatureIndex {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FeatureError {
+    OutOfRange,
+}
+
+impl std::fmt::Display for FeatureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OutOfRange => write!(f, "feature row is out of range"),
+        }
+    }
+}
+
+impl std::error::Error for FeatureError {}
+
+impl FeatureIndex {
+    /// Derive the index from authoritative world state plus the resolved
+    /// call-history path for one scope. Unknown relation types are ignored.
+    pub fn rebuild_from_state(
+        state: &WorldStateTable,
+        history: &[CallHistoryEntry],
+        scope: u16,
+    ) -> Result<Self, FeatureError> {
+        let mut index = Self::new();
+        for edge in &state.edges {
+            if !edge.relation_type.eq_ignore_ascii_case("owns") {
+                continue;
+            }
+            let Some(owner_vertex) = state.vertices.iter().find(|v| v.vertex_id == edge.source_id) else {
+                continue;
+            };
+            let Some(item_vertex) = state.vertices.iter().find(|v| v.vertex_id == edge.target_id) else {
+                continue;
+            };
+            let (Some(owner), Some(item)) = (owner_vertex.entity_index, item_vertex.entity_index) else {
+                continue;
+            };
+            let quantity = match item_vertex.attributes.get("quantity") {
+                Some(AttributeValue::Int(value)) if *value >= 0 => *value as u32,
+                Some(AttributeValue::Float(value)) if *value >= 0.0 => *value as u32,
+                _ => 1,
+            };
+            if !index.items.set_quantity(owner, item, quantity) {
+                return Err(FeatureError::OutOfRange);
+            }
+        }
+
+        for (actor, value) in state.passions.macro_values.iter().enumerate() {
+            if actor >= MAX_ACTORS {
+                return Err(FeatureError::OutOfRange);
+            }
+            if !index.actor_traits.set(actor as u16, 1, value.clamp(-127.0, 127.0) as i8) {
+                return Err(FeatureError::OutOfRange);
+            }
+        }
+
+        for entry in history {
+            if entry.scope_index != scope {
+                continue;
+            }
+            if let Some(key) = entry
+                .chosen_output_pin
+                .strip_prefix("choice_")
+                .and_then(|value| value.parse::<u16>().ok())
+                && !index.choices.record(key)
+            {
+                return Err(FeatureError::OutOfRange);
+            }
+        }
+
+        for bit in 0..crate::chrono_state::MAX_TAGS as u16 {
+            if state.global_tags.bit(bit) && !index.world_stage.set(bit) {
+                return Err(FeatureError::OutOfRange);
+            }
+        }
+
+        Ok(index)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,6 +291,41 @@ mod tests {
         assert!(index.world_stage.contains(4));
         index.world_stage.clear(4);
         assert!(!index.world_stage.contains(4));
+    }
+
+    #[test]
+    fn rebuild_from_state_and_history() {
+        use crate::chrono_state::{GraphLayer, WorldEdge, WorldVertex};
+        let mut state = WorldStateTable::new();
+        state.vertices.push(WorldVertex {
+            vertex_id: "actor".into(),
+            layer: GraphLayer::Character,
+            entity_index: Some(1),
+            attributes: Default::default(),
+        });
+        state.vertices.push(WorldVertex {
+            vertex_id: "key".into(),
+            layer: GraphLayer::Item,
+            entity_index: Some(2),
+            attributes: [("quantity".into(), AttributeValue::Int(3))].into(),
+        });
+        state.edges.push(WorldEdge {
+            edge_id: "owns".into(),
+            source_id: "actor".into(),
+            target_id: "key".into(),
+            relation_type: "owns".into(),
+            weight: 1.0,
+        });
+        state.global_tags.set_bit(4).unwrap();
+        let history = vec![CallHistoryEntry {
+            scope_index: 0,
+            chosen_output_pin: "choice_9".into(),
+            ..CallHistoryEntry::default()
+        }];
+        let index = FeatureIndex::rebuild_from_state(&state, &history, 0).unwrap();
+        assert_eq!(index.items.quantity(1, 2), 3);
+        assert_eq!(index.choices.count(9), 1);
+        assert!(index.world_stage.contains(4));
     }
 
     #[test]
