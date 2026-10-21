@@ -87,7 +87,7 @@ pub fn get_location_attribute(loc: &LocationRecord, key: &str) -> Option<Value> 
             return Some(val.clone());
         }
     }
-    None
+    crate::entities::attribute_path(&loc.attributes, trimmed)
 }
 
 pub fn match_location(loc: &LocationRecord, key: &str, expected: Option<&Value>) -> bool {
@@ -134,7 +134,7 @@ pub fn get_character_attribute(char: &CharacterRecord, key: &str) -> Option<Valu
             return Some(val.clone());
         }
     }
-    None
+    crate::entities::attribute_path(&char.attributes, trimmed)
 }
 
 pub fn match_character(char: &CharacterRecord, key: &str, expected: Option<&Value>) -> bool {

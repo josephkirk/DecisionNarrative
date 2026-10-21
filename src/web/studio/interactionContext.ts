@@ -53,7 +53,13 @@ const viewNames: Record<string, string> = {
   storylets: "Storylet Library",
   "new-storylet": "New Storylet",
   "edit-storylet": "Storylet Editor",
-  codex: "Story Codex",
+  browse: "Project Browser",
+  entity: "Entity Editor",
+  quality: "Quality Editor",
+  "new-quality": "New Quality",
+  "trait-template": "Trait Template Editor",
+  asset: "Asset Editor",
+  codex: "Rules & Events",
   tags: "Tag Manager",
   scenarios: "Starting Scenarios",
   playtest: "Playtest",
@@ -69,14 +75,23 @@ function first(value: unknown): string | undefined {
 function routeEntity(route: InteractionRoute): InteractionEntity | undefined {
   const id = first(route.params.id);
   if (route.name === "edit-storylet" && id) return { type: "storylet", id };
+  if (route.name === "entity" && id) return { type: "entity", id };
+  const qualityName = first(route.params.name);
+  if (route.name === "quality" && qualityName) return { type: "quality", id: qualityName };
+  if (route.name === "trait-template" && id) return { type: "trait_template", id };
+  if (route.name === "asset" && id) return { type: "asset", id };
+  if (route.name === "browse") {
+    const root = first(route.params.root);
+    const folderId = first(route.params.folderId);
+    if (folderId) return { type: "folder", id: folderId };
+    if (root) return { type: "folder_root", id: root };
+    return undefined;
+  }
   const queryId = first(route.query.id);
   if (route.name === "codex" && queryId) {
     const category = first(route.query.category);
-    const type = category === "characters" ? "character"
-      : category === "locations" ? "location"
-        : category === "qualities" ? "quality"
-          : category === "npc_behaviors" ? "npc_behavior"
-            : category === "events" ? "event" : undefined;
+    const type = category === "npc_behaviors" ? "npc_behavior"
+      : category === "events" ? "event" : undefined;
     if (type) return { type, id: queryId };
   }
   if (route.name === "scenarios" && queryId) return { type: "scenario", id: queryId };

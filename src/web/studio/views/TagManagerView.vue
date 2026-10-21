@@ -1,15 +1,12 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { StudioApi } from "../api.ts";
-import type { CharacterRecord, LocationRecord, StoryletRecord } from "../contracts.ts";
+import { studioState } from "../state.ts";
 import { buildTagIndex, TAG_KINDS, type TagKind } from "../tagData.ts";
 import { interactionContextKey } from "../interactionContext.ts";
+import { refreshWorkspace } from "../view-models/workspace.ts";
 
 const router = useRouter();
-const characters = ref<CharacterRecord[]>([]);
-const locations = ref<LocationRecord[]>([]);
-const storylets = ref<StoryletRecord[]>([]);
 const activeKind = ref<TagKind>("role");
 const query = ref("");
 const loading = ref(true);
@@ -17,11 +14,7 @@ const error = ref("");
 
 onMounted(async () => {
   try {
-    [characters.value, locations.value, storylets.value] = await Promise.all([
-      StudioApi.listContent<CharacterRecord>("characters"),
-      StudioApi.listContent<LocationRecord>("locations"),
-      StudioApi.listContent<StoryletRecord>("storylets"),
-    ]);
+    await refreshWorkspace(["entities", "storylets"]);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Unable to load tag references.";
   } finally {
@@ -29,7 +22,11 @@ onMounted(async () => {
   }
 });
 
-const allTags = computed(() => buildTagIndex({ characters: characters.value, locations: locations.value, storylets: storylets.value }));
+const allTags = computed(() => buildTagIndex({
+  characters: studioState.characters,
+  locations: studioState.locations,
+  storylets: studioState.storylets,
+}));
 const visibleTags = computed(() => allTags.value.filter((tag) => tag.kind === activeKind.value && tag.name.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())));
 const kindCount = (kind: TagKind) => allTags.value.filter((tag) => tag.kind === kind).length;
 const interactionContext = inject(interactionContextKey);
@@ -46,9 +43,11 @@ watch(() => [activeKind.value, query.value, visibleTags.value], () => {
   });
 }, { deep: true, immediate: true });
 function openReference(reference: { entityType: string; entityId: string; nodeId?: string; itemId?: string }) {
-  if (reference.entityType === "character") router.push({ path: "/codex", query: { category: "characters", id: reference.entityId } });
-  else if (reference.entityType === "location") router.push({ path: "/codex", query: { category: "locations", id: reference.entityId } });
-  else router.push({ path: `/storylets/${encodeURIComponent(reference.entityId)}/edit`, query: { ...(reference.nodeId ? { node: reference.nodeId } : {}), ...(reference.itemId ? { item: reference.itemId } : {}) } });
+  if (reference.entityType === "character" || reference.entityType === "location") {
+    router.push(`/entities/${encodeURIComponent(reference.entityId)}`);
+  } else {
+    router.push({ path: `/storylets/${encodeURIComponent(reference.entityId)}/edit`, query: { ...(reference.nodeId ? { node: reference.nodeId } : {}), ...(reference.itemId ? { item: reference.itemId } : {}) } });
+  }
 }
 </script>
 

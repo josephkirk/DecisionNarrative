@@ -14,6 +14,7 @@ export interface QualityRecord {
   menace_crisis_storylet_id?: string;
   description?: string;
   metadata?: Record<string, unknown>;
+  folder_id?: string | null;
 }
 
 export interface MicroPassionRecord {
@@ -177,8 +178,6 @@ export interface StoryletRecord {
   approved_revision?: number | null;
   title: string;
   ending: boolean;
-  position?: [number, number];
-  size?: [number, number];
   location_tags: string[];
   group_tag?: string | null;
   cluster_type: "linear_progression" | "player_passage" | "wheel_deck" | "aftermath_accelerator" | "linear" | "player_controlled_passage" | "wheel" | "aftermath";
@@ -195,6 +194,7 @@ export interface StoryletRecord {
   };
   choices: StoryletChoiceRecord[];
   effects: Record<string, unknown>;
+  folder_id?: string | null;
   created_at: number;
 }
 
@@ -396,4 +396,129 @@ export interface ChronoPlaytestSnapshot {
     passionThresholds: unknown[];
   };
   result: unknown;
+}
+
+export const CONTENT_ROOT_KEYS = ["storylets", "entities", "qualities", "trait_templates", "assets"] as const;
+export type ContentRoot = (typeof CONTENT_ROOT_KEYS)[number];
+
+export interface FolderRecord {
+  id: string;
+  name: string;
+  root: ContentRoot | string;
+  parent_id?: string | null;
+  created_at?: number;
+}
+
+export type EntityType = "character" | "location" | "item" | "fact" | "other";
+
+export type PropertyType = "bool" | "string" | "float" | "int" | "asset" | "entity";
+
+export interface AssetLinkValue {
+  asset_id: string;
+  version: string;
+}
+
+export type PropertyScalar = boolean | string | number | AssetLinkValue | null;
+export type PropertyValue = PropertyScalar | PropertyScalar[];
+
+export interface PropertyDefinition {
+  id: string;
+  key: string;
+  name: string;
+  type: PropertyType;
+  is_array?: boolean;
+  multiline?: boolean;
+  default?: PropertyValue;
+}
+
+export interface EntityProperty {
+  id: string;
+  key: string;
+  name: string;
+  type: PropertyType;
+  is_array?: boolean;
+  multiline?: boolean;
+  value?: PropertyValue;
+}
+
+export interface TraitInstance {
+  template_id: string;
+  values: Record<string, PropertyValue>;
+}
+
+export interface TraitTemplateRecord {
+  id: string;
+  key: string;
+  /** True when the server generated `key` and renames keep it in sync. */
+  key_auto?: boolean;
+  name: string;
+  description?: string;
+  folder_id?: string | null;
+  properties: PropertyDefinition[];
+  created_at?: number;
+}
+
+export type CharacterSection = Omit<CharacterRecord, "id" | "name" | "created_at">;
+export type LocationSection = Omit<LocationRecord, "id" | "name" | "description" | "created_at">;
+
+export interface EntityRecord {
+  id: string;
+  object_id: string;
+  game_id: string;
+  /** True when the server generated `game_id` and renames keep it in sync. */
+  game_id_auto?: boolean;
+  name: string;
+  type: EntityType;
+  description?: string;
+  thumbnail?: string | null;
+  folder_id?: string | null;
+  properties: EntityProperty[];
+  traits: TraitInstance[];
+  character?: CharacterSection;
+  location?: LocationSection;
+  created_at?: number;
+}
+
+export interface StorageLocationRecord {
+  storage_type: "disk" | "git" | "perforce" | string;
+  storage_id: string;
+  created_at: number;
+  reference_type: "file" | "commit" | "changelist" | "snapshot" | string;
+  path: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AssetVersionRecord {
+  id: string;
+  file_path: string;
+  creator: string;
+  tool_version: string;
+  description?: string | null;
+  created_at: number;
+  tags: string[];
+  custom_data?: Record<string, unknown>;
+  thumbnail?: string | null;
+  storage: StorageLocationRecord[];
+}
+
+export interface AssetRecord {
+  id: string;
+  name: string;
+  folder_id?: string | null;
+  thumbnail?: string | null;
+  tags: string[];
+  versions: AssetVersionRecord[];
+  created_at?: number;
+}
+
+export type ReferenceVia = "id" | "role" | "tag";
+
+export interface ContentReference {
+  source_kind: string;
+  source_id: string;
+  source_label: string;
+  node_id?: string | null;
+  node_label?: string | null;
+  field: string;
+  via: ReferenceVia;
 }

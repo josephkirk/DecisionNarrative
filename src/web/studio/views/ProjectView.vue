@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { useProjectViewModel } from "../view-models/project.ts";
 import { StudioApi } from "../api.ts";
 import { notify } from "../state.ts";
+import { refreshWorkspace } from "../view-models/workspace.ts";
 
 const {
   metadata,
@@ -15,6 +16,15 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const pendingBundle = ref<any>(null);
 const validationIssues = ref<string[]>([]);
 const isValid = ref(false);
+
+watch(
+  () => metadata.name,
+  (name) => {
+    // Keep the field truthful after a load or a bundle replace; user edits still
+    // own the value between loads because metadata only changes on those events.
+    nameInput.value = name;
+  },
+);
 
 onMounted(async () => {
   await loadProject();
@@ -53,6 +63,7 @@ async function handleImport() {
     pendingBundle.value = null;
     isValid.value = false;
     await loadProject();
+    await refreshWorkspace();
   } catch (err) {
     notify(err instanceof Error ? err.message : String(err), "error");
   }
@@ -79,7 +90,7 @@ async function handleImport() {
       <div style="padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px; margin-bottom:20px;">
         <h3 style="font-size:14px; font-weight:700; margin-bottom:8px;">EXPORT PROJECT</h3>
         <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
-          Download complete portable project bundle v2 (Story Codex, storylets, and scenarios).
+          Download complete portable project bundle v3 (entities, folders, trait templates, assets, storylets, and scenarios).
         </p>
         <a href="/api/v2/project-bundle" class="btn btn-secondary" download>Export .storylet.json</a>
       </div>

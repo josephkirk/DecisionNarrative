@@ -4,8 +4,6 @@ import { useRoute, useRouter } from "vue-router";
 import { useStoryletEditorViewModel } from "../view-models/storyletEditor.ts";
 import NarrativeGraphCanvas from "../components/NarrativeGraphCanvas.vue";
 import PropertyInspector from "../components/PropertyInspector.vue";
-import { StudioApi } from "../api.ts";
-import type { CharacterRecord, LocationRecord, QualityRecord, StoryletRecord } from "../contracts.ts";
 import { buildGraphFromStorylet, compileGraphToStorylet, validateNarrativeGraph, type NarrativeGraph } from "../narrativeGraphTypes.ts";
 import { notify, studioState } from "../state.ts";
 import { interactionContextKey } from "../interactionContext.ts";
@@ -13,11 +11,12 @@ import { interactionContextKey } from "../interactionContext.ts";
 const route = useRoute();
 const router = useRouter();
 const storyletId = typeof route.params.id === "string" ? route.params.id : undefined;
-const { loading, isNew, draft, isApproved, loadStorylet, saveDraft, approveStorylet } = useStoryletEditorViewModel(storyletId);
+const folderId = typeof route.query.folder === "string" ? route.query.folder : null;
+const { loading, isNew, draft, isApproved, loadStorylet, saveDraft, approveStorylet } = useStoryletEditorViewModel(storyletId, folderId);
 const currentGraph = ref<NarrativeGraph>({ nodes: [], edges: [], local_variables: [] });
 const selectedNodeId = ref<string | null>(null);
 const selectedNode = computed(() => currentGraph.value.nodes.find((node) => node.id === selectedNodeId.value) ?? null);
-const availableStorylets = ref<StoryletRecord[]>([]);
+const availableStorylets = computed(() => studioState.storylets);
 const graphReady = ref(false);
 
 const interactionContext = inject(interactionContextKey);
@@ -50,12 +49,7 @@ watch(() => [
 const lastSavedSnapshot = ref("");
 
 onMounted(async () => {
-  const loads: Promise<unknown>[] = [
-    StudioApi.listContent<StoryletRecord>("storylets").then((items) => { availableStorylets.value = items; }).catch(() => { availableStorylets.value = []; }),
-    StudioApi.listContent<CharacterRecord>("characters").then((items) => { studioState.characters = items; }).catch(() => { studioState.characters = []; }),
-    StudioApi.listContent<LocationRecord>("locations").then((items) => { studioState.locations = items; }).catch(() => { studioState.locations = []; }),
-    StudioApi.listContent<QualityRecord>("qualities").then((items) => { studioState.qualities = items; }).catch(() => { studioState.qualities = []; }),
-  ];
+  const loads: Promise<unknown>[] = [];
   if (storyletId) loads.push(loadStorylet(storyletId));
   await Promise.all(loads);
   currentGraph.value = buildGraphFromStorylet(draft);

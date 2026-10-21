@@ -33,6 +33,7 @@ use crate::chrono_adapter::{
 use crate::chrono_graph_adapter::{bind_storylet_start_nodes, compile_narrative_graphs};
 use crate::contracts::{
     CharacterRecord, LocationRecord, QualityRecord, ScenarioRecord, StoryletRecord,
+    WorldObjectRecord,
 };
 use crate::scenario::resolve_scenario_start;
 use crate::service::{StudioInner, StudioService, chrono_now_ms};
@@ -501,15 +502,18 @@ struct WorkspaceContent {
     qualities: Vec<QualityRecord>,
     locations: Vec<LocationRecord>,
     characters: Vec<CharacterRecord>,
+    world_objects: Vec<WorldObjectRecord>,
     storylets: Vec<StoryletRecord>,
     scenarios: Vec<ScenarioRecord>,
 }
 
 fn read_content(store: &Store) -> Result<WorkspaceContent, ChronoPlaytestError> {
+    let runtime = store.runtime_records().map_err(persistence_error)?;
     Ok(WorkspaceContent {
         qualities: store.list_qualities().map_err(persistence_error)?,
-        locations: store.list_locations().map_err(persistence_error)?,
-        characters: store.list_characters().map_err(persistence_error)?,
+        locations: runtime.locations,
+        characters: runtime.characters,
+        world_objects: runtime.world_objects,
         storylets: store.list_storylets().map_err(persistence_error)?,
         scenarios: store.list_scenarios().map_err(persistence_error)?,
     })
@@ -652,6 +656,7 @@ fn prepare(
         &content.qualities,
         &content.locations,
         &content.characters,
+        &content.world_objects,
         scenario,
         &session.start_location_id,
     )
@@ -761,6 +766,7 @@ fn load_session(
         &content.qualities,
         &content.locations,
         &content.characters,
+        &content.world_objects,
         scenario,
         &row.start_location_id,
     )
@@ -1727,6 +1733,7 @@ impl StudioService {
             &content.qualities,
             &content.locations,
             &content.characters,
+            &content.world_objects,
             Some(&scenario),
             &start_location,
         )

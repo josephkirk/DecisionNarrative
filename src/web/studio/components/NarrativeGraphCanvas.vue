@@ -278,12 +278,28 @@ function removeNode(nodeId: string) {
 // Create new node of type
 function addNode(type: NodeType) {
   const nextId = `node_${type}_${Date.now().toString(36)}`;
-  const x = contextMenu.value?.kind === "canvas" && contextWorld.value
-    ? contextWorld.value.x
+  const fromCanvasMenu = contextMenu.value?.kind === "canvas" && contextWorld.value !== null;
+  let x = fromCanvasMenu
+    ? contextWorld.value!.x
     : Math.round((-panX.value + 400) / zoom.value);
-  const y = contextMenu.value?.kind === "canvas" && contextWorld.value
-    ? contextWorld.value.y
+  let y = fromCanvasMenu
+    ? contextWorld.value!.y
     : Math.round((-panY.value + 250) / zoom.value);
+
+  // Toolbar inserts would otherwise stack exactly on top of each other; walk a
+  // diagonal cascade until the slot is free.
+  if (!fromCanvasMenu) {
+    let attempts = 0;
+    const maxAttempts = nodes.value.length + 2;
+    while (
+      attempts < maxAttempts &&
+      nodes.value.some((node) => Math.abs(node.x - x) < 24 && Math.abs(node.y - y) < 24)
+    ) {
+      x += 48;
+      y += 48;
+      attempts += 1;
+    }
+  }
 
   const baseNode: NarrativeNode = {
     id: nextId,

@@ -42,8 +42,7 @@ test("fresh designer workspace can author and start a scenario through the real 
     const markup = await studio.text();
     expect(markup).toContain("DecisionNarrative — Storylet Studio");
 
-    expect(await (await request("/api/locations")).json()).toEqual([]);
-    expect(await (await request("/api/characters")).json()).toEqual([]);
+    expect(await (await request("/api/v2/content/entities")).json()).toEqual([]);
     expect(await (await request("/api/qualities")).json()).toEqual([]);
     expect(await (await request("/api/storylets")).json()).toEqual([]);
     expect(await (await request("/api/v1/scenarios")).json()).toEqual([]);
@@ -52,10 +51,10 @@ test("fresh designer workspace can author and start a scenario through the real 
     expect((await request("/api/v1/project", { method: "PATCH", headers: { "content-type": "application/json" }, body: "null" })).status).toBe(400);
     expect((await request("/api/v1/project-bundle/validate", { method: "POST", headers: { "content-type": "application/json" }, body: "null" })).status).toBe(400);
 
-    const location = await request("/api/locations", {
+    const location = await request("/api/v2/content/entities", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: "station", name: "Station", description: "A quiet platform." }),
+      body: JSON.stringify({ id: "station", name: "Station", type: "location", description: "A quiet platform." }),
     });
     expect(location.status).toBe(201);
 

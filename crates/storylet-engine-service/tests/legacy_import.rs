@@ -36,11 +36,17 @@ fn test_legacy_import_pipeline() {
     let qualities = store.list_qualities().unwrap();
     assert!(!qualities.is_empty(), "Expected qualities to be imported");
 
-    let characters = store.list_characters().unwrap();
-    assert!(!characters.is_empty(), "Expected characters to be imported");
-
-    let locations = store.list_locations().unwrap();
-    assert!(!locations.is_empty(), "Expected locations to be imported");
+    let entities = store.list_entities().unwrap();
+    let runtime = store.runtime_records().unwrap();
+    assert!(!entities.is_empty(), "Expected entities to be imported");
+    assert!(
+        !runtime.characters.is_empty(),
+        "Expected character entities to be imported"
+    );
+    assert!(
+        !runtime.locations.is_empty(),
+        "Expected location entities to be imported"
+    );
 
     let scenarios = store.list_scenarios().unwrap();
     assert!(!scenarios.is_empty(), "Expected scenarios to be imported");

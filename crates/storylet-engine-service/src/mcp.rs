@@ -145,7 +145,7 @@ fn get_tool_definitions() -> Vec<Value> {
                     "type": "string",
                     "enum": [
                         "platform.health", "workspace.context", "workspace.inspect", "workspace.validate", "workspace.replace",
-                        "content.list", "content.get", "content.save", "content.delete", "storylet.approve",
+                        "content.list", "content.get", "content.save", "content.delete", "content.move", "content.references", "storylet.approve",
                         "scenarios.list", "scenarios.get", "scenarios.create", "scenarios.save", "scenarios.delete", "scenarios.preview",
                         "playtest.list", "playtest.create_from_workspace", "playtest.snapshot",
                         "playtest.director", "playtest.command", "playtest.choose", "playtest.fork",
@@ -158,7 +158,7 @@ fn get_tool_definitions() -> Vec<Value> {
                 },
                 "entity": {
                     "type": "string",
-                    "enum": ["qualities", "characters", "locations", "storylets", "npc_behaviors", "events", "scenarios"]
+                    "enum": crate::contracts::CONTENT_KINDS
                 },
                 "id": { "type": "string" },
                 "payload": { "type": "object" },
@@ -225,6 +225,20 @@ fn get_tool_definitions() -> Vec<Value> {
                         "required": ["operation"]
                     },
                     "then": { "required": ["entity", "payload"] }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "const": "content.move" } },
+                        "required": ["operation"]
+                    },
+                    "then": { "required": ["entity", "id", "payload"] }
+                },
+                {
+                    "if": {
+                        "properties": { "operation": { "const": "content.references" } },
+                        "required": ["operation"]
+                    },
+                    "then": { "required": ["entity", "id"] }
                 },
                 {
                     "if": {
@@ -438,6 +452,40 @@ async fn dispatch_narrative_platform_op(
                 );
             }
             Ok(json!({ "deleted": deleted }))
+        }
+        "content.move" => {
+            let entity = args
+                .get("entity")
+                .and_then(|e| e.as_str())
+                .ok_or_else(|| "Missing entity".to_string())?;
+            let id = args
+                .get("id")
+                .and_then(|i| i.as_str())
+                .ok_or_else(|| "Missing id".to_string())?;
+            let folder_id = args
+                .get("payload")
+                .and_then(|payload| payload.get("folder_id"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.to_string());
+            let res = service.move_content_item(entity, id, folder_id).await?;
+            if let Err(e) = service.mark_interaction_context_stale().await {
+                eprintln!(
+                    "Warning: failed to mark interaction context stale after content move: {e}"
+                );
+            }
+            Ok(res)
+        }
+        "content.references" => {
+            let entity = args
+                .get("entity")
+                .and_then(|e| e.as_str())
+                .ok_or_else(|| "Missing entity".to_string())?;
+            let id = args
+                .get("id")
+                .and_then(|i| i.as_str())
+                .ok_or_else(|| "Missing id".to_string())?;
+            serde_json::to_value(service.content_references(entity, id).await?)
+                .map_err(|error| error.to_string())
         }
         "storylet.approve" => {
             let id = args

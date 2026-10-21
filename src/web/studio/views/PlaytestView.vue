@@ -30,8 +30,10 @@ const currentStorylet = ref<StoryletRecord | null>(null);
 const context = computed(() => snapshot.value?.context ?? null);
 const world = computed(() => context.value?.world ?? null);
 const currentLocation = computed(() => {
-  const id = world.value?.currentLocation;
-  return id ? locationMap.value.get(id) : null;
+  const rawId = world.value?.currentLocation;
+  if (!rawId) return null;
+  const cleanId = rawId.startsWith("location:") ? rawId.slice("location:".length) : rawId;
+  return locationMap.value.get(cleanId) ?? locationMap.value.get(rawId) ?? null;
 });
 const currentStoryletId = computed(() => {
   const nodes = context.value?.nodes ?? [];
@@ -39,8 +41,33 @@ const currentStoryletId = computed(() => {
     ?? snapshot.value?.session.startStoryletId
     ?? null;
 });
-const metricEntries = computed(() => Object.entries(world.value?.metrics ?? {}).sort(([a], [b]) => a.localeCompare(b)));
-const entityEntries = computed(() => Object.entries(world.value?.entities ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+const metricEntries = computed(() =>
+  Object.entries(world.value?.metrics ?? {})
+    .filter(([key]) => Boolean(key && key.trim()))
+    .sort(([a], [b]) => a.localeCompare(b)),
+);
+const entityEntries = computed(() =>
+  Object.entries(world.value?.entities ?? {})
+    .filter(([key]) => Boolean(key && key.trim()))
+    .sort(([a], [b]) => a.localeCompare(b)),
+);
+const passionsDisplay = computed(() => {
+  const p = world.value?.passions;
+  if (!p) return {};
+  const cleanMicro: Record<string, number> = {};
+  for (const [k, v] of Object.entries(p.micro ?? {})) {
+    if (k && k.trim()) cleanMicro[k] = v;
+  }
+  const cleanMacro: Record<string, number> = {};
+  for (const [k, v] of Object.entries(p.macro ?? {})) {
+    if (k && k.trim()) cleanMacro[k] = v;
+  }
+  return {
+    micro: cleanMicro,
+    macro: cleanMacro,
+    active: (p.active ?? []).filter((k) => Boolean(k && k.trim())),
+  };
+});
 const interactionCount = computed(() => context.value?.activeInteractions.length ?? 0);
 const history = computed(() => context.value?.globalCallHistory ?? []);
 
@@ -104,6 +131,7 @@ watch(() => [sessionId.value, snapshot.value, currentStorylet.value, activeTab.v
         <span v-if="snapshot" class="badge">Turn {{ context?.turn }} · {{ context?.clockMs }} ms</span>
         <button class="btn btn-secondary" :disabled="!sessionId || loading" @click="tick(16)">Tick 16 ms</button>
         <button class="btn btn-secondary" :disabled="!history.length || loading" @click="rollbackLatestCall">Undo call</button>
+        <button v-if="sessionId" class="btn btn-secondary" :disabled="loading" title="Exit the active run" @click="selectSession('')">Exit run</button>
       </div>
     </header>
 
@@ -112,6 +140,11 @@ watch(() => [sessionId.value, snapshot.value, currentStorylet.value, activeTab.v
         <div v-if="!snapshot" style="padding:60px; text-align:center; color:var(--text-muted);">
           <strong style="display:block; color:var(--text-main); font-size:16px;">No ChronoFlow run selected</strong>
           <span>Create a run to execute the authored graph with the deterministic runtime.</span>
+          <p v-if="!studioState.scenarios.length" style="margin-top:14px;">
+            A run needs a starting scenario.
+            <router-link to="/scenarios" style="color:var(--accent);">Create one on the Scenarios page</router-link>
+            and choose it above.
+          </p>
         </div>
         <template v-else>
           <div style="margin-bottom:18px; color:var(--accent); font-size:12px; font-weight:700; text-transform:uppercase;">
@@ -184,6 +217,7 @@ watch(() => [sessionId.value, snapshot.value, currentStorylet.value, activeTab.v
 
           <template v-else-if="activeTab === 'state'">
             <h3 class="chrono-heading">Qualities</h3>
+            <div v-if="!metricEntries.length" class="chrono-empty">No qualities recorded.</div>
             <div v-for="([name, value]) in metricEntries" :key="name" class="chrono-row"><span>{{ name }}</span><strong>{{ value }}</strong></div>
             <h3 class="chrono-heading">Global tags</h3>
             <div v-if="!world?.globalTags.length" class="chrono-empty">No global tags.</div>
@@ -191,7 +225,7 @@ watch(() => [sessionId.value, snapshot.value, currentStorylet.value, activeTab.v
             <h3 class="chrono-heading">Entities</h3>
             <div v-for="([id, tags]) in entityEntries" :key="id" class="chrono-row"><strong>{{ id }}</strong><div>{{ tags.join(', ') || 'No tags' }}</div></div>
             <h3 class="chrono-heading">Passions</h3>
-            <pre class="chrono-json">{{ JSON.stringify(world?.passions ?? {}, null, 2) }}</pre>
+            <pre class="chrono-json">{{ JSON.stringify(passionsDisplay, null, 2) }}</pre>
             <h3 class="chrono-heading">Narrative Lego transitions</h3>
             <div v-if="!context?.passionEvents.length" class="chrono-empty">No passion threshold transitions yet.</div>
             <pre v-else class="chrono-json">{{ JSON.stringify(context.passionEvents, null, 2) }}</pre>

@@ -2,8 +2,9 @@ import { ref, reactive, computed } from "vue";
 import { StudioApi } from "../api.ts";
 import type { StoryletRecord, StoryletChoiceRecord } from "../contracts.ts";
 import { notify, studioState } from "../state.ts";
+import { refreshWorkspace, currentFolderId } from "./workspace.ts";
 
-export function useStoryletEditorViewModel(storyletId?: string) {
+export function useStoryletEditorViewModel(storyletId?: string, folderId?: string | null) {
   const activeTab = ref<"content" | "logic" | "review">("content");
   const loading = ref(false);
   const isNew = ref(!storyletId);
@@ -29,6 +30,7 @@ export function useStoryletEditorViewModel(storyletId?: string) {
     },
     choices: [],
     effects: {},
+    folder_id: folderId ?? null,
     created_at: Date.now(),
   });
 
@@ -55,6 +57,11 @@ export function useStoryletEditorViewModel(storyletId?: string) {
       return false;
     }
 
+    const storedFolder = currentFolderId("storylets", draft.id);
+    if (storedFolder !== undefined && storedFolder !== draft.folder_id) {
+      draft.folder_id = storedFolder;
+    }
+
     try {
       if (isNew.value) {
         await StudioApi.saveContent("storylets", draft);
@@ -66,6 +73,7 @@ export function useStoryletEditorViewModel(storyletId?: string) {
         await StudioApi.updateContent("storylets", draft.id, draft);
         notify(`Saved draft revision ${draft.revision}`, "success");
       }
+      await refreshWorkspace(["storylets"]);
       return true;
     } catch (e) {
       notify(e instanceof Error ? e.message : String(e), "error");
@@ -81,6 +89,7 @@ export function useStoryletEditorViewModel(storyletId?: string) {
     try {
       const updated = await StudioApi.approveStorylet(draft.id, draft.revision);
       draft.approved_revision = updated.approved_revision;
+      await refreshWorkspace(["storylets"]);
       notify(`Approved storylet revision ${draft.revision}`, "success");
       return true;
     } catch (e) {

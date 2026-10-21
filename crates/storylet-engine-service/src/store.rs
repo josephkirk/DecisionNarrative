@@ -7,10 +7,11 @@ use std::path::Path;
 use crate::narrative_graph::NarrativeGraph;
 
 use crate::contracts::{
-    CharacterRecord, EventRecord, LibraryPageResult, LibraryQuery, LibrarySummaryItem,
-    LocationRecord, NpcBehaviorRecord, ProjectBundleContent, ProjectMetadata, QualityRecord,
-    ScenarioRecord, StoryletRecord,
+    AssetRecord, EntityRecord, EventRecord, FolderRecord, LibraryPageResult, LibraryQuery,
+    LibrarySummaryItem, NpcBehaviorRecord, ProjectBundleContent, ProjectMetadata, QualityRecord,
+    ScenarioRecord, StoryletRecord, TraitTemplateRecord,
 };
+use crate::entities::RuntimeRecords;
 
 /// Older records may carry an `ending` flag written before the graph became
 /// authoritative. Normalize on read so library filters and approvals see the
@@ -222,6 +223,16 @@ impl Store {
             )?;
         }
 
+        // Migration: fold legacy `characters`/`locations` rows into `entities`
+        // and drop retired storylet canvas fields.
+        let tx = self.conn.unchecked_transaction()?;
+        crate::entities::migrate_legacy_rows(&tx).map_err(|message| {
+            rusqlite::Error::ToSqlConversionFailure(Box::<dyn std::error::Error + Send + Sync>::from(
+                message,
+            ))
+        })?;
+        tx.commit()?;
+
         Ok(())
     }
 
@@ -336,32 +347,61 @@ impl Store {
         self.save_content("qualities", &q.name, &json, 1, None)
     }
 
-    pub fn list_characters(&self) -> Result<Vec<CharacterRecord>, rusqlite::Error> {
-        let json_list = self.list_content_json("characters")?;
+    pub fn list_entities(&self) -> Result<Vec<EntityRecord>, rusqlite::Error> {
+        let json_list = self.list_content_json("entities")?;
         Ok(json_list
             .into_iter()
             .filter_map(|s| serde_json::from_str(&s).ok())
             .collect())
     }
 
-    pub fn save_character(&self, c: &CharacterRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(c)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-        self.save_content("characters", &c.id, &json, 1, None)
-    }
-
-    pub fn list_locations(&self) -> Result<Vec<LocationRecord>, rusqlite::Error> {
-        let json_list = self.list_content_json("locations")?;
+    pub fn list_trait_templates(&self) -> Result<Vec<TraitTemplateRecord>, rusqlite::Error> {
+        let json_list = self.list_content_json("trait_templates")?;
         Ok(json_list
             .into_iter()
             .filter_map(|s| serde_json::from_str(&s).ok())
             .collect())
     }
 
-    pub fn save_location(&self, l: &LocationRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(l)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-        self.save_content("locations", &l.id, &json, 1, None)
+    pub fn list_assets(&self) -> Result<Vec<AssetRecord>, rusqlite::Error> {
+        let json_list = self.list_content_json("assets")?;
+        Ok(json_list
+            .into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect())
+    }
+
+    pub fn list_folders(&self) -> Result<Vec<FolderRecord>, rusqlite::Error> {
+        let json_list = self.list_content_json("folders")?;
+        Ok(json_list
+            .into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect())
+    }
+
+    /// Entities and trait templates projected into engine-facing records.
+    pub fn runtime_records(&self) -> Result<RuntimeRecords, rusqlite::Error> {
+        let entities = self.list_entities()?;
+        let templates = self.list_trait_templates()?;
+        Ok(crate::entities::runtime_records(&entities, &templates))
+    }
+
+    /// Rewrite only the JSON payload of an existing row, leaving its revision
+    /// and approval columns untouched (folder moves must not re-approve).
+    pub fn update_content_json(
+        &self,
+        entity: &str,
+        id: &str,
+        data_json: &str,
+    ) -> Result<bool, rusqlite::Error> {
+        let count = self.conn.execute(
+            "UPDATE content_records SET data_json = ?1, updated_at = ?2 WHERE entity = ?3 AND id = ?4",
+            params![data_json, chrono_now_ms(), entity, id],
+        )?;
+        if count > 0 {
+            self.bump_project_revision()?;
+        }
+        Ok(count > 0)
     }
 
     pub fn list_npc_behaviors(&self) -> Result<Vec<NpcBehaviorRecord>, rusqlite::Error> {
@@ -694,55 +734,132 @@ impl Store {
         )?;
 
         let now = chrono_now_ms();
-        for q in &content.qualities {
-            let json = serde_json::to_string(q).unwrap();
-            tx.execute(
-                "INSERT INTO content_records (entity, id, data_json, revision, approved_revision, updated_at) VALUES ('qualities', ?1, ?2, 1, NULL, ?3)",
-                params![q.name, json, now],
-            )?;
-        }
-        for l in &content.locations {
-            let json = serde_json::to_string(l).unwrap();
-            tx.execute(
-                "INSERT INTO content_records (entity, id, data_json, revision, approved_revision, updated_at) VALUES ('locations', ?1, ?2, 1, NULL, ?3)",
-                params![l.id, json, now],
-            )?;
-        }
-        for c in &content.characters {
-            let json = serde_json::to_string(c).unwrap();
-            tx.execute(
-                "INSERT INTO content_records (entity, id, data_json, revision, approved_revision, updated_at) VALUES ('characters', ?1, ?2, 1, NULL, ?3)",
-                params![c.id, json, now],
-            )?;
-        }
-        for st in &content.storylets {
-            let json = serde_json::to_string(st).unwrap();
-            tx.execute(
-                "INSERT INTO content_records (entity, id, data_json, revision, approved_revision, updated_at) VALUES ('storylets', ?1, ?2, ?3, ?4, ?5)",
-                params![st.id, json, st.revision as i64, st.approved_revision.map(|r| r as i64), now],
-            )?;
-        }
-        for b in &content.npc_behaviors {
-            let json = serde_json::to_string(b).unwrap();
-            tx.execute(
-                "INSERT INTO content_records (entity, id, data_json, revision, approved_revision, updated_at) VALUES ('npc_behaviors', ?1, ?2, 1, NULL, ?3)",
-                params![b.id, json, now],
-            )?;
-        }
-        for e in &content.events {
-            let json = serde_json::to_string(e).unwrap();
-            tx.execute(
-                "INSERT INTO content_records (entity, id, data_json, revision, approved_revision, updated_at) VALUES ('events', ?1, ?2, 1, NULL, ?3)",
-                params![e.id, json, now],
-            )?;
-        }
-        for s in &content.scenarios {
-            let json = serde_json::to_string(s).unwrap();
-            tx.execute(
-                "INSERT INTO content_records (entity, id, data_json, revision, approved_revision, updated_at) VALUES ('scenarios', ?1, ?2, 1, NULL, ?3)",
-                params![s.id, json, now],
-            )?;
-        }
+        insert_rows(
+            &tx,
+            "qualities",
+            content.qualities.iter().map(|quality| {
+                Ok((
+                    quality.name.clone(),
+                    serde_json::to_string(quality)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                    1,
+                    None,
+                ))
+            }),
+            now,
+        )?;
+        insert_rows(
+            &tx,
+            "entities",
+            content.entities.iter().map(|entity| {
+                Ok((
+                    entity.id.clone(),
+                    serde_json::to_string(entity)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                    1,
+                    None,
+                ))
+            }),
+            now,
+        )?;
+        insert_rows(
+            &tx,
+            "folders",
+            content.folders.iter().map(|folder| {
+                Ok((
+                    folder.id.clone(),
+                    serde_json::to_string(folder)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                    1,
+                    None,
+                ))
+            }),
+            now,
+        )?;
+        insert_rows(
+            &tx,
+            "trait_templates",
+            content.trait_templates.iter().map(|template| {
+                Ok((
+                    template.id.clone(),
+                    serde_json::to_string(template)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                    1,
+                    None,
+                ))
+            }),
+            now,
+        )?;
+        insert_rows(
+            &tx,
+            "assets",
+            content.assets.iter().map(|asset| {
+                Ok((
+                    asset.id.clone(),
+                    serde_json::to_string(asset)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                    1,
+                    None,
+                ))
+            }),
+            now,
+        )?;
+        insert_rows(
+            &tx,
+            "storylets",
+            content.storylets.iter().map(|storylet| {
+                Ok((
+                    storylet.id.clone(),
+                    serde_json::to_string(storylet)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                    storylet.revision,
+                    storylet.approved_revision,
+                ))
+            }),
+            now,
+        )?;
+        insert_rows(
+            &tx,
+            "npc_behaviors",
+            content.npc_behaviors.iter().map(|behavior| {
+                Ok((
+                    behavior.id.clone(),
+                    serde_json::to_string(behavior)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                    1,
+                    None,
+                ))
+            }),
+            now,
+        )?;
+        insert_rows(
+            &tx,
+            "events",
+            content.events.iter().map(|event| {
+                Ok((
+                    event.id.clone(),
+                    serde_json::to_string(event)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                    1,
+                    None,
+                ))
+            }),
+            now,
+        )?;
+        insert_rows(
+            &tx,
+            "scenarios",
+            content.scenarios.iter().map(|scenario| {
+                Ok((
+                    scenario.id.clone(),
+                    serde_json::to_string(scenario)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                    1,
+                    None,
+                ))
+            }),
+            now,
+        )?;
         tx.commit()?;
         Ok(next_revision as u64)
     }
@@ -874,6 +991,29 @@ fn chrono_playtest_row_from_row(row: &rusqlite::Row) -> Result<ChronoPlaytestRow
         created_at: row.get(15)?,
         updated_at: row.get(16)?,
     })
+}
+
+fn insert_rows(
+    tx: &rusqlite::Transaction<'_>,
+    entity: &str,
+    rows: impl Iterator<Item = rusqlite::Result<(String, String, u64, Option<u64>)>>,
+    now: i64,
+) -> Result<(), rusqlite::Error> {
+    let mut statement = tx.prepare(
+        "INSERT INTO content_records (entity, id, data_json, revision, approved_revision, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
+    for row in rows {
+        let (id, json, revision, approved_revision) = row?;
+        statement.execute(params![
+            entity,
+            id,
+            json,
+            revision as i64,
+            approved_revision.map(|value| value as i64),
+            now
+        ])?;
+    }
+    Ok(())
 }
 
 fn chrono_now_ms() -> i64 {

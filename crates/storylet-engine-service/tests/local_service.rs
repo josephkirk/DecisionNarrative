@@ -796,6 +796,8 @@ async fn mcp_narrative_platform_advertises_and_dispatches_every_operation() {
         ("content.get", &["entity", "id"][..]),
         ("content.delete", &["entity", "id"][..]),
         ("content.save", &["entity", "payload"][..]),
+        ("content.move", &["entity", "id", "payload"][..]),
+        ("content.references", &["entity", "id"][..]),
         ("scenarios.get", &["id"][..]),
         ("scenarios.delete", &["id"][..]),
         ("scenarios.create", &["payload"][..]),
@@ -1153,21 +1155,24 @@ async fn character_passions_and_zero_sum_links_validate_and_persist() {
     let (status, saved) = request(
         &app,
         "POST",
-        "/api/v2/content/characters",
+        "/api/v2/content/entities",
         Some(json!({
             "id": "rival",
             "name": "Rival",
-            "role": "npc",
-            "home_location": "home",
-            "current_location": "home",
-            "passion_pool": [{
-                "passion_id": "Fear",
-                "current_value": 20,
-                "weight": 1,
-                "is_hidden": false
-            }],
-            "active_passions": ["Fear"],
-            "trust_inertia": 3
+            "type": "character",
+            "character": {
+                "role": "npc",
+                "home_location": "home",
+                "current_location": "home",
+                "passion_pool": [{
+                    "passion_id": "Fear",
+                    "current_value": 20,
+                    "weight": 1,
+                    "is_hidden": false
+                }],
+                "active_passions": ["Fear"],
+                "trust_inertia": 3
+            }
         })),
     )
     .await;
@@ -1176,60 +1181,69 @@ async fn character_passions_and_zero_sum_links_validate_and_persist() {
     let (status, saved) = request(
         &app,
         "POST",
-        "/api/v2/content/characters",
+        "/api/v2/content/entities",
         Some(json!({
             "id": "star",
             "name": "Star NPC",
-            "role": "npc",
-            "home_location": "home",
-            "current_location": "home",
-            "passion_pool": [{
-                "passion_id": "Resolve",
-                "current_value": -15,
-                "weight": 2,
-                "is_hidden": true
-            }],
-            "active_passions": ["Resolve"],
-            "thresholds": [{
-                "threshold_id": "resolve-high",
-                "trigger_value": 50,
-                "direction": "positive",
-                "linked_graph_asset_id": "crisis-scene"
-            }],
-            "zero_sum_passion_links": [{
-                "target_character_id": "rival",
-                "source_passion_id": "Resolve",
-                "target_passion_id": "Fear",
-                "weight": -1
-            }]
+            "type": "character",
+            "character": {
+                "role": "npc",
+                "home_location": "home",
+                "current_location": "home",
+                "passion_pool": [{
+                    "passion_id": "Resolve",
+                    "current_value": -15,
+                    "weight": 2,
+                    "is_hidden": true
+                }],
+                "active_passions": ["Resolve"],
+                "thresholds": [{
+                    "threshold_id": "resolve-high",
+                    "trigger_value": 50,
+                    "direction": "positive",
+                    "linked_graph_asset_id": "crisis-scene"
+                }],
+                "zero_sum_passion_links": [{
+                    "target_character_id": "rival",
+                    "source_passion_id": "Resolve",
+                    "target_passion_id": "Fear",
+                    "weight": -1
+                }]
+            }
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{saved}");
     assert_eq!(
-        saved["passion_pool"][0]["current_value"].as_f64(),
+        saved["character"]["passion_pool"][0]["current_value"].as_f64(),
         Some(-15.0)
     );
     assert_eq!(
-        saved["zero_sum_passion_links"][0]["weight"].as_f64(),
+        saved["character"]["zero_sum_passion_links"][0]["weight"].as_f64(),
         Some(-1.0)
     );
-    assert_eq!(saved["thresholds"][0]["threshold_id"], "resolve-high");
+    assert_eq!(
+        saved["character"]["thresholds"][0]["threshold_id"],
+        "resolve-high"
+    );
 
     let (status, error) = request(
         &app,
         "POST",
-        "/api/v2/content/characters",
+        "/api/v2/content/entities",
         Some(json!({
             "id": "duplicate",
             "name": "Duplicate",
-            "role": "npc",
-            "home_location": "home",
-            "current_location": "home",
-            "passion_pool": [
-                { "passion_id": "same", "current_value": 1, "weight": 1 },
-                { "passion_id": "same", "current_value": 2, "weight": 1 }
-            ]
+            "type": "character",
+            "character": {
+                "role": "npc",
+                "home_location": "home",
+                "current_location": "home",
+                "passion_pool": [
+                    { "passion_id": "same", "current_value": 1, "weight": 1 },
+                    { "passion_id": "same", "current_value": 2, "weight": 1 }
+                ]
+            }
         })),
     )
     .await;
@@ -1326,4 +1340,1085 @@ async fn bundle_import_derives_ending_from_the_graph() {
     drop(conn);
     drop(app);
     let _ = std::fs::remove_file(path);
+}
+
+fn is_object_id(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix("0x") else {
+        return false;
+    };
+    hex.len() == 16
+        && hex
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('A'..='F').contains(&c))
+}
+
+#[tokio::test]
+async fn entity_create_assigns_ids_and_derives_game_id() {
+    let app = test_app();
+    let (status, guard) = request(
+        &app,
+        "POST",
+        "/api/v2/content/entities",
+        Some(json!({ "name": "Guard", "type": "character" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{guard}");
+    let object_id = guard["object_id"].as_str().unwrap();
+    assert!(is_object_id(object_id), "{object_id}");
+    assert_eq!(guard["id"].as_str(), Some(object_id));
+    assert_eq!(guard["game_id"].as_str(), Some("Chr_Guard"));
+    assert!(guard["character"].is_object(), "{guard}");
+
+    let (status, second) = request(
+        &app,
+        "POST",
+        "/api/v2/content/entities",
+        Some(json!({ "name": "Guard", "type": "character" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{second}");
+    assert_eq!(second["game_id"].as_str(), Some("Chr_Guard_2"));
+
+    let entity_id = guard["id"].as_str().unwrap().to_string();
+    let mut forged = guard.clone();
+    forged["object_id"] = json!("0x0000000000000001");
+    let (status, error) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/entities/{entity_id}"),
+        Some(forged),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(error["error"].as_str().unwrap().contains("object_id is immutable"));
+
+    let mut as_item = guard.clone();
+    as_item["type"] = json!("item");
+    let (status, saved) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/entities/{entity_id}"),
+        Some(as_item),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["type"].as_str(), Some("item"));
+    assert!(saved.get("character").is_none(), "{saved}");
+}
+
+#[tokio::test]
+async fn legacy_character_and_location_rows_migrate_to_entities() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE project_metadata (
+             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+             project_id TEXT NOT NULL,
+             name TEXT NOT NULL,
+             revision INTEGER NOT NULL DEFAULT 0
+         );
+         CREATE TABLE content_records (
+             entity TEXT NOT NULL,
+             id TEXT NOT NULL,
+             data_json TEXT NOT NULL,
+             revision INTEGER NOT NULL DEFAULT 1,
+             approved_revision INTEGER,
+             updated_at INTEGER NOT NULL,
+             PRIMARY KEY(entity, id)
+         );",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO project_metadata (singleton, project_id, name, revision) VALUES (1, 'legacy', 'Legacy', 4)",
+        [],
+    )
+    .unwrap();
+    for (kind, id, data) in [
+        (
+            "characters",
+            "old-guard",
+            json!({
+                "id": "old-guard",
+                "name": "Old Guard",
+                "role": "Role.Guard",
+                "home_location": "old-dock",
+                "current_location": "old-dock"
+            }),
+        ),
+        (
+            "locations",
+            "old-dock",
+            json!({ "id": "old-dock", "name": "Old Dock", "description": "Wet planks." }),
+        ),
+        (
+            "storylets",
+            "old-story",
+            json!({
+                "id": "old-story",
+                "title": "Old Story",
+                "content": { "text_template": "" },
+                "created_at": 1,
+                "position": [10, 20],
+                "size": [100, 80]
+            }),
+        ),
+    ] {
+        conn.execute(
+            "INSERT INTO content_records (entity, id, data_json, revision, approved_revision, updated_at) VALUES (?1, ?2, ?3, 1, NULL, 0)",
+            rusqlite::params![kind, id, data.to_string()],
+        )
+        .unwrap();
+    }
+
+    let app = router(RuntimeService::from_connection(conn).unwrap());
+    let (status, entities) = request(&app, "GET", "/api/v2/content/entities", None).await;
+    assert_eq!(status, StatusCode::OK, "{entities}");
+    let entities = entities.as_array().unwrap();
+    assert_eq!(entities.len(), 2, "{entities:?}");
+    let guard = entities
+        .iter()
+        .find(|entity| entity["id"] == "old-guard")
+        .expect("migrated character keeps its id");
+    assert_eq!(guard["type"].as_str(), Some("character"));
+    assert_eq!(guard["character"]["role"].as_str(), Some("Role.Guard"));
+    let dock = entities
+        .iter()
+        .find(|entity| entity["id"] == "old-dock")
+        .expect("migrated location keeps its id");
+    assert_eq!(dock["type"].as_str(), Some("location"));
+    assert_eq!(dock["description"].as_str(), Some("Wet planks."));
+
+    let (status, storylet) = request(&app, "GET", "/api/v2/content/storylets/old-story", None).await;
+    assert_eq!(status, StatusCode::OK, "{storylet}");
+    assert!(storylet.get("position").is_none(), "{storylet}");
+    assert!(storylet.get("size").is_none(), "{storylet}");
+
+    let (status, _) = request(&app, "GET", "/api/v2/content/characters", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn folders_validate_roots_cycles_and_block_non_empty_delete() {
+    let app = test_app();
+    let (status, parent) = request(
+        &app,
+        "POST",
+        "/api/v2/content/folders",
+        Some(json!({ "name": "Characters", "root": "entities" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{parent}");
+    let parent_id = parent["id"].as_str().unwrap().to_string();
+    let (status, child) = request(
+        &app,
+        "POST",
+        "/api/v2/content/folders",
+        Some(json!({ "name": "Nested", "root": "entities", "parent_id": parent_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{child}");
+    let child_id = child["id"].as_str().unwrap().to_string();
+
+    let (status, error) = request(
+        &app,
+        "POST",
+        &format!("/api/v2/content/folders/{parent_id}/move"),
+        Some(json!({ "folder_id": child_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(error["error"].as_str().unwrap().contains("into itself"), "{error}");
+
+    let (status, error) = request(
+        &app,
+        "POST",
+        "/api/v2/content/assets",
+        Some(json!({ "name": "Asset", "folder_id": parent_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("does not belong to assets"),
+        "{error}"
+    );
+
+    let (status, error) = request(
+        &app,
+        "DELETE",
+        &format!("/api/v2/content/folders/{parent_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{error}");
+    assert!(error["error"].as_str().unwrap().contains("is not empty"), "{error}");
+}
+
+fn storylet_with_end_graph() -> Value {
+    json!({
+        "nodes": [
+            { "id": "start", "title": "Start", "type": "start", "x": 0, "y": 0, "width": 100, "height": 80, "text": "Begin" },
+            { "id": "end", "title": "End", "type": "end", "x": 200, "y": 0, "width": 100, "height": 80, "is_terminal": true }
+        ],
+        "edges": [
+            { "id": "start-end", "from_node": "start", "from_port": "output", "to_node": "end", "to_port": "input" }
+        ]
+    })
+}
+
+#[tokio::test]
+async fn move_keeps_storylet_revision_and_approval() {
+    let app = test_app();
+    let (status, folder) = request(
+        &app,
+        "POST",
+        "/api/v2/content/folders",
+        Some(json!({ "name": "Act One", "root": "storylets" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{folder}");
+    let folder_id = folder["id"].as_str().unwrap().to_string();
+
+    let (status, storylet) = request(
+        &app,
+        "POST",
+        "/api/v2/content/storylets",
+        Some(json!({
+            "id": "movable",
+            "title": "Movable",
+            "created_at": 1,
+            "content": { "text_template": "" },
+            "graph": storylet_with_end_graph()
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{storylet}");
+    let (status, approved) = request(
+        &app,
+        "POST",
+        "/api/v2/storylets/movable/approve",
+        Some(json!({ "expectedRevision": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{approved}");
+    assert_eq!(approved["approved_revision"].as_u64(), Some(1));
+
+    let (_, before) = request(&app, "GET", "/api/v2/project", None).await;
+    let (status, moved) = request(
+        &app,
+        "POST",
+        "/api/v2/content/storylets/movable/move",
+        Some(json!({ "folder_id": folder_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert_eq!(moved["folder_id"].as_str(), Some(folder_id.as_str()));
+
+    let (status, reloaded) = request(&app, "GET", "/api/v2/content/storylets/movable", None).await;
+    assert_eq!(status, StatusCode::OK, "{reloaded}");
+    assert_eq!(reloaded["revision"].as_u64(), Some(1), "{reloaded}");
+    assert_eq!(reloaded["approved_revision"].as_u64(), Some(1), "{reloaded}");
+
+    let (_, after) = request(&app, "GET", "/api/v2/project", None).await;
+    assert_eq!(
+        after["revision"].as_u64(),
+        before["revision"].as_u64().map(|rev| rev + 1)
+    );
+}
+
+fn storylet_with_goto_graph(location_id: &str) -> Value {
+    json!({
+        "nodes": [
+            { "id": "start", "title": "Start", "type": "start", "x": 0, "y": 0, "width": 100, "height": 80, "text": "Begin" },
+            { "id": "choice", "title": "Choice", "type": "choice", "x": 150, "y": 0, "width": 120, "height": 80,
+              "choices": [{ "id": "c1", "text": "Go there" }] },
+            { "id": "n1", "title": "Go To Station", "type": "go_to_location", "x": 300, "y": 0, "width": 120, "height": 80,
+              "location_id": location_id },
+            { "id": "end", "title": "End", "type": "end", "x": 450, "y": 0, "width": 100, "height": 80, "is_terminal": true }
+        ],
+        "edges": [
+            { "id": "start-choice", "from_node": "start", "from_port": "output", "to_node": "choice", "to_port": "input" },
+            { "id": "choice-goto", "from_node": "choice", "from_port": "choice_0", "to_node": "n1", "to_port": "input" },
+            { "id": "goto-end", "from_node": "n1", "from_port": "output", "to_node": "end", "to_port": "input" }
+        ]
+    })
+}
+
+#[tokio::test]
+async fn entity_references_list_graph_nodes_and_block_delete() {
+    let app = test_app();
+    let (status, station) = request(
+        &app,
+        "POST",
+        "/api/v2/content/entities",
+        Some(json!({ "id": "station", "name": "Station", "type": "location" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{station}");
+    let (status, storylet) = request(
+        &app,
+        "POST",
+        "/api/v2/content/storylets",
+        Some(json!({
+            "id": "goto-story",
+            "title": "Go To Story",
+            "created_at": 1,
+            "content": { "text_template": "" },
+            "graph": storylet_with_goto_graph("station")
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{storylet}");
+
+    let (status, references) =
+        request(&app, "GET", "/api/v2/content/entities/station/references", None).await;
+    assert_eq!(status, StatusCode::OK, "{references}");
+    let rows = references["references"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{references}");
+    assert_eq!(rows[0]["source_kind"].as_str(), Some("storylet"));
+    assert_eq!(rows[0]["source_id"].as_str(), Some("goto-story"));
+    assert_eq!(rows[0]["node_id"].as_str(), Some("n1"));
+    assert_eq!(rows[0]["via"].as_str(), Some("id"));
+
+    let (status, error) = request(&app, "DELETE", "/api/v2/content/entities/station", None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{error}");
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("referenced by 1 item(s)"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn trait_and_custom_properties_reach_scenario_attribute_matching() {
+    let app = test_app();
+    let (status, template) = request(
+        &app,
+        "POST",
+        "/api/v2/content/trait_templates",
+        Some(json!({
+            "name": "Personality",
+            "key": "Personality",
+            "properties": [
+                { "key": "Bravery", "name": "Bravery", "type": "int", "default": 1 }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{template}");
+    let template_id = template["id"].as_str().unwrap().to_string();
+    let property_id = template["properties"][0]["id"].as_str().unwrap().to_string();
+
+    let (status, _) = request(
+        &app,
+        "POST",
+        "/api/v2/content/entities",
+        Some(json!({ "id": "home", "name": "Home", "type": "location" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    for (id, name) in [("bold", "Bold"), ("timid", "Timid")] {
+        let traits = if id == "bold" {
+            json!([{ "template_id": template_id, "values": { property_id.clone(): 5 } }])
+        } else {
+            json!([])
+        };
+        let (status, saved) = request(
+            &app,
+            "POST",
+            "/api/v2/content/entities",
+            Some(json!({
+                "id": id,
+                "name": name,
+                "type": "character",
+                "traits": traits,
+                "character": {
+                    "role": "npc",
+                    "home_location": "home",
+                    "current_location": "home"
+                }
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{saved}");
+    }
+
+    let (status, preview) = request(
+        &app,
+        "POST",
+        "/api/v2/scenarios/preview",
+        Some(json!({
+            "id": "brave-only",
+            "name": "Brave only",
+            "seed": 3,
+            "start_location_policy": { "mode": "fixed", "location_id": "home" },
+            "actor_locations": {},
+            "initial_qualities": {},
+            "actor_population_policy": {
+                "mode": "by_attribute",
+                "attribute_key": "trait.Personality.Bravery",
+                "attribute_value": 5
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["active_actor_ids"], json!(["bold"]), "{preview}");
+}
+
+#[tokio::test]
+async fn asset_versions_are_append_only() {
+    let app = test_app();
+    let version = json!({
+        "id": "v1",
+        "file_path": "art/model.fbx",
+        "creator": "designer",
+        "tool_version": "1.0",
+        "created_at": 1_700_000_000_000i64
+    });
+    let (status, asset) = request(
+        &app,
+        "POST",
+        "/api/v2/content/assets",
+        Some(json!({ "name": "Model", "versions": [version] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{asset}");
+    let asset_id = asset["id"].as_str().unwrap().to_string();
+
+    let mut edited = asset.clone();
+    edited["versions"][0]["file_path"] = json!("art/model-v2.fbx");
+    let (status, error) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/assets/{asset_id}"),
+        Some(edited),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(error["error"].as_str().unwrap().contains("append-only"), "{error}");
+
+    let mut appended = asset.clone();
+    appended["versions"] = json!([
+        version,
+        {
+            "id": "v2",
+            "file_path": "art/model-v2.fbx",
+            "creator": "designer",
+            "tool_version": "1.1",
+            "created_at": 1_700_000_100_000i64
+        }
+    ]);
+    let (status, saved) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/assets/{asset_id}"),
+        Some(appended),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["versions"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn thumbnail_upload_round_trips() {
+    let root = std::env::temp_dir().join(format!(
+        "dn-files-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let service = RuntimeService::open_in_memory(&root).unwrap();
+    let app = router(service);
+
+    let png: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4];
+    let upload = Request::builder()
+        .method("POST")
+        .uri("/api/v2/files?name=portrait.png")
+        .body(Body::from(png.clone()))
+        .unwrap();
+    let response = app.clone().oneshot(upload).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let uploaded: Value = serde_json::from_slice(&body).unwrap();
+    let path = uploaded["path"].as_str().unwrap().to_string();
+    assert!(path.starts_with("project-files/thumbnails/"), "{path}");
+
+    let fetch = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v2/files/{path}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(fetch).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "image/png"
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(bytes.to_vec(), png);
+
+    let escape = Request::builder()
+        .method("GET")
+        .uri("/api/v2/files/../secret.png")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(escape).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let bogus = Request::builder()
+        .method("POST")
+        .uri("/api/v2/files?name=notes.png")
+        .body(Body::from("plain text".to_string()))
+        .unwrap();
+    let response = app.oneshot(bogus).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn bundle_v2_import_converts_legacy_records() {
+    let app = test_app();
+    let bundle = json!({
+        "format": "decision-narrative-project",
+        "schema_version": 2,
+        "project": { "id": "legacy-bundle", "name": "Legacy Bundle", "revision": 1 },
+        "content": {
+            "qualities": [],
+            "locations": [{ "id": "yard", "name": "Yard", "description": "Open ground." }],
+            "characters": [{
+                "id": "keeper",
+                "name": "Keeper",
+                "role": "Role.Keeper",
+                "home_location": "yard",
+                "current_location": "yard"
+            }],
+            "storylets": [],
+            "npcBehaviors": [],
+            "events": [],
+            "scenarios": []
+        }
+    });
+    let (status, result) = request(
+        &app,
+        "POST",
+        "/api/v2/project-bundle/import",
+        Some(json!({ "bundle": bundle, "confirmReplace": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+
+    let (status, entities) = request(&app, "GET", "/api/v2/content/entities", None).await;
+    assert_eq!(status, StatusCode::OK, "{entities}");
+    let entities = entities.as_array().unwrap();
+    assert_eq!(entities.len(), 2, "{entities:?}");
+    assert!(entities.iter().any(|entity| entity["id"] == "keeper" && entity["type"] == "character"));
+    assert!(entities.iter().any(|entity| entity["id"] == "yard" && entity["type"] == "location"));
+
+    let (status, exported) = request(&app, "GET", "/api/v2/project-bundle", None).await;
+    assert_eq!(status, StatusCode::OK, "{exported}");
+    assert_eq!(exported["schema_version"].as_u64(), Some(3));
+    assert_eq!(
+        exported["content"]["entities"].as_array().unwrap().len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn trait_template_defaults_count_as_entity_references() {
+    let app = test_app();
+    let (status, station) = request(
+        &app,
+        "POST",
+        "/api/v2/content/entities",
+        Some(json!({ "id": "station", "name": "Station", "type": "location" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{station}");
+
+    let (status, template) = request(
+        &app,
+        "POST",
+        "/api/v2/content/trait_templates",
+        Some(json!({
+            "name": "Home Base",
+            "key": "HomeBase",
+            "properties": [
+                { "key": "Base", "name": "Base", "type": "entity", "default": "station" }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{template}");
+
+    let (status, references) =
+        request(&app, "GET", "/api/v2/content/entities/station/references", None).await;
+    assert_eq!(status, StatusCode::OK, "{references}");
+    let rows = references["references"].as_array().unwrap();
+    assert!(
+        rows.iter().any(|row| row["source_kind"] == "trait_template"
+            && row["source_id"] == template["id"]
+            && row["field"] == "Default Base"),
+        "{references}"
+    );
+
+    let (status, error) = request(&app, "DELETE", "/api/v2/content/entities/station", None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{error}");
+}
+
+#[tokio::test]
+async fn imported_asset_versions_survive_a_later_resave() {
+    let app = test_app();
+    let bundle = json!({
+        "format": "decision-narrative-project",
+        "schema_version": 3,
+        "project": { "id": "asset-bundle", "name": "Asset Bundle", "revision": 1 },
+        "content": {
+            "entities": [],
+            "folders": [],
+            "trait_templates": [],
+            "qualities": [],
+            "storylets": [],
+            "npcBehaviors": [],
+            "events": [],
+            "scenarios": [],
+            "assets": [{
+                "id": "0x00000000000000A1",
+                "name": "Imported Asset",
+                "tags": [],
+                "versions": [{
+                    "id": "v1",
+                    "file_path": "art/imported.psd",
+                    "creator": "artist",
+                    "tool_version": "1.0",
+                    "created_at": 1_700_000_000_000i64
+                }]
+            }]
+        }
+    });
+    let (status, imported) = request(
+        &app,
+        "POST",
+        "/api/v2/project-bundle/import",
+        Some(json!({ "bundle": bundle, "confirmReplace": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+
+    let (status, asset) = request(&app, "GET", "/api/v2/content/assets/0x00000000000000A1", None).await;
+    assert_eq!(status, StatusCode::OK, "{asset}");
+    assert_eq!(asset["versions"][0]["custom_data"], json!({}));
+
+    let mut renamed = asset.clone();
+    renamed["name"] = json!("Renamed Asset");
+    let (status, saved) = request(
+        &app,
+        "PUT",
+        "/api/v2/content/assets/0x00000000000000A1",
+        Some(renamed),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["name"].as_str(), Some("Renamed Asset"));
+    assert_eq!(saved["versions"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn blank_folder_ids_are_normalized_to_the_root() {
+    let app = test_app();
+    let (status, entity) = request(
+        &app,
+        "POST",
+        "/api/v2/content/entities",
+        Some(json!({ "id": "loose", "name": "Loose", "type": "item", "folder_id": "" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{entity}");
+    assert!(entity["folder_id"].is_null(), "{entity}");
+
+    let (status, storylet) = request(
+        &app,
+        "POST",
+        "/api/v2/content/storylets",
+        Some(json!({
+            "id": "loose-story",
+            "title": "Loose Story",
+            "created_at": 1,
+            "folder_id": "",
+            "content": { "text_template": "" },
+            "graph": storylet_with_end_graph()
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{storylet}");
+    assert!(storylet["folder_id"].is_null(), "{storylet}");
+}
+
+#[tokio::test]
+async fn storylets_save_when_a_character_has_no_role() {
+    let app = test_app();
+    let (status, character) = request(
+        &app,
+        "POST",
+        "/api/v2/content/entities",
+        Some(json!({
+            "name": "Unroled",
+            "type": "character",
+            "character": { "role": "", "home_location": "", "current_location": "" }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{character}");
+
+    let (status, storylet) = request(
+        &app,
+        "POST",
+        "/api/v2/content/storylets",
+        Some(json!({
+            "id": "unroled-story",
+            "title": "Unroled Story",
+            "created_at": 1,
+            "content": { "text_template": "" },
+            "graph": storylet_with_end_graph()
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{storylet}");
+
+    let (status, approved) = request(
+        &app,
+        "POST",
+        "/api/v2/storylets/unroled-story/approve",
+        Some(json!({ "expectedRevision": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{approved}");
+}
+
+#[tokio::test]
+async fn auto_game_ids_follow_renames_until_the_author_edits_them() {
+    let app = test_app();
+    let (status, guard) = request(
+        &app,
+        "POST",
+        "/api/v2/content/entities",
+        Some(json!({ "name": "Guard", "type": "character" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{guard}");
+    assert_eq!(guard["game_id"].as_str(), Some("Chr_Guard"));
+    let id = guard["id"].as_str().unwrap().to_string();
+
+    let mut renamed = guard.clone();
+    renamed["name"] = json!("Night Guard");
+    let (status, saved) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/entities/{id}"),
+        Some(renamed),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["game_id"].as_str(), Some("Chr_NightGuard"));
+
+    let mut manual = saved.clone();
+    manual["game_id"] = json!("Chr_Custom");
+    let (status, manual) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/entities/{id}"),
+        Some(manual),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{manual}");
+    let mut renamed_again = manual.clone();
+    renamed_again["name"] = json!("Dawn Guard");
+    let (status, kept) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/entities/{id}"),
+        Some(renamed_again),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(kept["game_id"].as_str(), Some("Chr_Custom"));
+
+    // A type change regenerates an auto-derived id as well.
+    let (status, lantern) = request(
+        &app,
+        "POST",
+        "/api/v2/content/entities",
+        Some(json!({ "name": "Lantern", "type": "item" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{lantern}");
+    assert_eq!(lantern["game_id"].as_str(), Some("Itm_Lantern"));
+    let mut retyped = lantern.clone();
+    retyped["type"] = json!("fact");
+    let (status, fact) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/entities/{}", lantern["id"].as_str().unwrap()),
+        Some(retyped),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{fact}");
+    assert_eq!(fact["game_id"].as_str(), Some("Fct_Lantern"));
+
+    // An id the author supplied is kept even when it matches the generated
+    // shape, because auto status comes from the server, not the value.
+    let (status, explicit) = request(
+        &app,
+        "POST",
+        "/api/v2/content/entities",
+        Some(json!({ "name": "Explicit Guard", "type": "character", "game_id": "Chr_ExplicitGuard" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{explicit}");
+    assert_eq!(explicit["game_id_auto"], json!(false));
+    let mut explicit_renamed = explicit.clone();
+    explicit_renamed["name"] = json!("Renamed Guard");
+    let (status, kept_explicit) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/entities/{}", explicit["id"].as_str().unwrap()),
+        Some(explicit_renamed),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{kept_explicit}");
+    assert_eq!(kept_explicit["game_id"].as_str(), Some("Chr_ExplicitGuard"));
+
+    // Generated ids advertise their provenance so the UI can explain the rule.
+    assert_eq!(guard["game_id_auto"], json!(true));
+}
+
+#[tokio::test]
+async fn bundles_reject_property_definitions_that_cannot_be_saved_back() {
+    let app = test_app();
+    let bundle = json!({
+        "format": "decision-narrative-project",
+        "schema_version": 3,
+        "project": { "id": "bad-template", "name": "Bad Template", "revision": 1 },
+        "content": {
+            "entities": [],
+            "folders": [],
+            "qualities": [],
+            "storylets": [],
+            "npcBehaviors": [],
+            "events": [],
+            "scenarios": [],
+            "assets": [],
+            "trait_templates": [{
+                "id": "0x00000000000000C1",
+                "key": "Mood",
+                "name": "Mood",
+                "properties": [
+                    { "id": "p1", "key": "Brave", "name": "Brave", "type": "bool", "default": "true" }
+                ]
+            }]
+        }
+    });
+
+    let (status, validation) = request(
+        &app,
+        "POST",
+        "/api/v2/project-bundle/validate",
+        Some(json!({ "bundle": bundle })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{validation}");
+    assert_eq!(validation["valid"], false);
+    assert!(
+        validation["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue.as_str().unwrap().contains("default does not match its type")),
+        "{validation}"
+    );
+
+    let (status, result) = request(
+        &app,
+        "POST",
+        "/api/v2/project-bundle/import",
+        Some(json!({ "bundle": bundle, "confirmReplace": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{result}");
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .contains("default does not match its type"),
+        "{result}"
+    );
+
+    // A definition without an id cannot be matched to entity overrides later.
+    let mut missing_id = bundle.clone();
+    missing_id["content"]["trait_templates"][0]["properties"][0]["default"] = json!(true);
+    missing_id["content"]["trait_templates"][0]["properties"][0]["id"] = json!("");
+    let (status, validation) = request(
+        &app,
+        "POST",
+        "/api/v2/project-bundle/validate",
+        Some(json!({ "bundle": missing_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{validation}");
+    assert_eq!(validation["valid"], false);
+    assert!(
+        validation["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue.as_str().unwrap().contains("is missing an id")),
+        "{validation}"
+    );
+}
+
+#[tokio::test]
+async fn auto_trait_keys_follow_renames_until_edited() {
+    let app = test_app();
+    let (status, template) = request(
+        &app,
+        "POST",
+        "/api/v2/content/trait_templates",
+        Some(json!({ "name": "New Trait Template", "properties": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{template}");
+    assert_eq!(template["key"].as_str(), Some("NewTraitTemplate"));
+    assert_eq!(template["key_auto"], json!(true));
+    let id = template["id"].as_str().unwrap().to_string();
+
+    let mut renamed = template.clone();
+    renamed["name"] = json!("Personality");
+    let (status, saved) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/trait_templates/{id}"),
+        Some(renamed),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["key"].as_str(), Some("Personality"));
+
+    let mut custom = saved.clone();
+    custom["key"] = json!("Mood");
+    let (status, custom) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/trait_templates/{id}"),
+        Some(custom),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{custom}");
+    let mut renamed_again = custom.clone();
+    renamed_again["name"] = json!("Temperament");
+    let (status, kept) = request(
+        &app,
+        "PUT",
+        &format!("/api/v2/content/trait_templates/{id}"),
+        Some(renamed_again),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(kept["key"].as_str(), Some("Mood"));
+}
+
+#[tokio::test]
+async fn folders_move_within_their_root_only() {
+    let app = test_app();
+    let (status, parent) = request(
+        &app,
+        "POST",
+        "/api/v2/content/folders",
+        Some(json!({ "name": "Parent", "root": "entities" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{parent}");
+    let (status, child) = request(
+        &app,
+        "POST",
+        "/api/v2/content/folders",
+        Some(json!({ "name": "Child", "root": "entities", "parent_id": parent["id"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{child}");
+    let (status, storylet_folder) = request(
+        &app,
+        "POST",
+        "/api/v2/content/folders",
+        Some(json!({ "name": "Act One", "root": "storylets" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{storylet_folder}");
+
+    let (status, moved) = request(
+        &app,
+        "POST",
+        &format!("/api/v2/content/folders/{}/move", child["id"].as_str().unwrap()),
+        Some(json!({ "folder_id": null })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert!(moved["parent_id"].is_null(), "{moved}");
+
+    let (status, error) = request(
+        &app,
+        "POST",
+        &format!("/api/v2/content/folders/{}/move", parent["id"].as_str().unwrap()),
+        Some(json!({ "folder_id": storylet_folder["id"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(
+        error["error"].as_str().unwrap().contains("belongs to storylets"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn empty_fixed_start_location_falls_back_to_first_available_location() {
+    let app = test_app();
+    let (status, location) = request(
+        &app,
+        "POST",
+        "/api/v2/content/entities",
+        Some(json!({ "id": "station", "name": "Station", "type": "location" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{location}");
+
+    let scenario = json!({
+        "id": "default-start",
+        "name": "Default Start Scenario",
+        "seed": 1,
+        "start_location_policy": { "mode": "fixed", "location_id": "" },
+        "initial_qualities": {},
+        "actor_locations": {},
+        "actor_population_policy": { "mode": "all" }
+    });
+
+    let (status, preview) = request(
+        &app,
+        "POST",
+        "/api/v2/scenarios/preview",
+        Some(scenario),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["player_start_location"], "station");
+    assert!(preview["issues"].as_array().unwrap().is_empty());
 }

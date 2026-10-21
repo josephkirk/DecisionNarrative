@@ -8,6 +8,7 @@ export function useScenarioViewModel() {
   const selectedScenarioId = ref<string>("");
   const preview = ref<ResolvedScenarioStart | null>(null);
   const loading = ref(false);
+  const playtestError = ref<string | null>(null);
 
   const activeScenario = reactive<ScenarioRecord>({
     id: "default-scenario",
@@ -64,7 +65,23 @@ export function useScenarioViewModel() {
     }
   }
 
+  /** Replace authored ids in engine messages with the names the user sees. */
+  function humanizeScenarioError(message: string): string {
+    const names = [
+      ...studioState.entities.map((entity) => ({ id: entity.id, name: entity.name })),
+      ...studioState.scenarios.map((scenario) => ({ id: scenario.id, name: scenario.name })),
+    ]
+      .filter((entry) => entry.id)
+      .sort((left, right) => right.id.length - left.id.length);
+    let text = message;
+    for (const entry of names) {
+      text = text.split(entry.id).join(`'${entry.name}'`);
+    }
+    return text;
+  }
+
   async function startPlaytestFromScenario() {
+    playtestError.value = null;
     try {
       const res = await StudioApi.createChronoPlaytest({
         sessionId: crypto.randomUUID(),
@@ -77,7 +94,9 @@ export function useScenarioViewModel() {
       notify(`Started ChronoFlow run '${res.session.sessionId.slice(0, 8)}'`, "success");
       return res.session.sessionId;
     } catch (e) {
-      notify(e instanceof Error ? e.message : String(e), "error");
+      const message = humanizeScenarioError(e instanceof Error ? e.message : String(e));
+      playtestError.value = message;
+      notify(message, "error");
       return null;
     }
   }
@@ -93,5 +112,6 @@ export function useScenarioViewModel() {
     triggerPreview,
     saveScenario,
     startPlaytestFromScenario,
+    playtestError,
   };
 }

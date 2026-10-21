@@ -48,12 +48,30 @@ describe("studio interaction context", () => {
 
   test("maps Codex categories and excludes empty query values", () => {
     const context = buildInteractionContext({
-      route: route({ name: "codex", path: "/codex", fullPath: "/codex?category=characters&id=char-2", query: { category: "characters", id: "char-2", node: null } }),
+      route: route({ name: "codex", path: "/codex", fullPath: "/codex?category=npc_behaviors&id=npc-2", query: { category: "npc_behaviors", id: "npc-2", node: null } }),
       project,
       ...emptyRuntime,
     });
-    expect(context.entity).toEqual({ type: "character", id: "char-2" });
+    expect(context.entity).toEqual({ type: "npc_behavior", id: "npc-2" });
     expect(context.selection).toBeUndefined();
+  });
+
+  test("maps entity and folder routes to their own context entities", () => {
+    const entityContext = buildInteractionContext({
+      route: route({ name: "entity", path: "/entities/char-2", fullPath: "/entities/char-2", params: { id: "char-2" } }),
+      project,
+      ...emptyRuntime,
+    });
+    expect(entityContext.route.name).toBe("Entity Editor");
+    expect(entityContext.entity).toEqual({ type: "entity", id: "char-2" });
+
+    const folderContext = buildInteractionContext({
+      route: route({ name: "browse", path: "/browse/entities/f-1", fullPath: "/browse/entities/f-1", params: { root: "entities", folderId: "f-1" } }),
+      project,
+      ...emptyRuntime,
+    });
+    expect(folderContext.route.name).toBe("Project Browser");
+    expect(folderContext.entity).toEqual({ type: "folder", id: "f-1" });
   });
 
   test("exposes the active playtest revision without leaking runtime state when inactive", () => {

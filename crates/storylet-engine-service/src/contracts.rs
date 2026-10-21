@@ -29,6 +29,8 @@ pub struct QualityRecord {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
 }
 
 fn default_quality_min() -> f64 {
@@ -105,6 +107,9 @@ pub struct CharacterRecord {
     pub zero_sum_passion_links: Vec<ZeroSumPassionLinkRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
+    /// Derived runtime attributes; never persisted directly.
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub attributes: Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -122,6 +127,9 @@ pub struct LocationRecord {
     pub devices: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
+    /// Derived runtime attributes; never persisted directly.
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub attributes: Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -306,10 +314,6 @@ pub struct StoryletRecord {
     pub title: String,
     #[serde(default)]
     pub ending: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub position: Option<[i32; 2]>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<[i32; 2]>,
     #[serde(default)]
     pub location_tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -340,6 +344,8 @@ pub struct StoryletRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub chrono: Option<ChronoStoryletSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
     pub created_at: i64,
 }
 
@@ -497,23 +503,337 @@ pub struct AuthoringOptions {
     pub policy_modes: Vec<String>,
     pub event_types: Vec<String>,
 }
+/// Authored content kinds addressable through `/api/v2/content/{entity}`.
+pub const CONTENT_KINDS: [&str; 9] = [
+    "qualities",
+    "entities",
+    "folders",
+    "trait_templates",
+    "assets",
+    "storylets",
+    "npc_behaviors",
+    "events",
+    "scenarios",
+];
+
+/// Project-tree roots that own folders.
+pub const FOLDER_ROOTS: [&str; 5] = [
+    "storylets",
+    "entities",
+    "qualities",
+    "trait_templates",
+    "assets",
+];
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FolderRecord {
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    /// One of [`FOLDER_ROOTS`]; a folder never leaves its root.
+    pub root: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<i64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityType {
+    Character,
+    Location,
+    Item,
+    Fact,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PropertyType {
+    Bool,
+    String,
+    Float,
+    Int,
+    Asset,
+    Entity,
+}
+
+/// A trait-template variable: the Unreal-Blueprint-style authoring unit.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PropertyDefinition {
+    #[serde(default)]
+    pub id: String,
+    pub key: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub property_type: PropertyType,
+    #[serde(default)]
+    pub is_array: bool,
+    #[serde(default)]
+    pub multiline: bool,
+    #[serde(default)]
+    pub default: Value,
+}
+
+/// An entity-local variable with the same shape as [`PropertyDefinition`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EntityProperty {
+    #[serde(default)]
+    pub id: String,
+    pub key: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub property_type: PropertyType,
+    #[serde(default)]
+    pub is_array: bool,
+    #[serde(default)]
+    pub multiline: bool,
+    #[serde(default)]
+    pub value: Value,
+}
+
+/// One composed trait template; override keys are [`PropertyDefinition::id`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TraitInstance {
+    pub template_id: String,
+    #[serde(default)]
+    pub values: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TraitTemplateRecord {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub key: String,
+    /// True when the server generated `key` and may regenerate it on rename.
+    #[serde(default)]
+    pub key_auto: bool,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub properties: Vec<PropertyDefinition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<i64>,
+}
+
+/// Every [`CharacterRecord`] field except identity and timestamps; persisted
+/// inside an entity of type `character`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CharacterSection {
+    pub role: String,
+    pub home_location: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub faction_id: Option<String>,
+    pub current_location: String,
+    #[serde(default)]
+    pub status_axes: Value,
+    #[serde(default)]
+    pub needs: Value,
+    #[serde(default)]
+    pub agenda: String,
+    #[serde(default)]
+    pub red_line: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualities: Option<Value>,
+    #[serde(default)]
+    pub passion_pool: Vec<MicroPassionRecord>,
+    #[serde(default)]
+    pub active_passions: Vec<String>,
+    #[serde(default)]
+    pub trust_inertia: f64,
+    #[serde(default)]
+    pub thresholds: Vec<MacroPassionThresholdRecord>,
+    #[serde(default)]
+    pub zero_sum_passion_links: Vec<ZeroSumPassionLinkRecord>,
+}
+
+impl Default for CharacterSection {
+    fn default() -> Self {
+        Self {
+            role: String::new(),
+            home_location: String::new(),
+            faction_id: None,
+            current_location: String::new(),
+            status_axes: Value::Null,
+            needs: Value::Null,
+            agenda: String::new(),
+            red_line: String::new(),
+            schedule: None,
+            qualities: None,
+            passion_pool: Vec::new(),
+            active_passions: Vec::new(),
+            trust_inertia: 0.0,
+            thresholds: Vec::new(),
+            zero_sum_passion_links: Vec::new(),
+        }
+    }
+}
+
+/// Every [`LocationRecord`] field except identity, name, description, and
+/// timestamps; persisted inside an entity of type `location`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LocationSection {
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connected_zones: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environmental_params: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devices: Option<Value>,
+}
+
+/// The single authorable world object: characters, locations, items, facts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EntityRecord {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub object_id: String,
+    #[serde(default)]
+    pub game_id: String,
+    /// True when the server generated `game_id` and may regenerate it on rename.
+    #[serde(default)]
+    pub game_id_auto: bool,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub entity_type: EntityType,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub thumbnail: Option<String>,
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub properties: Vec<EntityProperty>,
+    #[serde(default)]
+    pub traits: Vec<TraitInstance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub character: Option<CharacterSection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<LocationSection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StorageLocationRecord {
+    pub storage_type: String,
+    pub storage_id: String,
+    pub created_at: i64,
+    pub reference_type: String,
+    pub path: String,
+    #[serde(default)]
+    pub metadata: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AssetVersionRecord {
+    pub id: String,
+    pub file_path: String,
+    pub creator: String,
+    pub tool_version: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub created_at: i64,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub custom_data: Value,
+    #[serde(default)]
+    pub thumbnail: Option<String>,
+    #[serde(default)]
+    pub storage: Vec<StorageLocationRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AssetRecord {
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub thumbnail: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub versions: Vec<AssetVersionRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<i64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorldObjectLayer {
+    Item,
+    Fact,
+}
+
+/// An item or fact entity projected into the runtime graph.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WorldObjectRecord {
+    pub id: String,
+    pub name: String,
+    pub layer: WorldObjectLayer,
+    pub attributes: Value,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReferenceVia {
+    Id,
+    Role,
+    Tag,
+}
+
+/// Where an entity, asset, or trait template is used.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ContentReference {
+    pub source_kind: String,
+    pub source_id: String,
+    pub source_label: String,
+    pub node_id: Option<String>,
+    pub node_label: Option<String>,
+    pub field: String,
+    pub via: ReferenceVia,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProjectBundleContent {
+    #[serde(default)]
     pub qualities: Vec<QualityRecord>,
-    pub locations: Vec<LocationRecord>,
-    pub characters: Vec<CharacterRecord>,
+    #[serde(default)]
+    pub entities: Vec<EntityRecord>,
+    #[serde(default)]
+    pub folders: Vec<FolderRecord>,
+    #[serde(default)]
+    pub trait_templates: Vec<TraitTemplateRecord>,
+    #[serde(default)]
+    pub assets: Vec<AssetRecord>,
+    #[serde(default)]
     pub storylets: Vec<StoryletRecord>,
-    #[serde(rename = "npcBehaviors")]
+    #[serde(default, rename = "npcBehaviors")]
     pub npc_behaviors: Vec<NpcBehaviorRecord>,
+    #[serde(default)]
     pub events: Vec<EventRecord>,
+    #[serde(default)]
     pub scenarios: Vec<ScenarioRecord>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProjectBundleV2 {
+pub struct ProjectBundle {
     pub format: String,
     pub schema_version: u32,
     pub project: ProjectMetadata,
+    #[serde(default)]
     pub content: ProjectBundleContent,
 }
 

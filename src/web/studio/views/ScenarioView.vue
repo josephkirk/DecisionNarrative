@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { inject, onMounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useScenarioViewModel } from "../view-models/scenario.ts";
-import { studioState } from "../state.ts";
+import { studioState, locationMap } from "../state.ts";
 import { interactionContextKey } from "../interactionContext.ts";
 
 const router = useRouter();
+const route = useRoute();
 const {
   scenarios,
   selectedScenarioId,
@@ -17,6 +18,7 @@ const {
   triggerPreview,
   saveScenario,
   startPlaytestFromScenario,
+  playtestError,
 } = useScenarioViewModel();
 const interactionContext = inject(interactionContextKey);
 watch(() => [selectedScenarioId.value, activeScenario.id, activeScenario.name, JSON.stringify(activeScenario)], () => {
@@ -30,10 +32,26 @@ watch(() => [selectedScenarioId.value, activeScenario.id, activeScenario.name, J
 
 onMounted(async () => {
   await loadScenarios();
-  if (scenarios.value.length > 0) {
+  const requestedId = route.query.id;
+  const requested =
+    typeof requestedId === "string"
+      ? scenarios.value.find((scenario) => scenario.id === requestedId)
+      : undefined;
+  if (requested) {
+    selectScenario(requested);
+  } else if (scenarios.value.length > 0) {
     selectScenario(scenarios.value[0]);
   }
 });
+
+watch(
+  () => route.query.id,
+  (requestedId) => {
+    if (typeof requestedId !== "string") return;
+    const requested = scenarios.value.find((scenario) => scenario.id === requestedId);
+    if (requested && requested.id !== selectedScenarioId.value) selectScenario(requested);
+  },
+);
 
 function createNewScenario() {
   const newId = `scen_${Date.now().toString(36)}`;
@@ -77,6 +95,12 @@ function updateActorOverride(actorId: string, locId: string) {
   }
   triggerPreview();
 }
+
+function locationName(id: string | null | undefined): string {
+  if (!id) return "Unresolved";
+  const cleanId = id.startsWith("location:") ? id.slice("location:".length) : id;
+  return locationMap.value.get(cleanId)?.name ?? id;
+}
 </script>
 
 <template>
@@ -104,6 +128,11 @@ function updateActorOverride(actorId: string, locId: string) {
     </header>
 
     <div class="view-content" style="max-width:860px; margin:0 auto; width:100%;">
+      <div v-if="playtestError" class="scenario-error" role="alert">
+        <span>{{ playtestError }}</span>
+        <button class="btn btn-secondary" @click="playtestError = null">Dismiss</button>
+      </div>
+
       <!-- Basics -->
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
         <div class="form-group">
@@ -251,7 +280,7 @@ function updateActorOverride(actorId: string, locId: string) {
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; font-size:12px;">
           <div>
             <div style="color:var(--text-muted);">Resolved Player Start:</div>
-            <div style="font-weight:600; margin-top:2px;">{{ preview.player_start_location || "Unresolved" }}</div>
+            <div style="font-weight:600; margin-top:2px;">{{ locationName(preview.player_start_location) }}</div>
           </div>
           <div>
             <div style="color:var(--text-muted);">Active Actors:</div>
@@ -268,7 +297,7 @@ function updateActorOverride(actorId: string, locId: string) {
               class="badge"
               style="padding:4px 8px;"
             >
-              {{ locId }}: {{ actors.length }} actor{{ actors.length === 1 ? '' : 's' }}
+              {{ locationName(String(locId)) }}: {{ actors.length }} actor{{ actors.length === 1 ? '' : 's' }}
             </span>
           </div>
         </div>

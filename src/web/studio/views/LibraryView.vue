@@ -1,11 +1,7 @@
 <script setup lang="ts">
-import { inject, onMounted, ref, watch } from "vue";
+import { inject, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useLibraryViewModel } from "../view-models/library.ts";
-import TwineStoryMap from "../components/TwineStoryMap.vue";
-import TwineImportExportModal from "../components/TwineImportExportModal.vue";
-import { StudioApi } from "../api.ts";
-import type { StoryletRecord } from "../contracts.ts";
 import { interactionContextKey } from "../interactionContext.ts";
 
 const router = useRouter();
@@ -19,11 +15,8 @@ const {
   deleteStorylet,
 } = useLibraryViewModel();
 
-const viewMode = ref<"grid" | "twine_map">("grid");
-const showTwineModal = ref(false);
-const allProjectStorylets = ref<StoryletRecord[]>([]);
 const interactionContext = inject(interactionContextKey);
-watch(() => [filters, result.value, viewMode.value], () => {
+watch(() => [filters, result.value], () => {
   const visibleStorylets = result.value.items.map(({ id, title, revision, approved_revision, location_tags, role_tags }) => ({
     id, title, revision, approved_revision, location_tags, role_tags,
   }));
@@ -32,7 +25,7 @@ watch(() => [filters, result.value, viewMode.value], () => {
       type: "storylet_library",
       id: "storylets",
       label: "Storylets",
-      data: { filters: { ...filters }, viewMode: viewMode.value, total: result.value.total, visibleStorylets },
+      data: { filters: { ...filters }, total: result.value.total, visibleStorylets },
     },
     selection: filters.q.trim() ? {
       type: "storylet_filter",
@@ -43,16 +36,8 @@ watch(() => [filters, result.value, viewMode.value], () => {
   });
 }, { deep: true });
 
-async function loadAllStorylets() {
-  try {
-    allProjectStorylets.value = await StudioApi.listContent<StoryletRecord>("storylets");
-  } catch {
-    allProjectStorylets.value = [];
-  }
-}
-
 onMounted(async () => {
-  await Promise.all([loadLibrary(), loadAllStorylets()]);
+  await loadLibrary();
 });
 
 function openStorylet(id: string) {
@@ -61,10 +46,6 @@ function openStorylet(id: string) {
 
 function createStorylet() {
   router.push("/storylets/new");
-}
-
-async function handleRefresh() {
-  await Promise.all([loadLibrary(), loadAllStorylets()]);
 }
 </script>
 
@@ -75,47 +56,16 @@ async function handleRefresh() {
       <div style="display:flex; align-items:center; gap:16px;">
         <h1 class="view-title">Storylets</h1>
         <span class="badge">{{ result.total }} Total</span>
-
-        <!-- View Mode Switcher -->
-        <div style="display:flex; gap:2px; background:var(--bg-input); padding:3px; border-radius:8px; border:1px solid var(--border-subtle);">
-          <button
-            :class="['tab-btn', viewMode === 'grid' ? 'active' : '']"
-            style="padding:3px 10px; font-size:11px;"
-            @click="viewMode = 'grid'"
-          >
-            Card Grid
-          </button>
-          <button
-            :class="['tab-btn', viewMode === 'twine_map' ? 'active' : '']"
-            style="padding:3px 10px; font-size:11px;"
-            @click="viewMode = 'twine_map'; loadAllStorylets();"
-          >
-            Twine Story Map
-          </button>
-        </div>
       </div>
 
       <div style="display:flex; align-items:center; gap:10px;">
-        <button class="btn btn-secondary" style="font-size:12px;" @click="showTwineModal = true">
-          Twine I/O
-        </button>
         <button class="btn btn-primary" @click="createStorylet">
           + New Storylet
         </button>
       </div>
     </header>
 
-    <!-- TWINE STORY MAP VIEW -->
-    <div v-if="viewMode === 'twine_map'" style="flex:1; overflow:hidden;">
-      <TwineStoryMap
-        :storylets="allProjectStorylets"
-        @open-storylet="openStorylet"
-        @refresh="handleRefresh"
-      />
-    </div>
-
-    <!-- CARD GRID VIEW -->
-    <div v-else style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
+    <div style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
       <div style="padding:12px 20px; border-bottom:1px solid var(--border-subtle); display:flex; gap:12px; align-items:center; background:var(--bg-card); flex-wrap:wrap;">
         <input
           v-model="filters.q"
@@ -224,12 +174,5 @@ async function handleRefresh() {
         </div>
       </div>
     </div>
-
-    <!-- Twine I/O Modal -->
-    <TwineImportExportModal
-      v-if="showTwineModal"
-      @close="showTwineModal = false"
-      @imported="handleRefresh"
-    />
   </div>
 </template>

@@ -2,8 +2,8 @@
 
 use axum::{
     Json, Router,
-    body::Body,
-    extract::{Path, Query, State},
+    body::{Body, Bytes},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{Method, StatusCode, header},
     response::{
         IntoResponse, Response,
@@ -61,8 +61,6 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
         .route("/api/v2/project-bundle/validate", post(validate_bundle))
         .route("/api/v1/project-bundle/validate", post(validate_bundle))
         .route("/api/v2/project-bundle/import", post(import_bundle))
-        .route("/api/v2/twine/export", get(export_twine))
-        .route("/api/v2/twine/import", post(import_twine))
         .route("/api/v1/project-bundle/import", post(import_bundle))
         // Library query
         .route("/api/v2/library", get(query_library))
@@ -75,14 +73,20 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
             "/api/v2/content/{entity}/{id}",
             get(get_content).put(update_content).delete(delete_content),
         )
+        .route("/api/v2/content/{entity}/{id}/move", post(move_content))
+        .route(
+            "/api/v2/content/{entity}/{id}/references",
+            get(get_content_references),
+        )
+        .route(
+            "/api/v2/files",
+            post(upload_file).layer(DefaultBodyLimit::max(crate::files::MAX_UPLOAD_BYTES)),
+        )
+        .route("/api/v2/files/{*path}", get(get_project_file))
         .route("/api/v2/storylets/{id}/approve", post(approve_storylet))
         // Direct legacy aliases
         .route("/api/qualities", get(list_qualities).post(save_quality))
         .route("/api/qualities/{id}", delete(delete_quality))
-        .route("/api/characters", get(list_characters).post(save_character))
-        .route("/api/characters/{id}", delete(delete_character))
-        .route("/api/locations", get(list_locations).post(save_location))
-        .route("/api/locations/{id}", delete(delete_location))
         .route(
             "/api/npc-behaviors",
             get(list_npc_behaviors).post(save_npc_behavior),
@@ -269,134 +273,6 @@ async fn patch_project_meta(
     }
 }
 
-#[derive(Deserialize)]
-struct TwineExportQuery {
-    #[serde(default = "default_twine_format")]
-    pub format: String, // "twee" | "html"
-}
-fn default_twine_format() -> String {
-    "twee".into()
-}
-
-async fn export_twine(
-    State(s): State<StudioService>,
-    Query(q): Query<TwineExportQuery>,
-) -> Response {
-    let meta = match s.get_project_metadata().await {
-        Ok(m) => m,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e })),
-            )
-                .into_response();
-        }
-    };
-
-    let storylets = match s.list_content("storylets").await {
-        Ok(val) => {
-            let list: Vec<crate::contracts::StoryletRecord> =
-                serde_json::from_value(val).unwrap_or_default();
-            list
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e })),
-            )
-                .into_response();
-        }
-    };
-
-    let story = crate::twee::storylets_to_twee_story(&meta.name, &storylets);
-    let safe_title = meta
-        .name
-        .to_lowercase()
-        .replace(|c: char| !c.is_alphanumeric(), "_");
-
-    if q.format.eq_ignore_ascii_case("html") {
-        let html = crate::twee::serialize_twine_2_html(&story);
-        let disp = format!("attachment; filename=\"{safe_title}.html\"");
-        let mut resp = Response::new(Body::from(html));
-        resp.headers_mut().insert(
-            header::CONTENT_TYPE,
-            "text/html; charset=utf-8".parse().unwrap(),
-        );
-        resp.headers_mut()
-            .insert(header::CONTENT_DISPOSITION, disp.parse().unwrap());
-        resp
-    } else {
-        let twee_text = crate::twee::serialize_twee_3(&story);
-        let disp = format!("attachment; filename=\"{safe_title}.twee\"");
-        let mut resp = Response::new(Body::from(twee_text));
-        resp.headers_mut().insert(
-            header::CONTENT_TYPE,
-            "text/plain; charset=utf-8".parse().unwrap(),
-        );
-        resp.headers_mut()
-            .insert(header::CONTENT_DISPOSITION, disp.parse().unwrap());
-        resp
-    }
-}
-
-async fn import_twine(State(s): State<StudioService>, bytes: axum::body::Bytes) -> Response {
-    let text = match String::from_utf8(bytes.to_vec()) {
-        Ok(t) => t,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("Invalid UTF-8: {e}") })),
-            )
-                .into_response();
-        }
-    };
-
-    let story_res = if text.contains("<tw-storydata") {
-        crate::twee::parse_twine_2_html(&text)
-    } else if let Ok(json_val) = serde_json::from_str::<Value>(&text) {
-        if let Some(c) = json_val.get("content").and_then(|v| v.as_str()) {
-            if c.contains("<tw-storydata") {
-                crate::twee::parse_twine_2_html(c)
-            } else {
-                crate::twee::parse_twee_3(c)
-            }
-        } else {
-            crate::twee::parse_twee_3(&text)
-        }
-    } else {
-        crate::twee::parse_twee_3(&text)
-    };
-
-    let story = match story_res {
-        Ok(st) => st,
-        Err(err) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("Failed to parse Twine/Twee content: {err}") })),
-            )
-                .into_response();
-        }
-    };
-
-    let storylets = crate::twee::twee_story_to_storylets(&story);
-    let count = storylets.len();
-
-    for st in &storylets {
-        let val = json!(st);
-        let _ = s.save_content_item("storylets", &val).await;
-    }
-
-    (
-        StatusCode::OK,
-        Json(json!({
-            "success": true,
-            "imported_count": count,
-            "storylets": storylets
-        })),
-    )
-        .into_response()
-}
-
 async fn export_bundle(State(service): State<StudioService>) -> Response {
     match service.export_project_bundle().await {
         Ok(bundle) => {
@@ -505,10 +381,27 @@ async fn query_library(
 }
 
 // Content CRUD
+fn unknown_kind(entity: &str) -> Option<Response> {
+    if crate::contracts::CONTENT_KINDS.contains(&entity) {
+        None
+    } else {
+        Some(
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": format!("Unknown content kind '{entity}'") })),
+            )
+                .into_response(),
+        )
+    }
+}
+
 async fn list_content(
     State(service): State<StudioService>,
     Path(entity): Path<String>,
 ) -> Response {
+    if let Some(response) = unknown_kind(&entity) {
+        return response;
+    }
     match service.list_content(&entity).await {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(e) => (
@@ -523,6 +416,9 @@ async fn get_content(
     State(service): State<StudioService>,
     Path((entity, id)): Path<(String, String)>,
 ) -> Response {
+    if let Some(response) = unknown_kind(&entity) {
+        return response;
+    }
     match service.get_content_item(&entity, &id).await {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
@@ -534,6 +430,9 @@ async fn save_content(
     Path(entity): Path<String>,
     Json(payload): Json<Value>,
 ) -> Response {
+    if let Some(response) = unknown_kind(&entity) {
+        return response;
+    }
     match service.save_content_item(&entity, &payload).await {
         Ok(data) => (StatusCode::CREATED, Json(data)).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
@@ -545,6 +444,9 @@ async fn update_content(
     Path((entity, _id)): Path<(String, String)>,
     Json(payload): Json<Value>,
 ) -> Response {
+    if let Some(response) = unknown_kind(&entity) {
+        return response;
+    }
     match service.save_content_item(&entity, &payload).await {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
@@ -555,6 +457,9 @@ async fn delete_content(
     State(service): State<StudioService>,
     Path((entity, id)): Path<(String, String)>,
 ) -> Response {
+    if let Some(response) = unknown_kind(&entity) {
+        return response;
+    }
     match service.delete_content_item(&entity, &id).await {
         Ok(deleted) => (StatusCode::OK, Json(json!({ "deleted": deleted }))).into_response(),
         Err(ContentDeleteError::Conflict(error)) => {
@@ -566,6 +471,126 @@ async fn delete_content(
         )
             .into_response(),
     }
+}
+
+#[derive(Deserialize)]
+struct MoveBody {
+    #[serde(default)]
+    pub folder_id: Option<String>,
+}
+
+async fn move_content(
+    State(service): State<StudioService>,
+    Path((entity, id)): Path<(String, String)>,
+    Json(body): Json<MoveBody>,
+) -> Response {
+    match service.move_content_item(&entity, &id, body.folder_id).await {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(error) if error.contains("not found") => {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": error }))).into_response()
+        }
+        Err(error) => (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response(),
+    }
+}
+
+async fn get_content_references(
+    State(service): State<StudioService>,
+    Path((entity, id)): Path<(String, String)>,
+) -> Response {
+    match service.content_references(&entity, &id).await {
+        Ok(references) => {
+            (StatusCode::OK, Json(json!({ "references": references }))).into_response()
+        }
+        Err(error) if error.contains("not found") => {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": error }))).into_response()
+        }
+        Err(error) => (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct UploadQuery {
+    #[serde(default)]
+    pub name: String,
+}
+
+async fn upload_file(
+    State(service): State<StudioService>,
+    Query(query): Query<UploadQuery>,
+    bytes: Bytes,
+) -> Response {
+    if bytes.len() > crate::files::MAX_UPLOAD_BYTES {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Upload exceeds the 10 MiB limit" })),
+        )
+            .into_response();
+    }
+    match crate::files::store_thumbnail(&service.resource_root, &query.name, &bytes) {
+        Ok(path) => (StatusCode::CREATED, Json(json!({ "path": path }))).into_response(),
+        Err(crate::files::FileError::Invalid(error)) => {
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
+        }
+        Err(crate::files::FileError::NotFound) => {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": "File not found" }))).into_response()
+        }
+        Err(crate::files::FileError::Io(error)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": error })),
+        )
+            .into_response(),
+    }
+}
+
+async fn get_project_file(
+    State(service): State<StudioService>,
+    Path(path): Path<String>,
+) -> Response {
+    let resolved = match crate::files::resolve_project_file(&service.resource_root, &path) {
+        Ok(resolved) => resolved,
+        Err(crate::files::FileError::Invalid(error)) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response();
+        }
+        Err(crate::files::FileError::NotFound) => {
+            return (StatusCode::NOT_FOUND, Json(json!({ "error": "File not found" })))
+                .into_response();
+        }
+        Err(crate::files::FileError::Io(error)) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": error })),
+            )
+                .into_response();
+        }
+    };
+    let bytes = match tokio::fs::read(&resolved).await {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return (StatusCode::NOT_FOUND, Json(json!({ "error": "File not found" })))
+                .into_response();
+        }
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": error.to_string() })),
+            )
+                .into_response();
+        }
+    };
+    let content_type = if path.to_ascii_lowercase().ends_with(".png") {
+        "image/png"
+    } else {
+        "image/jpeg"
+    };
+    let mut response = Response::new(Body::from(bytes));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        content_type.parse().unwrap(),
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, "no-cache".parse().unwrap());
+    response
 }
 
 #[derive(Deserialize)]
@@ -594,26 +619,6 @@ async fn save_quality(State(s): State<StudioService>, Json(p): Json<Value>) -> R
 }
 async fn delete_quality(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
     delete_content(State(s), Path(("qualities".into(), id))).await
-}
-
-async fn list_characters(State(s): State<StudioService>) -> Response {
-    list_content(State(s), Path("characters".into())).await
-}
-async fn save_character(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
-    save_content(State(s), Path("characters".into()), Json(p)).await
-}
-async fn delete_character(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    delete_content(State(s), Path(("characters".into(), id))).await
-}
-
-async fn list_locations(State(s): State<StudioService>) -> Response {
-    list_content(State(s), Path("locations".into())).await
-}
-async fn save_location(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
-    save_content(State(s), Path("locations".into()), Json(p)).await
-}
-async fn delete_location(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    delete_content(State(s), Path(("locations".into(), id))).await
 }
 
 async fn list_npc_behaviors(State(s): State<StudioService>) -> Response {

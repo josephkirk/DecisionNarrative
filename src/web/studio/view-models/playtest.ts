@@ -26,7 +26,11 @@ export function usePlaytestViewModel() {
   }
 
   async function selectSession(id: string) {
-    if (!id) return;
+    if (!id) {
+      studioState.activeChronoPlaytestSessionId = null;
+      studioState.activeChronoPlaytestSnapshot = null;
+      return;
+    }
     loading.value = true;
     try {
       applySnapshot(await StudioApi.getChronoPlaytest(id));

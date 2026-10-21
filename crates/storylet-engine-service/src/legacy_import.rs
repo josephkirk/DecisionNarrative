@@ -165,6 +165,7 @@ pub fn maybe_import_legacy_database(
                         .map(str::to_owned),
                     description: r.get(3)?,
                     metadata,
+                    folder_id: None,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -211,6 +212,7 @@ pub fn maybe_import_legacy_database(
                     thresholds: Vec::new(),
                     zero_sum_passion_links: Vec::new(),
                     created_at: r.get(11)?,
+                    attributes: Value::Null,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -259,6 +261,7 @@ pub fn maybe_import_legacy_database(
                     environmental_params: env_str.and_then(|s| serde_json::from_str(&s).ok()),
                     devices: dev_str.and_then(|s| serde_json::from_str(&s).ok()),
                     created_at: r.get(7)?,
+                    attributes: Value::Null,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -363,11 +366,10 @@ pub fn maybe_import_legacy_database(
                     revision: rev as u64,
                     approved_revision: None, // User selected: Require fresh approval!
                     ending: ending_int != 0,
-                    position: None,
-                    size: None,
                     local_variables: None,
                     chrono: Some(ChronoStoryletSettings::default()),
                     graph: None,
+                    folder_id: None,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -525,6 +527,10 @@ pub fn maybe_import_legacy_database(
             }
         }
     }
+
+    // Fold the freshly imported characters/locations into entities while the
+    // import transaction is still open.
+    crate::entities::migrate_legacy_rows(&tx)?;
 
     // Mark migration complete
     tx.execute(

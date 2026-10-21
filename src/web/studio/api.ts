@@ -3,6 +3,7 @@ import type {
   CharacterRecord,
   ChronoPlaytestSessionSummary,
   ChronoPlaytestSnapshot,
+  ContentReference,
   DirectorEvaluation,
   EventRecord,
   LibraryPageResult,
@@ -116,6 +117,35 @@ export const StudioApi = {
     return request<{ deleted: boolean }>(`/api/v2/content/${encodeURIComponent(entity)}/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
+  },
+  moveContent<T>(kind: string, id: string, folderId: string | null): Promise<T> {
+    return request<T>(
+      `/api/v2/content/${encodeURIComponent(kind)}/${encodeURIComponent(id)}/move`,
+      { method: "POST", body: JSON.stringify({ folder_id: folderId }) },
+    );
+  },
+  getReferences(kind: string, id: string): Promise<{ references: ContentReference[] }> {
+    return request<{ references: ContentReference[] }>(
+      `/api/v2/content/${encodeURIComponent(kind)}/${encodeURIComponent(id)}/references`,
+    );
+  },
+  async uploadThumbnail(file: File): Promise<{ path: string }> {
+    const resp = await fetch(`/api/v2/files?name=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    if (!resp.ok) {
+      let message = `Upload failed with status ${resp.status}`;
+      try {
+        const body = (await resp.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        message = resp.statusText || message;
+      }
+      throw new ApiError(message, resp.status);
+    }
+    return (await resp.json()) as { path: string };
   },
   approveStorylet(id: string, expectedRevision: number): Promise<StoryletRecord> {
     return request<StoryletRecord>(`/api/v2/storylets/${encodeURIComponent(id)}/approve`, {

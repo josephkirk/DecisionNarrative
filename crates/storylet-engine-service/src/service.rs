@@ -10,8 +10,8 @@ use tokio::sync::{Mutex, broadcast};
 
 use crate::chrono_playtest::ChronoPlaytestSession;
 use storylet_engine::{
-    EngineError, ProjectBundle, RUNTIME_SESSION_FORMAT_VERSION, RuntimeError, RuntimeSessionState,
-    StoryletRuntime, WorldCommand, WorldEvent,
+    EngineError, ProjectBundle as EngineProjectBundle, RUNTIME_SESSION_FORMAT_VERSION, RuntimeError,
+    RuntimeSessionState, StoryletRuntime, WorldCommand, WorldEvent,
 };
 
 #[derive(Debug)]
@@ -55,11 +55,14 @@ impl std::fmt::Display for ContentDeleteError {
 
 use crate::chrono_adapter::compile_chrono_dispatch_for_storylet_validation;
 use crate::contracts::{
-    AuthoringOptions, CharacterRecord, LibraryPageResult, LibraryQuery, ProjectBundleContent,
-    ProjectBundleV2, ProjectMetadata, ScenarioRecord, StoryletRecord,
+    AssetRecord, AuthoringOptions, CharacterRecord, ContentReference, EntityRecord, FolderRecord,
+    LibraryPageResult, LibraryQuery, ProjectBundle, ProjectBundleContent, ProjectMetadata,
+    ScenarioRecord, StoryletRecord, TraitTemplateRecord, CONTENT_KINDS, FOLDER_ROOTS,
 };
+use crate::entities::{self, WorkspaceIndex};
 use crate::narrative_graph::NarrativeGraph;
 use crate::projection::project_workspace;
+use crate::references::{self, ReferenceContext};
 use crate::scenario::resolve_scenario_start;
 use crate::store::Store;
 
@@ -85,7 +88,7 @@ pub struct SessionChange {
     pub snapshot: Value,
 }
 
-fn validate_and_normalize_bundle(bundle: &mut ProjectBundleV2) -> Vec<String> {
+fn validate_and_normalize_bundle(bundle: &mut ProjectBundle) -> Vec<String> {
     let mut issues = Vec::new();
     for storylet in &mut bundle.content.storylets {
         let graph = match storylet.graph.clone() {
@@ -285,7 +288,7 @@ impl StudioService {
         Ok(json!({ "snapshot": snap_val }))
     }
 
-    pub async fn export_project_bundle(&self) -> Result<ProjectBundleV2, String> {
+    pub async fn export_project_bundle(&self) -> Result<ProjectBundle, String> {
         let inner = self.inner.lock().await;
         let project = inner
             .store
@@ -293,8 +296,13 @@ impl StudioService {
             .map_err(|e| e.to_string())?;
 
         let qualities = inner.store.list_qualities().map_err(|e| e.to_string())?;
-        let locations = inner.store.list_locations().map_err(|e| e.to_string())?;
-        let characters = inner.store.list_characters().map_err(|e| e.to_string())?;
+        let entities = inner.store.list_entities().map_err(|e| e.to_string())?;
+        let folders = inner.store.list_folders().map_err(|e| e.to_string())?;
+        let trait_templates = inner
+            .store
+            .list_trait_templates()
+            .map_err(|e| e.to_string())?;
+        let assets = inner.store.list_assets().map_err(|e| e.to_string())?;
         let storylets = inner.store.list_storylets().map_err(|e| e.to_string())?;
         let npc_behaviors = inner
             .store
@@ -302,14 +310,16 @@ impl StudioService {
             .map_err(|e| e.to_string())?;
         let events = inner.store.list_events().map_err(|e| e.to_string())?;
         let scenarios = inner.store.list_scenarios().map_err(|e| e.to_string())?;
-        Ok(ProjectBundleV2 {
+        Ok(ProjectBundle {
             format: "decision-narrative-project".into(),
-            schema_version: 2,
+            schema_version: 3,
             project,
             content: ProjectBundleContent {
                 qualities,
-                locations,
-                characters,
+                entities,
+                folders,
+                trait_templates,
+                assets,
                 storylets,
                 npc_behaviors,
                 events,
@@ -321,10 +331,10 @@ impl StudioService {
     pub async fn validate_bundle(&self, bundle_val: &Value) -> Result<Vec<String>, String> {
         let mut issues = Vec::new();
 
-        let mut bundle: ProjectBundleV2 = match serde_json::from_value(bundle_val.clone()) {
-            Ok(b) => b,
-            Err(e) => {
-                issues.push(format!("Bundle does not match schema version 2: {e}"));
+        let mut bundle: ProjectBundle = match entities::parse_project_bundle(bundle_val) {
+            Ok(bundle) => bundle,
+            Err(error) => {
+                issues.push(error);
                 return Ok(issues);
             }
         };
@@ -333,21 +343,20 @@ impl StudioService {
         if bundle.format != "decision-narrative-project" {
             issues.push(format!("Unsupported format '{}'", bundle.format));
         }
-        if bundle.schema_version != 2 {
-            issues.push(format!(
-                "Unsupported schema_version {}; expected 2",
-                bundle.schema_version
-            ));
-        }
+        issues.extend(entities::validate_bundle_content(&bundle.content));
 
         // Validate content through projection
+        let runtime = entities::runtime_records(
+            &bundle.content.entities,
+            &bundle.content.trait_templates,
+        );
         let res = project_workspace(
             &bundle.project.id,
             &bundle.project.name,
             bundle.project.revision,
             &bundle.content.qualities,
-            &bundle.content.locations,
-            &bundle.content.characters,
+            &runtime.locations,
+            &runtime.characters,
             &bundle.content.storylets,
             &bundle.content.npc_behaviors,
             &bundle.content.events,
@@ -355,13 +364,16 @@ impl StudioService {
         );
 
         issues.extend(res.issues);
+        issues.sort();
+        issues.dedup();
         Ok(issues)
     }
 
     pub async fn import_bundle(&self, bundle_val: &Value) -> Result<u64, String> {
-        let mut bundle: ProjectBundleV2 = serde_json::from_value(bundle_val.clone())
-            .map_err(|e| format!("Invalid bundle JSON: {e}"))?;
-        let issues = validate_and_normalize_bundle(&mut bundle);
+        let mut bundle: ProjectBundle = entities::parse_project_bundle(bundle_val)
+            .map_err(|error| format!("Invalid bundle JSON: {error}"))?;
+        let mut issues = validate_and_normalize_bundle(&mut bundle);
+        issues.extend(entities::validate_bundle_content(&bundle.content));
         if !issues.is_empty() {
             return Err(issues.join("; "));
         }
@@ -376,6 +388,7 @@ impl StudioService {
     // --- Content CRUD ---
 
     pub async fn list_content(&self, entity: &str) -> Result<Value, String> {
+        ensure_content_kind(entity)?;
         let inner = self.inner.lock().await;
         let list = inner
             .store
@@ -394,6 +407,7 @@ impl StudioService {
     }
 
     pub async fn get_content_item(&self, entity: &str, id: &str) -> Result<Value, String> {
+        ensure_content_kind(entity)?;
         let inner = self.inner.lock().await;
         let opt = inner
             .store
@@ -409,19 +423,56 @@ impl StudioService {
     }
 
     pub async fn save_content_item(&self, entity: &str, payload: &Value) -> Result<Value, String> {
-        let id = match entity {
-            "qualities" => payload
-                .get("name")
-                .and_then(|v| v.as_str())
-                .ok_or("Quality must have a 'name' field")?,
-            _ => payload
-                .get("id")
-                .and_then(|v| v.as_str())
-                .ok_or("Item must have an 'id' field")?,
+        ensure_content_kind(entity)?;
+        let inner = self.inner.lock().await;
+        let index = build_workspace_index(&inner.store)?;
+        let stored_id = payload
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty());
+
+        let mut final_payload = match entity {
+            "entities" => {
+                let stored: Option<EntityRecord> =
+                    load_stored_record(&inner.store, "entities", stored_id)?;
+                let prepared = entities::prepare_entity(payload, stored.as_ref(), &index)?;
+                serde_json::to_value(&prepared).map_err(|e| e.to_string())?
+            }
+            "trait_templates" => {
+                let stored: Option<TraitTemplateRecord> =
+                    load_stored_record(&inner.store, "trait_templates", stored_id)?;
+                let prepared =
+                    entities::prepare_trait_template(payload, stored.as_ref(), &index)?;
+                serde_json::to_value(&prepared).map_err(|e| e.to_string())?
+            }
+            "assets" => {
+                let stored: Option<AssetRecord> =
+                    load_stored_record(&inner.store, "assets", stored_id)?;
+                let prepared = entities::prepare_asset(payload, stored.as_ref(), &index)?;
+                serde_json::to_value(&prepared).map_err(|e| e.to_string())?
+            }
+            "folders" => {
+                let stored: Option<FolderRecord> =
+                    load_stored_record(&inner.store, "folders", stored_id)?;
+                let prepared = entities::prepare_folder(payload, stored.as_ref(), &index)?;
+                serde_json::to_value(&prepared).map_err(|e| e.to_string())?
+            }
+            _ => payload.clone(),
         };
 
-        let inner = self.inner.lock().await;
-        let mut final_payload = payload.clone();
+        let id = match entity {
+            "qualities" => final_payload
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or("Quality must have a 'name' field")?
+                .to_string(),
+            _ => final_payload
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or("Item must have an 'id' field")?
+                .to_string(),
+        };
+
         if entity == "storylets" {
             let settings = match final_payload.get("chrono") {
                 None | Some(Value::Null) => crate::contracts::ChronoStoryletSettings::default(),
@@ -438,7 +489,7 @@ impl StudioService {
                 );
         }
         let (revision, approved_rev) = if entity == "storylets" {
-            let existing_opt = inner.store.get_storylet(id).map_err(|e| e.to_string())?;
+            let existing_opt = inner.store.get_storylet(&id).map_err(|e| e.to_string())?;
             let next_rev = match existing_opt {
                 Some(prev) => prev.revision + 1,
                 None => payload
@@ -460,7 +511,7 @@ impl StudioService {
             (rev, app_rev)
         };
         if entity == "qualities" {
-            let quality: crate::contracts::QualityRecord =
+            let mut quality: crate::contracts::QualityRecord =
                 serde_json::from_value(final_payload.clone())
                     .map_err(|error| format!("Quality validation failed: {error}"))?;
             if quality.name.trim().is_empty()
@@ -497,90 +548,32 @@ impl StudioService {
             }
             storylet_engine::chrono_state::MetricRegistry::compile([quality.name.clone()])
                 .map_err(|error| format!("Quality validation failed: {error}"))?;
+            entities::normalize_optional_id(&mut quality.folder_id);
+            entities::validate_folder_ref("qualities", quality.folder_id.as_deref(), &index)
+                .map_err(|error| format!("Quality validation failed: {error}"))?;
             final_payload = serde_json::to_value(quality).map_err(|error| error.to_string())?;
         }
-        if entity == "characters" {
-            let character: CharacterRecord = serde_json::from_value(final_payload.clone())
-                .map_err(|error| format!("Character validation failed: {error}"))?;
-            let mut passion_ids = std::collections::BTreeSet::new();
-            for passion in &character.passion_pool {
-                if passion.passion_id.trim().is_empty()
-                    || !passion_ids.insert(passion.passion_id.as_str())
-                    || !passion.current_value.is_finite()
-                    || !(-100.0..=100.0).contains(&passion.current_value)
-                    || !passion.weight.is_finite()
-                    || passion.weight < 0.0
-                {
-                    return Err(format!(
-                        "Character validation failed: invalid or duplicate passion '{}'",
-                        passion.passion_id
-                    ));
-                }
-            }
-            let mut active_ids = std::collections::BTreeSet::new();
-            for passion_id in &character.active_passions {
-                if !active_ids.insert(passion_id.as_str())
-                    || !passion_ids.contains(passion_id.as_str())
-                {
-                    return Err(format!(
-                        "Character validation failed: active passion '{passion_id}' is missing or duplicated"
-                    ));
-                }
-            }
-            if !character.trust_inertia.is_finite() {
-                return Err("Character validation failed: trust inertia must be finite".into());
-            }
-            let mut threshold_ids = std::collections::BTreeSet::new();
-            for threshold in &character.thresholds {
-                if threshold.threshold_id.trim().is_empty()
-                    || !threshold_ids.insert(threshold.threshold_id.as_str())
-                    || !threshold.trigger_value.is_finite()
-                    || !(-100.0..=100.0).contains(&threshold.trigger_value)
-                    || !matches!(threshold.direction.as_str(), "positive" | "negative")
-                    || threshold.linked_graph_asset_id.trim().is_empty()
-                    || inner
+        if entity == "entities" {
+            let entity_record: EntityRecord = serde_json::from_value(final_payload.clone())
+                .map_err(|error| format!("Entity validation failed: {error}"))?;
+            if entity_record.entity_type == crate::contracts::EntityType::Character {
+                let character = entities::character_record(&entity_record, Value::Null)
+                    .ok_or("Entity validation failed: character settings are missing")?;
+                let mut characters = inner
+                    .store
+                    .runtime_records()
+                    .map_err(|error| error.to_string())?
+                    .characters;
+                characters.retain(|existing| existing.id != character.id);
+                characters.push(character.clone());
+                validate_character(&character, &characters, |storylet_id| {
+                    Ok(inner
                         .store
-                        .get_content_json("storylets", &threshold.linked_graph_asset_id)
+                        .get_content_json("storylets", storylet_id)
                         .map_err(|error| error.to_string())?
-                        .is_none()
-                {
-                    return Err("Character validation failed: macro thresholds need a valid direction, value, and existing graph storylet".into());
-                }
+                        .is_some())
+                })?;
             }
-            let mut characters = inner
-                .store
-                .list_characters()
-                .map_err(|error| error.to_string())?;
-            characters.retain(|existing| existing.id != character.id);
-            characters.push(character.clone());
-            let mut links = std::collections::BTreeSet::new();
-            for link in &character.zero_sum_passion_links {
-                let target = characters
-                    .iter()
-                    .find(|target| target.id == link.target_character_id);
-                let link_key = (
-                    link.target_character_id.as_str(),
-                    link.source_passion_id.as_str(),
-                    link.target_passion_id.as_str(),
-                );
-                if link.target_character_id.trim().is_empty()
-                    || !passion_ids.contains(link.source_passion_id.as_str())
-                    || !link.weight.is_finite()
-                    || !links.insert(link_key)
-                    || target.is_none_or(|target| {
-                        !target
-                            .passion_pool
-                            .iter()
-                            .any(|passion| passion.passion_id == link.target_passion_id)
-                    })
-                {
-                    return Err(format!(
-                        "Character validation failed: invalid zero-sum passion link from '{}' to '{}'/'{}'",
-                        link.source_passion_id, link.target_character_id, link.target_passion_id
-                    ));
-                }
-            }
-            final_payload = serde_json::to_value(character).map_err(|error| error.to_string())?;
         }
         if entity == "storylets" {
             let mut storylet: StoryletRecord = serde_json::from_value(final_payload.clone())
@@ -594,27 +587,34 @@ impl StudioService {
                 format!("Storylet graph validation failed: {}", issues.join("; "))
             })?;
             storylet.ending = graph.ending_from_graph();
-            final_payload
+            entities::normalize_optional_id(&mut storylet.folder_id);
+            entities::validate_folder_ref("storylets", storylet.folder_id.as_deref(), &index)
+                .map_err(|error| format!("Storylet validation failed: {error}"))?;
+            let payload_object = final_payload
                 .as_object_mut()
-                .ok_or("Storylet payload must be a JSON object")?
-                .insert("ending".into(), Value::Bool(storylet.ending));
+                .ok_or("Storylet payload must be a JSON object")?;
+            payload_object.insert("ending".into(), Value::Bool(storylet.ending));
+            payload_object.insert(
+                "folder_id".into(),
+                storylet
+                    .folder_id
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Null),
+            );
             let qualities = inner
                 .store
                 .list_qualities()
                 .map_err(|error| error.to_string())?;
-            let locations = inner
+            let runtime = inner
                 .store
-                .list_locations()
-                .map_err(|error| error.to_string())?;
-            let characters = inner
-                .store
-                .list_characters()
+                .runtime_records()
                 .map_err(|error| error.to_string())?;
             compile_chrono_dispatch_for_storylet_validation(
                 &[storylet],
                 &qualities,
-                &locations,
-                &characters,
+                &runtime.locations,
+                &runtime.characters,
             )
             .map_err(|error| format!("ChronoFlow storylet validation failed: {error}"))?;
         }
@@ -622,7 +622,7 @@ impl StudioService {
         let json_str = serde_json::to_string(&final_payload).map_err(|e| e.to_string())?;
         inner
             .store
-            .save_content(entity, id, &json_str, revision, approved_rev)
+            .save_content(entity, &id, &json_str, revision, approved_rev)
             .map_err(|e| e.to_string())?;
         Ok(final_payload)
     }
@@ -632,6 +632,7 @@ impl StudioService {
         entity: &str,
         id: &str,
     ) -> Result<bool, ContentDeleteError> {
+        ensure_content_kind(entity).map_err(ContentDeleteError::Conflict)?;
         let inner = self.inner.lock().await;
         if entity == "storylets" {
             let qualities = inner
@@ -648,10 +649,169 @@ impl StudioService {
                 )));
             }
         }
+        if entity == "folders" {
+            let folders = inner
+                .store
+                .list_folders()
+                .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
+            let Some(folder) = folders.iter().find(|folder| folder.id == id) else {
+                return Ok(false);
+            };
+            let subfolders = folders
+                .iter()
+                .filter(|candidate| candidate.parent_id.as_deref() == Some(id))
+                .count();
+            let items = count_items_in_folder(&inner.store, id)
+                .map_err(ContentDeleteError::Persistence)?;
+            if subfolders > 0 || items > 0 {
+                return Err(ContentDeleteError::Conflict(format!(
+                    "Folder '{}' is not empty ({subfolders} subfolders, {items} items)",
+                    folder.name
+                )));
+            }
+            return inner
+                .store
+                .delete_content(entity, id)
+                .map_err(|error| ContentDeleteError::Persistence(error.to_string()));
+        }
+        if matches!(entity, "entities" | "assets" | "trait_templates") {
+            if inner
+                .store
+                .get_content_json(entity, id)
+                .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
+                .is_none()
+            {
+                return Ok(false);
+            }
+            let references = collect_references(&inner, entity, id)
+                .map_err(ContentDeleteError::Persistence)?;
+            let direct: Vec<&ContentReference> = references
+                .iter()
+                .filter(|reference| reference.via == crate::contracts::ReferenceVia::Id)
+                .collect();
+            if !direct.is_empty() {
+                let label = record_label(&inner.store, entity, id)
+                    .map_err(ContentDeleteError::Persistence)?
+                    .unwrap_or_else(|| id.to_string());
+                // One storylet can reference the same record from several nodes;
+                // count and name it once, listing the fields it references.
+                let mut grouped: Vec<(String, String, Vec<String>)> = Vec::new();
+                for reference in &direct {
+                    match grouped
+                        .iter_mut()
+                        .find(|(source, _, _)| source == &reference.source_id)
+                    {
+                        Some((_, _, fields)) => {
+                            if !fields.contains(&reference.field) {
+                                fields.push(reference.field.clone());
+                            }
+                        }
+                        None => grouped.push((
+                            reference.source_id.clone(),
+                            reference.source_label.clone(),
+                            vec![reference.field.clone()],
+                        )),
+                    }
+                }
+                let summary = grouped
+                    .iter()
+                    .take(5)
+                    .map(|(_, source_label, fields)| format!("{source_label} ({})", fields.join(", ")))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(ContentDeleteError::Conflict(format!(
+                    "Cannot delete {} '{label}': referenced by {} item(s): {summary}",
+                    kind_label(entity),
+                    grouped.len()
+                )));
+            }
+        }
         inner
             .store
             .delete_content(entity, id)
             .map_err(|error| ContentDeleteError::Persistence(error.to_string()))
+    }
+
+    /// Move an item (or a folder) into a different folder of the same root.
+    pub async fn move_content_item(
+        &self,
+        kind: &str,
+        id: &str,
+        folder_id: Option<String>,
+    ) -> Result<Value, String> {
+        if kind != "folders" && !FOLDER_ROOTS.contains(&kind) {
+            return Err(format!("Unknown content kind '{kind}'"));
+        }
+        let inner = self.inner.lock().await;
+        let mut value: Value = inner
+            .store
+            .get_content_json(kind, id)
+            .map_err(|error| error.to_string())?
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .ok_or_else(|| format!("{kind} item '{id}' not found"))?;
+        let index = build_workspace_index(&inner.store)?;
+        let target = folder_id.filter(|folder| !folder.trim().is_empty());
+
+        if kind == "folders" {
+            let stored: FolderRecord =
+                serde_json::from_value(value.clone()).map_err(|error| error.to_string())?;
+            let mut candidate = value.clone();
+            if let Some(object) = candidate.as_object_mut() {
+                object.insert(
+                    "parent_id".into(),
+                    target
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            let prepared = entities::prepare_folder(&candidate, Some(&stored), &index)?;
+            value = serde_json::to_value(&prepared).map_err(|error| error.to_string())?;
+        } else {
+            entities::validate_folder_ref(kind, target.as_deref(), &index)?;
+            if let Some(object) = value.as_object_mut() {
+                object.insert(
+                    "folder_id".into(),
+                    target
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                );
+            }
+        }
+
+        let json = serde_json::to_string(&value).map_err(|error| error.to_string())?;
+        if !inner
+            .store
+            .update_content_json(kind, id, &json)
+            .map_err(|error| error.to_string())?
+        {
+            return Err(format!("{kind} item '{id}' not found"));
+        }
+        Ok(value)
+    }
+
+    /// Where an entity, asset, or trait template is used.
+    pub async fn content_references(
+        &self,
+        kind: &str,
+        id: &str,
+    ) -> Result<Vec<ContentReference>, String> {
+        if !matches!(kind, "entities" | "assets" | "trait_templates") {
+            return Err(
+                "References are only available for entities, assets, and trait templates".into(),
+            );
+        }
+        let inner = self.inner.lock().await;
+        if inner
+            .store
+            .get_content_json(kind, id)
+            .map_err(|error| error.to_string())?
+            .is_none()
+        {
+            return Err(format!("{kind} item '{id}' not found"));
+        }
+        collect_references(&inner, kind, id)
     }
 
     pub async fn approve_storylet(
@@ -677,10 +837,17 @@ impl StudioService {
 
         let inner = self.inner.lock().await;
         let qualities = inner.store.list_qualities().map_err(|e| e.to_string())?;
-        let locations = inner.store.list_locations().map_err(|e| e.to_string())?;
-        let characters = inner.store.list_characters().map_err(|e| e.to_string())?;
+        let runtime = inner
+            .store
+            .runtime_records()
+            .map_err(|e| e.to_string())?;
 
-        let resolved = resolve_scenario_start(&scenario, &qualities, &locations, &characters);
+        let resolved = resolve_scenario_start(
+            &scenario,
+            &qualities,
+            &runtime.locations,
+            &runtime.characters,
+        );
         serde_json::to_value(&resolved).map_err(|e| e.to_string())
     }
 
@@ -785,7 +952,7 @@ impl StudioService {
     pub async fn create_playtest_session(
         &self,
         session_id: &str,
-        project: ProjectBundle,
+        project: EngineProjectBundle,
         scenario_id: &str,
     ) -> Result<Value, String> {
         let mut inner = self.inner.lock().await;
@@ -821,8 +988,10 @@ impl StudioService {
             .get_project_metadata()
             .map_err(|e| e.to_string())?;
         let qualities = inner.store.list_qualities().map_err(|e| e.to_string())?;
-        let locations = inner.store.list_locations().map_err(|e| e.to_string())?;
-        let characters = inner.store.list_characters().map_err(|e| e.to_string())?;
+        let runtime = inner
+            .store
+            .runtime_records()
+            .map_err(|e| e.to_string())?;
         let storylets = inner.store.list_storylets().map_err(|e| e.to_string())?;
         let npc_behaviors = inner
             .store
@@ -854,8 +1023,8 @@ impl StudioService {
             &meta.name,
             meta.revision,
             &qualities,
-            &locations,
-            &characters,
+            &runtime.locations,
+            &runtime.characters,
             &storylets,
             &npc_behaviors,
             &events,
@@ -1128,6 +1297,219 @@ impl StudioService {
             .map_err(|e| e.to_string())?;
         Ok(true)
     }
+}
+
+fn ensure_content_kind(entity: &str) -> Result<(), String> {
+    if CONTENT_KINDS.contains(&entity) {
+        Ok(())
+    } else {
+        Err(format!("Unknown content kind '{entity}'"))
+    }
+}
+
+fn kind_label(kind: &str) -> &'static str {
+    match kind {
+        "entities" => "entity",
+        "assets" => "asset",
+        "trait_templates" => "trait template",
+        _ => "item",
+    }
+}
+
+fn build_workspace_index(store: &Store) -> Result<WorkspaceIndex, String> {
+    Ok(WorkspaceIndex {
+        entities: store.list_entities().map_err(|error| error.to_string())?,
+        templates: store
+            .list_trait_templates()
+            .map_err(|error| error.to_string())?,
+        assets: store.list_assets().map_err(|error| error.to_string())?,
+        folders: store.list_folders().map_err(|error| error.to_string())?,
+        storylet_ids: store
+            .list_storylets()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|storylet| storylet.id)
+            .collect(),
+    })
+}
+
+fn load_stored_record<T: serde::de::DeserializeOwned>(
+    store: &Store,
+    kind: &str,
+    id: Option<&str>,
+) -> Result<Option<T>, String> {
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    let Some(raw) = store
+        .get_content_json(kind, id)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    Ok(serde_json::from_str(&raw).ok())
+}
+
+fn record_label(store: &Store, kind: &str, id: &str) -> Result<Option<String>, String> {
+    let Some(raw) = store
+        .get_content_json(kind, id)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    let value: Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+    let name = match kind {
+        "storylets" => value.get("title"),
+        _ => value.get("name"),
+    };
+    Ok(name.and_then(Value::as_str).map(str::to_string))
+}
+
+fn count_items_in_folder(store: &Store, folder_id: &str) -> Result<usize, String> {
+    let mut total = 0;
+    for kind in FOLDER_ROOTS {
+        let rows = store
+            .list_content_json(kind)
+            .map_err(|error| error.to_string())?;
+        for raw in rows {
+            let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            if value.get("folder_id").and_then(Value::as_str) == Some(folder_id) {
+                total += 1;
+            }
+        }
+    }
+    Ok(total)
+}
+
+fn collect_references(
+    inner: &StudioInner,
+    kind: &str,
+    id: &str,
+) -> Result<Vec<ContentReference>, String> {
+    if !matches!(kind, "entities" | "assets" | "trait_templates") {
+        return Err(
+            "References are only available for entities, assets, and trait templates".to_string(),
+        );
+    }
+    let entities = inner
+        .store
+        .list_entities()
+        .map_err(|error| error.to_string())?;
+    let templates = inner
+        .store
+        .list_trait_templates()
+        .map_err(|error| error.to_string())?;
+    let assets = inner
+        .store
+        .list_assets()
+        .map_err(|error| error.to_string())?;
+    let storylets = inner
+        .store
+        .list_storylets()
+        .map_err(|error| error.to_string())?;
+    let scenarios = inner
+        .store
+        .list_scenarios()
+        .map_err(|error| error.to_string())?;
+    let npc_behaviors = inner
+        .store
+        .list_npc_behaviors()
+        .map_err(|error| error.to_string())?;
+    let context = ReferenceContext {
+        entities: &entities,
+        templates: &templates,
+        assets: &assets,
+        storylets: &storylets,
+        scenarios: &scenarios,
+        npc_behaviors: &npc_behaviors,
+    };
+    match kind {
+        "entities" => {
+            let target = entities
+                .iter()
+                .find(|entity| entity.id == id)
+                .ok_or_else(|| format!("entities item '{id}' not found"))?;
+            Ok(references::entity_references(target, &context))
+        }
+        "assets" => Ok(references::asset_references(id, &context)),
+        _ => Ok(references::trait_template_references(id, &context)),
+    }
+}
+
+fn validate_character(
+    character: &CharacterRecord,
+    others: &[CharacterRecord],
+    storylet_exists: impl Fn(&str) -> Result<bool, String>,
+) -> Result<(), String> {
+    let mut passion_ids = std::collections::BTreeSet::new();
+    for passion in &character.passion_pool {
+        if passion.passion_id.trim().is_empty()
+            || !passion_ids.insert(passion.passion_id.as_str())
+            || !passion.current_value.is_finite()
+            || !(-100.0..=100.0).contains(&passion.current_value)
+            || !passion.weight.is_finite()
+            || passion.weight < 0.0
+        {
+            return Err(format!(
+                "Character validation failed: invalid or duplicate passion '{}'",
+                passion.passion_id
+            ));
+        }
+    }
+    let mut active_ids = std::collections::BTreeSet::new();
+    for passion_id in &character.active_passions {
+        if !active_ids.insert(passion_id.as_str()) || !passion_ids.contains(passion_id.as_str()) {
+            return Err(format!(
+                "Character validation failed: active passion '{passion_id}' is missing or duplicated"
+            ));
+        }
+    }
+    if !character.trust_inertia.is_finite() {
+        return Err("Character validation failed: trust inertia must be finite".into());
+    }
+    let mut threshold_ids = std::collections::BTreeSet::new();
+    for threshold in &character.thresholds {
+        if threshold.threshold_id.trim().is_empty()
+            || !threshold_ids.insert(threshold.threshold_id.as_str())
+            || !threshold.trigger_value.is_finite()
+            || !(-100.0..=100.0).contains(&threshold.trigger_value)
+            || !matches!(threshold.direction.as_str(), "positive" | "negative")
+            || threshold.linked_graph_asset_id.trim().is_empty()
+            || !storylet_exists(&threshold.linked_graph_asset_id)?
+        {
+            return Err("Character validation failed: macro thresholds need a valid direction, value, and existing graph storylet".into());
+        }
+    }
+    let mut links = std::collections::BTreeSet::new();
+    for link in &character.zero_sum_passion_links {
+        let target = others
+            .iter()
+            .find(|target| target.id == link.target_character_id);
+        let link_key = (
+            link.target_character_id.as_str(),
+            link.source_passion_id.as_str(),
+            link.target_passion_id.as_str(),
+        );
+        if link.target_character_id.trim().is_empty()
+            || !passion_ids.contains(link.source_passion_id.as_str())
+            || !link.weight.is_finite()
+            || !links.insert(link_key)
+            || target.is_none_or(|target| {
+                !target
+                    .passion_pool
+                    .iter()
+                    .any(|passion| passion.passion_id == link.target_passion_id)
+            })
+        {
+            return Err(format!(
+                "Character validation failed: invalid zero-sum passion link from '{}' to '{}'/'{}'",
+                link.source_passion_id, link.target_character_id, link.target_passion_id
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn persist_session_to_store(inner: &mut StudioInner, session_id: &str) -> Result<(), String> {

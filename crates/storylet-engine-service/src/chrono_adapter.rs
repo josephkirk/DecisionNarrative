@@ -19,7 +19,7 @@ use storylet_engine::chrono_state::{
 
 use crate::contracts::{
     CharacterRecord, ChronoStoryletSettings, LocationRecord, QualityRecord, ScenarioRecord,
-    StoryletRecord,
+    StoryletRecord, WorldObjectLayer, WorldObjectRecord,
 };
 
 #[derive(Clone, Debug)]
@@ -107,7 +107,9 @@ fn compile_chrono_dispatch_inner(
     }
     for character in characters {
         names.insert(format!("character.{}", character.id));
-        names.insert(character.role.clone());
+        if !character.role.trim().is_empty() {
+            names.insert(character.role.clone());
+        }
         for (index, threshold) in character.thresholds.iter().enumerate() {
             names.insert(passion_threshold_tag(character, threshold, index));
         }
@@ -146,6 +148,9 @@ fn compile_chrono_dispatch_inner(
         collect_legacy_precondition_names(&storylet.preconditions, &mut names);
         validate_legacy_reference_ids(storylet, locations, characters)?;
     }
+    // Blank authored tags (an unfilled role or a cleared tag) carry no meaning
+    // and must not reach the registry, which rejects empty names.
+    names.retain(|name| !name.trim().is_empty());
     if names.len() > MAX_TAGS {
         return Err(format!(
             "ChronoFlow tag registry supports at most {MAX_TAGS} names; got {}",
@@ -1100,6 +1105,7 @@ pub fn initialize_chrono_world(
     qualities: &[QualityRecord],
     locations: &[LocationRecord],
     characters: &[CharacterRecord],
+    world_objects: &[WorldObjectRecord],
     scenario: Option<&ScenarioRecord>,
     start_location_id: &str,
 ) -> Result<ChronoWorldSeed, String> {
@@ -1229,6 +1235,7 @@ pub fn initialize_chrono_world(
         if let Some(value) = &location.devices {
             insert_json_attributes(value, "device", &mut attributes);
         }
+        insert_json_attributes(&location.attributes, "", &mut attributes);
         vertices.push(WorldVertex {
             vertex_id: format!("location:{}", location.id),
             layer: GraphLayer::Location,
@@ -1282,12 +1289,14 @@ pub fn initialize_chrono_world(
             entity_index,
             &format!("character.{}", character.id),
         )?;
-        add_entity_tag(
-            &compiled.registry,
-            &mut state,
-            entity_index,
-            &character.role,
-        )?;
+        if !character.role.trim().is_empty() {
+            add_entity_tag(
+                &compiled.registry,
+                &mut state,
+                entity_index,
+                &character.role,
+            )?;
+        }
         let mut attributes = BTreeMap::new();
         insert_json_attributes(&character.status_axes, "status", &mut attributes);
         insert_json_attributes(&character.needs, "need", &mut attributes);
@@ -1306,6 +1315,7 @@ pub fn initialize_chrono_world(
                 AttributeValue::String(character.red_line.clone()),
             );
         }
+        insert_json_attributes(&character.attributes, "", &mut attributes);
         vertices.push(WorldVertex {
             vertex_id: format!("character:{}", character.id),
             layer: GraphLayer::Character,
@@ -1397,6 +1407,23 @@ pub fn initialize_chrono_world(
                 GraphLayer::Fact
             },
             entity_index,
+            attributes,
+        });
+    }
+    let mut ordered_world_objects: Vec<&WorldObjectRecord> = world_objects.iter().collect();
+    ordered_world_objects.sort_by(|left, right| left.id.cmp(&right.id));
+    for object in ordered_world_objects {
+        let (prefix, layer) = match object.layer {
+            WorldObjectLayer::Item => ("item", GraphLayer::Item),
+            WorldObjectLayer::Fact => ("fact", GraphLayer::Fact),
+        };
+        let mut attributes = BTreeMap::new();
+        attributes.insert("name".into(), AttributeValue::String(object.name.clone()));
+        insert_json_attributes(&object.attributes, "", &mut attributes);
+        vertices.push(WorldVertex {
+            vertex_id: format!("{prefix}:{}", object.id),
+            layer,
+            entity_index: None,
             attributes,
         });
     }
@@ -1637,6 +1664,7 @@ mod tests {
             menace_crisis_storylet_id: None,
             description: None,
             metadata: None,
+            folder_id: None,
         };
         let location: LocationRecord = serde_json::from_value(serde_json::json!({
             "id": "museum",
@@ -1725,6 +1753,7 @@ mod tests {
             menace_crisis_storylet_id: None,
             description: None,
             metadata: None,
+            folder_id: None,
         };
         let tool_quality = QualityRecord {
             name: "Clue".into(),
@@ -1736,6 +1765,7 @@ mod tests {
             menace_crisis_storylet_id: None,
             description: None,
             metadata: None,
+            folder_id: None,
         };
         let location: LocationRecord = serde_json::from_value(serde_json::json!({
             "id": "square",
@@ -1784,6 +1814,7 @@ mod tests {
                 "needs": {}
             }))
             .expect("valid character fixture")],
+            &[],
             None,
             "square",
         )
@@ -1865,6 +1896,7 @@ mod tests {
             menace_crisis_storylet_id: Some("crisis-scene".into()),
             description: None,
             metadata: None,
+            folder_id: None,
         };
         let location: LocationRecord = serde_json::from_value(serde_json::json!({
             "id": "start",
@@ -1876,8 +1908,15 @@ mod tests {
         let compiled =
             compile_chrono_dispatch(&[storylet], &[menace.clone()], &[location.clone()], &[])
                 .expect("menace crisis should compile");
-        let mut seed =
-            super::initialize_chrono_world(&compiled, &[menace], &[location], &[], None, "start")
+        let mut seed = super::initialize_chrono_world(
+            &compiled,
+            &[menace],
+            &[location],
+            &[],
+            &[],
+            None,
+            "start",
+        )
                 .expect("world should seed");
         let crisis_tag = compiled
             .registry
@@ -1931,6 +1970,7 @@ mod tests {
             menace_crisis_storylet_id: Some("missing-crisis".into()),
             description: None,
             metadata: None,
+            folder_id: None,
         };
         assert!(
             super::compile_chrono_dispatch(
@@ -1977,6 +2017,7 @@ mod tests {
             &[],
             std::slice::from_ref(&location),
             std::slice::from_ref(&character),
+            &[],
             None,
             "harbor",
         )
@@ -2031,5 +2072,71 @@ fn insert_json_attributes(
             attributes.insert(prefix.to_owned(), AttributeValue::String(value.clone()));
         }
         serde_json::Value::Null => {}
+    }
+}
+
+#[cfg(test)]
+mod world_object_vertex_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn item_and_fact_entities_add_vertices_with_flattened_attributes() {
+        let location: LocationRecord = serde_json::from_value(json!({
+            "id": "square",
+            "name": "Square",
+            "description": "",
+            "tags": []
+        }))
+        .expect("valid location fixture");
+        let compiled = compile_chrono_dispatch(&[], &[], std::slice::from_ref(&location), &[])
+            .expect("empty storylet deck compiles");
+        let item: WorldObjectRecord = serde_json::from_value(json!({
+            "id": "lantern",
+            "name": "Rusted Lantern",
+            "layer": "item",
+            "attributes": { "prop": { "Rusty": true, "Weight": 2 } }
+        }))
+        .expect("valid item fixture");
+        let fact: WorldObjectRecord = serde_json::from_value(json!({
+            "id": "rumor",
+            "name": "Rumor",
+            "layer": "fact",
+            "attributes": { "prop": { "Verified": false } }
+        }))
+        .expect("valid fact fixture");
+
+        let seed = initialize_chrono_world(
+            &compiled,
+            &[],
+            std::slice::from_ref(&location),
+            &[],
+            &[item, fact],
+            None,
+            "square",
+        )
+        .expect("world seeds with item and fact vertices");
+
+        let item_vertex = seed.state.vertex("item:lantern").expect("item vertex");
+        assert_eq!(
+            item_vertex.attributes.get("prop.Rusty"),
+            Some(&AttributeValue::Bool(true))
+        );
+        assert_eq!(
+            item_vertex.attributes.get("prop.Weight"),
+            Some(&AttributeValue::Int(2))
+        );
+        assert_eq!(
+            item_vertex.attributes.get("name"),
+            Some(&AttributeValue::String("Rusted Lantern".into()))
+        );
+        assert!(item_vertex.entity_index.is_none());
+
+        let fact_vertex = seed.state.vertex("fact:rumor").expect("fact vertex");
+        assert_eq!(
+            fact_vertex.attributes.get("prop.Verified"),
+            Some(&AttributeValue::Bool(false))
+        );
+        assert!(seed.entity_indices.get("item:lantern").is_none());
     }
 }
