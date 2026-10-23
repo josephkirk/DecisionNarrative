@@ -4,21 +4,29 @@
   "description": "Local authoring and playtest studio for non-linear storylet-driven narrative games",
   "type": "module",
   "scripts": {
-    "play": "bun run src/web/server.ts",
+    "build": "vite build",
+    "dev": "vite",
+    "typecheck": "vue-tsc --noEmit",
+    "play": "bun run build && cargo run --target-dir target/play-clean --manifest-path crates/storylet-engine-service/Cargo.toml --bin storylet-engine-service",
+    "play:fresh": "bun run build && cargo run --target-dir target/play-clean --manifest-path crates/storylet-engine-service/Cargo.toml --bin storylet-engine-service -- --fresh-database",
+    "serve": "bun run play",
     "engine:service": "cargo run --manifest-path crates/storylet-engine-service/Cargo.toml --bin storylet-engine-service",
-    "smoke:semantic-director": "bun run scripts/smoke-semantic-director.ts",
     "smoke:native-host": "pwsh -NoProfile -File scripts/run-native-host.ps1",
     "test": "bun test",
-    "bench": "cargo run --release --manifest-path crates/storylet-engine/Cargo.toml --bin storylet-engine-bench --",
-    "build": "bun run scripts/build.ts",
-    "serve": "bun run src/web/server.ts"
+    "bench": "cargo run --release --manifest-path crates/storylet-engine/Cargo.toml --bin storylet-engine-bench --"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "bun-types": "1.3.14"
+    "@types/node": "^22.20.5",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "bun-types": "1.3.14",
+    "typescript": "^5.7.0",
+    "vite": "^8.3.4",
+    "vue-tsc": "^3.3.13"
   },
   "dependencies": {
-    "@types/three": "^0.186.0",
-    "three": "^0.186.1"
+    "@oh-my-pi/pi-natives": "^18.12.1",
+    "pi": "^2.0.5",
+    "vue": "^3.5.44",
+    "vue-router": "^5.4.0"
   }
 }

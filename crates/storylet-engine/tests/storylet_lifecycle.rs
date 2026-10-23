@@ -10,6 +10,7 @@ use storylet_engine::{
 fn world() -> WorldState {
     WorldState {
         current_location: Some("archive".into()),
+        location_tags: BTreeMap::from([("archive".into(), BTreeSet::from(["archive".into()]))]),
         qualities: BTreeMap::from([
             ("stock.depot".into(), json!(5)),
             ("stock.clinic".into(), json!(1)),
@@ -33,7 +34,8 @@ fn definition(repeatability: Repeatability) -> StoryletDefinition {
         title: "A ledger at the clinic".into(),
         summary: "A generic authored incident".into(),
         approved: true,
-        location_id: Some("archive".into()),
+        ending: false,
+        location_tags: BTreeSet::from(["archive".into()]),
         urgency_weight: 60.0,
         cluster_type: ClusterType::Linear,
         repeatability,
@@ -41,6 +43,7 @@ fn definition(repeatability: Repeatability) -> StoryletDefinition {
             role: "clerk".into(),
         }],
         trigger: PredicateSet::default(),
+        preconditions: Default::default(),
         content: SceneContent {
             opening: "Nora turns the ledger around.".into(),
         },

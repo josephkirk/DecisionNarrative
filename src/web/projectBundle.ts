@@ -6,7 +6,6 @@ import type {
   ScenarioRecord,
   StoryletRecord,
 } from "../db/repository.ts";
-import type { GenerationJob } from "../agents/GenerationWorkflow.ts";
 import { buildWorkspaceProject } from "./workspaceProject.ts";
 
 export const PROJECT_BUNDLE_FORMAT = "decision-narrative-project";
@@ -19,7 +18,6 @@ export interface ProjectBundleContent {
   storylets: StoryletRecord[];
   npcBehaviors: NpcBehaviorRecord[];
   scenarios: ScenarioRecord[];
-  generationJobs: GenerationJob[];
 }
 
 export interface ProjectMetadata {
@@ -43,11 +41,11 @@ export interface ProjectBundleInspection {
 }
 
 const CONTENT_COLLECTIONS: Array<keyof ProjectBundleContent> = [
-  "qualities", "locations", "characters", "storylets", "npcBehaviors", "scenarios", "generationJobs",
+  "qualities", "locations", "characters", "storylets", "npcBehaviors", "scenarios",
 ];
 
 function emptyCounts(): ProjectBundleInspection["counts"] {
-  return { qualities: 0, locations: 0, characters: 0, storylets: 0, npcBehaviors: 0, scenarios: 0, generationJobs: 0 };
+  return { qualities: 0, locations: 0, characters: 0, storylets: 0, npcBehaviors: 0, scenarios: 0 };
 }
 
 export function makeProjectBundle(project: ProjectMetadata, content: ProjectBundleContent): StoryletProjectBundle {
@@ -108,18 +106,10 @@ export function inspectProjectBundle(input: unknown): ProjectBundleInspection {
       issues.push(`content.storylets[${index}] has invalid required fields or approval revision`);
     }
   }
-  for (const [index, job] of bundle.content.generationJobs.entries()) {
-    if (!isRecord(job) || typeof job.id !== "string" || !job.id.trim() || !Number.isSafeInteger(job.revision)
-      || !["ready", "running", "failed", "complete"].includes(String(job.status))
-      || !isRecord(job.request) || !Array.isArray(job.stages) || !isRecord(job.attempts)
-      || !Number.isSafeInteger(job.nextStageIndex) || !Number.isSafeInteger(job.createdAt) || !Number.isSafeInteger(job.updatedAt)) {
-      issues.push(`content.generationJobs[${index}] is not a valid generation job record`);
-    }
-  }
   const globalIds = new Map<string, string>();
   const idCollections: Array<[keyof ProjectBundleContent, Array<unknown>]> = [];
   for (const collection of CONTENT_COLLECTIONS) {
-    if (collection !== "generationJobs") idCollections.push([collection, bundle.content[collection] as unknown[]]);
+    idCollections.push([collection, bundle.content[collection] as unknown[]]);
   }
   for (const [collection, records] of idCollections) {
     records.forEach((value, index) => {

@@ -1,5 +1,4 @@
 import { RustRuntimeClient, type RustWorldCommand } from "../engine/RustRuntimeClient.ts";
-import { rankPlaytestWithLocalEncoder } from "./semanticDirector.ts";
 import type { WorkspaceProjectResult } from "./workspaceProject.ts";
 
 function response(body: unknown, status = 200): Response {
@@ -10,7 +9,7 @@ function response(body: unknown, status = 200): Response {
 }
 
 function statusForError(message: string): number {
-  if (/embedding service|fetch failed|connection refused|ECONNREFUSED/i.test(message)) return 503;
+  if (/fetch failed|connection refused|ECONNREFUSED/i.test(message)) return 503;
   if (/revision conflict|already exists|idempotency key was already used/i.test(message)) return 409;
   if (/was not found/i.test(message)) return 404;
   if (/project validation failed|not part of this project|not eligible|unavailable|insufficient|unknown (actor|quality|location)/i.test(message)) return 422;
@@ -39,7 +38,6 @@ export async function handlePlaytestApi(
   request: Request,
   runtime: RustRuntimeClient,
   workspaceProject?: (startLocationId?: string, scenarioId?: string) => WorkspaceProjectResult,
-  options: { embeddingServiceUrl?: string } = {},
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (url.pathname === "/api/v1/playtests/from-workspace") {
@@ -91,22 +89,6 @@ export async function handlePlaytestApi(
         const snapshot = await runtime.forkSession(sourceSessionId, branchSessionId, body.eventId!);
         return response({ sessionId: branchSessionId, snapshot }, 201);
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return response({ error: message }, statusForError(message));
-    }
-  }
-
-  const rankMatch = url.pathname.match(/^\/api\/v1\/playtests\/([^/]+)\/director\/rank$/);
-  if (rankMatch) {
-    if (request.method !== "POST") return response({ error: "Method not allowed" }, 405);
-    try {
-      const sessionId = decodeURIComponent(rankMatch[1]);
-      return await withSessionLock(sessionId, async () => response(await rankPlaytestWithLocalEncoder(
-        runtime,
-        sessionId,
-        options.embeddingServiceUrl ?? Bun.env.STORYLET_EMBEDDING_URL ?? "http://127.0.0.1:4318",
-      )));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return response({ error: message }, statusForError(message));

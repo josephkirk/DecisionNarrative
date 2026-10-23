@@ -159,75 +159,6 @@ test("playtest API rejects stale revisions without changing session state", asyn
   expect(snapshot.world.events).toHaveLength(1);
 });
 
-test("local encoder reranks only eligible project storylets and revalidates the result in Rust", async () => {
-  const runtime = new RustRuntimeClient({ databasePath: ":memory:" });
-  runtimes.push(runtime);
-  let embeddedDocumentCount = 0;
-  const model = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    async fetch(request) {
-      if (new URL(request.url).pathname === "/v1/ranking-head") {
-        const featureNames = ["semantic_relevance", "urgency", "pacing_arc_alignment", "novelty", "waiting_time", "goal_progress", "role_binding_quality", "predicted_consequence_alignment", "no_action"];
-        return Response.json({ schema_version: 1, model_version: "pairwise-fixture", feature_names: featureNames,
-          weights: Object.fromEntries(featureNames.map((name) => [name, name === "semantic_relevance" ? 8 : 0])),
-          bias: 0, temperature: 1, no_action_bias: -4 });
-      }
-      const body = await request.json() as { input: string | string[]; input_type: string };
-      const texts = Array.isArray(body.input) ? body.input : [body.input];
-      if (body.input_type === "document") embeddedDocumentCount += texts.length;
-      const embeddings = texts.map((text) => body.input_type === "query" || /receipt/i.test(text) ? [1, ...Array(767).fill(0)] : [0, 1, ...Array(766).fill(0)]);
-      return Response.json({ model: "fixture-encoder", model_revision: "rev-1", dimensions: 768, embeddings });
-    },
-  });
-  try {
-    const built = buildWorkspaceProject({
-      qualities: [],
-      locations: [
-        { id: "archive", name: "Archive", description: "A records room", connected_zones: ["station"] },
-        { id: "station", name: "Station", description: "A distant platform", connected_zones: ["archive"] },
-      ],
-      characters: [],
-      storylets: ["receipt", "weather", "remote"].map((name) => ({
-        id: name,
-        revision: 1,
-        approved_revision: 1,
-        title: name === "receipt" ? "Find the receipt" : "Discuss the weather",
-        location: name === "remote" ? "station" : "archive",
-        cluster_type: "player_controlled_passage" as const,
-        urgency_weight: 50,
-        repeatability: "always" as const,
-        cooldown_turns: 0,
-        parameters: [],
-        preconditions: {},
-        content: { text_template: "A short scene." },
-        choices: [],
-        effects: {},
-        created_at: 1,
-      })),
-    }, "archive");
-    expect(built.issues).toEqual([]);
-    await runtime.createSession("semantic-rank", built.project, built.scenarioId);
-
-    const response = await handlePlaytestApi(
-      new Request("http://studio/api/v1/playtests/semantic-rank/director/rank", { method: "POST" }),
-      runtime,
-      undefined,
-      { embeddingServiceUrl: `http://127.0.0.1:${model.port}` },
-    );
-    const result = await response?.json();
-    expect(response?.status).toBe(200);
-    expect(result.selected).toBe("receipt");
-    expect(result.decision.source).toBe("trained_ranking_head_uncalibrated");
-    expect(result.decision.modelVersion).toBe("fixture-encoder@rev-1+pairwise-fixture");
-    expect(result.candidates.filter((item: any) => item.eligible).map((item: any) => item.storylet_id)).toEqual(["receipt", "weather"]);
-    expect(embeddedDocumentCount).toBe(2);
-    expect((await runtime.snapshot("semantic-rank")).world.revision).toBe(0);
-  } finally {
-    model.stop(true);
-  }
-
-});
 
 test("playtest API forks at a selected event and returns an isolated branch", async () => {
   const runtime = new RustRuntimeClient();
@@ -354,11 +285,11 @@ test("designer-created storylet candidates execute their authored choice effects
   runtimes.push(runtime);
   const built = buildWorkspaceProject({
     qualities: [{ name: "clue.receipt", type: "tool", value: 0, description: "Receipt clue" }],
-    locations: [{ id: "archive", name: "Archive", description: "A reading room", connected_zones: [] }],
+    locations: [{ id: "archive", name: "Archive", description: "A reading room", tags: ["archive"], connected_zones: [] }],
     characters: [{ id: "clerk", name: "Clerk", role: "Clerk", home_location: "archive", current_location: "archive", status_axes: {}, needs: {}, agenda: "", red_line: "" }],
     storylets: [{
       revision: 1, approved_revision: 1,
-      id: "read-receipt", title: "Read the Receipt", location: "archive", cluster_type: "player_controlled_passage",
+      id: "read-receipt", title: "Read the Receipt", location_tags: ["archive"], cluster_type: "player_controlled_passage",
       urgency_weight: 50, repeatability: "always", cooldown_turns: 0,
       parameters: [{ param_name: "clerk", query: "character.role == 'Clerk'" }],
       preconditions: { all_of: [{ variable: "clue.receipt", op: "eq", value: 0 }] },

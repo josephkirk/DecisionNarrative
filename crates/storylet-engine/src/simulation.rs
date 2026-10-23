@@ -69,6 +69,7 @@ pub fn advance_npcs(
                 effects: rule.effects.clone(),
                 caused_by: caused_by.to_vec(),
                 advance_turn: false,
+                terminal: false,
             },
         )?;
         acted.insert(rule.actor_id.clone());

@@ -4,10 +4,17 @@ import type {
   NpcBehaviorRecord,
   QualityRecord,
   ScenarioRecord,
+  StartLocationPolicy,
+  ActorPopulationPolicy,
+  ActorLocationPolicy,
   StoryletRecord,
+  ScenarioEventRecord,
 } from "../db/repository.ts";
 import type { RustProjectBundle } from "../engine/RustRuntimeClient.ts";
+import { buildGraphFromStorylet, validateNarrativeGraph } from "./studio/narrativeGraphTypes.ts";
 
+
+const QUALITY_CATEGORIES = new Set(["currency", "metric", "tool", "progress", "menace", "territory"]);
 interface WorkspaceRecords {
   qualities: QualityRecord[];
   locations: LocationRecord[];
@@ -117,8 +124,224 @@ function mapEffects(
 }
 
 function mapRoleQuery(query: string): string | null {
-  const match = query.trim().match(/^(?:character\.)?role\s*==\s*(['"])(.*?)\1$/i);
+  const match = query.trim().match(/^(?:(?:character\.)?role|character_role)\s*==\s*(['"])(.*?)\1$/i);
   return match?.[2]?.trim() || null;
+}
+
+
+/** PRNG created deterministically from seed (xorshift32) */
+export function createDeterministicRng(seed: number): () => number {
+  let s = (Math.floor(seed) >>> 0) || 1;
+  return function next(): number {
+    s = (s ^ (s << 13)) >>> 0;
+    s = (s ^ (s >>> 17)) >>> 0;
+    s = (s ^ (s << 5)) >>> 0;
+    return (s >>> 0) / 4294967296;
+  };
+}
+
+export function sampleDeterministic<T>(items: T[], count: number, rng: () => number): T[] {
+  if (count >= items.length) return [...items];
+  if (count <= 0) return [];
+  const pool = [...items];
+  const result: T[] = [];
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(rng() * pool.length);
+    result.push(pool[idx]);
+    pool.splice(idx, 1);
+  }
+  return result;
+}
+
+export function matchAttributeValue(actual: unknown, expected: unknown): boolean {
+  if (actual === undefined && expected === undefined) return true;
+  if (actual === undefined || expected === undefined) return false;
+  if (typeof actual === "number" && typeof expected === "number") {
+    return actual === expected;
+  }
+  if (typeof actual === "boolean" && typeof expected === "boolean") {
+    return actual === expected;
+  }
+  const actualStr = String(actual).trim().toLowerCase();
+  const expectedStr = String(expected).trim().toLowerCase();
+  return actualStr === expectedStr;
+}
+
+export function getLocationAttribute(loc: LocationRecord, key: string): unknown {
+  const trimmedKey = key.trim();
+  if (trimmedKey === "id") return loc.id;
+  if (trimmedKey === "name") return loc.name;
+  if (trimmedKey === "description") return loc.description;
+  if (loc.environmental_params && Object.prototype.hasOwnProperty.call(loc.environmental_params, trimmedKey)) {
+    return loc.environmental_params[trimmedKey];
+  }
+  if (loc.devices && Object.prototype.hasOwnProperty.call(loc.devices, trimmedKey)) {
+    return loc.devices[trimmedKey];
+  }
+  return undefined;
+}
+
+export function matchLocation(loc: LocationRecord, key: string, expectedValue: unknown): boolean {
+  const actual = getLocationAttribute(loc, key);
+  return matchAttributeValue(actual, expectedValue);
+}
+
+export function getCharacterAttribute(char: CharacterRecord, key: string): unknown {
+  const trimmedKey = key.trim();
+  if (trimmedKey === "id") return char.id;
+  if (trimmedKey === "name") return char.name;
+  if (trimmedKey === "role") return char.role;
+  if (trimmedKey === "home_location") return char.home_location;
+  if (trimmedKey === "current_location") return char.current_location;
+  if (trimmedKey === "agenda") return char.agenda;
+  if (trimmedKey === "red_line") return char.red_line;
+  if (char.status_axes && Object.prototype.hasOwnProperty.call(char.status_axes, trimmedKey)) {
+    return char.status_axes[trimmedKey];
+  }
+  if (char.qualities && Object.prototype.hasOwnProperty.call(char.qualities, trimmedKey)) {
+    return char.qualities[trimmedKey];
+  }
+  if (char.needs && Object.prototype.hasOwnProperty.call(char.needs, trimmedKey)) {
+    return char.needs[trimmedKey];
+  }
+  return undefined;
+}
+
+export function matchCharacter(char: CharacterRecord, key: string, expectedValue: unknown): boolean {
+  const actual = getCharacterAttribute(char, key);
+  return matchAttributeValue(actual, expectedValue);
+}
+
+export function resolveLocationFromPolicy(
+  policy: StartLocationPolicy | ActorLocationPolicy | undefined,
+  fallbackLocationId: string,
+  locations: LocationRecord[],
+  rng: () => number,
+  issues: string[],
+  pathPrefix: string,
+): string {
+  if (!policy || policy.mode === "fixed") {
+    const locId = policy?.location_id || fallbackLocationId;
+    if (!locId) {
+      issues.push(`${pathPrefix}: fixed location mode requires a location`);
+      return "";
+    }
+    const found = locations.find((l) => l.id === locId);
+    if (!found) {
+      issues.push(`${pathPrefix}: unknown fixed location '${locId}'`);
+      return "";
+    }
+    return found.id;
+  }
+
+  if (policy.mode === "random") {
+    if (!locations.length) {
+      issues.push(`${pathPrefix}: cannot select random location from empty locations list`);
+      return "";
+    }
+    const idx = Math.floor(rng() * locations.length);
+    return locations[idx].id;
+  }
+
+  if (policy.mode === "by_attribute") {
+    const attrKey = policy.attribute_key?.trim();
+    if (!attrKey) {
+      issues.push(`${pathPrefix}: by_attribute mode requires an attribute key`);
+      return "";
+    }
+    const matches = locations.filter((l) => matchLocation(l, attrKey, policy.attribute_value));
+    if (!matches.length) {
+      issues.push(`${pathPrefix}: no location matches attribute '${attrKey}' = ${JSON.stringify(policy.attribute_value)}`);
+      return "";
+    }
+    const idx = Math.floor(rng() * matches.length);
+    return matches[idx].id;
+  }
+
+  issues.push(`${pathPrefix}: unsupported location policy mode '${(policy as any).mode}'`);
+  return fallbackLocationId;
+}
+
+export function resolveActorPopulation(
+  scenario: ScenarioRecord | undefined,
+  characters: CharacterRecord[],
+  locations: LocationRecord[],
+  seed: number,
+  issues: string[],
+  pathPrefix: string,
+): Record<string, string> {
+  const rng = createDeterministicRng(seed);
+  const locationIds = new Set(locations.map((l) => l.id));
+  const policy = scenario?.actor_population_policy;
+
+  if (!policy) {
+    const result: Record<string, string> = {};
+    if (scenario?.actor_locations) {
+      for (const [actorId, locId] of Object.entries(scenario.actor_locations)) {
+        result[actorId] = locId;
+      }
+    } else {
+      for (const character of characters) {
+        if (locationIds.has(character.current_location)) {
+          result[character.id] = character.current_location;
+        }
+      }
+    }
+    return result;
+  }
+
+  let selectedCharacters: CharacterRecord[] = [];
+  if (policy.mode === "all") {
+    selectedCharacters = [...characters];
+  } else if (policy.mode === "random") {
+    if (policy.count === undefined || !Number.isInteger(policy.count) || policy.count < 0) {
+      issues.push(`${pathPrefix}.count: random actor population requires a non-negative integer count`);
+      return {};
+    }
+    selectedCharacters = sampleDeterministic(characters, policy.count, rng);
+  } else if (policy.mode === "by_attribute") {
+    const attrKey = policy.attribute_key?.trim();
+    if (!attrKey) {
+      issues.push(`${pathPrefix}.attribute_key: by_attribute actor population requires an attribute key`);
+      return {};
+    }
+    const matches = characters.filter((c) => matchCharacter(c, attrKey, policy.attribute_value));
+    if (!matches.length) {
+      issues.push(`${pathPrefix}: no character matches attribute '${attrKey}' = ${JSON.stringify(policy.attribute_value)}`);
+      return {};
+    }
+    selectedCharacters = matches;
+  } else {
+    issues.push(`${pathPrefix}.mode: unsupported actor population mode '${(policy as any).mode}'`);
+    return {};
+  }
+
+  const result: Record<string, string> = {};
+  for (const character of selectedCharacters) {
+    const locPolicy = policy.location_policy;
+    if (!locPolicy || locPolicy.mode === "fixed") {
+      const fixedLoc = locPolicy?.location_id || scenario?.actor_locations?.[character.id] || character.current_location || character.home_location;
+      if (!locationIds.has(fixedLoc)) {
+        issues.push(`${pathPrefix}.${character.id}: unknown location '${fixedLoc}'`);
+      } else {
+        result[character.id] = fixedLoc;
+      }
+    } else {
+      const resolvedLoc = resolveLocationFromPolicy(
+        locPolicy,
+        character.current_location || character.home_location,
+        locations,
+        rng,
+        issues,
+        `${pathPrefix}.${character.id}.location`,
+      );
+      if (resolvedLoc) {
+        result[character.id] = resolvedLoc;
+      }
+    }
+  }
+
+  return result;
 }
 
 /** Build a disposable Rust project bundle from the current designer Codex. */
@@ -135,6 +358,14 @@ export function buildWorkspaceProject(
   const storylets = [...records.storylets].sort((a, b) => a.id.localeCompare(b.id));
   const npcBehaviors = [...(records.npcBehaviors ?? [])].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id));
   const qualityIds = new Set(records.qualities.map((quality) => quality.name));
+  for (const quality of records.qualities) {
+    const min = quality.min_value ?? 0;
+    const max = quality.max_value ?? 100;
+    if (!QUALITY_CATEGORIES.has(quality.type)) issues.push(`qualities.${quality.name}.type: unsupported category`);
+    if (!Number.isFinite(quality.value) || !Number.isFinite(min) || !Number.isFinite(max) || min > max) {
+      issues.push(`qualities.${quality.name}: value bounds must be finite and minimum must not exceed maximum`);
+    }
+  }
   const usedIds = new Set([
     ...qualityIds,
     ...locations.map((location) => location.id),
@@ -162,6 +393,10 @@ export function buildWorkspaceProject(
     key: quality.name,
     kind: quality.type,
     default_value: quality.value,
+    min_value: quality.min_value ?? 0,
+    max_value: quality.max_value ?? 100,
+    is_hidden: quality.is_hidden ?? false,
+    menace_crisis_storylet_id: quality.menace_crisis_storylet_id,
     description: quality.description ?? "",
   }]));
   const locationIds = new Set(locations.map((location) => location.id));
@@ -181,6 +416,7 @@ export function buildWorkspaceProject(
       id: location.id,
       name: location.name,
       description: location.description,
+      tags: location.tags ?? [],
       connected_locations: (location.connected_zones ?? []).filter((id) => locationIds.has(id)),
       map_position: position,
     }];
@@ -202,6 +438,9 @@ export function buildWorkspaceProject(
   for (const storylet of storylets) {
     if (storylet.revision == null || storylet.approved_revision !== storylet.revision) continue;
     const path = `storylets.${storylet.id}`;
+    for (const issue of validateNarrativeGraph(buildGraphFromStorylet(storylet))) {
+      issues.push(`${path}.graph: ${issue}`);
+    }
     const roles: Array<{ role: string }> = [];
     for (const parameter of storylet.parameters ?? []) {
       const role = mapRoleQuery(parameter.query);
@@ -234,7 +473,8 @@ export function buildWorkspaceProject(
       title: storylet.title,
       summary: storylet.content.text_template,
       approved: true,
-      location_id: storylet.location || null,
+      ending: storylet.ending === true,
+      location_tags: storylet.location_tags ?? [],
       urgency_weight: storylet.urgency_weight,
       cluster_type: storylet.cluster_type,
       repeatability,
@@ -299,9 +539,43 @@ export function buildWorkspaceProject(
     };
   }
 
-  const startLocation = authoredScenario?.player_start_location || options.playerStartLocation || locations[0]?.id || "";
-  if (!startLocation) issues.push("Choose or create a location before starting a playtest");
-  else if (!locationIds.has(startLocation)) issues.push(`Unknown playtest start location '${startLocation}'`);
+  const scenarioSeed = authoredScenario?.seed ?? 1;
+  const startLocationRng = createDeterministicRng(scenarioSeed);
+
+  let resolvedStartLocation = authoredScenario?.start_location_policy
+    ? resolveLocationFromPolicy(
+        authoredScenario.start_location_policy,
+        authoredScenario.player_start_location || options.playerStartLocation || locations[0]?.id || "",
+        locations,
+        startLocationRng,
+        issues,
+        `scenarios.${scenarioId}.start_location_policy`,
+      )
+    : (authoredScenario?.player_start_location || options.playerStartLocation || locations[0]?.id || "");
+
+  if (!resolvedStartLocation) issues.push("Choose or create a location before starting a playtest");
+  else if (!locationIds.has(resolvedStartLocation)) issues.push(`Unknown playtest start location '${resolvedStartLocation}'`);
+
+  let resolvedActorLocations: Record<string, string> = {};
+  if (authoredScenario?.actor_population_policy) {
+    resolvedActorLocations = resolveActorPopulation(
+      authoredScenario,
+      characters,
+      locations,
+      scenarioSeed,
+      issues,
+      `scenarios.${scenarioId}.actor_population_policy`,
+    );
+  } else if (authoredScenario?.actor_locations) {
+    resolvedActorLocations = { ...authoredScenario.actor_locations };
+  } else {
+    resolvedActorLocations = Object.fromEntries(
+      characters
+        .filter((character) => locationIds.has(character.current_location))
+        .map((character) => [character.id, character.current_location]),
+    );
+  }
+
   if (authoredScenario) {
     if (!authoredScenario.name.trim()) issues.push(`scenarios.${scenarioId}.name: a name is required`);
     if (!Number.isSafeInteger(authoredScenario.seed) || authoredScenario.seed < 0) {
@@ -311,7 +585,7 @@ export function buildWorkspaceProject(
       if (!qualityIds.has(key)) issues.push(`scenarios.${scenarioId}.initial_qualities.${key}: unknown quality`);
       if (value === null || value === undefined) issues.push(`scenarios.${scenarioId}.initial_qualities.${key}: value cannot be null`);
     }
-    for (const [actorId, locationId] of Object.entries(authoredScenario.actor_locations)) {
+    for (const [actorId, locationId] of Object.entries(authoredScenario.actor_locations ?? {})) {
       if (!characters.some((character) => character.id === actorId)) issues.push(`scenarios.${scenarioId}.actor_locations.${actorId}: unknown character`);
       if (!locationIds.has(locationId)) issues.push(`scenarios.${scenarioId}.actor_locations.${actorId}: unknown location '${locationId}'`);
     }
@@ -325,6 +599,21 @@ export function buildWorkspaceProject(
     }
   }
 
+  const scenarioEvents: Record<string, unknown> = {};
+  const scenarioEventIds: string[] = [];
+  for (const event of authoredScenario?.event_definitions ?? []) {
+    scenarioEventIds.push(event.id);
+    const trigger = {
+      all_of: mapPredicates(event.trigger.all_of, qualityIds, issues, `events.${event.id}.trigger.all_of`),
+      any_of: mapPredicates(event.trigger.any_of, qualityIds, issues, `events.${event.id}.trigger.any_of`),
+    };
+    scenarioEvents[event.id] = {
+      id: event.id, title: event.title, description: event.description, event_type: event.event_type, trigger,
+      effects: mapEffects(event.effects ?? {}, qualityIds, issues, `events.${event.id}.effects`),
+      delay_turns: event.delay_turns ?? 0, repeatable: event.repeatable ?? false,
+    };
+  }
+
   const project: RustProjectBundle = {
     schema_version: 1,
     id: resolvedProjectId,
@@ -333,20 +622,19 @@ export function buildWorkspaceProject(
     qualities,
     locations: locationDefinitions,
     characters: characterDefinitions,
-    events: {},
+    events: scenarioEvents,
     storylets: storyletDefinitions,
     npc_behaviors: npcBehaviorDefinitions,
-    scenarios: startLocation ? {
+    scenarios: resolvedStartLocation ? {
       [scenarioId]: {
         id: scenarioId,
         name: authoredScenario?.name ?? "Playtest",
-        player_start_location: startLocation,
+        player_start_location: resolvedStartLocation,
         initial_qualities: authoredScenario?.initial_qualities ?? {},
-        actor_locations: authoredScenario?.actor_locations ?? Object.fromEntries(characters
-          .filter((character) => locationIds.has(character.current_location))
-          .map((character) => [character.id, character.current_location])),
+        actor_locations: resolvedActorLocations,
         storylet_ids: authoredScenario?.storylet_ids ?? Object.keys(storyletDefinitions),
-        seed: authoredScenario?.seed ?? 1,
+        seed: scenarioSeed,
+        event_ids: scenarioEventIds,
       },
     } : {},
   };

@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Badger · Codebase Map</title>
+<style>
+:root {
+  color-scheme:dark;
+  --font-ui: "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-heading: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-code: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --bg:#101413; --panel:#191e1c; --text:#edf2ee; --muted:#a6b3ac;
+  --line:#303a35; --accent:#83d69a; --soft:#23372b; --input:#141916;
+  --map:#111714; --tile-border:#111714; --tile-light:32%;
+  --direct:#35483f; --direct-stripe:#3b4e45; --selection:#83e497;
+  --button:#64c879; --button-text:#0c2011; --button-hover:#7bda8e;
+  --language-light:64%;
+  --shadow:#00000040; --tooltip:#222c25;
+}
+:root[data-theme="light"] {
+  color-scheme:light;
+  --bg:#f5f6f8; --panel:#fff; --text:#202b3b; --muted:#687587;
+  --line:#e3e7ed; --accent:#226955; --soft:#edf5f1; --input:#f8f9fb;
+  --map:#edf0f3; --tile-border:#fff; --tile-light:37%;
+  --direct:#52675b; --direct-stripe:#586d61; --selection:#b8ffcc;
+  --button:#286b57; --button-text:#fff; --button-hover:#1e5545;
+  --language-light:43%;
+  --shadow:#202b3b18; --tooltip:#202b3b;
+}
+* { box-sizing:border-box; }
+html,body { margin:0; height:100%; }
+body { background:var(--bg); color:var(--text); font:14px/1.5 var(--font-ui); -webkit-font-smoothing:antialiased; }
+button,input,select { font:inherit; }
+h1,h2,.brand { font-family:var(--font-heading); font-weight:650; }
+::selection { background:var(--accent); color:var(--bg); }
+#search::placeholder { color:var(--muted); opacity:1; }
+.folder-path,.file-name,.child-name,.crumb { font-family:var(--font-code); }
+.summary strong,.tile-lines,#repository-stats { font-variant-numeric:tabular-nums; }
+.control,.focus-button,.crumb,.search-result,.child-row { transition:background-color 120ms ease,color 120ms ease,border-color 120ms ease; }
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none !important; } }
+button { cursor:pointer; }
+button:disabled { opacity:.4; cursor:default; }
+button:focus-visible,input:focus-visible,select:focus-visible,.tile:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+header { padding:18px 28px; display:flex; align-items:center; justify-content:space-between; gap:24px; background:var(--panel); border-bottom:1px solid var(--line); }
+.brand { color:var(--accent); font-size:20px; font-weight:700; letter-spacing:-.65px; text-decoration:none; }
+.brand:hover { text-decoration:underline; text-underline-offset:4px; }
+.brand:focus-visible { outline:2px solid var(--accent); outline-offset:4px; border-radius:2px; }
+.brand-line { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; }
+.feature-name { padding-left:16px; border-left:1px solid var(--line); font-size:14px; font-weight:550; color:var(--text); }
+.page-footer { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px 20px; padding:16px 2px 0; font-size:11px; color:var(--muted); }
+.footer-brand { color:var(--accent); }
+.page-footer a { color:var(--accent); text-decoration:none; }
+.page-footer a:hover { text-decoration:underline; text-underline-offset:3px; }
+.page-footer a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.footer-links { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; }
+.subtitle { color:var(--muted); font-size:12px; margin-top:4px; }
+.header-actions { display:flex; align-items:center; gap:12px; }
+#theme-toggle { padding:9px 12px; }
+.search { position:relative; width:min(360px,40vw); }
+#search { width:100%; border:1px solid var(--line); border-radius:9px; padding:10px 14px; background:var(--input); color:var(--text); }
+#search-results { position:absolute; top:48px; left:0; right:0; z-index:200; background:var(--panel); border:1px solid var(--line); border-radius:10px; box-shadow:0 12px 36px var(--shadow); max-height:320px; overflow:auto; }
+#search-results:empty { display:none; }
+.search-result { color:var(--text); display:block; width:100%; text-align:left; padding:10px 14px; border:0; background:var(--panel); overflow-wrap:anywhere; }
+.search-result:hover { background:var(--soft); }
+.search-result small { display:block; color:var(--muted); }
+.workspace { padding:22px 28px 26px; }
+.toolbar { display:flex; align-items:center; gap:8px; padding:12px 14px; background:var(--panel); border:1px solid var(--line); border-radius:12px 12px 0 0; }
+.control { font-size:12px; font-weight:550; border:1px solid var(--line); border-radius:7px; padding:6px 10px; color:var(--text); background:var(--panel); white-space:nowrap; }
+.control:hover:enabled { background:var(--soft); }
+#crumbs { display:flex; align-items:center; gap:4px; flex:1; min-width:0; overflow:auto; }
+.crumb { font-size:12px; border:0; border-radius:5px; padding:5px 7px; color:var(--muted); background:transparent; white-space:nowrap; }
+.crumb:hover,.crumb:last-child { color:var(--accent); background:var(--soft); }
+.sep { color:var(--muted); }
+#repository-stats { flex:0 1 auto; min-width:0; max-width:100%; color:var(--muted); white-space:normal; overflow-wrap:anywhere; margin-left:12px; padding-left:20px; border-left:1px solid var(--line); text-align:right; }
+.repository-loc { display:block; color:var(--accent); line-height:1.15; }
+.repository-loc strong { font-family:var(--font-heading); font-size:28px; font-weight:700; letter-spacing:-.8px; }
+.repository-loc .loc-unit { font-size:12px; font-weight:650; letter-spacing:.06em; margin-left:5px; }
+.repository-counts { display:block; margin-top:4px; font-size:11px; }
+.depth-label { color:var(--muted); font-size:12px; white-space:nowrap; }
+main { display:grid; grid-template-columns:minmax(0,1fr) 310px; background:var(--panel); border:1px solid var(--line); border-top:0; border-radius:0 0 12px 12px; overflow:hidden; }
+#map-wrap { min-width:0; padding:14px; display:flex; flex-direction:column; }
+#map { position:relative; width:100%; height:max(440px,calc(100vh - 330px)); overflow:hidden; background:var(--map); border-radius:8px; }
+.leaf-view { height:100%; display:grid; justify-items:center; align-items:safe center; padding:28px; background:linear-gradient(145deg,var(--soft),var(--map)); overflow:auto; }
+.file-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; padding:7px 0; border-bottom:1px solid var(--line); font-size:12px; }
+.file-name { font-size:11px; line-height:1.7; overflow-wrap:anywhere; }
+.file-count { color:var(--muted); font-size:11px; margin:10px 0; }
+.file-list .control { margin:4px 0; }
+.leaf-card { width:min(100%,440px); padding:28px; border:1px solid var(--line); border-radius:14px; background:var(--panel); box-shadow:0 8px 30px var(--shadow); }
+.leaf-card h2 { margin:8px 0; font-size:28px; letter-spacing:-.7px; overflow-wrap:anywhere; }
+.leaf-card p { color:var(--muted); font-size:13px; }
+.leaf-card .control { margin-top:8px; }
+.map-caption { display:flex; flex-wrap:wrap; gap:8px 20px; color:var(--muted); font-size:11px; padding:12px 2px 0; }
+.map-caption[hidden] { display:none; }
+.map-caption span:first-child { margin-right:auto; }
+.tile { position:absolute; overflow:hidden; border:2px solid var(--tile-border); border-radius:4px; cursor:pointer; color:white; background:hsl(var(--tile-hue) 24% calc(var(--tile-light) - var(--tile-depth))); transition:filter 100ms ease; }
+.tile:hover { filter:brightness(1.12); }
+.tile:focus-visible { outline:3px solid var(--selection); outline-offset:-3px; }
+.tile.depth-0 { border-radius:6px; }
+.tile.parent > .tile-label { background:#00000016; }
+.tile.selected { outline:3px solid var(--selection); outline-offset:-3px; }
+.tile.direct { cursor:pointer; background:repeating-linear-gradient(135deg,var(--direct),var(--direct) 8px,var(--direct-stripe) 8px,var(--direct-stripe) 9px) !important; }
+.tile-label { position:absolute; top:0; left:0; right:0; padding:6px 9px; pointer-events:none; overflow:hidden; }
+.tile-name { display:block; font-family:var(--font-code); font-size:13px; line-height:18px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tile-languages { display:flex; align-items:center; gap:4px; margin-top:3px; overflow:hidden; white-space:nowrap; }
+.language-chip { display:block; min-width:0; padding:1px 5px; border-radius:4px; font-size:10px; line-height:16px; color:#f5f7f6; background:transparent; border:1px solid hsl(var(--language-hue) var(--language-saturation) 72% / .45); overflow:hidden; text-overflow:ellipsis; }
+.language-more { flex-shrink:0; font-size:10px; line-height:18px; color:#ffffffcf; }
+.tile-lines { display:block; color:#ffffffdf; font-size:11px; line-height:15px; }
+.tile.spacious > .tile-label { padding:18px 20px; }
+.tile.spacious .tile-name { font-size:18px; line-height:26px; }
+.tile.spacious .tile-lines { margin-top:10px; font-size:14px; line-height:22px; white-space:normal; }
+.tile-share { display:block; margin-top:3px; color:#ffffffdf; font-size:13px; line-height:20px; }
+.tile.spacious .tile-languages { margin-top:12px; }
+.tile.spacious .language-chip { font-size:12px; }
+.tile.has-explore .tile-name { padding-right:72px; }
+.tile-explore { position:absolute; z-index:2; padding:3px 5px; border:0; border-radius:3px; background:transparent; color:white; font:inherit; font-size:11px; line-height:18px; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
+.tile-explore:hover { background:#ffffff18; }
+.tile-explore:focus-visible { outline:2px solid var(--selection); outline-offset:1px; }
+.tile.tiny .tile-label { display:none; }
+#details { min-width:0; padding:22px; border-left:1px solid var(--line); max-height:max(490px,calc(100vh - 290px)); overflow:auto; }
+.eyebrow { color:var(--muted); font-size:10px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; }
+#details h2 { margin:7px 0 4px; font-size:22px; letter-spacing:-.6px; overflow-wrap:anywhere; }
+.folder-path { font-size:11px; color:var(--muted); overflow-wrap:anywhere; margin-bottom:18px; }
+.summary { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px; }
+.summary div { border:0; border-radius:6px; padding:12px 0; background:transparent; color:var(--muted); font-size:11px; }
+.summary strong { display:block; color:var(--text); font-size:24px; font-weight:600; letter-spacing:-.7px; }
+.share { font-size:12px; color:var(--muted); margin:0 0 16px; }
+.focus-button { width:100%; border:0; border-radius:8px; padding:10px; background:var(--button); color:var(--button-text); font-weight:600; }
+.focus-button:hover:enabled { background:var(--button-hover); }
+.section-title { margin:26px 0 10px; font-size:12px; font-weight:700; }
+.stat-row { padding:8px 0; }
+.stat-heading { display:flex; justify-content:space-between; gap:10px; font-size:12px; }
+.stat-value,.child-value { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.bar { height:4px; background:var(--map); border-radius:4px; margin-top:7px; overflow:hidden; }
+.bar span { display:block; height:100%; background:hsl(var(--language-hue, 160) var(--language-saturation, 0%) var(--language-light)); border-radius:4px; }
+.child-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; width:100%; text-align:left; padding:10px 0; border:0; border-top:1px solid var(--line); background:transparent; color:var(--text); font-size:12px; }
+.child-row:hover { color:var(--accent); background:var(--soft); }
+.child-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.substat { display:block; color:var(--muted); font-size:11px; font-weight:400; }
+#tooltip { position:fixed; z-index:100; display:none; max-width:320px; padding:10px 13px; border-radius:8px; color:white; background:var(--tooltip); box-shadow:0 5px 20px var(--shadow); pointer-events:none; font-size:12px; overflow-wrap:anywhere; }
+.folder-heading { display:flex; align-items:center; gap:8px; }
+.folder-heading h2 { min-width:0; }
+.copy-path { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:30px; height:30px; padding:6px; border:0; background:transparent; color:var(--muted); }
+.copy-path:hover { color:var(--accent); }
+.copy-status:empty { display:none; }
+.badger-help { margin-top:20px; border-top:1px solid var(--line); padding-top:16px; font-size:12px; }
+.badger-help summary { cursor:pointer; font-weight:600; }
+.badger-help p,.badger-help ol { color:var(--muted); }
+.badger-help ol { padding-left:20px; }
+.badger-help li { margin:6px 0; }
+.badger-help a { color:var(--accent); }
+.copy-fragment { margin:12px 0; }
+.copy-fragment label { display:block; margin-bottom:6px; font-weight:600; }
+.copy-fragment textarea,.copy-fallback { display:block; width:100%; resize:vertical; border:1px solid var(--line); border-radius:6px; padding:9px; background:var(--input); color:var(--text); font:12px/1.6 var(--font-code); margin-bottom:6px; }
+.copy-status { color:var(--muted); font-size:11px; min-height:1.5em; margin-top:6px; }
+summary:focus-visible,textarea:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+.empty { padding:12px; color:var(--muted); font-size:12px; }
+@media(max-width:1100px) { .toolbar { flex-wrap:wrap; } #repository-stats { order:3; flex-basis:100%; margin:4px 0 0; padding:12px 0 0; border-left:0; border-top:1px solid var(--line); text-align:left; } }
+@media(max-width:900px) { header { padding:16px; } .workspace { padding:16px; } main { grid-template-columns:minmax(0,1fr) 270px; } .depth-label { display:none; } }
+@media(max-width:680px) { header { align-items:stretch; flex-direction:column; gap:12px; } .header-actions { gap:8px; } .search { width:auto; flex:1; min-width:0; } .toolbar { flex-wrap:wrap; } #crumbs { order:2; flex-basis:100%; } main { grid-template-columns:1fr; } #map { height:55vh; min-height:320px; } #details { border-left:0; border-top:1px solid var(--line); max-height:none; } }
+</style>
+</head>
+<body>
+<header>
+  <div><div class="brand-line"><a class="brand" href="https://pvrlabs.xyz/aibadger" target="_blank" rel="noopener noreferrer">AI Badger</a><div class="feature-name">Codebase Map</div></div><div class="subtitle">A closer look at where your code lives.</div></div>
+  <div class="header-actions"><div class="search"><input id="search" type="search" placeholder="Find a folder…" aria-label="Find a folder" autocomplete="off" aria-controls="search-results"><div id="search-results" aria-label="Matching folders"></div></div><button id="theme-toggle" class="control" type="button" aria-label="Switch to light mode">☀ Light mode</button></div>
+</header>
+<div class="workspace">
+  <div class="toolbar">
+    <button id="up" class="control" title="Go to parent folder">↑ Up</button>
+    <button id="reset" class="control" title="Return to the repository root">Repository</button>
+    <nav id="crumbs" aria-label="Focused directory"></nav>
+    <label class="depth-label" for="depth">Visible levels</label><select id="depth" class="control" aria-label="Visible levels"><option value="1">One level</option><option value="2" selected>Two levels</option><option value="4">Four levels</option></select>
+    <div id="repository-stats" aria-label="Repository totals"></div>
+  </div>
+  <main>
+    <section id="map-wrap"><div id="map" aria-label="Directory treemap"></div><div class="map-caption"><span id="area-caption">Area = nonblank lines, including comments · Color = folder group</span><span>Click to inspect · Double-click to explore folder</span></div></section>
+    <aside id="details" aria-label="Folder details"></aside>
+  </main>
+  <footer class="page-footer"><span class="footer-brand"><a href="https://pvrlabs.xyz/aibadger" target="_blank" rel="noopener noreferrer">AI Badger</a> · Codebase Map</span><span class="footer-links"><span>Generated locally · Nothing uploaded</span><a href="https://github.com/PVRLabs/aibadger" target="_blank" rel="noopener noreferrer">Star us on GitHub ↗</a></span></footer>
+</div>
+<div id="tooltip"></div>
+<script id="map-data" type="application/json">{"name":"DecisionNarrative","path":".","lines":135040,"files":285,"directLines":125,"directFiles":5,"languages":{"C":{"lines":13,"files":1},"C#":{"lines":90,"files":1},"C++":{"lines":60,"files":1},"C/C++":{"lines":40,"files":1},"CSS":{"lines":394,"files":1},"HTML":{"lines":356,"files":2},"JavaScript":{"lines":33240,"files":1},"Markdown":{"lines":19257,"files":167},"Python":{"lines":41331,"files":15},"Rust":{"lines":29939,"files":43},"Shell":{"lines":14,"files":1},"TypeScript":{"lines":5846,"files":38},"Vue":{"lines":4460,"files":13}},"directLanguages":{"HTML":{"lines":12,"files":1},"Markdown":{"lines":76,"files":2},"Shell":{"lines":14,"files":1},"TypeScript":{"lines":23,"files":1}},"fileList":[{"name":"README.md","lines":57},{"name":"vite.config.ts","lines":23},{"name":"AGENTS.md","lines":19},{"name":"autoresearch.sh","lines":14},{"name":"index.html","lines":12}],"children":[{"name":".agents","path":".agents","lines":44693,"files":133,"directLines":0,"directFiles":0,"languages":{"JavaScript":{"lines":33240,"files":1},"Markdown":{"lines":11453,"files":132}},"directLanguages":{},"fileList":[],"children":[{"name":"skills","path":".agents/skills","lines":44693,"files":133,"directLines":0,"directFiles":0,"languages":{"JavaScript":{"lines":33240,"files":1},"Markdown":{"lines":11453,"files":132}},"directLanguages":{},"fileList":[],"children":[{"name":"story-maintenance","path":".agents/skills/story-maintenance","lines":33700,"files":7,"directLines":86,"directFiles":1,"languages":{"JavaScript":{"lines":33240,"files":1},"Markdown":{"lines":460,"files":6}},"directLanguages":{"Markdown":{"lines":86,"files":1}},"fileList":[{"name":"SKILL.md","lines":86}],"children":[{"name":"scripts","path":".agents/skills/story-maintenance/scripts","lines":33240,"files":1,"directLines":33240,"directFiles":1,"languages":{"JavaScript":{"lines":33240,"files":1}},"directLanguages":{"JavaScript":{"lines":33240,"files":1}},"fileList":[{"name":"story.js","lines":33240}],"children":[]},{"name":"references","path":".agents/skills/story-maintenance/references","lines":374,"files":5,"directLines":374,"directFiles":5,"languages":{"Markdown":{"lines":374,"files":5}},"directLanguages":{"Markdown":{"lines":374,"files":5}},"fileList":[{"name":"continuity-checks.md","lines":168},{"name":"commands.md","lines":90},{"name":"editing-commands.md","lines":43},{"name":"builds.md","lines":37},{"name":"conventions.md","lines":36}],"children":[]}]},{"name":"genre-craft","path":".agents/skills/genre-craft","lines":982,"files":11,"directLines":134,"directFiles":1,"languages":{"Markdown":{"lines":982,"files":11}},"directLanguages":{"Markdown":{"lines":134,"files":1}},"fileList":[{"name":"SKILL.md","lines":134}],"children":[{"name":"references","path":".agents/skills/genre-craft/references","lines":848,"files":10,"directLines":848,"directFiles":10,"languages":{"Markdown":{"lines":848,"files":10}},"directLanguages":{"Markdown":{"lines":848,"files":10}},"fileList":[{"name":"comedy.md","lines":196},{"name":"mystery-fair-play.md","lines":119},{"name":"serial-episodic.md","lines":92},{"name":"fantasy.md","lines":88},{"name":"historical.md","lines":75},{"name":"romance-beats.md","lines":59},{"name":"scifi-pipeline.md","lines":59},{"name":"thriller.md","lines":58},{"name":"horror.md","lines":51},{"name":"mg-ya.md","lines":51}],"children":[]}]},{"name":"adaptation","path":".agents/skills/adaptation","lines":973,"files":7,"directLines":218,"directFiles":1,"languages":{"Markdown":{"lines":973,"files":7}},"directLanguages":{"Markdown":{"lines":218,"files":1}},"fileList":[{"name":"SKILL.md","lines":218}],"children":[{"name":"references","path":".agents/skills/adaptation/references","lines":755,"files":6,"directLines":755,"directFiles":6,"languages":{"Markdown":{"lines":755,"files":6}},"directLanguages":{"Markdown":{"lines":755,"files":6}},"fileList":[{"name":"interactive-fiction.md","lines":163},{"name":"audiobook.md","lines":143},{"name":"picture-book.md","lines":133},{"name":"translation.md","lines":121},{"name":"fountain.md","lines":109},{"name":"comics-script.md","lines":86}],"children":[]}]},{"name":"publishing","path":".agents/skills/publishing","lines":953,"files":7,"directLines":264,"directFiles":1,"languages":{"Markdown":{"lines":953,"files":7}},"directLanguages":{"Markdown":{"lines":264,"files":1}},"fileList":[{"name":"SKILL.md","lines":264}],"children":[{"name":"references","path":".agents/skills/publishing/references","lines":689,"files":6,"directLines":689,"directFiles":6,"languages":{"Markdown":{"lines":689,"files":6}},"directLanguages":{"Markdown":{"lines":689,"files":6}},"fileList":[{"name":"launch-plan.md","lines":168},{"name":"metadata-checklist.md","lines":149},{"name":"copyright-page.md","lines":103},{"name":"rights-one-sheet.md","lines":92},{"name":"print-interior.md","lines":91},{"name":"contract-red-flags.md","lines":86}],"children":[]}]},{"name":"submission","path":".agents/skills/submission","lines":670,"files":7,"directLines":263,"directFiles":1,"languages":{"Markdown":{"lines":670,"files":7}},"directLanguages":{"Markdown":{"lines":263,"files":1}},"fileList":[{"name":"SKILL.md","lines":263}],"children":[{"name":"references","path":".agents/skills/submission/references","lines":407,"files":6,"directLines":407,"directFiles":6,"languages":{"Markdown":{"lines":407,"files":6}},"directLanguages":{"Markdown":{"lines":407,"files":6}},"fileList":[{"name":"short-fiction-markets.md","lines":160},{"name":"query-letter.md","lines":57},{"name":"tracker-template.md","lines":53},{"name":"word-count-norms.md","lines":51},{"name":"blurb.md","lines":47},{"name":"comp-titles.md","lines":39}],"children":[]}]},{"name":"worldbuilding","path":".agents/skills/worldbuilding","lines":604,"files":10,"directLines":132,"directFiles":1,"languages":{"Markdown":{"lines":604,"files":10}},"directLanguages":{"Markdown":{"lines":132,"files":1}},"fileList":[{"name":"SKILL.md","lines":132}],"children":[{"name":"references","path":".agents/skills/worldbuilding/references","lines":472,"files":9,"directLines":472,"directFiles":9,"languages":{"Markdown":{"lines":472,"files":9}},"directLanguages":{"Markdown":{"lines":472,"files":9}},"fileList":[{"name":"calendars.md","lines":120},{"name":"maps-and-routes.md","lines":75},{"name":"naming-languages.md","lines":63},{"name":"world-element-types.md","lines":60},{"name":"economy-logistics.md","lines":56},{"name":"location-template.md","lines":35},{"name":"faction-template.md","lines":23},{"name":"artifact-template.md","lines":21},{"name":"system-template.md","lines":19}],"children":[]}]},{"name":"scene-craft","path":".agents/skills/scene-craft","lines":602,"files":9,"directLines":116,"directFiles":1,"languages":{"Markdown":{"lines":602,"files":9}},"directLanguages":{"Markdown":{"lines":116,"files":1}},"fileList":[{"name":"SKILL.md","lines":116}],"children":[{"name":"references","path":".agents/skills/scene-craft/references","lines":486,"files":8,"directLines":486,"directFiles":8,"languages":{"Markdown":{"lines":486,"files":8}},"directLanguages":{"Markdown":{"lines":486,"files":8}},"fileList":[{"name":"flashbacks-time.md","lines":76},{"name":"dialogue-subtext.md","lines":68},{"name":"deep-pov.md","lines":65},{"name":"scene-sequel.md","lines":62},{"name":"try-fail.md","lines":61},{"name":"exposition.md","lines":54},{"name":"openings.md","lines":51},{"name":"scene-cards.md","lines":49}],"children":[]}]},{"name":"line-editing","path":".agents/skills/line-editing","lines":542,"files":6,"directLines":194,"directFiles":1,"languages":{"Markdown":{"lines":542,"files":6}},"directLanguages":{"Markdown":{"lines":194,"files":1}},"fileList":[{"name":"SKILL.md","lines":194}],"children":[{"name":"references","path":".agents/skills/line-editing/references","lines":348,"files":5,"directLines":348,"directFiles":5,"languages":{"Markdown":{"lines":348,"files":5}},"directLanguages":{"Markdown":{"lines":348,"files":5}},"fileList":[{"name":"line-edit-checklist.md","lines":85},{"name":"copyedit-checklist.md","lines":81},{"name":"language-conventions.md","lines":71},{"name":"edit-note-format.md","lines":56},{"name":"read-aloud-guide.md","lines":55}],"children":[]}]},{"name":"editorial-review","path":".agents/skills/editorial-review","lines":539,"files":5,"directLines":208,"directFiles":1,"languages":{"Markdown":{"lines":539,"files":5}},"directLanguages":{"Markdown":{"lines":208,"files":1}},"fileList":[{"name":"SKILL.md","lines":208}],"children":[{"name":"references","path":".agents/skills/editorial-review/references","lines":331,"files":4,"directLines":331,"directFiles":4,"languages":{"Markdown":{"lines":331,"files":4}},"directLanguages":{"Markdown":{"lines":331,"files":4}},"fileList":[{"name":"real-people-and-permissions.md","lines":94},{"name":"editor-rounds.md","lines":86},{"name":"collaboration.md","lines":78},{"name":"sensitivity-reader-brief.md","lines":73}],"children":[]}]},{"name":"verse-craft","path":".agents/skills/verse-craft","lines":443,"files":4,"directLines":161,"directFiles":1,"languages":{"Markdown":{"lines":443,"files":4}},"directLanguages":{"Markdown":{"lines":161,"files":1}},"fileList":[{"name":"SKILL.md","lines":161}],"children":[{"name":"references","path":".agents/skills/verse-craft/references","lines":282,"files":3,"directLines":282,"directFiles":3,"languages":{"Markdown":{"lines":282,"files":3}},"directLanguages":{"Markdown":{"lines":282,"files":3}},"fileList":[{"name":"forms.md","lines":106},{"name":"meter-and-scansion.md","lines":106},{"name":"rhyme.md","lines":70}],"children":[]}]},{"name":"premise-workshop","path":".agents/skills/premise-workshop","lines":404,"files":5,"directLines":171,"directFiles":1,"languages":{"Markdown":{"lines":404,"files":5}},"directLanguages":{"Markdown":{"lines":171,"files":1}},"fileList":[{"name":"SKILL.md","lines":171}],"children":[{"name":"references","path":".agents/skills/premise-workshop/references","lines":233,"files":4,"directLines":233,"directFiles":4,"languages":{"Markdown":{"lines":233,"files":4}},"directLanguages":{"Markdown":{"lines":233,"files":4}},"fileList":[{"name":"title-and-comps.md","lines":71},{"name":"form-choice.md","lines":57},{"name":"what-if-generation.md","lines":55},{"name":"premise-tests.md","lines":50}],"children":[]}]},{"name":"interactive-fiction","path":".agents/skills/interactive-fiction","lines":383,"files":3,"directLines":209,"directFiles":1,"languages":{"Markdown":{"lines":383,"files":3}},"directLanguages":{"Markdown":{"lines":209,"files":1}},"fileList":[{"name":"SKILL.md","lines":209}],"children":[{"name":"references","path":".agents/skills/interactive-fiction/references","lines":174,"files":2,"directLines":174,"directFiles":2,"languages":{"Markdown":{"lines":174,"files":2}},"directLanguages":{"Markdown":{"lines":174,"files":2}},"fileList":[{"name":"path-continuity.md","lines":107},{"name":"choice-graph.md","lines":67}],"children":[]}]},{"name":"theme-craft","path":".agents/skills/theme-craft","lines":374,"files":6,"directLines":97,"directFiles":1,"languages":{"Markdown":{"lines":374,"files":6}},"directLanguages":{"Markdown":{"lines":97,"files":1}},"fileList":[{"name":"SKILL.md","lines":97}],"children":[{"name":"references","path":".agents/skills/theme-craft/references","lines":277,"files":5,"directLines":277,"directFiles":5,"languages":{"Markdown":{"lines":277,"files":5}},"directLanguages":{"Markdown":{"lines":277,"files":5}},"fileList":[{"name":"lie-truth.md","lines":66},{"name":"controlling-idea.md","lines":56},{"name":"theme-audit.md","lines":55},{"name":"antagonist-design.md","lines":54},{"name":"motif-symbolism.md","lines":46}],"children":[]}]},{"name":"feedback-triage","path":".agents/skills/feedback-triage","lines":369,"files":3,"directLines":232,"directFiles":1,"languages":{"Markdown":{"lines":369,"files":3}},"directLanguages":{"Markdown":{"lines":232,"files":1}},"fileList":[{"name":"SKILL.md","lines":232}],"children":[{"name":"references","path":".agents/skills/feedback-triage/references","lines":137,"files":2,"directLines":137,"directFiles":2,"languages":{"Markdown":{"lines":137,"files":2}},"directLanguages":{"Markdown":{"lines":137,"files":2}},"fileList":[{"name":"synthesis-template.md","lines":76},{"name":"feedback-template.md","lines":61}],"children":[]}]},{"name":"plot-structure","path":".agents/skills/plot-structure","lines":369,"files":9,"directLines":106,"directFiles":1,"languages":{"Markdown":{"lines":369,"files":9}},"directLanguages":{"Markdown":{"lines":106,"files":1}},"fileList":[{"name":"SKILL.md","lines":106}],"children":[{"name":"references","path":".agents/skills/plot-structure/references","lines":263,"files":8,"directLines":263,"directFiles":8,"languages":{"Markdown":{"lines":263,"files":8}},"directLanguages":{"Markdown":{"lines":263,"files":8}},"fileList":[{"name":"structure-models.md","lines":97},{"name":"snowflake.md","lines":38},{"name":"arc-template.md","lines":36},{"name":"question-template.md","lines":22},{"name":"mice-quotient.md","lines":20},{"name":"promise-template.md","lines":20},{"name":"outlining-ladder.md","lines":18},{"name":"short-story-form.md","lines":12}],"children":[]}]},{"name":"discovery-drafting","path":".agents/skills/discovery-drafting","lines":361,"files":5,"directLines":104,"directFiles":1,"languages":{"Markdown":{"lines":361,"files":5}},"directLanguages":{"Markdown":{"lines":104,"files":1}},"fileList":[{"name":"SKILL.md","lines":104}],"children":[{"name":"references","path":".agents/skills/discovery-drafting/references","lines":257,"files":4,"directLines":257,"directFiles":4,"languages":{"Markdown":{"lines":257,"files":4}},"directLanguages":{"Markdown":{"lines":257,"files":4}},"fileList":[{"name":"reconcile-loop.md","lines":77},{"name":"drafting-cadence.md","lines":67},{"name":"dead-ends.md","lines":61},{"name":"story-kernel.md","lines":52}],"children":[]}]},{"name":"reader-panel","path":".agents/skills/reader-panel","lines":361,"files":6,"directLines":199,"directFiles":1,"languages":{"Markdown":{"lines":361,"files":6}},"directLanguages":{"Markdown":{"lines":199,"files":1}},"fileList":[{"name":"SKILL.md","lines":199}],"children":[{"name":"references","path":".agents/skills/reader-panel/references","lines":162,"files":5,"directLines":162,"directFiles":5,"languages":{"Markdown":{"lines":162,"files":5}},"directLanguages":{"Markdown":{"lines":162,"files":5}},"fileList":[{"name":"sensitivity-reader.md","lines":36},{"name":"genre-reader.md","lines":35},{"name":"continuity-reader.md","lines":34},{"name":"line-editor.md","lines":34},{"name":"first-page-reader.md","lines":23}],"children":[]}]},{"name":"voice-style","path":".agents/skills/voice-style","lines":358,"files":3,"directLines":176,"directFiles":1,"languages":{"Markdown":{"lines":358,"files":3}},"directLanguages":{"Markdown":{"lines":176,"files":1}},"fileList":[{"name":"SKILL.md","lines":176}],"children":[{"name":"references","path":".agents/skills/voice-style/references","lines":182,"files":2,"directLines":182,"directFiles":2,"languages":{"Markdown":{"lines":182,"files":2}},"directLanguages":{"Markdown":{"lines":182,"files":2}},"fileList":[{"name":"prose-checks.md","lines":92},{"name":"style-sheet-guide.md","lines":90}],"children":[]}]},{"name":"revision-continuity","path":".agents/skills/revision-continuity","lines":357,"files":2,"directLines":141,"directFiles":1,"languages":{"Markdown":{"lines":357,"files":2}},"directLanguages":{"Markdown":{"lines":141,"files":1}},"fileList":[{"name":"SKILL.md","lines":141}],"children":[{"name":"references","path":".agents/skills/revision-continuity/references","lines":216,"files":1,"directLines":216,"directFiles":1,"languages":{"Markdown":{"lines":216,"files":1}},"directLanguages":{"Markdown":{"lines":216,"files":1}},"fileList":[{"name":"pass-checklists.md","lines":216}],"children":[]}]},{"name":"research","path":".agents/skills/research","lines":323,"files":3,"directLines":149,"directFiles":1,"languages":{"Markdown":{"lines":323,"files":3}},"directLanguages":{"Markdown":{"lines":149,"files":1}},"fileList":[{"name":"SKILL.md","lines":149}],"children":[{"name":"references","path":".agents/skills/research/references","lines":174,"files":2,"directLines":174,"directFiles":2,"languages":{"Markdown":{"lines":174,"files":2}},"directLanguages":{"Markdown":{"lines":174,"files":2}},"fileList":[{"name":"research-practice.md","lines":100},{"name":"interviews-and-site-visits.md","lines":74}],"children":[]}]},{"name":"character-management","path":".agents/skills/character-management","lines":279,"files":5,"directLines":129,"directFiles":1,"languages":{"Markdown":{"lines":279,"files":5}},"directLanguages":{"Markdown":{"lines":129,"files":1}},"fileList":[{"name":"SKILL.md","lines":129}],"children":[{"name":"references","path":".agents/skills/character-management/references","lines":150,"files":4,"directLines":150,"directFiles":4,"languages":{"Markdown":{"lines":150,"files":4}},"directLanguages":{"Markdown":{"lines":150,"files":4}},"fileList":[{"name":"character-template.md","lines":65},{"name":"relationship-types.md","lines":62},{"name":"supporting-characters.md","lines":13},{"name":"ensemble-cast.md","lines":10}],"children":[]}]},{"name":"chapter-writing","path":".agents/skills/chapter-writing","lines":252,"files":4,"directLines":122,"directFiles":1,"languages":{"Markdown":{"lines":252,"files":4}},"directLanguages":{"Markdown":{"lines":122,"files":1}},"fileList":[{"name":"SKILL.md","lines":122}],"children":[{"name":"references","path":".agents/skills/chapter-writing/references","lines":130,"files":3,"directLines":130,"directFiles":3,"languages":{"Markdown":{"lines":130,"files":3}},"directLanguages":{"Markdown":{"lines":130,"files":3}},"fileList":[{"name":"writing-guidelines.md","lines":49},{"name":"scene-template.md","lines":44},{"name":"chapter-template.md","lines":37}],"children":[]}]},{"name":"series-continuity","path":".agents/skills/series-continuity","lines":242,"files":2,"directLines":105,"directFiles":1,"languages":{"Markdown":{"lines":242,"files":2}},"directLanguages":{"Markdown":{"lines":105,"files":1}},"fileList":[{"name":"SKILL.md","lines":105}],"children":[{"name":"references","path":".agents/skills/series-continuity/references","lines":137,"files":1,"directLines":137,"directFiles":1,"languages":{"Markdown":{"lines":137,"files":1}},"directLanguages":{"Markdown":{"lines":137,"files":1}},"fileList":[{"name":"series-bible.md","lines":137}],"children":[]}]},{"name":"story-init","path":".agents/skills/story-init","lines":233,"files":3,"directLines":62,"directFiles":1,"languages":{"Markdown":{"lines":233,"files":3}},"directLanguages":{"Markdown":{"lines":62,"files":1}},"fileList":[{"name":"SKILL.md","lines":62}],"children":[{"name":"references","path":".agents/skills/story-init/references","lines":171,"files":2,"directLines":171,"directFiles":2,"languages":{"Markdown":{"lines":171,"files":2}},"directLanguages":{"Markdown":{"lines":171,"files":2}},"fileList":[{"name":"manual-setup.md","lines":156},{"name":"title-logline.md","lines":15}],"children":[]}]},{"name":"storylet-content-deck","path":".agents/skills/storylet-content-deck","lines":20,"files":1,"directLines":20,"directFiles":1,"languages":{"Markdown":{"lines":20,"files":1}},"directLanguages":{"Markdown":{"lines":20,"files":1}},"fileList":[{"name":"SKILL.md","lines":20}],"children":[]}]}]},{"name":"unsloth_compiled_cache","path":"unsloth_compiled_cache","lines":41331,"files":15,"directLines":41331,"directFiles":15,"languages":{"Python":{"lines":41331,"files":15}},"directLanguages":{"Python":{"lines":41331,"files":15}},"fileList":[{"name":"UnslothGRPOTrainer.py","lines":7716},{"name":"moe_utils.py","lines":4457},{"name":"UnslothGOLDTrainer.py","lines":3052},{"name":"UnslothRLOOTrainer.py","lines":2929},{"name":"UnslothDistillationTrainer.py","lines":2770},{"name":"UnslothSFTTrainer.py","lines":2648},{"name":"UnslothDPOTrainer.py","lines":2488},{"name":"UnslothOnlineDPOTrainer.py","lines":2249},{"name":"UnslothKTOTrainer.py","lines":2237},{"name":"UnslothSDFTTrainer.py","lines":1996},{"name":"UnslothCPOTrainer.py","lines":1965},{"name":"UnslothGKDTrainer.py","lines":1911},{"name":"UnslothORPOTrainer.py","lines":1903},{"name":"UnslothRewardTrainer.py","lines":1638},{"name":"UnslothServerDistillationTrainer.py","lines":1372}],"children":[]},{"name":"crates","path":"crates","lines":29939,"files":41,"directLines":0,"directFiles":0,"languages":{"C":{"lines":13,"files":1},"C/C++":{"lines":40,"files":1},"Rust":{"lines":29886,"files":39}},"directLanguages":{},"fileList":[],"children":[{"name":"storylet-engine","path":"crates/storylet-engine","lines":16336,"files":23,"directLines":0,"directFiles":0,"languages":{"C":{"lines":13,"files":1},"C/C++":{"lines":40,"files":1},"Rust":{"lines":16283,"files":21}},"directLanguages":{},"fileList":[],"children":[{"name":"src","path":"crates/storylet-engine/src","lines":12905,"files":11,"directLines":12531,"directFiles":9,"languages":{"Rust":{"lines":12905,"files":11}},"directLanguages":{"Rust":{"lines":12531,"files":9}},"fileList":[{"name":"chrono_runtime.rs","lines":5080},{"name":"chrono_state.rs","lines":2829},{"name":"chrono_dispatch.rs","lines":1360},{"name":"storylets.rs","lines":863},{"name":"project.rs","lines":765},{"name":"runtime.rs","lines":720},{"name":"lib.rs","lines":518},{"name":"ffi.rs","lines":297},{"name":"simulation.rs","lines":99}],"children":[{"name":"bin","path":"crates/storylet-engine/src/bin","lines":374,"files":2,"directLines":374,"directFiles":2,"languages":{"Rust":{"lines":374,"files":2}},"directLanguages":{"Rust":{"lines":374,"files":2}},"fileList":[{"name":"host.rs","lines":196},{"name":"benchmark.rs","lines":178}],"children":[]}]},{"name":"tests","path":"crates/storylet-engine/tests","lines":3378,"files":10,"directLines":3378,"directFiles":10,"languages":{"Rust":{"lines":3378,"files":10}},"directLanguages":{"Rust":{"lines":3378,"files":10}},"fileList":[{"name":"chrono_v5_acceptance.rs","lines":819},{"name":"chrono_dispatch.rs","lines":623},{"name":"runtime_session.rs","lines":622},{"name":"world_transactions.rs","lines":327},{"name":"storylet_selection.rs","lines":316},{"name":"storylet_lifecycle.rs","lines":216},{"name":"project_bundle.rs","lines":157},{"name":"autonomous_simulation.rs","lines":139},{"name":"ffi_abi.rs","lines":85},{"name":"host_protocol.rs","lines":74}],"children":[]},{"name":"include","path":"crates/storylet-engine/include","lines":40,"files":1,"directLines":40,"directFiles":1,"languages":{"C/C++":{"lines":40,"files":1}},"directLanguages":{"C/C++":{"lines":40,"files":1}},"fileList":[{"name":"storylet_engine.h","lines":40}],"children":[]},{"name":"examples","path":"crates/storylet-engine/examples","lines":13,"files":1,"directLines":13,"directFiles":1,"languages":{"C":{"lines":13,"files":1}},"directLanguages":{"C":{"lines":13,"files":1}},"fileList":[{"name":"native_host.c","lines":13}],"children":[]}]},{"name":"storylet-engine-service","path":"crates/storylet-engine-service","lines":13603,"files":18,"directLines":0,"directFiles":0,"languages":{"Rust":{"lines":13603,"files":18}},"directLanguages":{},"fileList":[],"children":[{"name":"src","path":"crates/storylet-engine-service/src","lines":12418,"files":15,"directLines":12350,"directFiles":14,"languages":{"Rust":{"lines":12418,"files":15}},"directLanguages":{"Rust":{"lines":12350,"files":14}},"fileList":[{"name":"chrono_adapter.rs","lines":1820},{"name":"chrono_playtest.rs","lines":1610},{"name":"narrative_graph.rs","lines":1434},{"name":"chrono_graph_adapter.rs","lines":1209},{"name":"http.rs","lines":1149},{"name":"service.rs","lines":1093},{"name":"mcp.rs","lines":731},{"name":"store.rs","lines":712},{"name":"projection.rs","lines":695},{"name":"legacy_import.rs","lines":533},{"name":"contracts.rs","lines":497},{"name":"twee.rs","lines":484},{"name":"scenario.rs","lines":367},{"name":"lib.rs","lines":16}],"children":[{"name":"bin","path":"crates/storylet-engine-service/src/bin","lines":68,"files":1,"directLines":68,"directFiles":1,"languages":{"Rust":{"lines":68,"files":1}},"directLanguages":{"Rust":{"lines":68,"files":1}},"fileList":[{"name":"service.rs","lines":68}],"children":[]}]},{"name":"tests","path":"crates/storylet-engine-service/tests","lines":1185,"files":3,"directLines":1185,"directFiles":3,"languages":{"Rust":{"lines":1185,"files":3}},"directLanguages":{"Rust":{"lines":1185,"files":3}},"fileList":[{"name":"local_service.rs","lines":1087},{"name":"twee_spec.rs","lines":58},{"name":"legacy_import.rs","lines":40}],"children":[]}]}]},{"name":"src","path":"src","lines":9426,"files":38,"directLines":0,"directFiles":0,"languages":{"CSS":{"lines":394,"files":1},"TypeScript":{"lines":4572,"files":24},"Vue":{"lines":4460,"files":13}},"directLanguages":{},"fileList":[],"children":[{"name":"web","path":"src/web","lines":8323,"files":35,"directLines":1809,"directFiles":7,"languages":{"CSS":{"lines":394,"files":1},"TypeScript":{"lines":3469,"files":21},"Vue":{"lines":4460,"files":13}},"directLanguages":{"CSS":{"lines":394,"files":1},"TypeScript":{"lines":1326,"files":5},"Vue":{"lines":89,"files":1}},"fileList":[{"name":"workspaceProject.ts","lines":602},{"name":"server.ts","lines":440},{"name":"styles.css","lines":394},{"name":"projectBundle.ts","lines":142},{"name":"playtestApi.ts","lines":137},{"name":"App.vue","lines":89},{"name":"main.ts","lines":5}],"children":[{"name":"studio","path":"src/web/studio","lines":6514,"files":28,"directLines":1661,"directFiles":10,"languages":{"TypeScript":{"lines":2143,"files":16},"Vue":{"lines":4371,"files":12}},"directLanguages":{"TypeScript":{"lines":1661,"files":10}},"fileList":[{"name":"narrativeGraphTypes.ts","lines":637},{"name":"contracts.ts","lines":362},{"name":"api.ts","lines":218},{"name":"tagData.ts","lines":131},{"name":"interactionContext.ts","lines":120},{"name":"state.ts","lines":65},{"name":"twineUtils.ts","lines":57},{"name":"tagEditorModel.ts","lines":27},{"name":"definitions.ts","lines":22},{"name":"router.ts","lines":22}],"children":[{"name":"components","path":"src/web/studio/components","lines":2902,"files":5,"directLines":2902,"directFiles":5,"languages":{"Vue":{"lines":2902,"files":5}},"directLanguages":{"Vue":{"lines":2902,"files":5}},"fileList":[{"name":"PropertyInspector.vue","lines":1355},{"name":"NarrativeGraphCanvas.vue","lines":825},{"name":"TwineStoryMap.vue","lines":375},{"name":"TagEditor.vue","lines":218},{"name":"TwineImportExportModal.vue","lines":129}],"children":[]},{"name":"views","path":"src/web/studio/views","lines":1469,"files":7,"directLines":1469,"directFiles":7,"languages":{"Vue":{"lines":1469,"files":7}},"directLanguages":{"Vue":{"lines":1469,"files":7}},"fileList":[{"name":"CodexView.vue","lines":411},{"name":"ScenarioView.vue","lines":261},{"name":"PlaytestView.vue","lines":214},{"name":"LibraryView.vue","lines":211},{"name":"StoryletEditorView.vue","lines":166},{"name":"ProjectView.vue","lines":103},{"name":"TagManagerView.vue","lines":103}],"children":[]},{"name":"view-models","path":"src/web/studio/view-models","lines":482,"files":6,"directLines":482,"directFiles":6,"languages":{"TypeScript":{"lines":482,"files":6}},"directLanguages":{"TypeScript":{"lines":482,"files":6}},"fileList":[{"name":"storyletEditor.ts","lines":119},{"name":"playtest.ts","lines":110},{"name":"scenario.ts","lines":89},{"name":"library.ts","lines":65},{"name":"codex.ts","lines":59},{"name":"project.ts","lines":40}],"children":[]}]}]},{"name":"db","path":"src/db","lines":854,"files":2,"directLines":854,"directFiles":2,"languages":{"TypeScript":{"lines":854,"files":2}},"directLanguages":{"TypeScript":{"lines":854,"files":2}},"fileList":[{"name":"repository.ts","lines":658},{"name":"schema.ts","lines":196}],"children":[]},{"name":"engine","path":"src/engine","lines":249,"files":1,"directLines":249,"directFiles":1,"languages":{"TypeScript":{"lines":249,"files":1}},"directLanguages":{"TypeScript":{"lines":249,"files":1}},"fileList":[{"name":"RustRuntimeClient.ts","lines":249}],"children":[]}]},{"name":"graphify-out","path":"graphify-out","lines":4115,"files":5,"directLines":1287,"directFiles":2,"languages":{"HTML":{"lines":344,"files":1},"Markdown":{"lines":3771,"files":4}},"directLanguages":{"HTML":{"lines":344,"files":1},"Markdown":{"lines":943,"files":1}},"fileList":[{"name":"GRAPH_REPORT.md","lines":943},{"name":"graph.html","lines":344}],"children":[{"name":"2026-10-18","path":"graphify-out/2026-10-18","lines":943,"files":1,"directLines":943,"directFiles":1,"languages":{"Markdown":{"lines":943,"files":1}},"directLanguages":{"Markdown":{"lines":943,"files":1}},"fileList":[{"name":"GRAPH_REPORT.md","lines":943}],"children":[]},{"name":"2026-10-19","path":"graphify-out/2026-10-19","lines":943,"files":1,"directLines":943,"directFiles":1,"languages":{"Markdown":{"lines":943,"files":1}},"directLanguages":{"Markdown":{"lines":943,"files":1}},"fileList":[{"name":"GRAPH_REPORT.md","lines":943}],"children":[]},{"name":"2026-10-14","path":"graphify-out/2026-10-14","lines":942,"files":1,"directLines":942,"directFiles":1,"languages":{"Markdown":{"lines":942,"files":1}},"directLanguages":{"Markdown":{"lines":942,"files":1}},"fileList":[{"name":"GRAPH_REPORT.md","lines":942}],"children":[]}]},{"name":"docs","path":"docs","lines":3922,"files":23,"directLines":48,"directFiles":2,"languages":{"Markdown":{"lines":3922,"files":23}},"directLanguages":{"Markdown":{"lines":48,"files":2}},"fileList":[{"name":"HANDOFF.md","lines":38},{"name":"README.md","lines":10}],"children":[{"name":"featuresbacklog","path":"docs/featuresbacklog","lines":1977,"files":6,"directLines":202,"directFiles":3,"languages":{"Markdown":{"lines":1977,"files":6}},"directLanguages":{"Markdown":{"lines":202,"files":3}},"fileList":[{"name":"two-stage-storlet-decision.md","lines":196},{"name":"savetolocal.md","lines":6},{"name":" entity-system.md","lines":0}],"children":[{"name":"chrono-decision-engine","path":"docs/featuresbacklog/chrono-decision-engine","lines":1775,"files":3,"directLines":1775,"directFiles":3,"languages":{"Markdown":{"lines":1775,"files":3}},"directLanguages":{"Markdown":{"lines":1775,"files":3}},"fileList":[{"name":"chronoflow_narrative_engine_technical_specification_v5.md","lines":820},{"name":"chronoflow_narrative_engine_technical_specification_v3.md","lines":563},{"name":"chronoflow_narrative_engine_technical_specification_v4.md","lines":392}],"children":[]}]},{"name":"design","path":"docs/design","lines":1866,"files":13,"directLines":1866,"directFiles":13,"languages":{"Markdown":{"lines":1866,"files":13}},"directLanguages":{"Markdown":{"lines":1866,"files":13}},"fileList":[{"name":"Storylet.md","lines":407},{"name":"non-linear-narrative-system.md","lines":341},{"name":"Graph-based-narrative-architecture.md","lines":255},{"name":"tropes.md","lines":213},{"name":"system-one-decision-model-as-drama-director.md","lines":178},{"name":"branching-narrative-within-storylet-content-structure.md","lines":113},{"name":"unslop-style-guide-sf.md","lines":83},{"name":"storylet-design-limitation.md","lines":70},{"name":"Emotioneering-in-storylet-modular-narrative-system.md","lines":67},{"name":"storylet-studio.md","lines":45},{"name":"social-simulation.md","lines":43},{"name":"event-type-in-modular-narrative.md","lines":31},{"name":"storylet-authoring-guideline.md","lines":20}],"children":[]},{"name":"guides","path":"docs/guides","lines":28,"files":1,"directLines":28,"directFiles":1,"languages":{"Markdown":{"lines":28,"files":1}},"directLanguages":{"Markdown":{"lines":28,"files":1}},"fileList":[{"name":"storylet-authoring.md","lines":28}],"children":[]},{"name":"benchmarks","path":"docs/benchmarks","lines":3,"files":1,"directLines":3,"directFiles":1,"languages":{"Markdown":{"lines":3,"files":1}},"directLanguages":{"Markdown":{"lines":3,"files":1}},"fileList":[{"name":"README.md","lines":3}],"children":[]}]},{"name":"tests","path":"tests","lines":1251,"files":13,"directLines":0,"directFiles":0,"languages":{"TypeScript":{"lines":1251,"files":13}},"directLanguages":{},"fileList":[],"children":[{"name":"web","path":"tests/web","lines":1251,"files":13,"directLines":1251,"directFiles":13,"languages":{"TypeScript":{"lines":1251,"files":13}},"directLanguages":{"TypeScript":{"lines":1251,"files":13}},"fileList":[{"name":"playtest-api.test.ts","lines":331},{"name":"workspace-project.test.ts","lines":308},{"name":"narrative-graph.test.ts","lines":128},{"name":"project-bundle.test.ts","lines":80},{"name":"workspace-http-smoke.test.ts","lines":78},{"name":"interaction-context.test.ts","lines":70},{"name":"rust-runtime-client.test.ts","lines":66},{"name":"scenario-repository.test.ts","lines":53},{"name":"storylet-approval.test.ts","lines":35},{"name":"tag-editor-model.test.ts","lines":30},{"name":"tag-data.test.ts","lines":26},{"name":"npc-behavior-repository.test.ts","lines":24},{"name":"twine-utils.test.ts","lines":22}],"children":[]}]},{"name":"examples","path":"examples","lines":162,"files":3,"directLines":0,"directFiles":0,"languages":{"C#":{"lines":90,"files":1},"C++":{"lines":60,"files":1},"Markdown":{"lines":12,"files":1}},"directLanguages":{},"fileList":[],"children":[{"name":"native-host-dotnet","path":"examples/native-host-dotnet","lines":90,"files":1,"directLines":90,"directFiles":1,"languages":{"C#":{"lines":90,"files":1}},"directLanguages":{"C#":{"lines":90,"files":1}},"fileList":[{"name":"Program.cs","lines":90}],"children":[]},{"name":"native-host","path":"examples/native-host","lines":72,"files":2,"directLines":72,"directFiles":2,"languages":{"C++":{"lines":60,"files":1},"Markdown":{"lines":12,"files":1}},"directLanguages":{"C++":{"lines":60,"files":1},"Markdown":{"lines":12,"files":1}},"fileList":[{"name":"main.cpp","lines":60},{"name":"README.md","lines":12}],"children":[]}]},{"name":"src-tauri","path":"src-tauri","lines":53,"files":4,"directLines":3,"directFiles":1,"languages":{"Rust":{"lines":53,"files":4}},"directLanguages":{"Rust":{"lines":3,"files":1}},"fileList":[{"name":"build.rs","lines":3}],"children":[{"name":"src","path":"src-tauri/src","lines":50,"files":3,"directLines":50,"directFiles":3,"languages":{"Rust":{"lines":50,"files":3}},"directLanguages":{"Rust":{"lines":50,"files":3}},"fileList":[{"name":"commands.rs","lines":29},{"name":"lib.rs","lines":16},{"name":"main.rs","lines":5}],"children":[]}]},{"name":".superpowers","path":".superpowers","lines":23,"files":5,"directLines":0,"directFiles":0,"languages":{"Markdown":{"lines":23,"files":5}},"directLanguages":{},"fileList":[],"children":[{"name":"sdd","path":".superpowers/sdd","lines":23,"files":5,"directLines":0,"directFiles":0,"languages":{"Markdown":{"lines":23,"files":5}},"directLanguages":{},"fileList":[],"children":[{"name":"2026-10-14-rust-local-service","path":".superpowers/sdd/2026-10-14-rust-local-service","lines":23,"files":5,"directLines":23,"directFiles":5,"languages":{"Markdown":{"lines":23,"files":5}},"directLanguages":{"Markdown":{"lines":23,"files":5}},"fileList":[{"name":"progress.md","lines":7},{"name":"task-1-brief.md","lines":4},{"name":"task-2-brief.md","lines":4},{"name":"task-3-brief.md","lines":4},{"name":"task-4-brief.md","lines":4}],"children":[]}]}]}]}</script>
+<script>
+(() => {
+  "use strict";
+  const themeToggle = document.getElementById("theme-toggle");
+  themeToggle.addEventListener("click", () => {
+    const isDark = document.documentElement.dataset.theme === "dark";
+    document.documentElement.dataset.theme = isDark ? "light" : "dark";
+    themeToggle.textContent = isDark ? "☾ Dark mode" : "☀ Light mode";
+    themeToggle.setAttribute("aria-label", isDark ? "Switch to dark mode" : "Switch to light mode");
+  });
+  const root = JSON.parse(document.getElementById("map-data").textContent);
+  const map = document.getElementById("map");
+  const details = document.getElementById("details");
+  const crumbs = document.getElementById("crumbs");
+  const tooltip = document.getElementById("tooltip");
+  const byPath = new Map();
+  const parents = new Map();
+  const visibleTiles = new Map();
+  let focus = root;
+  let selected = root;
+  let resizeTimer;
+
+  function index(node, parent) {
+    byPath.set(node.path, node);
+    if (parent) parents.set(node.path, parent);
+    node.children.forEach(child => index(child, node));
+  }
+  index(root, null);
+
+  function formatNumber(value) { return new Intl.NumberFormat().format(value); }
+  function compactLOC(value) {
+    return new Intl.NumberFormat("en", {notation: "compact", maximumFractionDigits: 1}).format(value);
+  }
+  function compact(value) {
+    if (value >= 1000000) return (value / 1000000).toFixed(value >= 10000000 ? 0 : 1).replace(/\.0$/, "") + "m";
+    if (value >= 1000) return (value / 1000).toFixed(value >= 10000 ? 0 : 1).replace(/\.0$/, "") + "k";
+    return String(value);
+  }
+  function escapeHTML(value) {
+    return String(value).replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
+  }
+  function hueFor(value) {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0;
+    return [158, 204, 230, 270, 24, 185][Math.abs(hash) % 6];
+  }
+
+  // Anchor colors to repository branches so drilling down preserves identity.
+  function branchHue(node) {
+    let branch = node;
+    while (parents.has(branch.path) && parents.get(branch.path) !== root) {
+      branch = parents.get(branch.path);
+    }
+    const index = root.children.indexOf(branch);
+    return index < 0 ? hueFor(node.path) : [158, 204, 270, 24, 185, 230][index % 6];
+  }
+
+  function directLanguages(node) {
+    return node.directLanguages || {};
+  }
+  function languageNames(node) {
+    return Object.entries(node.languages || {}).filter(([, stat]) => stat.lines > 0)
+      .sort((a, b) => b[1].lines - a[1].lines || a[0].localeCompare(b[0])).map(([name]) => name);
+  }
+  function showTileLanguages(node, box) {
+    return box.w >= 140 && box.h >= 76 && languageNames(node).length > 0;
+  }
+  function childItems(node) {
+    const items = node.children.map(child => ({node: child, value: child.lines, direct: false}));
+    if (node.directLines > 0) {
+      items.push({
+        node: {name: "Files in this folder", path: node.path + "::direct", lines: node.directLines, files: node.directFiles, owner: node, languages: directLanguages(node)},
+        value: node.directLines,
+        direct: true
+      });
+    }
+    return items.filter(item => item.value > 0).sort((a, b) => b.value - a.value);
+  }
+
+  function worst(row, side) {
+    if (!row.length) return Infinity;
+    const sum = row.reduce((total, item) => total + item.area, 0);
+    const max = Math.max(...row.map(item => item.area));
+    const min = Math.min(...row.map(item => item.area));
+    return Math.max((side * side * max) / (sum * sum), (sum * sum) / (side * side * min));
+  }
+
+  function squarify(items, box) {
+    if (!items.length || box.w <= 0 || box.h <= 0) return [];
+    const total = items.reduce((sum, item) => sum + item.value, 0);
+    const scaled = items.map(item => ({...item, area: item.value / total * box.w * box.h}));
+    const result = [];
+    let remaining = scaled.slice();
+    let x = box.x, y = box.y, w = box.w, h = box.h;
+
+    while (remaining.length) {
+      let row = [];
+      const side = Math.min(w, h);
+      while (remaining.length) {
+        const candidate = row.concat(remaining[0]);
+        if (row.length && worst(candidate, side) > worst(row, side)) break;
+        row = candidate;
+        remaining.shift();
+      }
+      const area = row.reduce((sum, item) => sum + item.area, 0);
+      if (w >= h) {
+        const rowWidth = h ? area / h : 0;
+        let rowY = y;
+        row.forEach(item => {
+          const itemHeight = rowWidth ? item.area / rowWidth : 0;
+          result.push({...item, box: {x, y: rowY, w: rowWidth, h: itemHeight}});
+          rowY += itemHeight;
+        });
+        x += rowWidth;
+        w -= rowWidth;
+      } else {
+        const rowHeight = w ? area / w : 0;
+        let rowX = x;
+        row.forEach(item => {
+          const itemWidth = rowHeight ? item.area / rowHeight : 0;
+          result.push({...item, box: {x: rowX, y, w: itemWidth, h: rowHeight}});
+          rowX += itemWidth;
+        });
+        y += rowHeight;
+        h -= rowHeight;
+      }
+    }
+    return result;
+  }
+
+  function tileKey(node) {
+    return JSON.stringify([node.owner ? node.owner.path : node.path, Boolean(node.owner)]);
+  }
+  function spaciousTileSummary(node) {
+    return '<span class="tile-lines">' + formatNumber(node.lines) + ' nonblank lines · ' + formatNumber(node.files) + ' files</span>' +
+      '<span class="tile-share">' + percent(node.lines, focus.lines) + ' of lines in this view</span>' + languageChips(node, true);
+  }
+  function makeTile(item, box, depth, hue) {
+    const tile = document.createElement("div");
+    tile.className = "tile depth-" + depth + (item.direct ? " direct" : "");
+    if (tileKey(selected) === tileKey(item.node)) tile.classList.add("selected");
+    if (box.w < 64 || box.h < 30) tile.classList.add("tiny");
+    tile.style.left = box.x + "px";
+    tile.style.top = box.y + "px";
+    tile.style.width = Math.max(0, box.w) + "px";
+    tile.style.height = Math.max(0, box.h) + "px";
+    if (!item.direct) {
+      tile.style.setProperty("--tile-hue", hue);
+      tile.style.setProperty("--tile-depth", Math.min(9, depth * 3) + "%");
+    }
+    const spacious = depth === 0 && box.w >= 300 && box.h >= 200 &&
+      (item.direct || item.node.children.length === 0);
+    if (spacious) tile.classList.add("spacious");
+    if (box.w >= 64 && box.h >= 30) {
+      tile.innerHTML = '<div class="tile-label"><span class="tile-name">' + escapeHTML(item.node.name) + '</span>' + (spacious ? spaciousTileSummary(item.node) : (box.w >= 90 && box.h >= 48 ? '<span class="tile-lines">' + compact(item.node.lines) + ' lines</span>' : '') + (showTileLanguages(item.node, box) ? languageChips(item.node) : '')) + '</div>';
+    }
+    tile.addEventListener("mousemove", event => showTooltip(event, item.node));
+    tile.addEventListener("mouseleave", hideTooltip);
+    {
+      tile.tabIndex = 0;
+      tile.setAttribute("role", "button");
+      tile.setAttribute("aria-label", (item.direct ? item.node.owner.path + ": Files in this folder" : item.node.path) + ", " + formatNumber(item.node.lines) + (item.direct ? " lines. Enter to inspect files." : " lines. Enter to inspect; Shift Enter to explore."));
+      tile.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          if (event.shiftKey && !item.direct) focusOn(item.node); else selectNode(item.node);
+        }
+      });
+      visibleTiles.set(tileKey(item.node), tile);
+      tile.addEventListener("click", event => {
+        event.stopPropagation();
+        selectNode(item.node);
+      });
+      tile.addEventListener("dblclick", event => {
+        event.stopPropagation();
+        if (!item.direct) focusOn(item.node);
+      });
+    }
+    map.appendChild(tile);
+    if (!item.direct && box.w >= 180 && box.h >= 70) {
+      tile.classList.add("has-explore");
+      const explore = document.createElement("button");
+      explore.className = "tile-explore";
+      explore.type = "button";
+      explore.textContent = "Explore →";
+      explore.setAttribute("aria-label", "Explore folder " + item.node.path);
+      explore.style.left = (box.x + box.w - 76) + "px";
+      explore.style.top = (box.y + (spacious ? 18 : 6)) + "px";
+      explore.addEventListener("click", event => {
+        event.stopPropagation();
+        hideTooltip();
+        focusOn(item.node);
+      });
+      map.appendChild(explore);
+    }
+    return tile;
+  }
+
+  function renderChildren(node, box, depth, inheritedHue) {
+    if (depth >= Number(document.getElementById("depth").value) || box.w < 30 || box.h < 24) return;
+    const layouts = squarify(childItems(node), box);
+    layouts.forEach(item => {
+      const hue = depth === 0 && !item.direct ? branchHue(item.node) : inheritedHue;
+      const tile = makeTile(item, item.box, depth, hue);
+      const hasContents = !item.direct && item.node.children.length > 0;
+      const minimumWidth = depth === 0 ? 130 : 155;
+      const minimumHeight = depth === 0 ? 82 : 96;
+      const hasUsefulInterior = item.box.w >= minimumWidth &&
+        item.box.h >= minimumHeight &&
+        item.box.w * item.box.h >= 16000;
+      if (hasContents && hasUsefulInterior && depth + 1 < Number(document.getElementById("depth").value)) {
+        tile.classList.add("parent");
+        const inset = 5;
+        const header = showTileLanguages(item.node, item.box) ? 68 : 44;
+        const inner = {
+          x: item.box.x + inset,
+          y: item.box.y + header,
+          w: Math.max(0, item.box.w - inset * 2),
+          h: Math.max(0, item.box.h - header - inset)
+        };
+        renderChildren(item.node, inner, depth + 1, hue);
+      }
+    });
+  }
+
+  function showTooltip(event, node) {
+    tooltip.innerHTML = '<strong>' + escapeHTML(node.owner ? "Files in this folder" : node.path) + '</strong><br>' + compact(node.lines) + ' lines · ' + formatNumber(node.files) + ' files' + (languageNames(node).length ? '<br>' + escapeHTML(languageNames(node).join(' · ')) : '');
+    tooltip.style.display = "block";
+    const left = Math.min(window.innerWidth - tooltip.offsetWidth - 10, event.clientX + 12);
+    const top = Math.min(window.innerHeight - tooltip.offsetHeight - 10, event.clientY + 12);
+    tooltip.style.left = Math.max(8, left) + "px";
+    tooltip.style.top = Math.max(8, top) + "px";
+  }
+  function hideTooltip() { tooltip.style.display = "none"; }
+
+  function fileListHTML(node, limit) {
+    const files = (node.fileList || []).slice(0, limit);
+    const heading = '<div class="section-title">Files in this folder <span class="substat">' + formatNumber(node.directFiles) + ' direct files · Largest first</span></div>';
+    if (!Array.isArray(node.fileList)) return heading + '<p class="file-count">File names aren’t available in this saved map. Regenerate it to include file details.</p>';
+    const rows = files.map(file => '<div class="file-row"><span class="file-name">' + escapeHTML(file.name) + '</span><span class="stat-value">' + formatNumber(file.lines) + ' lines</span></div>').join("");
+    return heading + rows + '<p class="file-count">Showing ' + formatNumber(files.length) + ' of ' + formatNumber(node.directFiles) + ' files</p>' +
+      (node.fileList.length > 20 ? '<button type="button" class="control file-more">' + (limit === 20 ? 'Show more (up to 50)' : 'Show fewer') + '</button>' : '');
+  }
+  function renderFileList(host, node, limit = 20) {
+    host.innerHTML = fileListHTML(node, limit);
+    host.querySelector(".file-more")?.addEventListener("click", () => {
+      renderFileList(host, node, limit === 20 ? 50 : 20);
+      host.querySelector(".file-more")?.focus({preventScroll:true});
+    });
+  }
+  function languageStyle(name) {
+    // Muted language identities; folder colors remain independent.
+    const hues = {
+      Go:185, Java:25, Kotlin:275, JavaScript:48, TypeScript:215,
+      Python:205, Rust:18, C:225, "C++":240, "C/C++":232, "C#":285,
+      Swift:15, "Objective-C":210, "Objective-C++":230,
+      Ruby:350, PHP:250, Dart:190, Scala:355, Shell:140,
+      SQL:40, HTML:12, CSS:260, SCSS:325, Sass:325,
+      Vue:155, Svelte:20, Markdown:210, Lua:235, R:220,
+      Perl:195, Elixir:280, Erlang:335, Haskell:270,
+      Clojure:135, ClojureScript:150, Groovy:200,
+      "F#":200, "Visual Basic":255, Zig:40, Solidity:220,
+      Terraform:265, "Protocol Buffers":165
+    };
+    const known = Object.prototype.hasOwnProperty.call(hues, name);
+    return '--language-hue:' + (known ? hues[name] : 160) + ';--language-saturation:' + (known ? '36%' : '0%');
+  }
+  function languageChips(node, showPercentages = false) {
+    const names = languageNames(node);
+    return '<span class="tile-languages">' + names.slice(0, 2).map(name =>
+      '<span class="language-chip" style="' + languageStyle(name) + '">' + escapeHTML(name) + (showPercentages ? ' ' + percent(node.languages[name].lines, node.lines) : '') + '</span>'
+    ).join("") + (names.length > 2 ? '<span class="language-more">+' + (names.length - 2) + '</span>' : '') + '</span>';
+  }
+  function languageBar(name, lines, total) {
+    const width = total ? Math.max(0, Math.min(100, lines / total * 100)) : 0;
+    return '<div class="bar" aria-hidden="true"><span style="' + languageStyle(name) + ';width:' + width + '%"></span></div>';
+  }
+  function directLanguageRows(node) {
+    return languageNames(node).map(name => '<div class="stat-row"><div class="stat-heading"><span>' + escapeHTML(name) + '</span><span class="stat-value">' + formatNumber(node.languages[name].lines) + ' lines</span></div>' + languageBar(name, node.languages[name].lines, node.lines) + '</div>').join("");
+  }
+  function taskFragments(node) {
+    const scope = node.path === "." ? "this repository" : "the folder " + JSON.stringify(node.path);
+    return [
+      {label: "Explore · paste into Badger’s goal editor", text: "Explain how " + scope + " works. Start with its responsibilities, entry points, and the files most relevant to understanding it. Include related code elsewhere when needed."},
+      {label: "Change · replace the bracketed task, then paste into Badger’s goal editor", text: "In " + scope + ", I want to [describe the change]. Identify the smallest relevant set of files and tests, including dependencies outside this folder when needed."}
+    ];
+  }
+  function workflowFragments(node) {
+    const tasks = taskFragments(node);
+    return [
+      {label:"Design / exploration · run from the repository root", text:"badger", command:true},
+      tasks[0],
+      {label:"Code / implementation · run from the repository root", text:"badger code", command:true},
+      tasks[1]
+    ];
+  }
+  async function copyText(text, status, field) {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+      status.textContent = "Copied.";
+    } catch (_) {
+      // Local HTML clipboard access varies by browser. Keep a selectable fallback.
+      let fallback = field;
+      if (!fallback) {
+        fallback = status.parentElement.querySelector(".copy-fallback");
+        if (!fallback) {
+          fallback = document.createElement("textarea");
+          fallback.className = "copy-fallback";
+          fallback.readOnly = true;
+          fallback.setAttribute("aria-label", "Folder path to copy");
+          status.before(fallback);
+        }
+        fallback.value = text;
+      }
+      fallback.focus();
+      fallback.select();
+      status.textContent = "Text selected. Press Ctrl+C or ⌘C to copy.";
+    }
+  }
+  function addBadgerActions(node) {
+    const heading = details.querySelector("h2");
+    const row = document.createElement("div");
+    row.className = "folder-heading";
+    heading.before(row);
+    row.appendChild(heading);
+    const copy = document.createElement("button");
+    copy.className = "control copy-path";
+    copy.title = "Copy path";
+    copy.setAttribute("aria-label", "Copy path");
+    copy.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>';
+    copy.type = "button";
+    row.appendChild(copy);
+    const status = document.createElement("div");
+    status.className = "copy-status";
+    status.setAttribute("role", "status");
+    row.after(status);
+    copy.addEventListener("click", () => copyText(node.path, status));
+
+    const help = document.createElement("details");
+    help.className = "badger-help";
+    help.innerHTML = '<summary>Work on this folder with Badger</summary>' +
+      '<p>Badger prepares code context for your AI chat. Use this folder as a starting point for a question or change.</p>' +
+      '<ol><li>Run <code>badger</code> in this repository’s root. For implementation work, run <code>badger code</code>.</li>' +
+      '<li>Paste a task below into Badger’s goal editor. Copy the generated <strong>Prompt 1</strong> into your AI chat.</li>' +
+      '<li>When the AI requests files, paste its response back into Badger. Copy <strong>Prompt 2</strong> back to the same chat.</li></ol>' +
+      '<p>Folder size helps you explore; your task may involve code elsewhere. These task fragments guide the question; they do not restrict file access.</p>';
+    const fragments = workflowFragments(node);
+    fragments.forEach((fragment, index) => {
+      const block = document.createElement("div");
+      block.className = "copy-fragment";
+      const label = document.createElement("label");
+      label.htmlFor = "badger-fragment-" + index;
+      label.textContent = fragment.label;
+      const field = document.createElement("textarea");
+      field.id = label.htmlFor;
+      field.rows = fragment.command ? 1 : 5;
+      field.readOnly = true;
+      field.value = fragment.text;
+      const button = document.createElement("button");
+      button.className = "control";
+      button.type = "button";
+      button.textContent = fragment.command ? "Copy command" : "Copy task";
+      button.setAttribute("aria-label", "Copy " + fragment.label);
+      const feedback = document.createElement("div");
+      feedback.className = "copy-status";
+      feedback.setAttribute("role", "status");
+      button.addEventListener("click", () => copyText(fragment.text, feedback, field));
+      block.append(label, field, button, feedback);
+      help.appendChild(block);
+    });
+    const link = document.createElement("a");
+    link.href = "https://github.com/PVRLabs/aibadger#quick-start";
+    link.textContent = "Getting started with Badger ↗";
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    help.appendChild(link);
+    details.querySelector(".focus-button").after(help);
+  }
+  function shareHTML(node) {
+    return '<p class="share">' + percent(node.lines, root.lines) + ' of project lines' +
+      (focus !== root ? '<br>' + percent(node.lines, focus.lines) + ' of lines in the current view' : '') + '</p>';
+  }
+  function renderDetails() {
+    if (selected.owner) {
+      const owner = selected.owner;
+      details.innerHTML = '<div class="eyebrow">Selected files</div><h2>Files in this folder</h2><div class="folder-path">' + escapeHTML(owner.path === "." ? owner.name : owner.path) + '</div><div class="summary"><div><strong>' + formatNumber(owner.directLines) + '</strong>nonblank lines</div><div><strong>' + formatNumber(owner.directFiles) + '</strong>recognized files</div></div><div class="file-list"></div><button class="focus-button">Explore containing folder →</button>';
+      renderFileList(details.querySelector(".file-list"), owner);
+      details.querySelector(".file-list").insertAdjacentHTML("beforebegin", '<div class="section-title">Languages</div>' + directLanguageRows(selected));
+      details.querySelector(".focus-button").addEventListener("click", () => focusOn(owner));
+      details.querySelector(".summary").insertAdjacentHTML("afterend", shareHTML(selected));
+      addBadgerActions(owner);
+      return;
+    }
+    const languages = Object.entries(selected.languages || {}).sort((a, b) => b[1].lines - a[1].lines || a[0].localeCompare(b[0]));
+    const children = selected.children.slice().sort((a, b) => b.lines - a.lines);
+    const languageRows = languages.map(([name, stat]) =>
+      '<div class="stat-row"><div class="stat-heading"><span>' + escapeHTML(name) + '</span><span class="stat-value">' + formatNumber(stat.lines) + ' <span class="substat">' + formatNumber(stat.files) + ' files · ' + percent(stat.lines, selected.lines) + '</span></span></div>' + languageBar(name, stat.lines, selected.lines) + '</div>'
+    ).join("") || '<div class="empty">No recognized source</div>';
+    const childRows = children.map(child =>
+      '<button class="child-row" data-path="' + escapeHTML(child.path) + '" title="Explore ' + escapeHTML(child.path) + '"><span class="child-name">' + escapeHTML(child.name) + '<span class="substat">' + formatNumber(child.files) + ' files</span></span><span class="child-value">' + compact(child.lines) + ' <span aria-hidden="true">→</span></span></button>'
+    ).join("") || '<div class="empty">No subfolders with nonblank source lines.</div>';
+    details.innerHTML =
+      '<div class="eyebrow">Folder details</div><h2>' + escapeHTML(selected.name) + '</h2><div class="folder-path">' + escapeHTML(selected.path) + '</div>' +
+      '<div class="summary"><div><strong>' + formatNumber(selected.lines) + '</strong>nonblank lines</div><div><strong>' + formatNumber(selected.files) + '</strong>recognized files</div></div>' +
+      shareHTML(selected) +
+      '<button class="focus-button" ' + (selected.path === focus.path ? "disabled" : "") + '>' + (selected.path === focus.path ? 'Viewing this folder' : 'Explore folder →') + '</button>' +
+      '<div class="section-title">Languages <span class="substat">Nonblank lines by language</span></div><div class="language-list">' + languageRows + '</div>' +
+      '<div class="section-title">Subfolders <span class="substat">Largest first · Select to explore</span></div><div class="child-list">' + childRows + '</div>' +
+      (selected.directFiles ? '<div class="file-list"></div>' : '');
+    addBadgerActions(selected);
+    if (selected.directFiles) renderFileList(details.querySelector(".file-list"), selected);
+    details.querySelector(".focus-button").addEventListener("click", () => focusOn(selected));
+    details.querySelectorAll(".child-row").forEach(row => row.addEventListener("click", () => focusOn(byPath.get(row.dataset.path))));
+  }
+  function percent(value, total) { return (total ? value / total * 100 : 0).toLocaleString(undefined, {maximumFractionDigits:1}) + "%"; }
+
+  function selectNode(node) {
+    selected = node;
+    visibleTiles.forEach(tile => tile.classList.remove("selected"));
+    const tile = visibleTiles.get(tileKey(node));
+    if (tile) tile.classList.add("selected");
+    renderDetails();
+  }
+
+  function ancestry(node) {
+    const result = [node];
+    while (parents.has(result[0].path)) result.unshift(parents.get(result[0].path));
+    return result;
+  }
+  function renderCrumbs() {
+    const chain = ancestry(focus);
+    crumbs.innerHTML = "";
+    chain.forEach((node, index) => {
+      if (index) {
+        const sep = document.createElement("span");
+        sep.className = "sep";
+        sep.textContent = "/";
+        crumbs.appendChild(sep);
+      }
+      const button = document.createElement("button");
+      button.className = "crumb";
+      button.textContent = node.name;
+      button.title = node.path;
+      if (node === focus) button.setAttribute("aria-current", "location");
+      button.addEventListener("click", () => focusOn(node));
+      crumbs.appendChild(button);
+    });
+  }
+
+  function focusOn(node) {
+    focus = node;
+    selected = node;
+    details.scrollTop = 0;
+    render();
+    // Navigation replaces tiles and details controls. Keep keyboard users at
+    // the destination folder rather than leaving focus on the document body.
+    crumbs.querySelector('[aria-current="location"]')?.focus({preventScroll:true});
+  }
+  function render() {
+    hideTooltip();
+    map.innerHTML = "";
+    visibleTiles.clear();
+    const bounds = {x: 2, y: 2, w: Math.max(0, map.clientWidth - 4), h: Math.max(0, map.clientHeight - 4)};
+    const isLeaf = focus.children.length === 0;
+    document.getElementById("depth").disabled = isLeaf;
+    document.querySelector(".map-caption").hidden = isLeaf;
+    if (isLeaf && focus.files > 0) {
+      map.innerHTML = '<div class="leaf-view"><div class="leaf-card"><div class="eyebrow">Folder summary</div><h2>' + escapeHTML(focus.name) + '</h2><div class="folder-path">' + escapeHTML(focus.path) + '</div><div class="summary"><div><strong>' + formatNumber(focus.lines) + '</strong>nonblank lines</div><div><strong>' + formatNumber(focus.files) + '</strong>recognized files</div></div><p>No subfolders with nonblank source lines. Totals include recognized files in subfolders; the list below shows only files directly in this folder.</p><div class="file-list"></div>' + (parents.has(focus.path) ? '<button class="control" id="leaf-back">↑ Back to ' + escapeHTML(parents.get(focus.path).name) + '</button>' : '') + '</div></div>';
+      renderFileList(map.querySelector(".file-list"), focus);
+      document.getElementById("leaf-back")?.addEventListener("click", () => focusOn(parents.get(focus.path)));
+    } else {
+      renderChildren(focus, bounds, 0, hueFor(focus.path));
+    }
+    if (!childItems(focus).length && !focus.files) {
+      map.innerHTML = '<div class="empty" style="padding:20px">This folder has no visible child folders or direct source files.</div>';
+    }
+    document.getElementById("up").disabled = focus === root;
+    document.getElementById("reset").disabled = focus === root;
+    renderCrumbs();
+    renderDetails();
+  }
+
+  const repositoryStats = document.getElementById("repository-stats");
+  repositoryStats.innerHTML = '<span class="repository-loc"><strong>' + compactLOC(root.lines) + '</strong><span class="loc-unit">LOC</span></span><span class="repository-counts">' + formatNumber(root.files) + ' files · ' + formatNumber(byPath.size) + ' folders</span>';
+  repositoryStats.title = formatNumber(root.lines) + " nonblank lines, including comments. Entire repository.";
+  repositoryStats.setAttribute("aria-label", "Repository totals: " + formatNumber(root.lines) + " nonblank lines, including comments; " + formatNumber(root.files) + " files; " + formatNumber(byPath.size) + " folders.");
+  document.getElementById("up").addEventListener("click", () => focusOn(parents.get(focus.path) || root));
+  document.getElementById("reset").addEventListener("click", () => focusOn(root));
+  document.getElementById("depth").addEventListener("change", render);
+  const search = document.getElementById("search");
+  const results = document.getElementById("search-results");
+  function searchFolders() {
+    const query = search.value.trim().toLowerCase();
+    results.innerHTML = "";
+    if (!query) return;
+    const matches = Array.from(byPath.values()).filter(node => (node.path + " " + node.name).toLowerCase().includes(query)).sort((a,b) => b.lines - a.lines).slice(0, 20);
+    matches.forEach(node => {
+      const button = document.createElement("button");
+      button.className = "search-result";
+      button.innerHTML = escapeHTML(node.path === "." ? node.name : node.path) + '<small>' + formatNumber(node.lines) + ' lines · ' + formatNumber(node.files) + ' files</small>';
+      button.addEventListener("click", () => { focusOn(node); results.innerHTML = ""; search.value = ""; search.focus(); });
+      results.appendChild(button);
+    });
+    if (!matches.length) results.innerHTML = '<div class="empty" role="status">No folders found. Try a shorter name.</div>';
+  }
+  search.addEventListener("input", searchFolders);
+  search.addEventListener("focus", searchFolders);
+  search.addEventListener("keydown", event => {
+    if (event.key === "ArrowDown") { event.preventDefault(); results.querySelector("button")?.focus(); }
+    if (event.key === "Enter") results.querySelector("button")?.click();
+  });
+  document.addEventListener("keydown", event => { if (event.key === "Escape") { results.innerHTML = ""; hideTooltip(); } });
+  document.addEventListener("click", event => { if (!event.target.closest(".search")) results.innerHTML = ""; });
+  map.addEventListener("click", () => selectNode(focus));
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(render, 80);
+  });
+  render();
+})();
+</script>
+</body>
+</html>

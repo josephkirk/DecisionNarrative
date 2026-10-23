@@ -11,6 +11,29 @@ import { Database } from "bun:sqlite";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
+export function migrateLocationTagColumns(db: Database): void {
+  const locationColumns = db.prepare("PRAGMA table_info(locations)").all() as Array<{ name: string }>;
+  if (!locationColumns.some((column) => column.name === "tags")) db.run("ALTER TABLE locations ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'");
+
+  const storyletColumns = db.prepare("PRAGMA table_info(storylets)").all() as Array<{ name: string }>;
+  if (storyletColumns.some((column) => column.name === "location_tags")) return;
+  db.run("ALTER TABLE storylets ADD COLUMN location_tags TEXT NOT NULL DEFAULT '[]'");
+  const legacyStorylets = db.prepare("SELECT id, location FROM storylets WHERE location IS NOT NULL").all() as Array<{ id: string; location: string }>;
+  const readLocationTags = db.prepare("SELECT tags FROM locations WHERE id = ?");
+  const migrateLocationTags = db.prepare("UPDATE locations SET tags = ? WHERE id = ? AND tags = '[]'");
+  const migrateStoryletTags = db.prepare("UPDATE storylets SET location_tags = ? WHERE id = ?");
+  for (const storylet of legacyStorylets) {
+    const location = readLocationTags.get(storylet.location) as { tags: string } | undefined;
+    let tags: unknown;
+    try { tags = JSON.parse(location?.tags ?? "[]"); } catch { tags = []; }
+    const validTags = Array.isArray(tags) && tags.every((tag) => typeof tag === "string");
+    const parsedTags = validTags ? tags as string[] : [];
+    const locationTags = parsedTags.length ? parsedTags : [storylet.location];
+    if (!parsedTags.length) migrateLocationTags.run(JSON.stringify(locationTags), storylet.location);
+    migrateStoryletTags.run(JSON.stringify(locationTags), storylet.id);
+  }
+}
+
 export function initializeDatabase(dbPath = "data/storylet_studio.db"): Database {
   const dir = path.dirname(dbPath);
   if (!fs.existsSync(dir)) {
@@ -71,16 +94,6 @@ export function initializeDatabase(dbPath = "data/storylet_studio.db"): Database
     );
   `);
 
-  // Resumable authoring jobs persist their stage artifacts and prompt provenance.
-  db.run(`
-    CREATE TABLE IF NOT EXISTS generation_jobs (
-      id TEXT PRIMARY KEY,
-      revision INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      job_json TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-  `);
 
   // Authored scenario starting states belong to the reusable project, not to a playtest run.
   db.run(`
@@ -98,6 +111,7 @@ export function initializeDatabase(dbPath = "data/storylet_studio.db"): Database
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       description TEXT NOT NULL,
+      tags TEXT NOT NULL DEFAULT '[]',
       connected_zones TEXT NOT NULL,
       environmental_params TEXT NOT NULL,
       devices TEXT NOT NULL,
@@ -125,6 +139,7 @@ export function initializeDatabase(dbPath = "data/storylet_studio.db"): Database
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       location TEXT,
+      location_tags TEXT NOT NULL DEFAULT '[]',
       group_tag TEXT,
       cluster_type TEXT NOT NULL CHECK(cluster_type IN ('linear', 'player_controlled_passage', 'wheel', 'aftermath')),
       urgency_weight REAL NOT NULL DEFAULT 50,
@@ -137,17 +152,30 @@ export function initializeDatabase(dbPath = "data/storylet_studio.db"): Database
       effects TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       revision INTEGER NOT NULL DEFAULT 1,
-      approved_revision INTEGER
+      approved_revision INTEGER,
+      ending INTEGER NOT NULL DEFAULT 0,
+      graph TEXT,
+      chrono TEXT
     );
   `);
 
   // Upgrade existing local databases without invalidating their current storylet data.
+  migrateLocationTagColumns(db);
   const storyletColumns = db.prepare("PRAGMA table_info(storylets)").all() as Array<{ name: string }>;
   if (!storyletColumns.some((column) => column.name === "revision")) {
     db.run("ALTER TABLE storylets ADD COLUMN revision INTEGER NOT NULL DEFAULT 1");
   }
   if (!storyletColumns.some((column) => column.name === "approved_revision")) {
     db.run("ALTER TABLE storylets ADD COLUMN approved_revision INTEGER");
+  }
+  if (!storyletColumns.some((column) => column.name === "ending")) {
+    db.run("ALTER TABLE storylets ADD COLUMN ending INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!storyletColumns.some((column) => column.name === "graph")) {
+    db.run("ALTER TABLE storylets ADD COLUMN graph TEXT");
+  }
+  if (!storyletColumns.some((column) => column.name === "chrono")) {
+    db.run("ALTER TABLE storylets ADD COLUMN chrono TEXT");
   }
 
   // 6. Call History table (Deterministic Replay & Butterfly Rollback Stack)

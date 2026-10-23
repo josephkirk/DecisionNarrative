@@ -2,9 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::json;
 use storylet_engine::{
-    ActorState, CandidateRejection, ClusterType, DirectorState, FactRef, LifecycleState, Predicate,
-    PredicateOp, PredicateSet, Repeatability, RoleRequirement, SceneContent, StoryletChoice,
-    StoryletDefinition, WorldState, evaluate_storylets,
+    ActorState, CandidateRejection, ClusterType, DirectorState, FactRef, LifecycleState,
+    MetCharacterRequirement, Predicate, PredicateOp, PredicateSet, Repeatability, RoleRequirement,
+    SceneContent, StoryletChoice, StoryletDefinition, VisitedLocationRequirement, WorldState,
+    evaluate_storylets,
 };
 
 fn storylet(id: &str) -> StoryletDefinition {
@@ -14,7 +15,8 @@ fn storylet(id: &str) -> StoryletDefinition {
         title: format!("{id} title"),
         summary: "A project-owned scene".into(),
         approved: true,
-        location_id: Some("archive".into()),
+        ending: false,
+        location_tags: BTreeSet::from(["archive".into()]),
         urgency_weight: 70.0,
         cluster_type: ClusterType::PlayerControlledPassage,
         repeatability: Repeatability::Always,
@@ -22,6 +24,7 @@ fn storylet(id: &str) -> StoryletDefinition {
             role: "clerk".into(),
         }],
         trigger: PredicateSet::default(),
+        preconditions: Default::default(),
         content: SceneContent {
             opening: "A clerk checks the ledger.".into(),
         },
@@ -38,13 +41,18 @@ fn storylet(id: &str) -> StoryletDefinition {
 
 fn world() -> WorldState {
     WorldState {
-        current_location: Some("archive".into()),
+        current_location: Some("annex".into()),
+        location_tags: BTreeMap::from([
+            ("archive".into(), BTreeSet::from(["archive".into()])),
+            ("market".into(), BTreeSet::from(["market".into()])),
+            ("annex".into(), BTreeSet::from(["archive".into()])),
+        ]),
         qualities: BTreeMap::from([("quality.trust".into(), json!(4))]),
         actors: BTreeMap::from([(
             "nora".into(),
             ActorState {
                 role_tags: BTreeSet::from(["clerk".into()]),
-                current_location: "archive".into(),
+                current_location: "annex".into(),
                 busy: false,
             },
         )]),
@@ -65,7 +73,7 @@ fn only_approved_matching_storylets_are_eligible_and_bind_generic_cast_roles() {
     let mut draft = storylet("draft_scene");
     draft.approved = false;
     let mut wrong_location = storylet("wrong_location");
-    wrong_location.location_id = Some("market".into());
+    wrong_location.location_tags = BTreeSet::from(["market".into()]);
 
     let results = evaluate_storylets(
         &[approved, draft, wrong_location],
@@ -162,6 +170,100 @@ fn relationship_and_witness_knowledge_predicates_use_actor_scoped_state() {
         },
     ]);
     assert!(evaluate_storylets(&[definition], &state, &DirectorState::default(), 0.15)[0].eligible);
+}
+
+#[test]
+fn location_preconditions_accept_any_matching_visited_id_or_tag() {
+    let mut definition = storylet("visited_archive");
+    definition.location_tags.clear();
+    definition.required_roles.clear();
+    definition.preconditions.visited_locations_any_of = vec![
+        VisitedLocationRequirement::LocationId {
+            location_id: "market".into(),
+        },
+        VisitedLocationRequirement::LocationTag {
+            tag: "archive".into(),
+        },
+    ];
+    let mut state = world();
+    state.current_location = Some("elsewhere".into());
+    state.location_tags.insert(
+        "archive-location".into(),
+        BTreeSet::from(["archive".into()]),
+    );
+    state.visited_locations.insert("archive-location".into());
+    assert!(
+        evaluate_storylets(
+            &[definition.clone()],
+            &state,
+            &DirectorState::default(),
+            0.15
+        )[0]
+        .eligible
+    );
+    state.visited_locations.clear();
+    assert_eq!(
+        evaluate_storylets(&[definition], &state, &DirectorState::default(), 0.15)[0].rejection,
+        Some(CandidateRejection::VisitedLocationRequirementNotMet)
+    );
+}
+
+#[test]
+fn met_character_preconditions_accept_any_met_character_id_or_role() {
+    let mut definition = storylet("met_clerk");
+    definition.location_tags.clear();
+    definition.required_roles.clear();
+    definition.preconditions.met_characters_any_of = vec![
+        MetCharacterRequirement::CharacterId {
+            character_id: "mira".into(),
+        },
+        MetCharacterRequirement::RoleTag {
+            role: "archivist".into(),
+        },
+    ];
+    let mut state = world();
+    state.current_location = Some("elsewhere".into());
+    state.actors.get_mut("nora").unwrap().current_location = "elsewhere".into();
+    state.met_characters.insert("mira".into());
+    assert!(
+        evaluate_storylets(
+            &[definition.clone()],
+            &state,
+            &DirectorState::default(),
+            0.15
+        )[0]
+        .eligible
+    );
+    state.met_characters.clear();
+    state
+        .actors
+        .get_mut("nora")
+        .unwrap()
+        .role_tags
+        .insert("archivist".into());
+    state.met_characters.insert("nora".into());
+    assert!(evaluate_storylets(&[definition], &state, &DirectorState::default(), 0.15)[0].eligible);
+}
+
+#[test]
+fn location_and_character_precondition_groups_are_both_required() {
+    let mut definition = storylet("both_requirements");
+    definition.location_tags.clear();
+    definition.required_roles.clear();
+    definition.preconditions.visited_locations_any_of =
+        vec![VisitedLocationRequirement::LocationId {
+            location_id: "market".into(),
+        }];
+    definition.preconditions.met_characters_any_of = vec![MetCharacterRequirement::CharacterId {
+        character_id: "nora".into(),
+    }];
+    let mut state = world();
+    state.visited_locations.insert("market".into());
+    state.current_location = Some("elsewhere".into());
+    assert_eq!(
+        evaluate_storylets(&[definition], &state, &DirectorState::default(), 0.15)[0].rejection,
+        Some(CandidateRejection::MetCharacterRequirementNotMet)
+    );
 }
 
 #[test]

@@ -68,6 +68,28 @@ pub struct PredicateSet {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum VisitedLocationRequirement {
+    LocationId { location_id: String },
+    LocationTag { tag: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MetCharacterRequirement {
+    CharacterId { character_id: String },
+    RoleTag { role: String },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoryletPreconditions {
+    #[serde(default)]
+    pub visited_locations_any_of: Vec<VisitedLocationRequirement>,
+    #[serde(default)]
+    pub met_characters_any_of: Vec<MetCharacterRequirement>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleRequirement {
     pub role: String,
 }
@@ -116,13 +138,18 @@ pub struct StoryletDefinition {
     pub title: String,
     pub summary: String,
     pub approved: bool,
-    pub location_id: Option<String>,
+    #[serde(default)]
+    pub ending: bool,
+    #[serde(default)]
+    pub location_tags: BTreeSet<String>,
     pub urgency_weight: f64,
     pub cluster_type: ClusterType,
     pub repeatability: Repeatability,
     #[serde(default)]
     pub required_roles: Vec<RoleRequirement>,
     pub trigger: PredicateSet,
+    #[serde(default)]
+    pub preconditions: StoryletPreconditions,
     pub content: SceneContent,
     #[serde(default)]
     pub choices: Vec<StoryletChoice>,
@@ -157,6 +184,8 @@ pub enum CandidateRejection {
     NotApproved,
     InvalidDefinition,
     WrongLocation,
+    VisitedLocationRequirementNotMet,
+    MetCharacterRequirementNotMet,
     TriggerFailed { predicate_index: usize },
     MissingRole { role: String },
     RoleUnavailable { role: String },
@@ -272,8 +301,15 @@ fn evaluate_one(
         reject(&mut result, CandidateRejection::InvalidDefinition);
         return result;
     }
-    if let Some(location) = &definition.location_id {
-        if world.current_location.as_ref() != Some(location) {
+    if !definition.location_tags.is_empty() {
+        let current_tags = world
+            .current_location
+            .as_ref()
+            .and_then(|location| world.location_tags.get(location));
+        if !current_tags.is_some_and(|tags| {
+            tags.iter()
+                .any(|tag| definition.location_tags.contains(tag))
+        }) {
             reject(&mut result, CandidateRejection::WrongLocation);
             return result;
         }
@@ -323,8 +359,8 @@ fn evaluate_one(
             actor.role_tags.contains(&requirement.role)
                 && !actor.busy
                 && !used_actors.contains(*actor_id)
-                && definition
-                    .location_id
+                && world
+                    .current_location
                     .as_ref()
                     .is_none_or(|location| &actor.current_location == location)
                 && !director.role_reservations.contains_key(*actor_id)
@@ -363,6 +399,74 @@ fn evaluate_one(
             .insert(requirement.role.clone(), actor_id.clone());
     }
 
+    let has_visited_location = |location_id: &str| {
+        world.visited_locations.contains(location_id)
+            || world.current_location.as_deref() == Some(location_id)
+    };
+    if !definition.preconditions.visited_locations_any_of.is_empty() {
+        let matched = definition
+            .preconditions
+            .visited_locations_any_of
+            .iter()
+            .any(|requirement| match requirement {
+                VisitedLocationRequirement::LocationId { location_id } => {
+                    has_visited_location(location_id)
+                }
+                VisitedLocationRequirement::LocationTag { tag } => {
+                    let was_here = |location_id: &str| {
+                        world
+                            .location_tags
+                            .get(location_id)
+                            .is_some_and(|tags| tags.contains(tag))
+                    };
+                    world
+                        .visited_locations
+                        .iter()
+                        .any(|location_id| was_here(location_id))
+                        || world.current_location.as_deref().is_some_and(was_here)
+                }
+            });
+        if !matched {
+            reject(
+                &mut result,
+                CandidateRejection::VisitedLocationRequirementNotMet,
+            );
+            return result;
+        }
+    }
+    if !definition.preconditions.met_characters_any_of.is_empty() {
+        let character_is_met = |character_id: &str| {
+            world.met_characters.contains(character_id)
+                || world.current_location.as_ref().is_some_and(|location_id| {
+                    world
+                        .actors
+                        .get(character_id)
+                        .is_some_and(|actor| &actor.current_location == location_id)
+                })
+        };
+        let matched = definition
+            .preconditions
+            .met_characters_any_of
+            .iter()
+            .any(|requirement| match requirement {
+                MetCharacterRequirement::CharacterId { character_id } => {
+                    character_is_met(character_id)
+                }
+                MetCharacterRequirement::RoleTag { role } => {
+                    world.actors.iter().any(|(character_id, actor)| {
+                        actor.role_tags.contains(role) && character_is_met(character_id)
+                    })
+                }
+            });
+        if !matched {
+            reject(
+                &mut result,
+                CandidateRejection::MetCharacterRequirementNotMet,
+            );
+            return result;
+        }
+    }
+
     let mut match_count = 0;
     for (index, predicate) in definition.trigger.all_of.iter().enumerate() {
         if predicate_matches(predicate, world) {
@@ -396,7 +500,7 @@ fn evaluate_one(
         }
     }
 
-    let location_bonus = if definition.location_id.is_some() {
+    let location_bonus = if !definition.location_tags.is_empty() {
         15.0
     } else {
         0.0
@@ -456,8 +560,18 @@ pub(crate) fn predicate_matches(predicate: &Predicate, world: &WorldState) -> bo
         return false;
     };
     match predicate.op {
-        PredicateOp::Eq => actual == predicate.value,
-        PredicateOp::Neq => actual != predicate.value,
+        PredicateOp::Eq => match (actual.as_f64(), predicate.value.as_f64()) {
+            (Some(actual), Some(expected)) if actual.is_finite() && expected.is_finite() => {
+                actual == expected
+            }
+            _ => actual == predicate.value,
+        },
+        PredicateOp::Neq => match (actual.as_f64(), predicate.value.as_f64()) {
+            (Some(actual), Some(expected)) if actual.is_finite() && expected.is_finite() => {
+                actual != expected
+            }
+            _ => actual != predicate.value,
+        },
         PredicateOp::Gt => compare_numbers(&actual, &predicate.value, |a, b| a > b),
         PredicateOp::Gte => compare_numbers(&actual, &predicate.value, |a, b| a >= b),
         PredicateOp::Lt => compare_numbers(&actual, &predicate.value, |a, b| a < b),
@@ -600,6 +714,7 @@ pub fn execute_storylet_choice(
         effects: choice.effects.clone(),
         caused_by,
         advance_turn: true,
+        terminal: definition.ending,
     };
 
     // A lost response can be safely retried after the scene has already closed.

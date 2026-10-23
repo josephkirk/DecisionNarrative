@@ -1,82 +1,84 @@
 # DecisionNarrative
 
-DecisionNarrative is a local authoring and playtest studio for nonlinear, storylet-driven narrative games. It is designed to scale from a compact detective scenario to a large systemic RPG without imposing a built-in setting or cast.
+DecisionNarrative is a local authoring and playtest studio for nonlinear, storylet-driven narrative games. It is designed to scale from a compact detective scenario to a large systemic RPG without imposing a built-in setting, cast, or linear plot structure.
 
-Designers define a project's characters, locations, qualities, events, NPC behavior, scenarios, and storylets. A staged authoring pipeline turns a scene brief into editable trigger, role, outcome, choice, and effect contracts plus dialogue and action drafts. Designers review and approve the result before playtest. During playtest, the Rust engine evaluates eligible storylets, simulates player and NPC actions, records causal events, and exposes director diagnostics and butterfly-effect traces.
+The platform couples a host-independent Rust decision core with a unified local Rust service and a modern Vue 3 MVVM authoring studio styled after quiet macOS creative tools.
 
-The runtime is a host-independent Rust library with a C ABI for native embedding. The Bun/TypeScript studio calls a local Rust service. An optional local Python service provides EmbeddingGemma embeddings and can serve an optional learned ranking head. Models may rank Rust-eligible storylets; they do not decide hard eligibility or mutate authoritative world state.
+## Architecture
+
+- **Narrative Core (`crates/storylet-engine`)**: Host-independent Rust library with zero I/O dependencies. ChronoFlow v5 uses data-oriented world state, fixed gameplay-tag bitsets, reversible mutation deltas, persistent call history, and deterministic QBN, salience, waypoint, token, timeline, invoke, and reconciliation runtime APIs. Exports a C ABI for native embedding (Unreal / Unity / Godot / .NET).
+- **Unified Local Service (`crates/storylet-engine-service`)**: Axum, Tokio, and rusqlite service providing single-store SQLite persistence, REST endpoints, Server-Sent Events (SSE) live streams, and stdio/HTTP Model Context Protocol (MCP) server.
+- **Authoring Studio (`src/web`)**: Vue 3 (Composition API) + Vite + Vue Router application. Articy:draft-style project tree (Storylets, Entities, Qualities, Trait Templates, Assets) with custom folders/subfolders, live search, drag-and-drop hierarchy, and grid/list folder browsing. Generic entity authoring (characters, locations, items, facts, other) with Blueprint-style custom properties, composable trait templates, thumbnail storage, and bidirectional reference tracking with graph jump-to-node. Full-width graph storylet editor with a contextual property inspector, Tag Manager reference tracking, Rules & Events (NPC rules and project events), and starting condition scenarios.
+- **Drama Director (`crates/storylet-engine`)**: Deterministic eligibility and selection in Rust; no embedding ranker or model dependency.
+- **Interaction Context (`src/web/studio/interactionContext.ts`)**: Shares the active studio view, project, focused entity/selection, and playtest revision with a local MCP agent. The agent works through MCP operations directly; the studio does not call a model or generate content.
 
 ## Requirements
 
 - Windows, macOS, or Linux with Rust 1.90 or later (edition 2024 support).
 - Bun 1.3.14 or later.
-- Python 3.11–3.13 and `uv` for model contract tests. GPU training requires a supported CUDA environment and the optional training dependencies.
-- Optional: a configured Strata-compatible generation endpoint for model-assisted authoring. The editor, deterministic playtest, and project bundle workflows remain usable without it.
+- No AI service, Python runtime, model download, or generation endpoint is required.
 
-## Run the studio
+## Quick start
 
 From the repository root:
 
 ```sh
 bun install
+bun run build
 bun run play
 ```
 
-Open `http://127.0.0.1:3000`. The studio starts with an empty workspace when no project data exists. Authoring records use a local SQLite database at `data/storylet_studio.db` by default; set `STORYLET_DB_PATH` to choose another path. Playtest sessions are managed by the Rust service. For an isolated disposable run, set `STORYLET_ENGINE_DB_PATH=:memory:`. Do not point test runs at a project database you want to preserve.
+Open `http://127.0.0.1:3000` in your browser (e.g. Microsoft Edge, Chrome, Safari). `bun run play` preserves the project database at `data/storylet_studio_v2.db`; the MCP server uses the same path.
 
-The Rust service binds to loopback. `STORYLET_WEB_PORT`, `STORYLET_ENGINE_ADDR`, `STRATA_BASE_URL`, and `STORYLET_EMBEDDING_URL` can configure the local endpoints. The optional embedding service defaults to `127.0.0.1:4318` and loads its model on the first request.
+`bun run play:fresh` opens the separate `data/storylet_studio_clean.db` workspace, skips legacy imports, and binds on port 3001; it does not modify the default v2 database. `STORYLET_STUDIO_DB_PATH` selects a different file or `:memory:` for isolated testing. The MCP process inherits that variable when the agent client passes it through.
+
+## Environment configuration
+
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `STORYLET_STUDIO_ADDR` | `127.0.0.1:3000` | HTTP service bind address (`play:fresh` defaults to port 3001) |
+| `STORYLET_STUDIO_DB_PATH` | `data/storylet_studio_v2.db` | Unified SQLite database file path |
+
+No AI service or model-provider environment variables are required.
 
 ## Build and test
 
 ```sh
+# Compile Vue 3 frontend
 bun run build
+
+# Run frontend typecheck
+bun run typecheck
+
+# Run test suites
 bun test
-bunx tsc --noEmit
 cargo test --manifest-path crates/storylet-engine/Cargo.toml
 cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
-uv run --project model --no-sync python -m unittest discover -s model/tests -v
 ```
 
-Run Rust service builds/tests before `bun test` on Windows. Bun tests may launch the service; compiling its executable concurrently can cause a Windows file-lock failure. Tests and the semantic director smoke test use in-memory playtest state. To exercise the local encoder path, run:
+## Authoring and Starting Scenarios
+
+- **Storylet Library**: Browsable card grid with responsive columns (60 cards per page), search by title/text/group tag, status filters (Approved/Draft), location-tag filters, and ending badges. Storylets may target location tags; with no location tags they are not location-gated. With tags, they are eligible anywhere the current location shares at least one tag. Clicking any card opens the full-width graph editor.
+- **Storylet Graph Editor**: Authors edit the graph canvas and inspect storylet metadata, dialogue sections, ordered lines or idle actions, role/tag/audio metadata, local variables, and node-specific rules. Go To Location nodes move the player to a selected project location and must be directly targeted by a Choice branch. Graph validation runs before draft save and approval; valid graphs require exactly one Start and one or more End nodes, with every node reachable from Start and able to reach an End. Each End is either terminal (ends the run) or a jump to another storylet. A jump takes precedence over a leftover terminal flag; a storylet is a dedicated ending only when every End is terminal and has no jump. Variable and condition nodes select global or storylet-local scope; right-click adds or deletes graph items, and Alt-drag cuts wires.
+- **Starting Scenarios**: Scenarios configure only starting conditions (player start location policy, initial qualities overrides, actor population and location policies, and random seed). Scenarios do not lock in plot arcs, storylet deck membership, or run length. All approved storylets in the project remain eligible during playtest based on dynamic world preconditions and role availability.
+- **Tag Manager**: Browse role, location, emotion, and action tags by category, inspect reference counts, and open referencing entities in the Entity Editor or storylets in the Graph Editor.
+- **Story Codex & World Bible**: Manage Qualities (currencies, metrics, tools, territory, menaces) with value bounds and crisis storylets, Rules & Events (autonomous NPC rules and world/canon events), and starting condition scenarios.
+- **Project Tree & Entities**: Manage world records under generic Entities (characters, locations, items, facts, other) categorized in user-defined folders. Compose reusable Trait Templates with default values and entity-specific overrides, and manage append-only Assets with versioning and external storage references.
+- **Playtest & Director**: ChronoFlow v5 is the primary runtime surface. Tick authored flow graphs, inspect world state and active interactions, choose storylets, signal waiters, divert waypoint conversations, invoke a target POI, and reconcile history. The context view exposes node/token state, call histories, and passion-threshold Narrative Lego events.
+- **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v3) containing entities, folders, trait templates, assets, storylets, and scenarios, with transactional validation and automatic schema v2 migration on import.
+
+## Model Context Protocol (MCP)
+
+DecisionNarrative exposes project data and deterministic playtest operations to local MCP agents. `workspace.context` identifies the active studio view and focused entity; the agent then works through MCP without UI automation. The MCP service shares the studio's local database. No generation or model-ranking tools are exposed:
 
 ```sh
-bun run scripts/smoke-semantic-director.ts
+# Run MCP over stdio against the shared project database; this does not reset it
+cargo run --manifest-path crates/storylet-engine-service/Cargo.toml --bin storylet-engine-service -- --mcp
 ```
 
-## Create a project and playtest
-
-Create or import a project in the studio, add locations and characters, define storylets with role requirements, trigger predicates, choices, and explicit effects, then approve the content revisions you want in runtime. Save a scenario with its start state and selected approved content. Start a playtest and use the Director view to inspect eligible and rejected candidates. Player movement, waiting, choices, and NPC behaviors create revisioned events. The Butterfly view follows cause and consequence; sessions can be exported, restored, and forked for comparison.
-
-Project bundles are portable, versioned JSON. Use the studio's export/validate/import actions to move authored projects. A new project is generic and empty; example content is opt-in.
-
-## Storylet generation
-
-Generation is an authoring-time process. A designer provides the scene purpose, required roles, trigger conditions, and desired outcomes. The workflow develops alternatives, plans scene beats, drafts executable structure and prose, audits voice/continuity/choice clarity, and presents a review package. Outputs remain drafts until the designer approves both the storylet logic and its content. See the [storylet authoring guide](docs/guides/storylet-authoring.md) and the [system design](docs/design/storylet-studio.md) for the complete workflow and contracts.
-
-The social model is setting-neutral. Its reusable principles—actor motives, obligations, directional relationships, witness-scoped knowledge, institutional access, resilient narrative routes, and causal event history—are described in the [social simulation design](docs/design/social-simulation.md).
-
-## Optional semantic ranking
-
-See [model/README.md](model/README.md) for the EmbeddingGemma 2 service, training data contract, Unsloth setup, evaluation requirements, and ranking-head configuration. Set `STORYLET_RANKING_HEAD` to a validated, reviewed `ranking-head.json` artifact when starting the embedding service to enable the trained feature head. Without it, the director uses its deterministic or uncalibrated embedding baseline. No production-trained, calibrated model is bundled; human-reviewed family-held-out evaluation is required before treating a model as accepted.
-
-Current live feature extraction uses neutral values for goal progress and predicted consequence alignment until those signals have explicit project/runtime contracts. These neutral values and all current model probabilities are uncalibrated.
-
-## Native embedding
-
-`crates/storylet-engine/` builds as Rust library forms (`rlib`, `cdylib`, and `staticlib`) and exports a versioned C ABI. Headers and example hosts are under `crates/` and `examples/`. Run `bun run smoke:native-host` for the native host smoke path. The Rust library is designed to be embedded by engines such as Unreal; a full Unreal Editor plugin is not included yet.
-
-## Project state and test data
-
-Local project authoring data persists by default; disposable test/playtest state should not. Set database paths to `:memory:` for test processes and use fresh scenario/session IDs within the process. Database files are ignored by Git. Keep backups of authored project databases and do not delete them as part of test cleanup.
-
-## Scope and current limitations
-
-- The engine supports deterministic eligibility and causal world changes, while model ranking is an optional layer over eligible candidates.
-- Ranking confidence and probabilities are explicitly uncalibrated until reviewed calibration data and evaluation exist.
-- Goal progress and predicted consequence alignment currently use neutral live values.
-- Full Unreal plugin packaging and hosted collaboration are outside the current local-studio scope.
-- Runtime benchmark results measure the Rust deterministic engine path, not embedding inference, model quality, memory, or full web request latency. See [benchmark notes](docs/benchmarks/README.md).
+Tools exposed:
+- `narrative_platform`: Read active workspace context, inspect/validate project content, manage entities, and exercise deterministic Rust playtests.
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for the full text.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.

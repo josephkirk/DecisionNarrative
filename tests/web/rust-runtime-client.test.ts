@@ -32,17 +32,6 @@ test("studio runtime client executes a player turn through the Rust host", async
       },
     }, "intro");
 
-    const decision = await client.applyDecision("web-smoke", {
-      formatVersion: 1,
-      contextRevision: 0,
-      source: "fixture-ranker",
-      modelVersion: "fixture-1",
-      confidence: 0.9,
-      noActionProbability: 1,
-      ranking: [],
-    });
-    expect(decision.selected).toBeNull();
-    expect(decision.decision?.source).toBe("fixture-ranker");
 
     const before = await client.snapshot("web-smoke");
     const turn = await client.submitCommand("web-smoke", {

@@ -12,7 +12,7 @@ if ! command -v bun >/dev/null 2>&1; then
 fi
 
 # Build bundle
-$BUN_CMD run scripts/build.ts >/dev/null 2>&1
+$BUN_CMD run build >/dev/null 2>&1
 
 # Execute deterministic benchmark workload
-$BUN_CMD run scripts/benchmark_engine.ts
+$BUN_CMD run bench

@@ -2,9 +2,11 @@
 
 ## Product and design
 
-- [Storylet studio design](design/storylet-studio.md) — product scope, runtime and authoring architecture, data contracts, generation, playtest, ranking, and acceptance criteria.
+- [Chrono decision engine](design/chrono-decision-engine.md) — deterministic runtime architecture, dense contracts, implementation status, and known limitations.
+- [Entity, trait, and quality model](design/entity-trait-quality.md) — entities, traits, qualities, metadata and asset links, quality effect commands, subscriptions, and the traversable entity graph.
+- [Storylet studio design](design/storylet-studio.md) — product scope, runtime and authoring architecture, data contracts, playtesting, and acceptance criteria.
 - [Social simulation design](design/social-simulation.md) — setting-neutral principles for actors, relationships, knowledge, institutions, causality, and authored narrative.
-- [Storylet authoring guide](guides/storylet-authoring.md) — practical checklist for generating, reviewing, and playtesting project-owned content.
+- [Storylet authoring guide](guides/storylet-authoring.md) — practical checklist for authoring, reviewing, and playtesting project-owned content.
 - [Agent handoff](HANDOFF.md) — implementation map, current limitations, verification commands, and next work.
 
 ## Measurements

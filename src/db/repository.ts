@@ -14,8 +14,12 @@ export interface ProjectMetadata {
 
 export interface QualityRecord {
   name: string;
-  type: "currency" | "metric" | "tool" | "territory" | "menace";
+  type: "currency" | "metric" | "tool" | "progress" | "territory" | "menace";
   value: number;
+  min_value?: number;
+  max_value?: number;
+  is_hidden?: boolean;
+  menace_crisis_storylet_id?: string;
   description?: string;
   metadata?: Record<string, unknown>;
 }
@@ -25,7 +29,10 @@ export interface StoryletRecord {
   revision?: number;
   approved_revision?: number | null;
   title: string;
-  location?: string;
+  ending?: boolean;
+  graph?: unknown;
+  chrono?: Record<string, unknown>;
+  location_tags: string[];
   group_tag?: string;
   cluster_type: "linear" | "player_controlled_passage" | "wheel" | "aftermath";
   urgency_weight: number;
@@ -49,13 +56,6 @@ export interface StoryletRecord {
     conditions?: Array<{ variable: string; op: string; value: unknown }>;
     effects: Record<string, unknown>;
     divert_target?: string | null;
-    advisorPreview?: {
-      civilianTrustDelta: number;
-      securityRisk: number;
-      resourceCost: string;
-      frictionDescription: string;
-      suggestAlternativeTest?: string;
-    };
   }>;
   effects: Record<string, unknown>;
   created_at: number;
@@ -65,10 +65,52 @@ export interface LocationRecord {
   id: string;
   name: string;
   description: string;
+  tags: string[];
   connected_zones?: string[];
   environmental_params?: Record<string, unknown>;
   devices?: Record<string, unknown>;
   created_at?: number;
+}
+
+export type StartLocationMode = "fixed" | "random" | "by_attribute";
+
+export interface StartLocationPolicy {
+  mode: StartLocationMode;
+  location_id?: string;
+  attribute_key?: string;
+  attribute_value?: unknown;
+}
+
+export type ActorPopulationMode = "all" | "random" | "by_attribute";
+export type ActorLocationMode = "fixed" | "random" | "by_attribute";
+
+export interface ActorLocationPolicy {
+  mode: ActorLocationMode;
+  location_id?: string;
+  attribute_key?: string;
+  attribute_value?: unknown;
+}
+
+export interface ActorPopulationPolicy {
+  mode: ActorPopulationMode;
+  count?: number;
+  attribute_key?: string;
+  attribute_value?: unknown;
+  location_policy?: ActorLocationPolicy;
+}
+
+export interface ScenarioEventRecord {
+  id: string;
+  title: string;
+  description: string;
+  event_type: "canon" | "world";
+  trigger: {
+    all_of?: Array<{ variable: string; op: string; value: unknown }>;
+    any_of?: Array<{ variable: string; op: string; value: unknown }>;
+  };
+  effects: Record<string, unknown>;
+  delay_turns?: number;
+  repeatable?: boolean;
 }
 
 export interface ScenarioRecord {
@@ -79,12 +121,38 @@ export interface ScenarioRecord {
   actor_locations: Record<string, string>;
   storylet_ids: string[];
   seed: number;
+  start_location_policy?: StartLocationPolicy;
+  actor_population_policy?: ActorPopulationPolicy;
+  event_definitions?: ScenarioEventRecord[];
+}
+
+export interface MicroPassionRecord {
+  passion_id: string;
+  current_value: number;
+  weight: number;
+  is_hidden: boolean;
+}
+
+export interface MacroPassionThresholdRecord {
+  threshold_id: string;
+  trigger_value: number;
+  direction: "positive" | "negative";
+  linked_graph_asset_id: string;
+  is_currently_active?: boolean;
+}
+
+export interface ZeroSumPassionLinkRecord {
+  target_character_id: string;
+  source_passion_id: string;
+  target_passion_id: string;
+  weight: number;
 }
 
 export interface CharacterRecord {
   id: string;
   name: string;
   role: string;
+  faction_id?: string;
   home_location: string;
   current_location: string;
   status_axes: Record<string, unknown>;
@@ -93,6 +161,11 @@ export interface CharacterRecord {
   red_line: string;
   schedule?: Record<string, string>;
   qualities?: Record<string, unknown>;
+  passion_pool?: MicroPassionRecord[];
+  active_passions?: string[];
+  trust_inertia?: number;
+  thresholds?: MacroPassionThresholdRecord[];
+  zero_sum_passion_links?: ZeroSumPassionLinkRecord[];
   created_at?: number;
 }
 
@@ -167,11 +240,10 @@ export class StoryletRepository {
       storylets: StoryletRecord[];
       npcBehaviors: NpcBehaviorRecord[];
       scenarios: ScenarioRecord[];
-      generationJobs: Array<{ id: string; revision: number; status: string; updatedAt: number }>;
     },
   ): void {
     const replace = this.db.transaction(() => {
-      for (const table of ["npc_behaviors", "storylets", "scenarios", "generation_jobs", "qualities", "characters", "locations"]) {
+      for (const table of ["npc_behaviors", "storylets", "scenarios", "qualities", "characters", "locations"]) {
         this.db.prepare(`DELETE FROM ${table}`).run();
       }
       for (const item of content.qualities) this.saveQuality(item);
@@ -186,12 +258,6 @@ export class StoryletRepository {
       }
       for (const item of content.npcBehaviors) this.saveNpcBehavior(item);
       for (const item of content.scenarios) this.saveScenario(item);
-      for (const item of content.generationJobs) {
-        const restored = item.status === "running"
-          ? { ...item, status: "ready", revision: item.revision + 1, updatedAt: Date.now() }
-          : item;
-        this.saveGenerationJob(restored);
-      }
       this.saveProjectMetadata(metadata);
     });
     replace();
@@ -256,11 +322,12 @@ export class StoryletRepository {
   // --- Locations ---
   public saveLocation(loc: LocationRecord): void {
     const stmt = this.db.prepare(`
-      INSERT INTO locations (id, name, description, connected_zones, environmental_params, devices, created_at)
-      VALUES ($id, $name, $description, $connected_zones, $environmental_params, $devices, $created_at)
+      INSERT INTO locations (id, name, description, tags, connected_zones, environmental_params, devices, created_at)
+      VALUES ($id, $name, $description, $tags, $connected_zones, $environmental_params, $devices, $created_at)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
+        tags = excluded.tags,
         connected_zones = excluded.connected_zones,
         environmental_params = excluded.environmental_params,
         devices = excluded.devices;
@@ -269,6 +336,7 @@ export class StoryletRepository {
       $id: loc.id,
       $name: loc.name,
       $description: loc.description,
+      $tags: JSON.stringify(loc.tags ?? []),
       $connected_zones: JSON.stringify(loc.connected_zones ?? []),
       $environmental_params: JSON.stringify(loc.environmental_params ?? {}),
       $devices: JSON.stringify(loc.devices ?? {}),
@@ -284,6 +352,7 @@ export class StoryletRepository {
       id: row.id,
       name: row.name,
       description: row.description,
+      tags: JSON.parse(row.tags ?? "[]"),
       connected_zones: JSON.parse(row.connected_zones),
       environmental_params: JSON.parse(row.environmental_params),
       devices: JSON.parse(row.devices),
@@ -297,6 +366,7 @@ export class StoryletRepository {
       id: row.id,
       name: row.name,
       description: row.description,
+      tags: JSON.parse(row.tags ?? "[]"),
       connected_zones: JSON.parse(row.connected_zones),
       environmental_params: JSON.parse(row.environmental_params),
       devices: JSON.parse(row.devices),
@@ -465,41 +535,6 @@ export class StoryletRepository {
     return result.changes > 0;
   }
 
-  // --- Resumable storylet generation audit trail ---
-  public saveGenerationJob(job: { id: string; revision: number; status: string; updatedAt: number }): void {
-    this.db.prepare(`
-      INSERT INTO generation_jobs (id, revision, status, job_json, updated_at)
-      VALUES ($id, $revision, $status, $job_json, $updated_at)
-      ON CONFLICT(id) DO UPDATE SET
-        revision = excluded.revision,
-        status = excluded.status,
-        job_json = excluded.job_json,
-        updated_at = excluded.updated_at
-    `).run({
-      $id: job.id,
-      $revision: job.revision,
-      $status: job.status,
-      $job_json: JSON.stringify(job),
-      $updated_at: job.updatedAt,
-    });
-    this.bumpProjectRevision();
-  }
-
-  public getGenerationJob<T>(id: string): T | null {
-    const row = this.db.prepare("SELECT job_json FROM generation_jobs WHERE id = ?").get(id) as { job_json: string } | undefined;
-    return row ? JSON.parse(row.job_json) as T : null;
-  }
-
-  public listGenerationJobs<T>(): T[] {
-    const rows = this.db.prepare("SELECT job_json FROM generation_jobs ORDER BY updated_at DESC").all() as Array<{ job_json: string }>;
-    return rows.map((row) => JSON.parse(row.job_json) as T);
-  }
-
-  public deleteGenerationJob(id: string): boolean {
-    const result = this.db.prepare("DELETE FROM generation_jobs WHERE id = ?").run(id);
-    if (result.changes > 0) this.bumpProjectRevision();
-    return result.changes > 0;
-  }
 
   // --- Storylets ---
   public saveStorylet(st: StoryletRecord): void {
@@ -507,17 +542,17 @@ export class StoryletRepository {
     const revision = existing ? Number(existing.revision) + 1 : 1;
     const stmt = this.db.prepare(`
       INSERT INTO storylets (
-        id, title, location, group_tag, cluster_type, urgency_weight,
+        id, title, location_tags, group_tag, cluster_type, urgency_weight,
         repeatability, cooldown_turns, parameters, preconditions, content,
-        choices, effects, created_at, revision, approved_revision
+        choices, effects, created_at, revision, approved_revision, ending, graph, chrono
       ) VALUES (
-        $id, $title, $location, $group_tag, $cluster_type, $urgency_weight,
+        $id, $title, $location_tags, $group_tag, $cluster_type, $urgency_weight,
         $repeatability, $cooldown_turns, $parameters, $preconditions, $content,
-        $choices, $effects, $created_at, $revision, NULL
+        $choices, $effects, $created_at, $revision, NULL, $ending, $graph, $chrono
       )
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
-        location = excluded.location,
+        location_tags = excluded.location_tags,
         group_tag = excluded.group_tag,
         cluster_type = excluded.cluster_type,
         urgency_weight = excluded.urgency_weight,
@@ -528,13 +563,16 @@ export class StoryletRepository {
         content = excluded.content,
         choices = excluded.choices,
         effects = excluded.effects,
+        ending = excluded.ending,
+        graph = excluded.graph,
+        chrono = excluded.chrono,
         revision = excluded.revision,
         approved_revision = NULL;
     `);
     stmt.run({
       $id: st.id,
       $title: st.title,
-      $location: st.location ?? null,
+      $location_tags: JSON.stringify(st.location_tags ?? []),
       $group_tag: st.group_tag ?? null,
       $cluster_type: st.cluster_type,
       $urgency_weight: st.urgency_weight,
@@ -547,6 +585,9 @@ export class StoryletRepository {
       $effects: JSON.stringify(st.effects),
       $created_at: st.created_at ?? Date.now(),
       $revision: revision,
+      $ending: st.ending === true ? 1 : 0,
+      $graph: st.graph == null ? null : JSON.stringify(st.graph),
+      $chrono: st.chrono == null ? null : JSON.stringify(st.chrono),
     });
     this.bumpProjectRevision();
     this.storyletsCache = null;
@@ -592,8 +633,11 @@ export class StoryletRepository {
       id: row.id,
       revision: row.revision,
       approved_revision: row.approved_revision,
+      ending: row.ending === 1,
+      graph: row.graph == null ? undefined : JSON.parse(row.graph),
+      chrono: row.chrono == null ? undefined : JSON.parse(row.chrono),
       title: row.title,
-      location: row.location,
+      location_tags: JSON.parse(row.location_tags ?? "[]"),
       group_tag: row.group_tag,
       cluster_type: row.cluster_type,
       urgency_weight: row.urgency_weight,

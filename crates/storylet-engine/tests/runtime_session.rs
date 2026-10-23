@@ -2,11 +2,10 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 use storylet_engine::{
-    CharacterDefinition, ClusterType, DecisionResult, Effect, FactRef, LocationDefinition,
-    NpcBehaviorRule, Predicate, PredicateOp, PredicateSet, ProjectBundle, QualityDefinition,
-    QualityType, RankedStorylet, RankingHead, Repeatability, RoleRequirement, ScenarioDefinition,
-    SceneContent, SemanticCandidateEmbedding, SemanticRankingRequest, StoryletChoice,
-    StoryletDefinition, StoryletRuntime, WorldCommand,
+    CharacterDefinition, ClusterType, Effect, EventDefinition, EventType, FactRef,
+    LocationDefinition, NpcBehaviorRule, Predicate, PredicateOp, PredicateSet, ProjectBundle,
+    QualityDefinition, QualityType, Repeatability, RoleRequirement, ScenarioDefinition,
+    SceneContent, StoryletChoice, StoryletDefinition, StoryletRuntime, WorldCommand,
 };
 
 fn project() -> ProjectBundle {
@@ -18,6 +17,10 @@ fn project() -> ProjectBundle {
             kind: QualityType::Custom,
             default_value: json!(false),
             description: "Whether the missing receipt has been found".into(),
+            min_value: 0.0,
+            max_value: 100.0,
+            is_hidden: false,
+            menace_crisis_storylet_id: None,
         },
     );
     project.qualities.insert(
@@ -27,6 +30,10 @@ fn project() -> ProjectBundle {
             kind: QualityType::Custom,
             default_value: json!(false),
             description: "Whether the receipt has been read".into(),
+            min_value: 0.0,
+            max_value: 100.0,
+            is_hidden: false,
+            menace_crisis_storylet_id: None,
         },
     );
     for (id, name) in [("market", "Covered Market"), ("archive", "Night Archive")] {
@@ -36,6 +43,7 @@ fn project() -> ProjectBundle {
                 id: id.into(),
                 name: name.into(),
                 description: String::new(),
+                tags: vec![id.into()],
                 connected_locations: vec![],
                 map_position: (0.0, 0.0),
             },
@@ -63,7 +71,8 @@ fn project() -> ProjectBundle {
             title: "The Receipt".into(),
             summary: "A clerk finds the missing receipt".into(),
             approved: true,
-            location_id: Some("archive".into()),
+            ending: false,
+            location_tags: std::collections::BTreeSet::from(["archive".into()]),
             urgency_weight: 20.0,
             cluster_type: ClusterType::PlayerControlledPassage,
             repeatability: Repeatability::Always,
@@ -80,6 +89,7 @@ fn project() -> ProjectBundle {
                 }],
                 any_of: vec![],
             },
+            preconditions: Default::default(),
             content: SceneContent {
                 opening: "Nora unfolds a receipt.".into(),
             },
@@ -136,6 +146,8 @@ fn project() -> ProjectBundle {
             actor_locations: BTreeMap::new(),
             storylet_ids: vec!["find_receipt".into()],
             seed: 19,
+            event_ids: vec![],
+            active_actor_ids: None,
         },
     );
     project
@@ -161,6 +173,7 @@ fn player_movement_triggers_npc_cascade_and_unlocks_a_storylet_in_the_rust_runti
                 }],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -180,233 +193,169 @@ fn player_movement_triggers_npc_cascade_and_unlocks_a_storylet_in_the_rust_runti
 }
 
 #[test]
-fn external_decision_is_revalidated_and_can_choose_no_action() {
+fn scenario_canon_and_world_events_fire_after_their_turn_and_are_recorded() {
     let mut authored = project();
-    let mut alternate = authored.storylets["find_receipt"].clone();
-    alternate.id = "ask_clerk".into();
-    alternate.title = "Ask the Clerk".into();
-    authored.storylets.insert(alternate.id.clone(), alternate);
-    authored.scenarios.get_mut("opening").unwrap().storylet_ids =
-        vec!["find_receipt".into(), "ask_clerk".into()];
+    authored.qualities.insert(
+        "world.pressure".into(),
+        QualityDefinition {
+            key: "world.pressure".into(),
+            kind: QualityType::Metric,
+            default_value: json!(0),
+            description: "Ambient pressure".into(),
+            min_value: 0.0,
+            max_value: 100.0,
+            is_hidden: false,
+            menace_crisis_storylet_id: None,
+        },
+    );
+    authored.events.insert(
+        "canon_revelation".into(),
+        EventDefinition {
+            id: "canon_revelation".into(),
+            title: "A canon revelation".into(),
+            description: "Nora confirms the receipt.".into(),
+            trigger: PredicateSet {
+                all_of: vec![Predicate {
+                    fact: FactRef::Quality {
+                        key: "evidence.receipt_found".into(),
+                    },
+                    op: PredicateOp::Eq,
+                    value: json!(true),
+                }],
+                any_of: vec![],
+            },
+            effects: vec![Effect::SetQuality {
+                key: "evidence.read".into(),
+                value: json!(true),
+            }],
+            delay_turns: 1,
+            repeatable: false,
+            event_type: EventType::Canon,
+        },
+    );
+    authored.events.insert(
+        "weather_shift".into(),
+        EventDefinition {
+            id: "weather_shift".into(),
+            title: "Rain reaches the archive".into(),
+            description: "The gutters answer the storm.".into(),
+            trigger: PredicateSet::default(),
+            effects: vec![Effect::AddQuality {
+                key: "world.pressure".into(),
+                amount: 1.0,
+            }],
+            delay_turns: 1,
+            repeatable: false,
+            event_type: EventType::World,
+        },
+    );
+    authored.scenarios.get_mut("opening").unwrap().event_ids =
+        vec!["canon_revelation".into(), "weather_shift".into()];
     let mut runtime = StoryletRuntime::default();
     runtime
-        .create_session("decision", authored, "opening")
+        .create_session("scenario-events", authored, "opening")
         .unwrap();
-    runtime
+    let result = runtime
         .submit_command(
-            "decision",
+            "scenario-events",
             WorldCommand {
-                idempotency_key: "player:enter-archive".into(),
+                idempotency_key: "turn-one".into(),
                 expected_revision: 0,
                 actor_id: "player".into(),
-                action: "move".into(),
-                effects: vec![Effect::MovePlayer {
-                    location_id: "archive".into(),
+                action: "wait".into(),
+                effects: vec![Effect::SetQuality {
+                    key: "evidence.receipt_found".into(),
+                    value: json!(true),
                 }],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
-
-    let decision = DecisionResult {
-        format_version: 1,
-        context_revision: 2,
-        source: "test-ranker".into(),
-        model_version: "fixture-1".into(),
-        confidence: 0.8,
-        no_action_probability: 0.2,
-        ranking: vec![
-            RankedStorylet {
-                storylet_id: "ask_clerk".into(),
-                score: 0.9,
-                probability: 0.6,
-            },
-            RankedStorylet {
-                storylet_id: "find_receipt".into(),
-                score: 0.4,
-                probability: 0.2,
-            },
-        ],
-    };
-    let result = runtime
-        .apply_decision("decision", 0.15, decision.clone())
-        .unwrap();
-    assert_eq!(result.selected.as_deref(), Some("ask_clerk"));
-    assert_eq!(result.candidates[0].storylet_id, "ask_clerk");
-    assert_eq!(result.decision, Some(decision.clone()));
-
-    let mut no_action = decision;
-    no_action.no_action_probability = 0.8;
-    no_action.ranking[0].probability = 0.1;
-    no_action.ranking[1].probability = 0.1;
-    let result = runtime.apply_decision("decision", 0.15, no_action).unwrap();
-    assert_eq!(result.selected, None);
-
-    let stale = DecisionResult {
-        format_version: 1,
-        context_revision: 1,
-        source: "test-ranker".into(),
-        model_version: "fixture-1".into(),
-        confidence: 0.5,
-        no_action_probability: 1.0,
-        ranking: vec![],
-    };
-    assert!(runtime.apply_decision("decision", 0.15, stale).is_err());
+    let event_actions: Vec<_> = result
+        .world
+        .events
+        .iter()
+        .map(|event| event.action.as_str())
+        .collect();
+    assert!(event_actions.contains(&"event:canon:canon_revelation"));
+    assert!(event_actions.contains(&"event:world:weather_shift"));
+    assert_eq!(
+        result.world.qualities.get("evidence.read"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        result.world.qualities.get("world.pressure"),
+        Some(&json!(1.0))
+    );
 }
 
 #[test]
-fn rust_engine_scores_embeddings_and_rejects_incomplete_or_ineligible_vectors() {
+fn ending_choice_terminates_session_and_blocks_later_actions() {
     let mut authored = project();
-    let mut alternate = authored.storylets["find_receipt"].clone();
-    alternate.id = "ask_clerk".into();
-    alternate.title = "Ask the Clerk".into();
-    authored.storylets.insert(alternate.id.clone(), alternate);
-    let mut remote = authored.storylets["find_receipt"].clone();
-    remote.id = "weather_elsewhere".into();
-    remote.location_id = Some("market".into());
-    authored.storylets.insert(remote.id.clone(), remote);
-    authored.scenarios.get_mut("opening").unwrap().storylet_ids = vec![
-        "find_receipt".into(),
-        "ask_clerk".into(),
-        "weather_elsewhere".into(),
-    ];
+    authored.storylets.get_mut("find_receipt").unwrap().ending = true;
+    authored
+        .scenarios
+        .get_mut("opening")
+        .unwrap()
+        .actor_locations
+        .insert("nora".into(), "archive".into());
     let mut runtime = StoryletRuntime::default();
     runtime
-        .create_session("semantic", authored, "opening")
+        .create_session("ending", authored, "opening")
         .unwrap();
     runtime
         .submit_command(
-            "semantic",
+            "ending",
             WorldCommand {
-                idempotency_key: "player:enter-archive".into(),
+                idempotency_key: "reveal".into(),
                 expected_revision: 0,
                 actor_id: "player".into(),
-                action: "move".into(),
-                effects: vec![Effect::MovePlayer {
-                    location_id: "archive".into(),
-                }],
+                action: "reveal".into(),
+                effects: vec![
+                    Effect::SetQuality {
+                        key: "evidence.receipt_found".into(),
+                        value: json!(true),
+                    },
+                    Effect::MovePlayer {
+                        location_id: "archive".into(),
+                    },
+                ],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
-
-    let request = SemanticRankingRequest {
-        format_version: 1,
-        context_revision: 2,
-        model_version: "encoder@revision-1".into(),
-        query_embedding: vec![1.0, 0.0],
-        ranking_head: None,
-        candidates: vec![
-            SemanticCandidateEmbedding {
-                storylet_id: "ask_clerk".into(),
-                embedding: vec![0.0, 1.0],
-                features: BTreeMap::new(),
-            },
-            SemanticCandidateEmbedding {
-                storylet_id: "find_receipt".into(),
-                embedding: vec![1.0, 0.0],
-                features: BTreeMap::new(),
-            },
-        ],
-    };
-    let result = runtime
-        .rank_semantic("semantic", 0.15, request.clone())
+    let completed = runtime
+        .execute_choice("ending", "find_receipt", "read", "ending-choice", 1)
         .unwrap();
-    assert_eq!(result.selected.as_deref(), Some("find_receipt"));
-    assert_eq!(result.candidates[0].storylet_id, "find_receipt");
-    assert_eq!(
-        result.decision.as_ref().unwrap().source,
-        "embedding_baseline_uncalibrated"
-    );
-    assert!(result.decision.as_ref().unwrap().confidence == 0.0);
-    let probabilities = result
-        .decision
-        .as_ref()
-        .unwrap()
-        .ranking
-        .iter()
-        .map(|item| item.probability)
-        .sum::<f64>()
-        + result.decision.as_ref().unwrap().no_action_probability;
-    assert!((probabilities - 1.0).abs() < 1e-10);
-
-    let feature_names = vec![
-        "semantic_relevance",
-        "urgency",
-        "pacing_arc_alignment",
-        "novelty",
-        "waiting_time",
-        "goal_progress",
-        "role_binding_quality",
-        "predicted_consequence_alignment",
-        "no_action",
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect::<Vec<_>>();
-    let head = RankingHead {
-        schema_version: 1,
-        model_version: "reviewed-pairwise-v1".into(),
-        feature_names: feature_names.clone(),
-        weights: [
-            ("semantic_relevance", 0.0),
-            ("urgency", 10.0),
-            ("pacing_arc_alignment", 0.0),
-            ("novelty", 0.0),
-            ("waiting_time", 0.0),
-            ("goal_progress", 0.0),
-            ("role_binding_quality", 0.0),
-            ("predicted_consequence_alignment", 0.0),
-            ("no_action", 0.0),
-        ]
-        .into_iter()
-        .map(|(name, weight)| (name.to_owned(), weight))
-        .collect(),
-        bias: 0.0,
-        temperature: 1.0,
-        no_action_bias: -20.0,
-    };
-    let mut ranked = request.clone();
-    ranked.ranking_head = Some(head);
-    for candidate in &mut ranked.candidates {
-        candidate.features = feature_names
-            .iter()
-            .map(|name| (name.clone(), 0.0))
-            .collect();
-        if candidate.storylet_id == "ask_clerk" {
-            candidate.features.insert("urgency".into(), 1.0);
-        }
-    }
-    let trained = runtime.rank_semantic("semantic", 0.15, ranked).unwrap();
-    assert_eq!(trained.selected.as_deref(), Some("ask_clerk"));
-    assert_eq!(
-        trained.decision.as_ref().unwrap().source,
-        "trained_ranking_head_uncalibrated"
-    );
-    assert_eq!(
-        trained.decision.as_ref().unwrap().model_version,
-        "encoder@revision-1+reviewed-pairwise-v1"
-    );
-    assert_eq!(trained.decision.as_ref().unwrap().confidence, 0.0);
-
-    let mut incomplete = request.clone();
-    incomplete.candidates.pop();
-    assert!(runtime.rank_semantic("semantic", 0.15, incomplete).is_err());
-    let mut includes_ineligible = request.clone();
-    includes_ineligible
-        .candidates
-        .push(SemanticCandidateEmbedding {
-            storylet_id: "weather_elsewhere".into(),
-            embedding: vec![1.0, 0.0],
-            features: BTreeMap::new(),
-        });
+    assert!(completed.player.event.terminal);
+    assert!(completed.world.is_terminal());
     assert!(
         runtime
-            .rank_semantic("semantic", 0.15, includes_ineligible)
-            .is_err()
+            .evaluate("ending", 0.15)
+            .unwrap()
+            .candidates
+            .is_empty()
     );
+    let error = runtime
+        .submit_command(
+            "ending",
+            WorldCommand {
+                idempotency_key: "after-ending".into(),
+                expected_revision: completed.world.revision,
+                actor_id: "player".into(),
+                action: "again".into(),
+                effects: vec![],
+                caused_by: vec![],
+                advance_turn: true,
+                terminal: false,
+            },
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("reached its ending"));
 }
 
 #[test]
@@ -420,6 +369,10 @@ fn replaying_a_player_command_does_not_replay_its_npc_cascade() {
             kind: QualityType::Custom,
             default_value: json!(0),
             description: "Number of times Nora acted".into(),
+            min_value: 0.0,
+            max_value: 100.0,
+            is_hidden: false,
+            menace_crisis_storylet_id: None,
         },
     );
     authored.npc_behaviors.insert(
@@ -448,6 +401,7 @@ fn replaying_a_player_command_does_not_replay_its_npc_cascade() {
         effects: vec![],
         caused_by: vec![],
         advance_turn: true,
+        terminal: false,
     };
     let first = runtime
         .submit_command("idempotent", command.clone())
@@ -482,6 +436,7 @@ fn invalid_player_command_keeps_session_snapshot_unchanged() {
             }],
             caused_by: vec![],
             advance_turn: true,
+            terminal: false,
         },
     );
 
@@ -506,6 +461,7 @@ fn clearing_a_playtest_discards_all_session_state_and_allows_a_clean_restart() {
                 effects: vec![],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -544,6 +500,7 @@ fn fork_replays_an_event_prefix_and_keeps_future_branch_actions_isolated() {
                 }],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -574,6 +531,7 @@ fn fork_replays_an_event_prefix_and_keeps_future_branch_actions_isolated() {
                 effects: vec![],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -606,6 +564,7 @@ fn exported_session_restores_world_and_director_state_after_runtime_restart() {
                 }],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();
@@ -619,7 +578,24 @@ fn exported_session_restores_world_and_director_state_after_runtime_restart() {
     let restored = restarted.restore_session(saved.clone()).unwrap();
     assert_eq!(restored, before);
     assert_eq!(restarted.evaluate("durable", 0.15).unwrap().selected, None);
-
+    let mut legacy_json = serde_json::to_value(saved.clone()).unwrap();
+    legacy_json["format_version"] = json!(1);
+    legacy_json["session_id"] = json!("legacy");
+    let legacy_world = legacy_json["world"].as_object_mut().unwrap();
+    legacy_world.remove("location_tags");
+    legacy_world.remove("visited_locations");
+    legacy_world.remove("met_characters");
+    let legacy: storylet_engine::RuntimeSessionState = serde_json::from_value(legacy_json).unwrap();
+    let mut legacy_restart = StoryletRuntime::default();
+    let normalized = legacy_restart.restore_session(legacy).unwrap();
+    assert_eq!(normalized.world, before.world);
+    assert_eq!(
+        legacy_restart
+            .export_session("legacy")
+            .unwrap()
+            .format_version,
+        2
+    );
     let mut tampered = saved;
     tampered.session_id = "tampered".into();
     tampered.world.events.pop();
@@ -645,6 +621,7 @@ fn eligible_storylet_choice_executes_through_runtime_and_retries_idempotently() 
                 }],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .unwrap();

@@ -5,8 +5,8 @@ test("Codex records map to a generic validated project and a fresh scenario", ()
   const result = buildWorkspaceProject({
     qualities: [{ name: "clue.receipt", type: "tool", value: 0, description: "Receipt found" }],
     locations: [
-      { id: "market", name: "Market", description: "A covered market", connected_zones: ["archive"] },
-      { id: "archive", name: "Archive", description: "A night archive", connected_zones: ["market"] },
+      { id: "market", name: "Market", description: "A covered market", tags: ["market"], connected_zones: ["archive"] },
+      { id: "archive", name: "Archive", description: "A night archive", tags: ["archive"], connected_zones: ["market"] },
     ],
     characters: [{
       id: "nora", name: "Nora", role: "Clerk", home_location: "archive", current_location: "archive",
@@ -14,9 +14,12 @@ test("Codex records map to a generic validated project and a fresh scenario", ()
     }],
     storylets: [{
       revision: 2, approved_revision: 2,
-      id: "find-receipt", title: "The Receipt", location: "archive", cluster_type: "player_controlled_passage",
+      id: "find-receipt", title: "The Receipt", location_tags: ["archive"], cluster_type: "player_controlled_passage",
       urgency_weight: 65, repeatability: "always", cooldown_turns: 0,
-      parameters: [{ param_name: "clerk", query: "character.role == 'Clerk'" }],
+      parameters: [
+        { param_name: "clerk", query: 'role == "Clerk"' },
+        { param_name: "guard", query: "character_role == 'Guard'" },
+      ],
       preconditions: { all_of: [{ variable: "clue.receipt", op: "eq", value: 0 }] },
       content: { text_template: "Nora unfolds a receipt." },
       choices: [{ choice_id: "read", label: "Read it", effects: { "clue.receipt": 1 } }],
@@ -27,8 +30,9 @@ test("Codex records map to a generic validated project and a fresh scenario", ()
   expect(result.issues).toEqual([]);
   expect(result.project.name).toBe("Workspace");
   expect(result.project.scenarios[result.scenarioId].player_start_location).toBe("market");
-  expect(result.project.storylets["find-receipt"].required_roles).toEqual([{ role: "Clerk" }]);
+  expect(result.project.storylets["find-receipt"].required_roles).toEqual([{ role: "Clerk" }, { role: "Guard" }]);
   expect(result.project.storylets["find-receipt"].approved).toBe(true);
+  expect(result.project.storylets["find-receipt"].location_tags).toEqual(["archive"]);
   expect(result.project.storylets["find-receipt"].choices[0].effects).toEqual([
     { kind: "add_quality", key: "clue.receipt", amount: 1 },
   ]);
@@ -41,7 +45,7 @@ test("unsupported role query and unknown references are surfaced as conversion e
     characters: [],
     storylets: [{
       revision: 1, approved_revision: 1,
-      id: "unsupported", title: "Unsupported", location: "room", cluster_type: "linear", urgency_weight: 50,
+      id: "unsupported", title: "Unsupported", location_tags: ["room"], cluster_type: "linear", urgency_weight: 50,
       repeatability: "always", cooldown_turns: 0,
       parameters: [{ param_name: "role", query: "role matches a designer expression" }],
       preconditions: { all_of: [{ variable: "unknown.quality", op: "eq", value: true }] },
@@ -57,10 +61,10 @@ test("unsupported role query and unknown references are surfaced as conversion e
 test("unapproved storylet revisions are kept out of runtime bundles", () => {
   const result = buildWorkspaceProject({
     qualities: [],
-    locations: [{ id: "room", name: "Room", description: "", connected_zones: [] }],
+    locations: [{ id: "room", name: "Room", description: "", tags: ["room"], connected_zones: [] }],
     characters: [],
     storylets: [{
-      id: "draft", revision: 3, approved_revision: 2, title: "Draft", location: "room", cluster_type: "linear",
+      id: "draft", revision: 3, approved_revision: 2, title: "Draft", location_tags: ["room"], cluster_type: "linear",
       urgency_weight: 50, repeatability: "always", cooldown_turns: 0, parameters: [], preconditions: {},
       content: { text_template: "Not approved yet." }, choices: [], effects: {}, created_at: 1,
     }],
@@ -107,12 +111,12 @@ test("a saved scenario preserves its start state, cast positions, seed, and sele
   const result = buildWorkspaceProject({
     qualities: [{ name: "clue.receipt", type: "tool", value: 0 }],
     locations: [
-      { id: "market", name: "Market", description: "", connected_zones: ["archive"] },
-      { id: "archive", name: "Archive", description: "", connected_zones: ["market"] },
+      { id: "market", name: "Market", description: "", tags: ["market"], connected_zones: ["archive"] },
+      { id: "archive", name: "Archive", description: "", tags: ["archive"], connected_zones: ["market"] },
     ],
     characters: [{ id: "nora", name: "Nora", role: "Clerk", home_location: "archive", current_location: "archive", status_axes: {}, needs: {}, agenda: "", red_line: "" }],
     storylets: [{
-      id: "find-receipt", revision: 1, approved_revision: 1, title: "The Receipt", location: "archive",
+      id: "find-receipt", revision: 1, approved_revision: 1, title: "The Receipt", location_tags: ["archive"],
       cluster_type: "player_controlled_passage", urgency_weight: 50, repeatability: "always", cooldown_turns: 0,
       parameters: [{ param_name: "clerk", query: "role == 'Clerk'" }], preconditions: {},
       content: { text_template: "Nora finds a receipt." }, choices: [], effects: {}, created_at: 1,
@@ -142,4 +146,191 @@ test("invalid saved scenario references are reported before runtime creation", (
   expect(result.issues.some((issue) => issue.includes("unknown location 'missing'"))).toBe(true);
   expect(result.issues.some((issue) => issue.includes("missing, invalid, or unapproved"))).toBe(true);
   expect(result.issues.some((issue) => issue.includes("nonnegative safe integer"))).toBe(true);
+});
+
+
+test("deterministic repeatability: identical seed produces identical resolved start location and actors", () => {
+  const records = {
+    qualities: [],
+    locations: [
+      { id: "loc-a", name: "Location A", description: "", connected_zones: ["loc-b", "loc-c"], environmental_params: { zone: "indoor", access: 1 } },
+      { id: "loc-b", name: "Location B", description: "", connected_zones: ["loc-a"], environmental_params: { zone: "outdoor", access: 2 } },
+      { id: "loc-c", name: "Location C", description: "", connected_zones: ["loc-a"], environmental_params: { zone: "indoor", access: 3 } },
+      { id: "loc-d", name: "Location D", description: "", connected_zones: [], environmental_params: { zone: "outdoor", access: 1 } },
+    ],
+    characters: [
+      { id: "c1", name: "Char 1", role: "Clerk", home_location: "loc-a", current_location: "loc-a", status_axes: { faction: "guild" }, needs: {}, agenda: "", red_line: "" },
+      { id: "c2", name: "Char 2", role: "Guard", home_location: "loc-b", current_location: "loc-b", status_axes: { faction: "city" }, needs: {}, agenda: "", red_line: "" },
+      { id: "c3", name: "Char 3", role: "Merchant", home_location: "loc-c", current_location: "loc-c", status_axes: { faction: "guild" }, needs: {}, agenda: "", red_line: "" },
+      { id: "c4", name: "Char 4", role: "Clerk", home_location: "loc-d", current_location: "loc-d", status_axes: { faction: "city" }, needs: {}, agenda: "", red_line: "" },
+    ],
+    storylets: [],
+  };
+
+  const scenario1 = {
+    id: "random-test",
+    name: "Random Test",
+    player_start_location: "loc-a",
+    initial_qualities: {},
+    actor_locations: {},
+    storylet_ids: [],
+    seed: 98765,
+    start_location_policy: { mode: "random" as const },
+    actor_population_policy: {
+      mode: "random" as const,
+      count: 2,
+      location_policy: { mode: "random" as const },
+    },
+  };
+
+  const res1 = buildWorkspaceProject(records, { scenario: scenario1 });
+  const res2 = buildWorkspaceProject(records, { scenario: { ...scenario1 } });
+
+  expect(res1.issues).toEqual([]);
+  expect(res2.issues).toEqual([]);
+  expect(res1.project.scenarios["random-test"].player_start_location)
+    .toBe(res2.project.scenarios["random-test"].player_start_location);
+  expect(res1.project.scenarios["random-test"].actor_locations)
+    .toEqual(res2.project.scenarios["random-test"].actor_locations);
+  expect(Object.keys(res1.project.scenarios["random-test"].actor_locations).length).toBe(2);
+});
+
+test("attribute matching: start location and actor population resolve matching entities", () => {
+  const records = {
+    qualities: [],
+    locations: [
+      { id: "loc-a", name: "Location A", description: "", connected_zones: [], environmental_params: { security_level: "High", is_open: true } },
+      { id: "loc-b", name: "Location B", description: "", connected_zones: [], environmental_params: { security_level: "Low", is_open: false } },
+    ],
+    characters: [
+      { id: "c1", name: "Alice", role: "Detective", home_location: "loc-a", current_location: "loc-a", status_axes: { rank: "Senior" }, needs: {}, agenda: "", red_line: "" },
+      { id: "c2", name: "Bob", role: "Patrol", home_location: "loc-b", current_location: "loc-b", status_axes: { rank: "Junior" }, needs: {}, agenda: "", red_line: "" },
+      { id: "c3", name: "Charlie", role: "Detective", home_location: "loc-a", current_location: "loc-a", status_axes: { rank: "Senior" }, needs: {}, agenda: "", red_line: "" },
+    ],
+    storylets: [],
+  };
+
+  const scenario = {
+    id: "attr-test",
+    name: "Attr Test",
+    player_start_location: "loc-b",
+    initial_qualities: {},
+    actor_locations: {},
+    storylet_ids: [],
+    seed: 42,
+    start_location_policy: {
+      mode: "by_attribute" as const,
+      attribute_key: "security_level",
+      attribute_value: "High",
+    },
+    actor_population_policy: {
+      mode: "by_attribute" as const,
+      attribute_key: "rank",
+      attribute_value: "Senior",
+      location_policy: {
+        mode: "by_attribute" as const,
+        attribute_key: "security_level",
+        attribute_value: "Low",
+      },
+    },
+  };
+
+  const res = buildWorkspaceProject(records, { scenario });
+  expect(res.issues).toEqual([]);
+  // Start location matches security_level == High -> loc-a
+  expect(res.project.scenarios["attr-test"].player_start_location).toBe("loc-a");
+  // Actors matching rank == Senior -> c1, c3 placed in security_level == Low -> loc-b
+  expect(res.project.scenarios["attr-test"].actor_locations).toEqual({
+    c1: "loc-b",
+    c3: "loc-b",
+  });
+});
+
+test("missing attribute matches and invalid selector config report validation errors", () => {
+  const records = {
+    qualities: [],
+    locations: [{ id: "loc-a", name: "Loc A", description: "", connected_zones: [] }],
+    characters: [{ id: "c1", name: "C1", role: "Role", home_location: "loc-a", current_location: "loc-a", status_axes: {}, needs: {}, agenda: "", red_line: "" }],
+    storylets: [],
+  };
+
+  const brokenScenario = {
+    id: "broken-attr",
+    name: "Broken Attr",
+    player_start_location: "loc-a",
+    initial_qualities: {},
+    actor_locations: {},
+    storylet_ids: [],
+    seed: 1,
+    start_location_policy: {
+      mode: "by_attribute" as const,
+      attribute_key: "nonexistent",
+      attribute_value: "val",
+    },
+    actor_population_policy: {
+      mode: "random" as const,
+      count: -5,
+    },
+  };
+
+  const res = buildWorkspaceProject(records, { scenario: brokenScenario });
+  expect(res.issues.some((issue) => issue.includes("no location matches attribute"))).toBe(true);
+  expect(res.issues.some((issue) => issue.includes("non-negative integer count"))).toBe(true);
+});
+
+test("old scenario records without policies remain 100% backwards compatible", () => {
+  const records = {
+    qualities: [{ name: "gold", type: "currency", value: 10 }],
+    locations: [{ id: "market", name: "Market", description: "", connected_zones: [] }],
+    characters: [{ id: "vendor", name: "Vendor", role: "Merchant", home_location: "market", current_location: "market", status_axes: {}, needs: {}, agenda: "", red_line: "" }],
+    storylets: [],
+  };
+
+  const legacyScenario = {
+    id: "legacy",
+    name: "Legacy Scenario",
+    player_start_location: "market",
+    initial_qualities: { gold: 50 },
+    actor_locations: { vendor: "market" },
+    storylet_ids: [],
+    seed: 77,
+  };
+
+  const res = buildWorkspaceProject(records, { scenario: legacyScenario });
+  expect(res.issues).toEqual([]);
+  expect(res.project.scenarios["legacy"].player_start_location).toBe("market");
+  expect(res.project.scenarios["legacy"].actor_locations).toEqual({ vendor: "market" });
+  expect(res.project.scenarios["legacy"].initial_qualities).toEqual({ gold: 50 });
+  expect(res.project.scenarios["legacy"].seed).toBe(77);
+});
+
+test("quality categories, bounds, visibility, and crisis links survive project projection", () => {
+  const result = buildWorkspaceProject({
+    qualities: [
+      { name: "act.progress", type: "progress", value: 1, min_value: 0, max_value: 5, is_hidden: true },
+      { name: "threat.suspicion", type: "menace", value: 4, min_value: 0, max_value: 9, menace_crisis_storylet_id: "panic" },
+    ],
+    locations: [{ id: "room", name: "Room", description: "", connected_zones: [] }],
+    characters: [],
+    storylets: [],
+  }, "room");
+  expect(result.issues).toEqual([]);
+  expect(result.project.qualities["act.progress"]).toMatchObject({
+    kind: "progress",
+    min_value: 0,
+    max_value: 5,
+    is_hidden: true,
+  });
+  expect(result.project.qualities["threat.suspicion"]).toMatchObject({
+    kind: "menace",
+    menace_crisis_storylet_id: "panic",
+  });
+
+  const invalid = buildWorkspaceProject({
+    qualities: [{ name: "broken", type: "metric", value: 0, min_value: 9, max_value: 2 }],
+    locations: [{ id: "room", name: "Room", description: "", connected_zones: [] }],
+    characters: [],
+    storylets: [],
+  }, "room");
+  expect(invalid.issues).toContain("qualities.broken: value bounds must be finite and minimum must not exceed maximum");
 });

@@ -16,6 +16,7 @@ fn command(id: &str, revision: u64, effects: Vec<Effect>) -> WorldCommand {
         effects,
         caused_by: Vec::new(),
         advance_turn: true,
+        terminal: false,
     }
 }
 
@@ -166,6 +167,25 @@ fn invalid_numbers_are_rejected_without_partial_commit() {
 
     assert_eq!(err, EngineError::NonFiniteNumber);
     assert_eq!(state, before);
+}
+
+#[test]
+fn commands_record_visited_locations_and_met_characters() {
+    let mut state = WorldState {
+        current_location: Some("location-a".into()),
+        actors: std::collections::BTreeMap::from([(
+            "actor-a".into(),
+            storylet_engine::ActorState {
+                role_tags: Default::default(),
+                current_location: "location-a".into(),
+                busy: false,
+            },
+        )]),
+        ..WorldState::default()
+    };
+    apply_command(&mut state, command("record-presence", 0, vec![])).unwrap();
+    assert!(state.visited_locations.contains("location-a"));
+    assert!(state.met_characters.contains("actor-a"));
 }
 
 #[test]

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::storylets::{ActorState, FactRef};
+use crate::storylets::{ActorState, FactRef, MetCharacterRequirement, VisitedLocationRequirement};
 use crate::{Effect, NpcBehaviorRule, PredicateSet, StoryletDefinition, WorldState};
 
 pub const PROJECT_SCHEMA_VERSION: u32 = 1;
@@ -54,6 +54,7 @@ pub enum QualityType {
     Currency,
     Metric,
     Tool,
+    Progress,
     Territory,
     Menace,
     Custom,
@@ -65,6 +66,18 @@ pub struct QualityDefinition {
     pub kind: QualityType,
     pub default_value: Value,
     pub description: String,
+    #[serde(default)]
+    pub min_value: f64,
+    #[serde(default = "default_quality_max")]
+    pub max_value: f64,
+    #[serde(default)]
+    pub is_hidden: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub menace_crisis_storylet_id: Option<String>,
+}
+
+fn default_quality_max() -> f64 {
+    100.0
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -72,6 +85,8 @@ pub struct LocationDefinition {
     pub id: String,
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
     #[serde(default)]
     pub connected_locations: Vec<String>,
     pub map_position: (f64, f64),
@@ -106,6 +121,16 @@ pub struct EventDefinition {
     pub delay_turns: u64,
     #[serde(default)]
     pub repeatable: bool,
+    #[serde(default)]
+    pub event_type: EventType,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventType {
+    Canon,
+    #[default]
+    World,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -120,6 +145,10 @@ pub struct ScenarioDefinition {
     #[serde(default)]
     pub storylet_ids: Vec<String>,
     pub seed: u64,
+    #[serde(default)]
+    pub event_ids: Vec<String>,
+    #[serde(default)]
+    pub active_actor_ids: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,6 +202,17 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
                     "quality default must be finite",
                 );
             }
+        }
+        if !quality.min_value.is_finite()
+            || !quality.max_value.is_finite()
+            || quality.min_value > quality.max_value
+        {
+            issue(
+                &mut issues,
+                format!("{path}.min_value"),
+                "invalid_bounds",
+                "quality bounds must be finite and minimum must not exceed maximum",
+            );
         }
     }
 
@@ -249,14 +289,6 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
     for (key, storylet) in &project.storylets {
         let path = format!("storylets.{key}");
         register_record(&mut issues, &mut global_ids, &path, key, &storylet.id);
-        if let Some(location) = &storylet.location_id {
-            validate_location_ref(
-                &mut issues,
-                &project.locations,
-                format!("{path}.location_id"),
-                location,
-            );
-        }
         if !storylet.urgency_weight.is_finite() {
             issue(
                 &mut issues,
@@ -304,6 +336,70 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
                     format!("{choice_path}.divert_target"),
                     "missing_storylet",
                     "divert target must reference a project storylet",
+                );
+            }
+        }
+        for (index, requirement) in storylet
+            .preconditions
+            .visited_locations_any_of
+            .iter()
+            .enumerate()
+        {
+            let (field, value, missing) = match requirement {
+                VisitedLocationRequirement::LocationId { location_id } => (
+                    "location_id",
+                    location_id,
+                    !project.locations.contains_key(location_id),
+                ),
+                VisitedLocationRequirement::LocationTag { tag } => ("tag", tag, false),
+            };
+            let requirement_path =
+                format!("{path}.preconditions.visited_locations_any_of[{index}].{field}");
+            if value.trim().is_empty() {
+                issue(
+                    &mut issues,
+                    requirement_path,
+                    "empty_precondition",
+                    "visited-location requirements must be nonempty",
+                );
+            } else if missing {
+                issue(
+                    &mut issues,
+                    requirement_path,
+                    "missing_location",
+                    format!("location '{value}' does not exist"),
+                );
+            }
+        }
+        for (index, requirement) in storylet
+            .preconditions
+            .met_characters_any_of
+            .iter()
+            .enumerate()
+        {
+            let (field, value, missing) = match requirement {
+                MetCharacterRequirement::CharacterId { character_id } => (
+                    "character_id",
+                    character_id,
+                    !project.characters.contains_key(character_id),
+                ),
+                MetCharacterRequirement::RoleTag { role } => ("role", role, false),
+            };
+            let requirement_path =
+                format!("{path}.preconditions.met_characters_any_of[{index}].{field}");
+            if value.trim().is_empty() {
+                issue(
+                    &mut issues,
+                    requirement_path,
+                    "empty_precondition",
+                    "met-character requirements must be nonempty",
+                );
+            } else if missing {
+                issue(
+                    &mut issues,
+                    requirement_path,
+                    "missing_character",
+                    format!("character '{value}' does not exist"),
                 );
             }
         }
@@ -406,6 +502,28 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
                 location,
             );
         }
+        if let Some(ref active) = scenario.active_actor_ids {
+            for (index, actor_id) in active.iter().enumerate() {
+                if !project.characters.contains_key(actor_id) {
+                    issue(
+                        &mut issues,
+                        format!("{path}.active_actor_ids[{index}]"),
+                        "missing_character",
+                        format!("active character '{actor_id}' does not exist"),
+                    );
+                }
+            }
+        }
+        for (index, event_id) in scenario.event_ids.iter().enumerate() {
+            if !project.events.contains_key(event_id) {
+                issue(
+                    &mut issues,
+                    format!("{path}.event_ids[{index}]"),
+                    "missing_event",
+                    "scenario event does not exist",
+                );
+            }
+        }
         for (index, storylet_id) in scenario.storylet_ids.iter().enumerate() {
             match project.storylets.get(storylet_id) {
                 None => issue(
@@ -449,6 +567,14 @@ pub fn build_world(
         scenario_id: Some(scenario.id.clone()),
         random_seed: scenario.seed,
         current_location: Some(scenario.player_start_location.clone()),
+        location_tags: project
+            .locations
+            .iter()
+            .map(|(id, location)| (id.clone(), location.tags.iter().cloned().collect()))
+            .collect(),
+        visited_locations: std::collections::BTreeSet::from([scenario
+            .player_start_location
+            .clone()]),
         ..WorldState::default()
     };
     for (key, definition) in &project.qualities {
@@ -458,6 +584,11 @@ pub fn build_world(
     }
     world.qualities.extend(scenario.initial_qualities.clone());
     for (id, character) in &project.characters {
+        if let Some(ref active) = scenario.active_actor_ids {
+            if !active.contains(id) {
+                continue;
+            }
+        }
         let current_location = scenario
             .actor_locations
             .get(id)
@@ -470,6 +601,14 @@ pub fn build_world(
                 busy: false,
             },
         );
+    }
+    if let Some(location_id) = &world.current_location {
+        world.met_characters = world
+            .actors
+            .iter()
+            .filter(|(_, actor)| actor.current_location == *location_id)
+            .map(|(actor_id, _)| actor_id.clone())
+            .collect();
     }
     Ok(world)
 }

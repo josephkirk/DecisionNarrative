@@ -58,6 +58,7 @@ fn main() {
                 effects: vec![],
                 caused_by: vec![],
                 advance_turn: true,
+                terminal: false,
             },
         )
         .expect("benchmark player command must be valid");
@@ -97,9 +98,9 @@ fn main() {
             "availableParallelism": std::thread::available_parallelism().map(|v| v.get()).ok(),
         },
         "notes": [
-            "Measures deterministic eligibility, role binding, scoring, and sorting; no encoder or trained ranker is included.",
+            "Measures deterministic eligibility, role binding, scoring, and sorting.",
             "Complete-turn measurement includes full candidate evaluation, one player wait, and all configured NPC rule evaluations/actions.",
-            "Run on the target GPU host for model and hardware acceptance; this harness reports CPU-side Rust runtime costs.",
+            "Run on target hardware for runtime acceptance; this harness reports CPU-side Rust runtime costs.",
         ],
     });
     println!("{}", serde_json::to_string_pretty(&output).unwrap());
@@ -147,7 +148,7 @@ fn make_world(actors_count: usize, locations_count: usize) -> WorldState {
     world
 }
 
-fn make_definitions(count: usize, locations_count: usize) -> Vec<StoryletDefinition> {
+fn make_definitions(count: usize, _locations_count: usize) -> Vec<StoryletDefinition> {
     (0..count)
         .map(|index| StoryletDefinition {
             id: format!("storylet-{index:05}"),
@@ -155,7 +156,8 @@ fn make_definitions(count: usize, locations_count: usize) -> Vec<StoryletDefinit
             title: format!("Generic scene {index}"),
             summary: "A generic benchmark scene".into(),
             approved: true,
-            location_id: Some(format!("location-{:02}", index % locations_count)),
+            ending: false,
+            location_tags: Default::default(),
             urgency_weight: 25.0 + (index % 75) as f64,
             cluster_type: ClusterType::PlayerControlledPassage,
             repeatability: Repeatability::Always,
@@ -163,6 +165,7 @@ fn make_definitions(count: usize, locations_count: usize) -> Vec<StoryletDefinit
                 role: "witness".into(),
             }],
             trigger: PredicateSet::default(),
+            preconditions: Default::default(),
             content: SceneContent {
                 opening: "A person notices something worth discussing.".into(),
             },
