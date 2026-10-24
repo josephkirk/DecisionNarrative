@@ -7,9 +7,10 @@ const props = withDefaults(defineProps<{
   modelValue?: string | string[] | null;
   options?: string[];
   multiple?: boolean;
+  allowCreate?: boolean;
   placeholder?: string;
   label?: string;
-}>(), { options: () => [], multiple: true, placeholder: "Add or create a tag", label: "Tag" });
+}>(), { options: () => [], multiple: true, allowCreate: true, placeholder: "Add or create a tag", label: "Tag" });
 const emit = defineEmits<{ "update:modelValue": [value: string | string[]] }>();
 
 const input = ref<HTMLInputElement | null>(null);
@@ -36,7 +37,7 @@ function finishEditing() {
   activeIndex.value = -1;
 }
 function add(raw: string) {
-  publish(addTagSelection(selected.value, raw, options.value, props.multiple));
+  publish(addTagSelection(selected.value, raw, options.value, props.multiple, props.allowCreate));
   finishEditing();
   isFocused.value = props.multiple && document.activeElement === input.value;
 }
@@ -66,7 +67,7 @@ function onBlur() {
   if (props.multiple) {
     if (query.value.trim()) add(query.value);
   } else if (isSingleEditing.value) {
-    publish(commitSingleTagEdit(selected.value, query.value, true, options.value));
+    publish(commitSingleTagEdit(selected.value, query.value, true, options.value, props.allowCreate));
   }
   finishEditing();
   isFocused.value = false;
@@ -85,7 +86,6 @@ function onKeydown(event: KeyboardEvent) {
     event.preventDefault();
     const active = suggestions.value[activeIndex.value];
     if (!props.multiple && isSingleEditing.value && !query.value.trim() && !active) {
-      publish([]);
       finishEditing();
       isFocused.value = false;
     } else add(active ?? query.value);
@@ -106,9 +106,9 @@ function focusInput() {
 
 <template>
   <div class="tag-editor" :aria-label="label" @click="focusInput">
-    <span v-if="multiple" v-for="tag in selected" :key="normalizeTagName(tag)" class="tag-editor__chip">
-      {{ tag }}
-      <button type="button" class="tag-editor__remove" :aria-label="'Remove ' + tag" @click.stop="remove(tag)">×</button>
+    <span v-if="props.multiple" v-for="tag in selected" :key="normalizeTagName(tag)" class="tag-editor__chip" :title="tag">
+      <span class="tag-hash">#</span><span class="tag-editor__chip-label">{{ tag }}</span>
+      <button type="button" class="tag-editor__remove" :aria-label="'Remove ' + tag" @click.stop="remove(tag)">✕</button>
     </span>
     <input
       ref="input"
@@ -141,7 +141,7 @@ function focusInput() {
         @click="chooseSuggestion(tag)"
       >{{ tag }}</div>
     </div>
-    <small v-if="query.trim() && !exactOption" class="tag-editor__hint">Press Enter to add “{{ query.trim() }}”.</small>
+    <small v-if="allowCreate && query.trim() && !exactOption" class="tag-editor__hint">Press Enter to add “{{ query.trim() }}”.</small>
   </div>
 </template>
 
@@ -151,52 +151,67 @@ function focusInput() {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
-  min-height: 34px;
-  padding: 4px 7px;
+  gap: 6px;
+  min-height: 42px;
+  padding: 6px 10px;
   border: 1px solid var(--border-subtle);
-  border-radius: 7px;
-  background: var(--bg-input);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-card);
   cursor: text;
+  transition: border-color 0.15s ease;
 }
 .tag-editor:focus-within {
   border-color: var(--border-focus);
-  box-shadow: 0 0 0 2px var(--accent-subtle);
+  box-shadow: 0 0 0 1px var(--accent-subtle);
 }
 .tag-editor__chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 8px;
   border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  background: var(--bg-badge);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-container-high, #212735);
   color: var(--text-main);
-  font-size: 12px;
-  line-height: 18px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+.tag-editor__chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tag-hash {
+  color: var(--accent);
+  opacity: 0.8;
 }
 .tag-editor__remove {
   border: 0;
-  padding: 0 1px;
+  padding: 0;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-dim);
   cursor: pointer;
-  font-size: 15px;
+  font-size: 11px;
   line-height: 1;
+  transition: color 0.1s ease;
 }
 .tag-editor__remove:hover { color: var(--status-danger); }
 .tag-editor__input {
-  flex: 1 1 90px;
-  min-width: 80px;
-  height: 24px;
+  flex: 1 1 140px;
+  min-width: 120px;
+  height: 26px;
   border: 0;
   outline: 0;
-  padding: 0 2px;
+  padding: 0 4px;
   background: transparent;
   color: var(--text-main);
-  box-shadow: none;
+  font-size: 12px;
 }
-.tag-editor__input:focus { outline: 0; box-shadow: none; }
+.tag-editor__input:focus { outline: 0; }
 .tag-editor__popup {
   position: absolute;
   z-index: 50;
@@ -207,17 +222,26 @@ function focusInput() {
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-md, 8px);
   background: var(--bg-card);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
 }
 .tag-editor__option {
-  padding: 6px 8px;
-  border-radius: 5px;
+  padding: 6px 10px;
+  border-radius: var(--radius-xs, 3px);
   color: var(--text-main);
   cursor: pointer;
   font-size: 12px;
+  font-family: var(--font-mono);
 }
-.tag-editor__option:hover, .tag-editor__option--active { background: var(--accent-subtle); }
-.tag-editor__hint { flex-basis: 100%; color: var(--text-muted); font-size: 11px; }
+.tag-editor__option:hover, .tag-editor__option--active {
+  background: var(--bg-card-hover);
+  color: var(--accent);
+}
+.tag-editor__hint {
+  flex-basis: 100%;
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-top: 2px;
+}
 </style>
