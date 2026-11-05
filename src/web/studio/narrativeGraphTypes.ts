@@ -30,6 +30,8 @@ export type NodeType =
   | "poi"
   | "image"
   | "teleport"
+  | "learn"
+  | "knows"
   | "go_to_location"
   | "graph_transform"
   | "passion_mutation"
@@ -206,6 +208,11 @@ export interface NarrativeNode {
   image_url?: string;
   destination_storylet?: string;
   location_id?: string;
+  fact_tag?: string;
+  kind?: "evidence" | "witnessed" | "told" | "rumor" | "recollection" | "testimony" | "inference";
+  visibility?: "private" | "co_located";
+  holder?: string;
+  confirmed_only?: boolean;
   is_terminal?: boolean;
   jump_to_storylet?: string;
   precondition_result?: boolean;
@@ -416,13 +423,14 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
   const allowedTypes = new Set<NodeType>([
     "start", "dialog", "choice", "condition", "compare", "get_entity", "get_entity_property", "apply_command", "qbn_storylet_hub",
     "salience_selector", "waypoint_conversation", "waiter", "and", "or",
-    "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation",
+    "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "learn", "knows", "graph_transform", "passion_mutation",
     "add_entity_tag", "remove_entity_tag", "has_entity_tag", "end",
   ]);
   if (graph.nodes.some((node) => !node || typeof node !== "object" || typeof node.id !== "string" || !node.id.trim() || !allowedTypes.has(node.type))) {
     return ["Graph nodes must have nonempty IDs and recognized types."];
   }
   for (const node of graph.nodes) {
+    if ((node.type === "learn" || node.type === "knows") && (!node.fact_tag?.startsWith("fact.") || node.fact_tag.length <= 5)) issues.push(`${node.type} node ${node.title} must choose a fact tag under fact.`);
     if (node.type === "go_to_location" && !node.location_id?.trim()) issues.push("Go To Location nodes must select a location.");
     if (node.type === "get_entity" && !node.entity_path?.trim()) issues.push(`Get Entity node ${node.title} must select an Entity.`);
     if (node.type === "get_entity_property") {
@@ -572,7 +580,7 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
     const source = graph.nodes.find((node) => node.id === edge.from_node)!;
     const target = graph.nodes.find((node) => node.id === edge.to_node)!;
     if ((edge.kind ?? "flow") === "flow") {
-      const pureDataSource = ["get_entity", "get_entity_property", "compare", "has_entity_tag", "and", "or"].includes(source.type);
+      const pureDataSource = ["get_entity", "get_entity_property", "compare", "has_entity_tag", "knows", "and", "or"].includes(source.type);
       if (pureDataSource || edge.to_port !== "input") issues.push(`Flow edge ${edge.id} uses an invalid source or target port.`);
       outgoing.set(edge.from_node, [...(outgoing.get(edge.from_node) ?? []), edge.to_node]);
       incoming.set(edge.to_node, [...(incoming.get(edge.to_node) ?? []), edge.from_node]);
@@ -580,9 +588,9 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
       dataIncoming.set(edge.to_node, [...(dataIncoming.get(edge.to_node) ?? []), edge]);
       const sourceType = source.type === "get_entity" ? "entity_ref" :
         source.type === "get_entity_property" ? graphNodeValueType(source) :
-          ["compare", "has_entity_tag", "and", "or"].includes(source.type) ? "bool" : undefined;
+          ["compare", "has_entity_tag", "knows", "and", "or"].includes(source.type) ? "bool" : undefined;
       const targetType = graphTargetPinType(target, edge.to_port);
-      const sourcePort = ["get_entity", "get_entity_property", "compare", "has_entity_tag", "and", "or"].includes(source.type)
+      const sourcePort = ["get_entity", "get_entity_property", "compare", "has_entity_tag", "knows", "and", "or"].includes(source.type)
         ? edge.from_port === "output" : false;
       if (!sourcePort || !sourceType || !targetType || (targetType !== "any" && targetType !== sourceType)) {
         issues.push(`Data edge ${edge.id} uses an invalid port or incompatible type.`);
@@ -641,7 +649,7 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
         }
       }
       if (edges.some((edge) => !expectedPorts.has(edge.from_port))) issues.push(`Waypoint ${node.title} has an edge from an unknown exit pin.`);
-    } else if (node.type === "has_entity_tag") {
+    } else if ((node.type === "has_entity_tag" || node.type === "knows")) {
       if (valueEdges.length !== 1 || valueEdges[0]?.from_port !== "output") {
         issues.push(`Has Entity Tag node ${node.title} must have exactly one boolean output connection.`);
       }
@@ -767,6 +775,7 @@ export function validatePreconditionGraph(graph: NarrativeGraph): string[] {
     get_entity: true,
     get_entity_property: true,
     has_entity_tag: true,
+    knows: true,
     and: true,
     or: true,
   };
@@ -787,3 +796,9 @@ export function validatePreconditionGraph(graph: NarrativeGraph): string[] {
 }
 
 
+
+export function graphNodeTypes(mode: "story" | "preconditions"): NodeType[] {
+  const pure: NodeType[] = ["start", "get_entity", "get_entity_property", "compare", "condition", "and", "or", "has_entity_tag", "knows", "end"];
+  if (mode === "preconditions") return pure;
+  return [...pure, "learn", "dialog", "choice", "apply_command", "qbn_storylet_hub", "salience_selector", "waypoint_conversation", "waiter", "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "add_entity_tag", "remove_entity_tag"];
+}

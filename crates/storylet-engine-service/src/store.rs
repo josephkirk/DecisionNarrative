@@ -189,13 +189,11 @@ impl Store {
         entity: &str,
         id: &str,
     ) -> Result<Option<String>, rusqlite::Error> {
-        self.conn
-            .query_row(
-                "SELECT data_json FROM content_records WHERE entity = ?1 AND id = ?2",
-                params![entity, id],
-                |row| row.get(0),
-            )
-            .optional()
+        let stored: Option<String> = self.conn.query_row(
+            "SELECT data_json FROM content_records WHERE entity = ?1 AND id = ?2",
+            params![entity, id], |row| row.get(0),
+        ).optional()?;
+        Ok(stored.or_else(|| (entity == "trait_templates" && id == "system.participant").then(participant_trait_json)))
     }
 
     pub fn list_content_json(&self, entity: &str) -> Result<Vec<String>, rusqlite::Error> {
@@ -203,7 +201,19 @@ impl Store {
             .conn
             .prepare("SELECT data_json FROM content_records WHERE entity = ?1 ORDER BY id")?;
         let rows = stmt.query_map(params![entity], |row| row.get::<_, String>(0))?;
-        rows.collect()
+        let mut records: Vec<String> = rows.collect::<Result<_, _>>()?;
+        // Provide the additive system trait to older v5 projects without rewriting
+        // their stored data or changing the project revision.
+        if entity == "trait_templates" && !records.iter().any(|row| {
+            serde_json::from_str::<Value>(row).ok().and_then(|value| value.get("id").and_then(Value::as_str).map(str::to_owned)).as_deref() == Some("system.participant")
+        }) {
+            records.push(participant_trait_json());
+            records.sort_by(|a,b| {
+                let id = |row: &str| serde_json::from_str::<Value>(row).ok().and_then(|v| v.get("id").and_then(Value::as_str).map(str::to_owned)).unwrap_or_default();
+                id(a).cmp(&id(b))
+            });
+        }
+        Ok(records)
     }
 
     pub fn save_content(
@@ -971,6 +981,17 @@ fn chrono_now_ms() -> i64 {
         .as_millis() as i64
 }
 
+fn participant_trait_json() -> String {
+    let spec = SYSTEM_TRAIT_TEMPLATES.iter().find(|spec| spec.key == "participant").expect("participant system trait exists");
+    let properties: Vec<Value> = spec.properties.iter().map(|property| json!({
+        "key": property.key, "name": property.name, "type": property.property_type,
+        "is_array": property.is_array, "default": serde_json::from_str::<Value>(property.default_json).expect("valid system trait default")
+    })).collect();
+    json!({"id":"system.participant", "key":"participant", "key_auto":false,
+        "name":spec.name, "description":"", "folder_id":null, "properties":properties,
+        "allow_multiple":false, "system":true, "created_at":0}).to_string()
+}
+
 fn seed_protected_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
     let roots = ["character", "location", "item", "fact", "other", "world"];
     for name in roots {
@@ -1025,6 +1046,20 @@ pub fn ensure_world_entity(conn: &rusqlite::Connection) -> Result<(), rusqlite::
 #[cfg(test)]
 mod tests {
     use super::{ChronoPlaytestRow, Store};
+
+    #[test]
+    fn old_v5_projects_expose_participant_trait_without_mutation() {
+        let store = Store::open_in_memory().unwrap();
+        store.conn.execute("DELETE FROM content_records WHERE entity='trait_templates' AND id='system.participant'", []).unwrap();
+        let before = store.get_project_metadata().unwrap().revision;
+        let traits = store.list_trait_templates().unwrap();
+        assert!(traits.iter().any(|item| item.id == "system.participant"));
+        assert_eq!(store.get_project_metadata().unwrap().revision, before);
+        let direct = store.get_content_json("trait_templates", "system.participant").unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&direct).unwrap()["id"], "system.participant");
+        let actual: bool = store.conn.query_row("SELECT EXISTS(SELECT 1 FROM content_records WHERE entity='trait_templates' AND id='system.participant')", [], |row| row.get(0)).unwrap();
+        assert!(!actual);
+    }
 
     #[test]
     fn chrono_playtest_row_round_trips() {

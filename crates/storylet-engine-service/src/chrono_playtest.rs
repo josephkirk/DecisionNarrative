@@ -374,6 +374,10 @@ pub struct CompiledIdSpace {
     pub passions: BTreeMap<String, u16>,
     pub entities: BTreeMap<String, u16>,
     pub tags: BTreeMap<String, u16>,
+    #[serde(default)]
+    pub participants: BTreeMap<String, u16>,
+    #[serde(default)]
+    pub implicit_participant: bool,
 }
 
 impl CompiledIdSpace {
@@ -400,6 +404,8 @@ impl CompiledIdSpace {
             passions,
             entities: entity_indices.clone(),
             tags,
+            participants: compiled.participant_indices.clone(),
+            implicit_participant: compiled.implicit_participant,
         }
     }
 }
@@ -601,17 +607,23 @@ fn enforce_revision_pin(
     global: &[CallHistoryEntry],
     scoped: &BTreeMap<u32, Vec<CallHistoryEntry>>,
 ) -> Result<Option<RebasedHistory>, ChronoPlaytestError> {
+    // Legacy v5 sessions predate participant fingerprints and only had an
+    // implicit solo player. Preserve those sessions only for that exact layout.
+    let compatible_space = pinned_space == current_space || (pinned_space.participants.is_empty()
+        && current_space.implicit_participant
+        && current_space.participants == BTreeMap::from([("player".to_string(), 0)])
+        && { let mut legacy = current_space.clone(); legacy.participants.clear(); legacy.implicit_participant = false; &legacy == pinned_space });
     if pinned_revision == current_revision {
         // `import_bundle` can rewrite content at the same revision counter, so
         // the compiled ID space is the real identity check.
-        if pinned_space != current_space {
+        if !compatible_space {
             return Err(ChronoPlaytestError::RevisionConflict(format!(
                 "project revision {current_revision} matches the session's pinned revision, but the compiled ID space changed"
             )));
         }
         return Ok(None);
     }
-    if pinned_space != current_space {
+    if !compatible_space {
         return Err(ChronoPlaytestError::RevisionConflict(format!(
             "project revision {current_revision} is not the session's pinned revision {pinned_revision}, and the compiled ID space changed"
         )));
@@ -687,6 +699,8 @@ fn prepare(
         &session.start_location_id,
     )
     .map_err(compile_error)?;
+    compiled.participant_indices = seed.state.participants.keys.iter().enumerate().map(|(i, key)| (key.clone(), i as u16)).collect();
+    compiled.implicit_participant = seed.state.participants.entity.as_slice() == [u16::MAX];
     let current_id_space = CompiledIdSpace::fingerprint(&compiled, &seed.entity_indices);
     let graphs = compile_narrative_graphs(
         &session.project_id,
@@ -806,6 +820,8 @@ fn load_session(
         &row.start_location_id,
     )
     .map_err(compile_error)?;
+    compiled.participant_indices = seed.state.participants.keys.iter().enumerate().map(|(i, key)| (key.clone(), i as u16)).collect();
+    compiled.implicit_participant = seed.state.participants.entity.as_slice() == [u16::MAX];
     let current_id_space = CompiledIdSpace::fingerprint(&compiled, &seed.entity_indices);
     let graphs = compile_narrative_graphs(
         &row.project_id,
@@ -1818,7 +1834,9 @@ impl StudioService {
             &start_location,
         )
         .map_err(compile_error)?;
-        let current_id_space = CompiledIdSpace::fingerprint(&compiled, &seed.entity_indices);
+        compiled.participant_indices = seed.state.participants.keys.iter().enumerate().map(|(i, key)| (key.clone(), i as u16)).collect();
+    compiled.implicit_participant = seed.state.participants.entity.as_slice() == [u16::MAX];
+    let current_id_space = CompiledIdSpace::fingerprint(&compiled, &seed.entity_indices);
         let graphs = compile_narrative_graphs(
             &meta.id,
             &content.storylets,
@@ -2863,6 +2881,19 @@ mod tests {
             instance.node(1).unwrap().call_data.as_slice(),
             [NodeCallData::Waiter { .. }]
         ));
+    }
+
+    #[test]
+    fn participant_reordering_rejects_revision_replay() {
+        let pinned = CompiledIdSpace { participants: BTreeMap::from([("a".into(), 0), ("b".into(), 1)]), ..Default::default() };
+        let current = CompiledIdSpace { participants: BTreeMap::from([("a".into(), 1), ("b".into(), 0)]), ..Default::default() };
+        let result = enforce_revision_pin(1, 2, &pinned, &current, &FlowGraphAsset::default(), &BTreeMap::new(), &UnifiedDispatcher::new(vec![]), &[], &BTreeMap::new());
+        assert!(matches!(result, Err(ChronoPlaytestError::RevisionConflict(_))));
+        let old: CompiledIdSpace = serde_json::from_value(serde_json::json!({"storylets":{},"passions":{},"entities":{},"tags":{}})).unwrap();
+        let solo = CompiledIdSpace { participants: BTreeMap::from([("player".into(), 0)]), implicit_participant: true, ..Default::default() };
+        assert!(enforce_revision_pin(1, 1, &old, &solo, &FlowGraphAsset::default(), &BTreeMap::new(), &UnifiedDispatcher::new(vec![]), &[], &BTreeMap::new()).is_ok());
+        let explicit_player = CompiledIdSpace { implicit_participant: false, ..solo.clone() };
+        assert!(matches!(enforce_revision_pin(1, 2, &old, &explicit_player, &FlowGraphAsset::default(), &BTreeMap::new(), &UnifiedDispatcher::new(vec![]), &[], &BTreeMap::new()), Err(ChronoPlaytestError::RevisionConflict(_))));
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! assigned in stable storylet-ID order and bounded by the engine's fixed completion mask.
 
 use std::collections::{BTreeMap, BTreeSet};
+use serde_json::Value;
 
 use storylet_engine::chrono_catalog::{StoryletCatalog, MAX_STORYLETS};
 use storylet_engine::chrono_dispatch::{
@@ -29,6 +30,8 @@ pub struct CompiledChronoDispatch {
     pub passion_registry: PassionRegistry,
     pub passion_indices: BTreeMap<(String, String), u16>,
     pub entity_game_ids: BTreeMap<String, String>,
+    pub participant_indices: BTreeMap<String, u16>,
+    pub implicit_participant: bool,
 }
 
 impl CompiledChronoDispatch {
@@ -110,7 +113,7 @@ pub fn compile_chrono_dispatch_with_world(
     let mut defs=Vec::with_capacity(ordered.len());
     for(i,s)in ordered.iter().enumerate(){let set=s.chrono.as_ref();let mut d=StoryletDef{storylet_id:i as u16,is_ending:s.ending,display_priority:set.map_or(0,|x|x.display_priority),urgency_tag:set.map_or("Standard".into(),|x|x.urgency_color_tag.clone()),cluster_type:map_cluster_type(&s.cluster_type)?,payload_node_guid:i as u32,is_repeatable:s.repeatability!="once_ever"&&set.map_or(true,|x|x.is_repeatable),cooldown_ms:set.map_or(0,|x|i64::try_from(x.cooldown_ms).unwrap_or(i64::MAX)),cooldown_turns:if s.repeatability=="cooldown"{s.cooldown_turns as u64}else{0},required_roles:s.parameters.iter().filter_map(|p|crate::projection::parse_role_query(&p.query).map(|r|RoleRequirement{role_tag:r,location_tag:(p.location_policy.trim()!="any").then(||"location.current".into()),..Default::default()})).collect(),..StoryletDef::default()};if let Some(set)=set{add_tags(&registry,&mut d.required_tags,&set.required_tags,&s.id,"required_tags")?;add_any_tags(&registry,&mut d.required_any_tags,&set.required_any_tags,&s.id,"required_any_tags")?;add_any_tags(&registry,&mut d.forbidden_tags,&set.forbidden_tags,&s.id,"forbidden_tags")?;add_any_tags(&registry,&mut d.required_arc_phases,&set.required_arc_phases,&s.id,"required_arc_phases")?;for tag in &set.salience_bonus_tags{let id=registry.id(tag).ok_or_else(||format!("unknown salience tag {tag}"))?;registry.add_hierarchical(&mut d.salience_bonus_tags,id).map_err(|e|e.to_string())?;}}defs.push(d);}
     let mut dispatcher=UnifiedDispatcher::new(defs);dispatcher.resolve(&registry).map_err(|e|e.to_string())?;
-    Ok(CompiledChronoDispatch{registry,dispatcher,catalog,passion_registry,passion_indices,entity_game_ids})
+    Ok(CompiledChronoDispatch{registry,dispatcher,catalog,passion_registry,passion_indices,entity_game_ids,participant_indices:BTreeMap::new(),implicit_participant:false})
 }
 
 fn passion_threshold_tag(
@@ -350,7 +353,7 @@ fn collect_graph_tag_value_names(
                 }
                 let is_tag_field = matches!(
                     key.as_str(),
-                    "tag"
+                    "fact_tag" | "tag"
                         | "tags"
                         | "emotion_tag"
                         | "action_tag"
@@ -399,6 +402,7 @@ fn collect_precondition_graph_tag_names(
             crate::narrative_graph::NarrativeNodeData::HasEntityTag { target_entity_id, tag, .. } => {
                 if !tag.trim().is_empty() { names.insert(crate::chrono_graph_adapter::resolve_entity_tag(target_entity_id, tag, Some(entity_game_ids))); }
             }
+            crate::narrative_graph::NarrativeNodeData::Knows { fact_tag, .. } => { if !fact_tag.trim().is_empty() { names.insert(fact_tag.clone()); } }
             _ => {}
         }
     }
@@ -522,6 +526,28 @@ pub fn initialize_chrono_world(
         .ok_or_else(|| format!("ChronoFlow start location {start_location_id} does not exist"))?;
     let mut state = WorldStateTable::with_capacity(entity_count);
     state.current_location_entity = Some(current_location_entity);
+    let mut participant_rows = Vec::new();
+    for entity in entities {
+        if let Some(trait_instance) = entity.traits.iter().find(|t| t.template_id == "system.participant") {
+            let entity_index = *entity_indices.get(&entity.id).ok_or_else(|| format!("participant {} has no runtime entity", entity.id))?;
+            let controller = trait_instance.values.get("controller").and_then(|v| v.as_str()).unwrap_or("human");
+            let seat = match trait_instance.values.get("seat") { None | Some(Value::Null) => 0, Some(value) => value.as_u64().ok_or_else(|| format!("participant {} has invalid seat", entity.id))? };
+            let seat = u8::try_from(seat).map_err(|_| format!("participant {} has invalid seat", entity.id))?;
+            let control = match controller { "human" => storylet_engine::chrono_participants::Controller::Human { seat }, "rule" => storylet_engine::chrono_participants::Controller::Rule, _ => return Err(format!("participant {} has invalid controller", entity.id)) };
+            let location = match trait_instance.values.get("start_location").and_then(|v| v.as_str()).filter(|v| !v.is_empty()) {
+                Some(id) => Some(*location_indices.get(id).ok_or_else(|| format!("participant {} has unknown start location {id}", entity.id))?),
+                None => None,
+            };
+            participant_rows.push((if controller == "human" { 0 } else { 1 }, seat, entity.id.as_str(), entity_index, control, location));
+        }
+    }
+    participant_rows.sort_by(|a,b| (a.0,a.1,a.2).cmp(&(b.0,b.1,b.2)));
+    if participant_rows.is_empty() { state.ensure_participants(); } else {
+        for (_,_,id,index,control,location) in participant_rows { state.participants.push(id,index,control,location); }
+        if state.participants.location[0].is_none() { state.participants.location[0] = Some(current_location_entity); }
+        state.current_location_entity = state.participants.location[0];
+    }
+
 
     // Seed the dramatic arc phase so arc-gated content is reachable without an
     // unrelated mutation writing the tag.
@@ -611,7 +637,7 @@ pub fn initialize_chrono_world(
             });
         }
     }
-    state.current_location_tag_mask = state.entity_tags[current_location_entity as usize];
+    state.current_location_tag_mask = state.current_location_entity.map(|id| state.entity_tags[id as usize]).unwrap_or_default();
     state.global_tags.merge(&state.current_location_tag_mask);
 
     for character in &ordered_characters {
@@ -1163,5 +1189,26 @@ mod world_object_vertex_tests {
             overridden.state.vertex("guard").unwrap().attributes.get("prop.score"),
             Some(&AttributeValue::Float(9.0))
         );
+    }
+}
+
+#[cfg(test)]
+mod participant_seed_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn participant_trait_compiles_rows_in_seat_order() {
+        let world: EntityRecord = serde_json::from_value(json!({"id":"world","name":"World","root_tag":"world"})).unwrap();
+        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
+            {"id":"square","name":"Square","root_tag":"location"},
+            {"id":"player","name":"A","root_tag":"character","traits":[{"template_id":"system.participant","values":{"controller":"human","seat":1,"start_location":"square"}}]},
+            {"id":"b","name":"B","root_tag":"character","traits":[{"template_id":"system.participant","values":{"controller":"human","seat":0}}]}
+        ])).unwrap();
+        let records = crate::entities::runtime_records_with_world(&world, &entities, &[]);
+        let compiled = compile_chrono_dispatch_with_world(&[], &records.locations, &records.characters, &records.world_objects, &records.world_tags, &records.entity_tag_seeds, &records.entity_game_ids).unwrap();
+        let seed = initialize_chrono_world(&compiled, &[], &world, &entities, &records.locations, &records.characters, &records.world_objects, &[], &records.entity_tag_seeds, None, "square").unwrap();
+        assert_eq!(seed.state.participants.keys, vec!["b", "player"]);
+        assert_eq!(seed.state.active_location(0), Some(seed.entity_indices["square"]));
+        assert_ne!(seed.state.participants.entity[1], u16::MAX);
     }
 }

@@ -520,6 +520,11 @@ pub struct SystemTraitTemplateSpec {
 }
 
 pub const SYSTEM_TRAIT_TEMPLATES: &[SystemTraitTemplateSpec] = &[
+    SystemTraitTemplateSpec { key: "participant", name: "Participant", allow_multiple: false, properties: &[
+        SystemTraitPropertySpec { key: "controller", name: "Controller", property_type: PropertyType::String, is_array: false, default_json: "\"human\"" },
+        SystemTraitPropertySpec { key: "seat", name: "Seat", property_type: PropertyType::Int, is_array: false, default_json: "0" },
+        SystemTraitPropertySpec { key: "start_location", name: "Start Location", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
+    ] },
     SystemTraitTemplateSpec { key: "character_settings", name: "Character Settings", allow_multiple: false, properties: &[
         SystemTraitPropertySpec { key: "role", name: "Role", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
         SystemTraitPropertySpec { key: "home_location", name: "Home Location", property_type: PropertyType::Entity, is_array: false, default_json: "null" },

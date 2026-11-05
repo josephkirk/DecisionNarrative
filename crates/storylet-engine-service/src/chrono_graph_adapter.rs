@@ -7,7 +7,7 @@ use storylet_engine::chrono_runtime::PredicateOperator;
 use storylet_engine::chrono_runtime::{
     DataEdgeConnection, DataPinDefinition, EdgeConnection, FlowGraphAsset, FlowNodeDef,
     NodeCategory, NodeKind, PinDefinition, TimelineActionType, TimelineTrackEvent,
-    DEFAULT_INPUT_PIN, DEFAULT_OUTPUT_PIN, DataValue, PropertyOperation,
+    DEFAULT_INPUT_PIN, DEFAULT_OUTPUT_PIN, DataValue, PropertyOperation, HolderRef,
 };
 use storylet_engine::chrono_dispatch::WaypointTopicGraph;
 use storylet_engine::chrono_state::{
@@ -411,10 +411,11 @@ fn compile_node_kind(
         NarrativeNodeData::Compare { operator, value_type, value } => (NodeKind::Compare { operator: predicate_operator(operator)?, literal: convert_typed_value(value_type, value)? }, NodeCategory::LogicGate),
         NarrativeNodeData::End { jump_to_storylet, precondition_result, .. } => (NodeKind::End { jump_to_storylet:jump_to_storylet.as_deref().map(|id|storylet_index_for(compiled,id)).transpose()?, precondition_result:precondition_result.unwrap_or(true) }, NodeCategory::LogicGate),
         NarrativeNodeData::Teleport { destination_storylet } => (NodeKind::Teleport { destination_storylet:Some(storylet_index_for(compiled,destination_storylet)?), destination_node_guid:storylet_start_nodes.get(destination_storylet).copied() }, NodeCategory::Mutator),
+        NarrativeNodeData::Learn { fact_tag, kind, visibility } => (NodeKind::Learn { fact: compiled.registry.id(fact_tag).ok_or_else(|| format!("unknown fact {fact_tag}"))?, kind: *kind, visibility: *visibility }, NodeCategory::Mutator),
+        NarrativeNodeData::Knows { holder, fact_tag, confirmed_only } => (NodeKind::Knows { holder: if holder == "acting" { HolderRef::Acting } else { HolderRef::Participant(*compiled.participant_indices.get(holder).ok_or_else(|| format!("unknown participant {holder}"))?) }, fact: compiled.registry.id(fact_tag).ok_or_else(|| format!("unknown fact {fact_tag}"))?, confirmed_only: *confirmed_only }, NodeCategory::LogicGate),
         NarrativeNodeData::GoToLocation { location_id } => {
             let index = *entity_indices.get(location_id).ok_or_else(|| format!("unknown location {location_id}"))?;
-            let mut op = MutationOp::default(); op.move_player = Some(index);
-            (NodeKind::Mutation { op }, NodeCategory::Mutator)
+            (NodeKind::MoveParticipant { location_entity: index }, NodeCategory::Mutator)
         }
         NarrativeNodeData::GraphTransform { rule } => (NodeKind::GraphTransform { rule: convert_graph_transform_rule(rule) }, NodeCategory::Mutator),
         NarrativeNodeData::PassionMutation { op } => (NodeKind::PassionMutation { op: RuntimePassionMutation { micro_deltas: op.micro_deltas.clone(), active_ops: op.active_ops.clone() } }, NodeCategory::Mutator),
@@ -687,7 +688,7 @@ fn compile_data_output_pins(node: &NarrativeNode) -> Vec<DataPinDefinition> {
             value_type: if value_type == "entity" { "entity_ref".into() } else { value_type.clone() },
             is_input: false,
         }],
-        NarrativeNodeData::HasEntityTag { .. } =>
+        NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } =>
             vec![DataPinDefinition { pin_name: "output".into(), value_type: "bool".into(), is_input: false }],
         NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. } =>
             vec![DataPinDefinition { pin_name: "output".into(), value_type: "bool".into(), is_input: false }],
@@ -696,7 +697,7 @@ fn compile_data_output_pins(node: &NarrativeNode) -> Vec<DataPinDefinition> {
 }
 
 fn compile_input_pins(node: &NarrativeNode, graph: &NarrativeGraph) -> Vec<PinDefinition> {
-    if matches!(node.data, NarrativeNodeData::GetEntity { .. } | NarrativeNodeData::GetEntityProperty { .. } | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. }) {
+    if matches!(node.data, NarrativeNodeData::GetEntity { .. } | NarrativeNodeData::GetEntityProperty { .. } | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. }) {
         return Vec::new();
     }
     let mut edges: Vec<&crate::narrative_graph::NarrativeEdge> = graph.edges.iter()
@@ -715,7 +716,7 @@ fn compile_output_pins(node: &NarrativeNode) -> Vec<PinDefinition> {
             .map(|index| format!("choice_{index}"))
             .collect(),
         NarrativeNodeData::Condition {} => vec!["true".into(), "false".into()],
-        NarrativeNodeData::GetEntity { .. } | NarrativeNodeData::GetEntityProperty { .. } | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. } => Vec::new(),
+        NarrativeNodeData::GetEntity { .. } | NarrativeNodeData::GetEntityProperty { .. } | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. } => Vec::new(),
         NarrativeNodeData::WaypointConversation { topic_nodes, .. } => {
             let mut pins = BTreeSet::new();
             for topic in topic_nodes {
@@ -869,6 +870,8 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::AddEntityTag { .. } => "AddEntityTag",
         NarrativeNodeData::RemoveEntityTag { .. } => "RemoveEntityTag",
         NarrativeNodeData::HasEntityTag { .. } => "HasEntityTag",
+        NarrativeNodeData::Learn { .. } => "Learn",
+        NarrativeNodeData::Knows { .. } => "Knows",
         NarrativeNodeData::End { .. } => "End",
     }
 }
@@ -980,6 +983,21 @@ mod tests {
             &property_graph(NarrativeNodeData::GetEntity { entity_path: "world".into() }, int_command(Value::Null)),
             &[entity("count", "int")],
         ).is_err());
+    }
+
+    #[test]
+    fn authored_knowledge_nodes_compile_and_resolve_participant() {
+        let storylet: StoryletRecord = serde_json::from_value(json!({
+            "id":"knowledge", "title":"Knowledge", "content":{"text_template":"x"}, "effects":{}, "created_at":1,
+            "graph":{"nodes":[{"id":"learn", "title":"Learn", "type":"learn", "fact_tag":"fact.secret", "kind":"evidence", "visibility":"co_located", "x":0,"y":0,"width":100,"height":80}],"edges":[]}
+        })).unwrap();
+        let mut dispatch = compile_chrono_dispatch(&[storylet], &[], &[]).unwrap();
+        dispatch.participant_indices.insert("hero".into(), 1);
+        let node: NarrativeNode = serde_json::from_value(json!({"id":"n", "title":"Knows", "type":"knows", "holder":"hero", "fact_tag":"fact.secret", "confirmed_only":true, "x":0,"y":0,"width":100,"height":80})).unwrap();
+        let (kind, _) = compile_node_kind(&node, 0, &dispatch, &Default::default(), &Default::default()).unwrap();
+        assert!(matches!(kind, NodeKind::Knows { holder: storylet_engine::chrono_runtime::HolderRef::Participant(1), confirmed_only:true, .. }));
+        assert_eq!(super::compile_data_output_pins(&node)[0].value_type, "bool");
+        assert!(super::compile_data_input_pins(&node).is_empty());
     }
 
     #[test]
@@ -1914,7 +1932,7 @@ mod tests {
             serde_json::json!({"type":"or"}),
         ] {
             let data: NarrativeNodeData = serde_json::from_value(value).unwrap();
-            assert!(matches!(data, NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {}));
+            assert!(matches!(data, NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {}));
         }
     }
 }

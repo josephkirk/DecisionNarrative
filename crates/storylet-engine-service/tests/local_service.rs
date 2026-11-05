@@ -130,3 +130,24 @@ async fn v3_project_and_content_routes_remain_available() {
     let (status, _) = request(&app, "GET", "/api/v3/content/gameplay_tags", None).await;
     assert_ne!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn old_v5_virtual_participant_trait_is_directly_readable_and_protected() {
+    use storylet_engine_service::store::Store;
+    let path = std::env::temp_dir().join(format!("dn-participant-{}.db", uuid::Uuid::new_v4()));
+    drop(Store::open(&path).unwrap());
+    let conn = Connection::open(&path).unwrap();
+    conn.execute("DELETE FROM content_records WHERE entity='trait_templates' AND id='system.participant'", []).unwrap();
+    drop(conn);
+    let service = StudioService::open(&path, ".").unwrap();
+    let item = service.get_content_item("trait_templates", "system.participant").await.unwrap();
+    assert_eq!(item["id"], "system.participant");
+    assert!(service.save_content_item("trait_templates", &item).await.is_err());
+    assert!(service.delete_content_item("trait_templates", "system.participant").await.is_err());
+    drop(service);
+    let conn = Connection::open(&path).unwrap();
+    let count: i64 = conn.query_row("SELECT count(*) FROM content_records WHERE entity='trait_templates' AND id='system.participant'", [], |row| row.get(0)).unwrap();
+    assert_eq!(count, 0);
+    drop(conn);
+    std::fs::remove_file(path).unwrap();
+}

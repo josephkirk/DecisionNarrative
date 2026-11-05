@@ -154,6 +154,8 @@ pub enum NarrativeNodeData {
     Teleport {
         destination_storylet: String,
     },
+    Learn { fact_tag: String, kind: storylet_engine::chrono_participants::KnowKind, visibility: storylet_engine::chrono_runtime::Visibility },
+    Knows { holder: String, fact_tag: String, #[serde(default)] confirmed_only: bool },
     GoToLocation {
         location_id: String,
     },
@@ -439,6 +441,8 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::Poi { .. } => "POI",
         NarrativeNodeData::Image { .. } => "Image",
         NarrativeNodeData::Teleport { .. } => "Teleport",
+        NarrativeNodeData::Learn { .. } => "Learn",
+        NarrativeNodeData::Knows { .. } => "Knows",
         NarrativeNodeData::GoToLocation { .. } => "Go To Location",
         NarrativeNodeData::GraphTransform { .. } => "Graph Transform",
         NarrativeNodeData::PassionMutation { .. } => "Passion Mutation",
@@ -611,7 +615,7 @@ impl NarrativeGraph {
                         &target.data,
                         NarrativeNodeData::GetEntity { .. }
                             | NarrativeNodeData::GetEntityProperty { .. }
-                            | NarrativeNodeData::HasEntityTag { .. }
+                            | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
                             | NarrativeNodeData::And {}
                             | NarrativeNodeData::Or {}
                             | NarrativeNodeData::Compare { .. }
@@ -619,7 +623,7 @@ impl NarrativeGraph {
                     let valid_source = match &source.data {
                         NarrativeNodeData::GetEntity { .. }
                         | NarrativeNodeData::GetEntityProperty { .. }
-                        | NarrativeNodeData::HasEntityTag { .. }
+                        | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
                         | NarrativeNodeData::And {}
                         | NarrativeNodeData::Or {}
                         | NarrativeNodeData::Compare { .. } => false,
@@ -651,7 +655,7 @@ impl NarrativeGraph {
                             "output",
                             if value_type == "entity" { "entity_ref" } else { value_type.as_str() },
                         )),
-                        NarrativeNodeData::HasEntityTag { .. }
+                        NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
                         | NarrativeNodeData::And {}
                         | NarrativeNodeData::Or {}
                         | NarrativeNodeData::Compare { .. } => Some(("output", "bool")),
@@ -742,7 +746,7 @@ impl NarrativeGraph {
                             | NarrativeNodeData::And {}
                             | NarrativeNodeData::Or {}
                             | NarrativeNodeData::Compare { .. }
-                            | NarrativeNodeData::HasEntityTag { .. }
+                            | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
                     )
                 });
                 if consumes_data {
@@ -771,7 +775,7 @@ impl NarrativeGraph {
                         | NarrativeNodeData::And {}
                         | NarrativeNodeData::Or {}
                         | NarrativeNodeData::Compare { .. }
-                        | NarrativeNodeData::HasEntityTag { .. }
+                        | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
                 )
             });
             if consumes_data {
@@ -808,6 +812,15 @@ impl NarrativeGraph {
                 }
             }
             match &node.data {
+                NarrativeNodeData::Learn { fact_tag, .. } | NarrativeNodeData::Knows { fact_tag, .. } => {
+                    if matches!(node.data, NarrativeNodeData::Knows { .. }) {
+                        let count = self.edges.iter().filter(|edge| edge.from_node == node.id && edge.kind == NarrativeEdgeKind::Data).count();
+                        if count != 1 { issues.push(format!("Knows node {} must have exactly one outgoing boolean data connection.", node.title)); }
+                    }
+                    if !fact_tag.starts_with("fact.") || fact_tag.len() <= 5 {
+                        issues.push(format!("{} node \"{}\": fact tag \"{}\" must be under \"fact.\"", node_type_name(&node.data), node.title, fact_tag));
+                    }
+                }
                 NarrativeNodeData::GoToLocation { location_id } => {
                     if location_id.trim().is_empty() {
                         issues.push("Go To Location nodes must select a location.".into());
@@ -1244,7 +1257,7 @@ impl NarrativeGraph {
                     | NarrativeNodeData::GetEntity { .. }
                     | NarrativeNodeData::GetEntityProperty { .. }
                     | NarrativeNodeData::Compare { .. }
-                    | NarrativeNodeData::HasEntityTag { .. }
+                    | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
                     | NarrativeNodeData::And {}
                     | NarrativeNodeData::Or {}
                     | NarrativeNodeData::Condition {}
@@ -1455,3 +1468,19 @@ impl NarrativeGraph {
     }
 }
 
+
+#[cfg(test)]
+mod knowledge_authoring_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn learn_node_requires_fact_root() {
+        let graph: NarrativeGraph = serde_json::from_value(json!({"nodes":[
+            {"id":"s","type":"start","title":"Start","text":"Start","x":0,"y":0,"width":100,"height":100},
+            {"id":"l","type":"learn","title":"Clue","fact_tag":"clue.x","kind":"evidence","visibility":"private","x":0,"y":0,"width":100,"height":100},
+            {"id":"e","type":"end","title":"End","x":0,"y":0,"width":100,"height":100}
+        ],"edges":[{"id":"a","from_node":"s","from_port":"output","to_node":"l","to_port":"input"},{"id":"b","from_node":"l","from_port":"output","to_node":"e","to_port":"input"}]})).unwrap();
+        assert!(graph.validate().unwrap_err().iter().any(|issue| issue.contains("must be under \"fact.\"")));
+    }
+}

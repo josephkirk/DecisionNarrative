@@ -174,6 +174,7 @@ watch(
     }
   },
 );
+const factTagOptions = computed(() => uniqueTagNames(studioState.gameplayTags.map((tag) => tag.name)).filter((name) => name.startsWith("fact.")));
 const catalogTagNames = computed(() => uniqueTagNames(studioState.gameplayTags.map((tag) => tag.name)));
 const roleTagOptions = computed(() => catalogTagNames.value.filter((name) => name.startsWith("character.")));
 const targetRoles = computed(() => uniqueTagNames(["player", ...roleTagOptions.value]));
@@ -589,6 +590,20 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 
       <div v-else-if="selectedNode.type === 'teleport'">
         <div class="form-group"><label class="field-label">Destination Storylet</label><select v-model="selectedNode.destination_storylet" class="form-select" @change="emitGraphUpdate(selectedNode)"><option value="">Choose destination…</option><option v-for="story in props.storylets" :key="story.id" :value="story.id">{{ story.title }} ({{ story.id }})</option></select></div>
+      </div>
+
+      <div v-else-if="selectedNode.type === 'learn' || selectedNode.type === 'knows'">
+        <div class="form-group">
+          <TagEditor v-model="selectedNode.fact_tag" :options="factTagOptions" :allow-create="false" :multiple="false" label="Fact" placeholder="Choose a fact" @update:model-value="emitGraphUpdate(selectedNode)" />
+        </div>
+        <template v-if="selectedNode.type === 'learn'">
+          <div class="form-group"><label class="field-label" for="learn-kind">Knowledge kind</label><select id="learn-kind" v-model="selectedNode.kind" class="form-select" @change="emitGraphUpdate(selectedNode)"><option v-for="kind in ['evidence','witnessed','told','rumor','recollection','testimony','inference']" :key="kind" :value="kind">{{ kind }}</option></select></div>
+          <div class="form-group"><label class="field-label" for="learn-visibility">Visibility</label><select id="learn-visibility" v-model="selectedNode.visibility" class="form-select" @change="emitGraphUpdate(selectedNode)"><option value="private">Private</option><option value="co_located">Co-located</option></select></div>
+        </template>
+        <template v-else>
+          <div class="form-group"><label class="field-label" for="knows-holder">Holder</label><select id="knows-holder" v-model="selectedNode.holder" class="form-select" @change="emitGraphUpdate(selectedNode)"><option value="acting">Acting participant</option><option v-for="entity in studioState.entityTemplates.filter((e) => e.traits?.some((t) => t.template_id === 'system.participant'))" :key="entity.id" :value="entity.id">{{ entity.name }}</option></select></div>
+          <div class="form-group"><label><input v-model="selectedNode.confirmed_only" type="checkbox" @change="emitGraphUpdate(selectedNode)" /> Confirmed only</label></div>
+        </template>
       </div>
 
       <div v-else-if="selectedNode.type === 'go_to_location'">

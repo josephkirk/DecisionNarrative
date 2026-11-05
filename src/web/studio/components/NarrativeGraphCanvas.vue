@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
-import { graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, GRAPH_PIN_COLORS, type GraphValueType, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType } from "../narrativeGraphTypes.ts";
+import { graphNodeTypes, graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, GRAPH_PIN_COLORS, type GraphValueType, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType } from "../narrativeGraphTypes.ts";
 import { studioState, notify } from "../state.ts";
 
 const props = withDefaults(defineProps<{
@@ -58,10 +58,7 @@ const contextMenu = ref<{ kind: "canvas" | "node" | "edge"; x: number; y: number
 const nodeSearch = ref("");
 const scissorStart = ref<{ x: number; y: number } | null>(null);
 const scissorEnd = ref<{ x: number; y: number } | null>(null);
-const storyNodeTypes: NodeType[] = ["start", "dialog", "choice", "condition", "and", "or", "compare", "get_entity", "get_entity_property", "apply_command", "qbn_storylet_hub", "salience_selector", "waypoint_conversation", "waiter", "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "add_entity_tag", "remove_entity_tag", "has_entity_tag", "end"];
-const nodeTypes = computed<NodeType[]>(() => props.graphMode === "preconditions"
-  ? ["start", "get_entity", "get_entity_property", "compare", "condition", "and", "or", "has_entity_tag", "end"]
-  : storyNodeTypes);
+const nodeTypes = computed<NodeType[]>(() => graphNodeTypes(props.graphMode));
 
 const failedImageNodes = ref(new Set<string>());
 watch(
@@ -247,7 +244,7 @@ function sourcePinType(node: NarrativeNode, port: string): GraphValueType | "flo
   if (port === "output") {
     if (node.type === "get_entity") return "entity_ref";
     if (node.type === "get_entity_property") return graphNodeValueType(node) ?? "any";
-    if (["has_entity_tag", "compare", "and", "or"].includes(node.type)) return "bool";
+    if (["has_entity_tag", "knows", "compare", "and", "or"].includes(node.type)) return "bool";
     return "flow";
   }
   return "flow";
@@ -402,6 +399,10 @@ function addNode(type: NodeType) {
   } else if (type === "teleport") {
     baseNode.destination_storylet = "";
     baseNode.height = 100;
+  } else if (type === "learn" || type === "knows") {
+    baseNode.fact_tag = "";
+    if (type === "learn") { baseNode.kind = "evidence"; baseNode.visibility = "private"; }
+    else { baseNode.holder = "acting"; baseNode.confirmed_only = false; }
   } else if (type === "go_to_location") {
     baseNode.location_id = studioState.entityTemplates.find((entity) => entity.root_tag === "location")?.id ?? "";
     baseNode.height = 100;
@@ -559,6 +560,8 @@ const computedEdges = computed(() => {
         <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('add_entity_tag')">+ Tag</button>
         <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('remove_entity_tag')">- Tag</button>
         <button class="node-tool-btn" @click="addNode('has_entity_tag')">Has tag</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('learn')">Learn</button>
+        <button class="node-tool-btn" @click="addNode('knows')">Knows</button>
         <button class="node-tool-btn" @click="addNode('end')">End</button>
       </div>
 
@@ -783,6 +786,7 @@ const computedEdges = computed(() => {
             </div>
             <div style="font-size:10px; color:var(--text-muted);">Boolean output</div>
           </div>
+          <div v-else-if="node.type === 'learn' || node.type === 'knows'">{{ node.fact_tag || 'Choose fact' }}</div>
           <div v-else-if="node.type === 'end'">
             <div v-if="props.graphMode === 'preconditions'" style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.precondition_result === false ? 'Reject candidate' : 'Valid candidate' }}</div>
             <div v-else style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.jump_to_storylet || 'Terminal ending' }}</div>
@@ -796,7 +800,7 @@ const computedEdges = computed(() => {
           <div v-if="node.type === 'condition'" class="socket input-socket" style="top:52px" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Boolean data input" @mouseup="completeConnection($event, node, 'input')"></div>
           <div v-if="node.type === 'and' || node.type === 'or'" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Boolean data input" @mouseup="completeConnection($event, node, 'input')"></div>
           <div v-if="node.type === 'compare'" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Value data input" @mouseup="completeConnection($event, node, 'input')"></div>
-          <div v-if="!['get_entity', 'get_entity_property', 'apply_command', 'condition', 'has_entity_tag', 'compare', 'and', 'or'].includes(node.type)" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Flow input" @mouseup="completeConnection($event, node, 'input')"></div>
+          <div v-if="!['get_entity', 'get_entity_property', 'apply_command', 'condition', 'has_entity_tag', 'knows', 'compare', 'and', 'or'].includes(node.type)" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Flow input" @mouseup="completeConnection($event, node, 'input')"></div>
         </template>
 
         <!-- Default Output Socket (Right edge) -->

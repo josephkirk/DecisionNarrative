@@ -1026,7 +1026,7 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
                     })
                 })
         });
-        if !valid {
+        if !valid && (spec.key != "participant" || content.trait_templates.iter().any(|template| template.id == "system.participant")) {
             issues.push(format!(
                 "required system trait template '{}' is missing or incompatible",
                 spec.key
