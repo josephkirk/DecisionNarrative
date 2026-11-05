@@ -12,6 +12,10 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::chrono_participants::{
+    FactIx, KnowledgeRow, KnowledgeTable, ParticipantTable, PartIx,
+};
+
 /// Number of 64-bit words in a `TagBitset` (REQ-DOD-02).
 pub const WORD_COUNT: usize = 4;
 /// Maximum number of compilable gameplay tags: `WORD_COUNT * 64`.
@@ -699,6 +703,14 @@ pub struct WorldStateTable {
     pub current_location_entity: Option<u16>,
     #[serde(default)]
     pub current_location_tag_mask: TagBitset,
+    /// Who acts. Empty in a v5 world until `ensure_participants` adds the
+    /// implicit player. Participant 0's location is projected into
+    /// `current_location_entity`.
+    #[serde(default)]
+    pub participants: ParticipantTable,
+    /// Who knows which fact.
+    #[serde(default)]
+    pub knowledge: KnowledgeTable,
 }
 
 impl WorldStateTable {
@@ -711,6 +723,8 @@ impl WorldStateTable {
             edges: Vec::new(),
             current_location_entity: None,
             current_location_tag_mask: TagBitset::new(),
+            participants: ParticipantTable::default(),
+            knowledge: KnowledgeTable::default(),
         }
     }
 
@@ -724,6 +738,8 @@ impl WorldStateTable {
             edges: Vec::new(),
             current_location_entity: None,
             current_location_tag_mask: TagBitset::new(),
+            participants: ParticipantTable::default(),
+            knowledge: KnowledgeTable::default(),
         }
     }
 
@@ -751,7 +767,89 @@ impl WorldStateTable {
             self.global_tags.words[word] |= row.words[word];
         }
         self.current_location_entity = Some(entity_id);
+        if !self.participants.is_empty() {
+            self.participants.location[0] = Some(entity_id);
+        }
         Ok(())
+    }
+
+    /// Normalizes participants and knowledge after construction or
+    /// deserialization. Idempotent; loaders and later tasks call it
+    /// explicitly, `new()` does not.
+    ///
+    /// - participant columns are truncated to the shortest one;
+    /// - an empty table becomes the implicit player at the current location;
+    /// - knowledge rows are sorted by `(holder, fact)`, first duplicate wins.
+    pub fn ensure_participants(&mut self) {
+        let table = &mut self.participants;
+        let shortest = table
+            .keys
+            .len()
+            .min(table.entity.len())
+            .min(table.controller.len())
+            .min(table.location.len());
+        table.keys.truncate(shortest);
+        table.entity.truncate(shortest);
+        table.controller.truncate(shortest);
+        table.location.truncate(shortest);
+        if table.is_empty() {
+            self.participants = ParticipantTable::implicit_player(self.current_location_entity);
+        }
+        self.knowledge.rows.sort_by_key(|row| (row.holder, row.fact));
+        self.knowledge
+            .rows
+            .dedup_by_key(|row| (row.holder, row.fact));
+    }
+
+    /// Where participant `p` is, if it is anywhere.
+    pub fn active_location(&self, p: PartIx) -> Option<u16> {
+        self.participants.location.get(p as usize).copied().flatten()
+    }
+
+    /// Records the location current when a delta starts being built from
+    /// scratch, so reverting a delta that never went through
+    /// `apply_mutation` does not clobber `current_location_entity`.
+    fn stamp_previous_location(&self, delta: &mut BijectiveDelta) {
+        if delta.is_empty() && delta.previous_current_location.is_none() {
+            delta.previous_current_location = self.current_location_entity;
+        }
+    }
+
+    /// Teaches `row.holder` a fact. A holder that already knows the fact keeps
+    /// its first source and nothing is recorded in `delta`.
+    pub fn apply_learn(&mut self, row: KnowledgeRow, delta: &mut BijectiveDelta) {
+        self.stamp_previous_location(delta);
+        if self.knowledge.learn(row) {
+            delta.knowledge_added.push((row.holder, row.fact));
+        }
+    }
+
+    /// Moves participant `p`. Moving participant 0 also updates the
+    /// `current_location_entity` projection, its tag mask and the contributed
+    /// global tags, exactly as a player move in `apply_mutation_with_registry`
+    /// does. Panics if `p` or `to` is out of range; callers validate content.
+    pub fn apply_move(&mut self, p: PartIx, to: Option<u16>, delta: &mut BijectiveDelta) {
+        self.stamp_previous_location(delta);
+        let from = self.participants.set_location(p, to);
+        delta.participant_moves.push((p, from, to));
+        if p != 0 {
+            return;
+        }
+        let new_mask = to.map_or_else(TagBitset::new, |entity| self.entity_tags[entity as usize]);
+        let mut new_global = self.global_tags;
+        for word in 0..WORD_COUNT {
+            new_global.words[word] &= !self.current_location_tag_mask.words[word];
+            new_global.words[word] |= new_mask.words[word];
+        }
+        delta
+            .global_xor_mask
+            .apply_xor(&self.global_tags.xor_with(&new_global));
+        delta
+            .location_tag_mask_xor
+            .apply_xor(&self.current_location_tag_mask.xor_with(&new_mask));
+        self.global_tags = new_global;
+        self.current_location_tag_mask = new_mask;
+        self.current_location_entity = to;
     }
 
     /// Vertex that represents an authored entity row, if one exists.
@@ -1390,6 +1488,12 @@ pub struct BijectiveDelta {
     pub passion_delta: Option<PassionDelta>,
     #[serde(default)]
     pub graph_diffs: Vec<GraphDiffRecord>,
+    /// Facts newly learned, undone with `KnowledgeTable::forget`.
+    #[serde(default)]
+    pub knowledge_added: Vec<(PartIx, FactIx)>,
+    /// `(participant, from, to)`, undone in reverse order.
+    #[serde(default)]
+    pub participant_moves: Vec<(PartIx, Option<u16>, Option<u16>)>,
 }
 
 impl BijectiveDelta {
@@ -1399,6 +1503,8 @@ impl BijectiveDelta {
             && self.entity_xor_masks.is_empty()
             && self.passion_delta.is_none()
             && self.graph_diffs.is_empty()
+            && self.knowledge_added.is_empty()
+            && self.participant_moves.is_empty()
     }
 }
 
@@ -1435,6 +1541,10 @@ pub fn apply_mutation_with_registry(
     let mut new_global = state.global_tags;
     let mut new_location_mask = state.current_location_tag_mask;
     if let Some(entity_id) = op.move_player {
+        if !state.participants.is_empty() {
+            let from = state.participants.set_location(0, Some(entity_id));
+            delta.participant_moves.push((0, from, Some(entity_id)));
+        }
         for word in 0..WORD_COUNT {
             new_global.words[word] &= !new_location_mask.words[word];
         }
@@ -1491,6 +1601,11 @@ pub fn revert_delta(
             return Err(ChronoStateError::EntityIndexOutOfRange { index: pair.entity_id });
         }
     }
+    for &(p, _, _) in &delta.participant_moves {
+        if p as usize >= state.participants.len() {
+            return Err(ChronoStateError::ParticipantIndexOutOfRange { index: p });
+        }
+    }
     for graph_diff in delta.graph_diffs.iter().rev() {
         state.revert_graph_transform(graph_diff)?;
     }
@@ -1503,6 +1618,12 @@ pub fn revert_delta(
         state.entity_tags[pair.entity_id as usize].apply_xor(&pair.xor_mask);
     }
     state.current_location_entity = delta.previous_current_location;
+    for &(p, from, _) in delta.participant_moves.iter().rev() {
+        state.participants.set_location(p, from);
+    }
+    for &(holder, fact) in &delta.knowledge_added {
+        state.knowledge.forget(holder, fact);
+    }
     Ok(())
 }
 
@@ -2079,6 +2200,9 @@ pub enum ChronoStateError {
     EntityIndexOutOfRange {
         index: u16,
     },
+    ParticipantIndexOutOfRange {
+        index: u16,
+    },
     NonFinitePassion {
         passion_id: u16,
         value: f32,
@@ -2203,6 +2327,12 @@ impl fmt::Display for ChronoStateError {
                 write!(
                     formatter,
                     "passion index {index} is outside the passion array"
+                )
+            }
+            Self::ParticipantIndexOutOfRange { index } => {
+                write!(
+                    formatter,
+                    "participant index {index} is outside the participant table"
                 )
             }
             Self::EntityIndexOutOfRange { index } => {
