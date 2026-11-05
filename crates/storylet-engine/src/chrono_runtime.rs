@@ -21,6 +21,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::chrono_completion::StoryletBitset;
+use crate::chrono_participants::{FactIx, KnowKind, KnowledgeRow, PartIx};
 use crate::chrono_dispatch::{DispatchError, UnifiedDispatcher, WaypointStep, WaypointTopicGraph};
 use crate::chrono_state::{
     apply_mutation, apply_mutation_with_registry, apply_passion_mutation, revert_delta,
@@ -270,11 +271,22 @@ pub struct FlowNodeDef {
     pub payload: serde_json::Value,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility { Private, CoLocated }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HolderRef { Acting, Participant(PartIx) }
+
 /// Node behavior. Every kind is executable through the same three endpoints
 /// (`ExecuteNormal`, `ForceComplete`, `CancelAndRevert`).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NodeKind {
+    Learn { fact: FactIx, #[serde(rename = "knowledge_kind")] kind: KnowKind, visibility: Visibility },
+    MoveParticipant { location_entity: u16 },
+    Knows { holder: HolderRef, fact: FactIx, confirmed_only: bool },
     GetEntity { entity_id: String },
     GetEntityProperty { property_key: String, value_type: String },
     ApplyCommand { property_key: String, operation: PropertyOperation, value: DataValue },
@@ -695,7 +707,8 @@ impl FlowGraphAsset {
             }
             let data_only = matches!(
                 node.kind,
-                NodeKind::GetEntity { .. }
+                NodeKind::Knows { .. }
+                    | NodeKind::GetEntity { .. }
                     | NodeKind::GetEntityProperty { .. }
                     | NodeKind::HasEntityTag { .. }
                     | NodeKind::Compare { .. }
@@ -1269,6 +1282,7 @@ pub enum GraphError {
     PassionRegistryRequired {
         node_guid: u32,
     },
+    ParticipantNotFound { node_guid: u32, participant: PartIx },
     EntityIndexOutOfRange {
         node_guid: u32,
         entity_index: u16,
@@ -1559,6 +1573,7 @@ impl fmt::Display for GraphError {
                 f,
                 "teleport at node {node_guid} targets unknown node {destination}"
             ),
+            GraphError::ParticipantNotFound { node_guid, participant } => write!(f, "node {node_guid} references unknown participant {participant}"),
             GraphError::EntityIndexOutOfRange {
                 node_guid,
                 entity_index,
@@ -1781,6 +1796,8 @@ fn beats(winner: &ComposerCommand, challenger: &ComposerCommand) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlowGraphInstance {
     pub instance_id: u64,
+    #[serde(default)]
+    pub acting_participant: PartIx,
     pub asset: FlowGraphAsset,
     /// Node instances, ordered by node GUID.
     pub nodes: Vec<FlowNodeInstance>,
@@ -1848,6 +1865,7 @@ impl FlowGraphInstance {
         nodes.sort_by_key(|node| node.node_guid);
         Ok(Self {
             instance_id,
+            acting_participant: 0,
             asset,
             nodes,
             tokens: Vec::new(),
@@ -2138,7 +2156,8 @@ impl FlowGraphInstance {
         plan.completed_storylets = Some(node.completed_storylets.clone());
 
         match &def.kind {
-            NodeKind::GetEntity { .. }
+            NodeKind::Knows { .. }
+            | NodeKind::GetEntity { .. }
             | NodeKind::GetEntityProperty { .. }
             | NodeKind::HasEntityTag { .. }
             | NodeKind::Compare { .. }
@@ -2148,6 +2167,41 @@ impl FlowGraphInstance {
                     node_guid,
                     category: def.category,
                 });
+            }
+            NodeKind::Learn { fact, kind, visibility } => {
+                let actor = self.acting_participant;
+                if usize::from(actor) >= ctx.state.participants.len() {
+                    return Err(GraphError::ParticipantNotFound { node_guid, participant: actor });
+                }
+                let source_event = match def.mission_scope {
+                    Some(scope) => self.nodes[self.node_index(scope).ok_or(GraphError::MissionScopeNotFound { node_guid, scope })?].local_call_history.len(),
+                    None => self.global_call_history.len(),
+                } as u32;
+                let witnesses: Vec<_> = if *visibility == Visibility::CoLocated {
+                    ctx.state.participants.colocated(actor).collect()
+                } else { Vec::new() };
+                ctx.state.apply_learn(KnowledgeRow { holder: actor, fact: *fact, kind: *kind, source_event }, &mut plan.delta);
+                for holder in witnesses {
+                    ctx.state.apply_learn(KnowledgeRow { holder, fact: *fact, kind: KnowKind::Witnessed, source_event }, &mut plan.delta);
+                }
+                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.completed = true;
+                plan.record = true;
+                plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
+            }
+            NodeKind::MoveParticipant { location_entity } => {
+                let actor = self.acting_participant;
+                if usize::from(actor) >= ctx.state.participants.len() {
+                    return Err(GraphError::ParticipantNotFound { node_guid, participant: actor });
+                }
+                if usize::from(*location_entity) >= ctx.state.entity_tags.len() {
+                    return Err(GraphError::EntityIndexOutOfRange { node_guid, entity_index: *location_entity });
+                }
+                ctx.state.apply_move(actor, Some(*location_entity), &mut plan.delta);
+                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.completed = true;
+                plan.record = true;
+                plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
             }
             NodeKind::ApplyCommand { property_key, operation, value } => {
                 let entity = match resolve_data_input(self, ctx, node_guid, "entity", &mut BTreeSet::new())? {
@@ -2443,7 +2497,7 @@ impl FlowGraphInstance {
                                 .storylet(id)
                                 .and_then(|storylet| storylet.precondition_graph.as_ref())
                             {
-                                Some(graph) => Self::evaluate_precondition_graph(graph, ctx)?,
+                                Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
                                 None => true,
                             };
                             if graph_eligible {
@@ -2781,8 +2835,44 @@ impl FlowGraphInstance {
         &mut self,
         node_guid: u32,
         storylet_id: Option<u16>,
+        state: Option<&mut WorldStateTable>,
     ) -> Result<(), GraphError> {
         let scope = self.asset.node(node_guid).and_then(|def| def.mission_scope);
+        let history = match scope {
+            Some(mission) => &self.nodes[self.node_index(mission).ok_or(GraphError::MissionScopeNotFound { node_guid, scope: mission })?].local_call_history,
+            None => &self.global_call_history,
+        };
+        let position = history.iter().rposition(|entry| entry.node_guid == node_guid && entry.chosen_storylet_id == storylet_id);
+        if let Some(position) = position {
+            // A Learn node's delta identifies exactly which knowledge rows its
+            // invocation inserted. Other graph instances may reuse the same
+            // source index, so never rebase rows by index alone.
+            let mut ordinal = BTreeMap::<u32, usize>::new();
+            let mut rebases = Vec::new();
+            for (index, entry) in history.iter().enumerate() {
+                if !self.asset.node(entry.node_guid).is_some_and(|def| matches!(def.kind, NodeKind::Learn { .. })) { continue; }
+                let count = ordinal.entry(entry.node_guid).or_default();
+                if index > position {
+                    if let Some(node_index) = self.node_index(entry.node_guid) {
+                        if let Some(NodeCallData::Delta { delta }) = self.nodes[node_index].call_data.get(*count) {
+                            for &(holder, fact) in &delta.knowledge_added {
+                                rebases.push((holder, fact, index as u32));
+                            }
+                        }
+                    }
+                }
+                *count += 1;
+            }
+            if let Some(state) = state {
+                for (holder, fact, old_index) in rebases {
+                    if let Some(row) = state.knowledge.rows.iter_mut().find(|row| row.holder == holder && row.fact == fact && row.source_event == old_index) {
+                        row.source_event -= 1;
+                    }
+                }
+            } else {
+                debug_assert!(rebases.is_empty(), "history removal without state must be tail-only");
+            }
+        }
         if let Some(mission) = scope {
             let index = self
                 .node_index(mission)
@@ -2907,22 +2997,35 @@ impl FlowGraphInstance {
         asset: &FlowGraphAsset,
         ctx: &RuntimeContext,
     ) -> Result<bool, GraphError> {
-        fn value(asset: &FlowGraphAsset, ctx: &RuntimeContext, guid: u32, seen: &mut BTreeSet<u32>) -> Result<DataValue, GraphError> {
+        Self::evaluate_precondition_graph_for(asset, ctx, 0)
+    }
+
+    pub fn evaluate_precondition_graph_for(
+        asset: &FlowGraphAsset,
+        ctx: &RuntimeContext,
+        acting_participant: PartIx,
+    ) -> Result<bool, GraphError> {
+        fn value(asset: &FlowGraphAsset, ctx: &RuntimeContext, acting_participant: PartIx, guid: u32, seen: &mut BTreeSet<u32>) -> Result<DataValue, GraphError> {
             if !seen.insert(guid) { return Err(GraphError::ZeroCostCycle { node_guid: guid }); }
             let node = asset.node(guid).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
             let mut input = |pin: &str| -> Result<DataValue, GraphError> {
                 let edge = asset.data_edges.iter().find(|e| e.target_node_guid == guid && e.target_pin_name == pin)
                     .ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
-                value(asset, ctx, edge.source_node_guid, seen)
+                value(asset, ctx, acting_participant, edge.source_node_guid, seen)
             };
             let out = match &node.kind {
+                NodeKind::Knows { holder, fact, confirmed_only } => {
+                    let participant = match holder { HolderRef::Acting => acting_participant, HolderRef::Participant(p) => *p };
+                    if usize::from(participant) >= ctx.state.participants.len() { return Err(GraphError::ParticipantNotFound { node_guid: guid, participant }); }
+                    DataValue::Bool(ctx.state.knowledge.knows(participant, *fact).is_some_and(|row| !confirmed_only || row.kind.is_confirmed()))
+                }
                 NodeKind::GetEntity { entity_id } => DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() { node.entity_path.clone() } else { entity_id.clone() }),
                 NodeKind::HasEntityTag { entity_id, tag, match_mode } => {
                     let registry = ctx.registry.ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
                     let id = registry.id(tag).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
                     let mask = *registry.ancestors_mask(id).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
                     let target = match asset.data_edges.iter().find(|e| e.target_node_guid == guid && e.target_pin_name == "target") {
-                        Some(edge) => match value(asset, ctx, edge.source_node_guid, &mut BTreeSet::new())? { DataValue::EntityRef(value) => value, _ => return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }) },
+                        Some(edge) => match value(asset, ctx, acting_participant, edge.source_node_guid, &mut BTreeSet::new())? { DataValue::EntityRef(value) => value, _ => return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }) },
                         None => entity_id.clone(),
                     };
                     let container = if target.is_empty() || target.eq_ignore_ascii_case("world") {
@@ -2946,7 +3049,7 @@ impl FlowGraphInstance {
                 NodeKind::And | NodeKind::Or => {
                     let edges: Vec<_> = asset.data_edges.iter().filter(|e| e.target_node_guid == guid).collect();
                     if edges.is_empty() { return Err(GraphError::NoDeclaredRoute { node_guid: guid }); }
-                    let mut values = edges.iter().map(|e| value(asset, ctx, e.source_node_guid, seen));
+                    let mut values = edges.iter().map(|e| value(asset, ctx, acting_participant, e.source_node_guid, seen));
                     let DataValue::Bool(mut result) = values.next().unwrap()? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
                     for next in values { let DataValue::Bool(v) = next? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); }; result = if matches!(&node.kind, NodeKind::And) { result && v } else { result || v }; }
                     DataValue::Bool(result)
@@ -2960,26 +3063,26 @@ impl FlowGraphInstance {
             seen.remove(&guid);
             Ok(out)
         }
-        fn walk(asset: &FlowGraphAsset, ctx: &RuntimeContext, guid: u32, seen: &mut BTreeSet<u32>) -> Result<bool, GraphError> {
+        fn walk(asset: &FlowGraphAsset, ctx: &RuntimeContext, acting_participant: PartIx, guid: u32, seen: &mut BTreeSet<u32>) -> Result<bool, GraphError> {
             if !seen.insert(guid) { return Err(GraphError::ZeroCostCycle { node_guid: guid }); }
             let node = asset.node(guid).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
             let result = match &node.kind {
                 NodeKind::End { precondition_result, .. } => *precondition_result,
                 NodeKind::Condition { .. } => {
-                    let DataValue::Bool(branch) = value(asset, ctx, guid, &mut BTreeSet::new())? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
+                    let DataValue::Bool(branch) = value(asset, ctx, acting_participant, guid, &mut BTreeSet::new())? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
                     let pin = if branch { "true" } else { "false" };
                     let edge = asset.edges.iter().find(|e| e.source_node_guid == guid && e.source_pin_name == pin).ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
-                    walk(asset, ctx, edge.target_node_guid, seen)?
+                    walk(asset, ctx, acting_participant, edge.target_node_guid, seen)?
                 }
                 _ => {
                     let edge = asset.edges.iter().find(|e| e.source_node_guid == guid).ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
-                    walk(asset, ctx, edge.target_node_guid, seen)?
+                    walk(asset, ctx, acting_participant, edge.target_node_guid, seen)?
                 }
             };
             seen.remove(&guid);
             Ok(result)
         }
-        walk(asset, ctx, asset.start_node_guid, &mut BTreeSet::new())
+        walk(asset, ctx, acting_participant, asset.start_node_guid, &mut BTreeSet::new())
     }
 
 }
@@ -3020,6 +3123,12 @@ fn resolve_data_node(instance: &FlowGraphInstance, ctx: &RuntimeContext, guid: u
     if !seen.insert(guid) { return Err(GraphError::ZeroCostCycle { node_guid: guid }); }
     let node = instance.asset.node(guid).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
     let result = match &node.kind {
+        NodeKind::Knows { holder, fact, confirmed_only } => {
+            let participant = match holder { HolderRef::Acting => instance.acting_participant, HolderRef::Participant(p) => *p };
+            if usize::from(participant) >= ctx.state.participants.len() { return Err(GraphError::ParticipantNotFound { node_guid: guid, participant }); }
+            DataValue::Bool(ctx.state.knowledge.knows(participant, *fact).is_some_and(|row| !confirmed_only || row.kind.is_confirmed()))
+        }
+
         NodeKind::GetEntity { entity_id } => DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() { node.entity_path.clone() } else { entity_id.clone() }),
         NodeKind::HasEntityTag { entity_id, tag, match_mode } => {
             let registry = ctx.registry.ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
@@ -3395,7 +3504,7 @@ impl FlowGraphInstance {
                         .map_err(GraphError::Dispatch)?
                         && self.off_cooldown(ctx, storylet_id)
                         && match storylet.precondition_graph.as_ref() {
-                            Some(graph) => Self::evaluate_precondition_graph(graph, ctx)?,
+                            Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
                             None => true,
                         }
                 }
@@ -3455,7 +3564,7 @@ impl FlowGraphInstance {
             }
             let eligible = match ctx.dispatcher.storylet(storylet_id) {
                 Some(storylet) => match storylet.precondition_graph.as_ref() {
-                    Some(graph) => Self::evaluate_precondition_graph(graph, ctx)?,
+                    Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
                     None => true,
                 },
                 None => false,
@@ -3545,7 +3654,7 @@ impl FlowGraphInstance {
                 continue;
             }
             let graph_eligible = match def.precondition_graph.as_ref() {
-                Some(graph) => Self::evaluate_precondition_graph(graph, ctx)?,
+                Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
                 None => true,
             };
             if ctx
@@ -3701,6 +3810,7 @@ impl FlowGraphInstance {
                 .map(FlowGraphInstance::nested_mission_histories)
                 .unwrap_or_default();
             if let Some(child) = self.nodes[index].sub_graph.as_mut() {
+                child.acting_participant = self.acting_participant;
                 if !scoped.is_empty()
                     && child.global_call_history.is_empty()
                     && !child.has_pending_work()
@@ -3888,7 +3998,7 @@ impl FlowGraphInstance {
             | NodeCallData::Teleport { .. } => {}
         }
         let cancelled_storylet = record_storylet(&record);
-        self.remove_record(node_guid, cancelled_storylet)?;
+        self.remove_record(node_guid, cancelled_storylet, Some(ctx.state))?;
         // A direct revert of the current head must move the head to its parent;
         // otherwise a later checkout/reconcile cancels the same call again.
         let head = self.history.head;
@@ -4171,7 +4281,7 @@ impl FlowGraphInstance {
             );
             if removable && head != 0 {
                 let commit = self.history.commits[head].clone();
-                self.remove_record(node_guid, commit.entry.chosen_storylet_id)?;
+                self.remove_record(node_guid, commit.entry.chosen_storylet_id, None)?;
                 self.history.head = commit.parent.unwrap_or(0);
             }
         }
@@ -4336,6 +4446,7 @@ impl FlowGraphInstance {
         let instance_id =
             mix64(self.instance_id ^ (node_guid as u64).wrapping_add(0x9e37_79b9_7f4a_7755));
         let mut child = Self::new_at_path(instance_id, child_asset.clone(), seed, path)?;
+        child.acting_participant = self.acting_participant;
         child.storylet_keys = self.storylet_keys.clone();
         child.scope_index = instance_id.max(1);
         self.nodes[index].sub_graph = Some(Box::new(child));
@@ -4488,6 +4599,7 @@ impl FlowGraphInstance {
                     sub_graph_asset_id: asset_id,
                 },
             )?;
+            child.acting_participant = self.acting_participant;
             if first_activation {
                 child.start()?;
             }
@@ -4652,6 +4764,7 @@ impl FlowGraphInstance {
                                     sub_graph_asset_id: asset_id,
                                 },
                             )?;
+                            child.acting_participant = self.acting_participant;
                             child.replay_history_with_missions(ctx, scoped, mission_histories)?;
                         }
                     }
