@@ -13,6 +13,7 @@ use serde_json::Value;
 pub mod chrono_catalog;
 pub mod chrono_completion;
 pub mod chrono_features;
+pub mod chrono_participants;
 pub mod chrono_tables;
 pub mod chrono_transactions;
 pub mod chrono_triggers;
