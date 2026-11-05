@@ -1,7 +1,10 @@
 use storylet_engine::chrono_participants::{
     Controller, KnowKind, KnowledgeRow, KnowledgeTable, ParticipantTable,
 };
-use storylet_engine::chrono_state::{revert_delta, BijectiveDelta, TagBitset, WorldStateTable};
+use storylet_engine::chrono_state::{
+    apply_mutation, revert_delta, BijectiveDelta, GraphLayer, MutationOp, TagBitset, WorldStateTable,
+    WorldVertex,
+};
 
 fn row(holder: u16, fact: u16, kind: KnowKind, source_event: u32) -> KnowledgeRow {
     KnowledgeRow { holder, fact, kind, source_event }
@@ -189,4 +192,44 @@ fn ensure_participants_normalizes_uneven_columns() {
     let keys: Vec<_> = world.knowledge.rows.iter().map(|r| (r.holder, r.fact)).collect();
     assert_eq!(keys, vec![(0, 9), (1, 2)]);
     assert_eq!(world.knowledge.knows(0, 9).unwrap().kind, KnowKind::Rumor);
+}
+
+#[test]
+fn mutation_move_player_syncs_participant_zero_and_reverts() {
+    let mut world = WorldStateTable::new();
+    let mut tag = TagBitset::new();
+    tag.set_bit(5).unwrap();
+    world.entity_tags[1] = tag;
+    let mut tag = TagBitset::new();
+    tag.set_bit(6).unwrap();
+    world.entity_tags[2] = tag;
+    for (id, entity) in [("loc.a", 1), ("loc.b", 2)] {
+        world.vertices.push(WorldVertex {
+            vertex_id: id.to_string(),
+            layer: GraphLayer::Location,
+            entity_index: Some(entity),
+            attributes: Default::default(),
+        });
+    }
+    world.seed_current_location(1).unwrap();
+    world.ensure_participants();
+    let before = world.clone();
+    let op = MutationOp { move_player: Some(2), ..MutationOp::default() };
+    let delta = apply_mutation(&mut world, &op).unwrap();
+    assert_eq!(world.current_location_entity, Some(2));
+    assert_eq!(world.active_location(0), world.current_location_entity);
+    assert_eq!(delta.participant_moves, vec![(0, Some(1), Some(2))]);
+    revert_delta(&mut world, &delta).unwrap();
+    assert_eq!(world.active_location(0), Some(1));
+    assert_eq!(world, before);
+}
+
+#[test]
+fn seed_current_location_after_ensure_participants_moves_participant_zero() {
+    let mut world = WorldStateTable::new();
+    world.ensure_participants();
+    assert_eq!(world.active_location(0), None);
+    world.seed_current_location(3).unwrap();
+    assert_eq!(world.current_location_entity, Some(3));
+    assert_eq!(world.active_location(0), Some(3));
 }

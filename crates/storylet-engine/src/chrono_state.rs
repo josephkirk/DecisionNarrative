@@ -835,12 +835,10 @@ impl WorldStateTable {
         if p != 0 {
             return;
         }
-        let new_mask = to.map_or_else(TagBitset::new, |entity| self.entity_tags[entity as usize]);
         let mut new_global = self.global_tags;
-        for word in 0..WORD_COUNT {
-            new_global.words[word] &= !self.current_location_tag_mask.words[word];
-            new_global.words[word] |= new_mask.words[word];
-        }
+        let mut new_mask = self.current_location_tag_mask;
+        let target = to.map_or_else(TagBitset::new, |entity| self.entity_tags[entity as usize]);
+        swap_location_tags(&mut new_global, &mut new_mask, target);
         delta
             .global_xor_mask
             .apply_xor(&self.global_tags.xor_with(&new_global));
@@ -1508,6 +1506,18 @@ impl BijectiveDelta {
     }
 }
 
+/// The one location-change rule: removes the tags the old location contributed
+/// to `global`, adds the tags of the new location, and makes them the new
+/// location mask. Shared by player moves in `apply_mutation_with_registry` and
+/// `WorldStateTable::apply_move` so the two cannot drift.
+fn swap_location_tags(global: &mut TagBitset, location_mask: &mut TagBitset, target: TagBitset) {
+    for word in 0..WORD_COUNT {
+        global.words[word] &= !location_mask.words[word];
+        global.words[word] |= target.words[word];
+    }
+    *location_mask = target;
+}
+
 /// Applies a mutation without a registry: no coupling propagation and no
 /// threshold evaluation.
 pub fn apply_mutation(
@@ -1545,13 +1555,8 @@ pub fn apply_mutation_with_registry(
             let from = state.participants.set_location(0, Some(entity_id));
             delta.participant_moves.push((0, from, Some(entity_id)));
         }
-        for word in 0..WORD_COUNT {
-            new_global.words[word] &= !new_location_mask.words[word];
-        }
-        new_location_mask = state.entity_tags[entity_id as usize];
-        for word in 0..WORD_COUNT {
-            new_global.words[word] |= new_location_mask.words[word];
-        }
+        let target = state.entity_tags[entity_id as usize];
+        swap_location_tags(&mut new_global, &mut new_location_mask, target);
         state.current_location_entity = Some(entity_id);
     }
     for word in 0..WORD_COUNT {
