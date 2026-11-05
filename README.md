@@ -64,7 +64,7 @@ cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 - **Tag Manager**: Browse the hierarchical Gameplay Tag catalog, add root and child tags, inspect references, and open referenced entities or storylets.
 - **Story Codex & World Bible**: Author world and canon events. Character settings, location settings, and passion data are composed from reusable trait templates.
 - **Project Tree & Entities**: Keep the intrinsic World entity under Entities; author characters, locations, items, facts, and other game objects as Entity Templates under the separate Entity Templates root. Compose reusable Trait Templates with default values and entity-specific overrides, and manage append-only Assets with versioning and external storage references.
-- **Playtest & Director**: ChronoFlow v5 is the primary runtime surface. Tick authored flow graphs, inspect world state and active interactions, choose storylets, signal waiters, divert waypoint conversations, invoke a target POI, and reconcile history. The context view exposes node/token state, call histories, and passion-threshold Narrative Lego events.
+- **Playtest & Director**: Playtest runs through HTTP/MCP; the Play view is being rebuilt (docs/design/playtest-ui.md).
 - **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v5) containing entities, entity templates, folders, trait templates, assets, storylets, and scenarios, with transactional validation. Earlier bundle schemas are rejected; use a fresh schema-v5 database rather than migrating a legacy database.
 
 ## Model Context Protocol (MCP)

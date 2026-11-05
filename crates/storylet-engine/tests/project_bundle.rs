@@ -159,3 +159,15 @@ fn bundle_json_round_trips_with_unknown_version_reported() {
             .any(|issue| issue.code == "unsupported_schema_version")
     );
 }
+
+#[test]
+fn native_host_example_project_loads() {
+    let json = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/native-host/storylet-project.json"
+    ))
+    .unwrap();
+    let project: ProjectBundle =
+        serde_json::from_str(&json).expect("example must match current schema");
+    assert!(project.storylets.contains_key("read-receipt"));
+}

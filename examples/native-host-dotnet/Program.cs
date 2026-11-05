@@ -91,7 +91,7 @@ static class Program
             var choice = Encoding.UTF8.GetBytes("{\"storyletId\":\"read-receipt\",\"choiceId\":\"read\",\"idempotencyKey\":\"dotnet:read-receipt\",\"expectedRevision\":0}");
             using (var applied = RequireSuccess(ReadAndFree(StoryletAbi.dn_playtest_execute_choice(handle, choice, (nuint)choice.Length))))
             {
-                var clue = applied.RootElement.GetProperty("result").GetProperty("world").GetProperty("qualities").GetProperty("clue.receipt").GetBoolean();
+                var clue = applied.RootElement.GetProperty("result").GetProperty("world").GetProperty("properties").GetProperty("clue.receipt").GetBoolean();
                 if (!clue) throw new InvalidOperationException("Storylet effect did not reach the native host.");
                 Console.WriteLine("Choice effect reached the native host.");
             }

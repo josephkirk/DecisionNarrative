@@ -322,9 +322,9 @@ bun run build
 
 Latest recorded result:
 
-- engine: 144 passed
-- service: 68 passed
-- Bun: 49 passed
+- engine: 128 passed
+- service: 41 passed
+- Bun: 40 passed
 - typecheck/build: pass
 
 Known flake: full `bun test` can race parallel service startup; the isolated playtest HTTP test passes.
