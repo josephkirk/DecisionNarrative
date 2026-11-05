@@ -2,24 +2,23 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 use storylet_engine::{
-    CharacterDefinition, LocationDefinition, ProjectBundle, QualityDefinition, QualityType,
+    CharacterDefinition, LocationDefinition, ProjectBundle, PropertyDefinition, PropertyType,
     ScenarioDefinition, StoryletDefinition, build_world, validate_project,
 };
 
 #[test]
 fn a_new_project_starts_empty_and_builds_a_generic_scenario_world() {
     let mut project = ProjectBundle::empty("glass-town", "Glass Town");
-    project.qualities.insert(
+    project.properties.insert(
         "stock.meals".into(),
-        QualityDefinition {
+        PropertyDefinition {
             key: "stock.meals".into(),
-            kind: QualityType::Currency,
+            kind: PropertyType::Currency,
             default_value: json!(8),
             description: "Meals in the communal pantry".into(),
             min_value: 0.0,
             max_value: 100.0,
             is_hidden: false,
-            menace_crisis_storylet_id: None,
         },
     );
     project.locations.insert(
@@ -64,7 +63,7 @@ fn a_new_project_starts_empty_and_builds_a_generic_scenario_world() {
             id: "opening".into(),
             name: "A Missing Receipt".into(),
             player_start_location: "market".into(),
-            initial_qualities: BTreeMap::new(),
+            initial_properties: BTreeMap::new(),
             actor_locations: BTreeMap::from([("nora".into(), "archive".into())]),
             storylet_ids: vec![],
             seed: 42,
@@ -77,7 +76,7 @@ fn a_new_project_starts_empty_and_builds_a_generic_scenario_world() {
     assert!(report.is_empty(), "{report:?}");
     let state = build_world(&project, "opening").unwrap();
     assert_eq!(state.current_location.as_deref(), Some("market"));
-    assert_eq!(state.qualities.get("stock.meals"), Some(&json!(8)));
+    assert_eq!(state.properties.get("stock.meals"), Some(&json!(8)));
     assert!(state.actors["nora"].role_tags.contains("clerk"));
 }
 
@@ -101,7 +100,7 @@ fn project_validation_catches_dangling_references_and_unapproved_runtime_content
             id: "first".into(),
             name: "First".into(),
             player_start_location: "nowhere".into(),
-            initial_qualities: BTreeMap::new(),
+            initial_properties: BTreeMap::new(),
             actor_locations: BTreeMap::new(),
             storylet_ids: vec!["draft".into()],
             seed: 9,
@@ -118,11 +117,10 @@ fn project_validation_catches_dangling_references_and_unapproved_runtime_content
         ending: false,
         location_tags: Default::default(),
         urgency_weight: 50.0,
-        cluster_type: storylet_engine::ClusterType::Linear,
+        cluster_type: storylet_engine::StoryletClusterType::LinearProgression,
         repeatability: storylet_engine::Repeatability::Always,
         required_roles: vec![],
         trigger: Default::default(),
-        preconditions: Default::default(),
         content: storylet_engine::SceneContent { opening: "".into() },
         choices: vec![],
     };

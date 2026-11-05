@@ -1,8 +1,8 @@
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { StudioApi } from "../api.ts";
-import type { AssetRecord, ContentRoot, EntityRecord, FolderRecord, TraitTemplateRecord } from "../contracts.ts";
-import { newEntityDraft } from "../entityModel.ts";
+import type { AssetRecord, ContentRoot, EntityRecord, EntityTemplateRecord, FolderRecord, TraitTemplateRecord } from "../contracts.ts";
+import { newEntityTemplateDraft } from "../entityModel.ts";
 import {
   buildTreeItems,
   CONTENT_ROOTS,
@@ -17,7 +17,7 @@ import {
   type ContentRootDefinition,
   type TreeRow,
 } from "../projectTree.ts";
-import { notify, setEntities, studioState } from "../state.ts";
+import { notify, studioState } from "../state.ts";
 import { refreshWorkspace } from "./workspace.ts";
 
 const EXPANDED_KEY = "dn.studio.tree.expanded";
@@ -73,8 +73,8 @@ export function useProjectTree() {
     buildTreeItems({
       projectName: studioState.project?.name ?? "Workspace",
       folders: studioState.folders,
-      qualities: studioState.qualities,
       entities: studioState.entities,
+      entityTemplates: studioState.entityTemplates,
       traitTemplates: studioState.traitTemplates,
       assets: studioState.assets,
       storylets: studioState.storylets,
@@ -128,9 +128,7 @@ export function useProjectTree() {
     if (name === "edit-storylet") return itemKey("storylets", String(params.id ?? ""));
     if (name === "new-storylet") return rootKey("storylets");
     if (name === "entity") return itemKey("entities", String(params.id ?? ""));
-    if (name === "quality" || name === "new-quality") {
-      return itemKey("qualities", String(params.name ?? ""));
-    }
+    if (name === "entity-template") return itemKey("entity_templates", String(params.id ?? ""));
     if (name === "trait-template") return itemKey("trait_templates", String(params.id ?? ""));
     if (name === "asset") return itemKey("assets", String(params.id ?? ""));
     return "";
@@ -182,13 +180,71 @@ export function useProjectTree() {
         case "storylets":
           router.push({ path: "/storylets/new", query: folderId ? { folder: folderId } : {} });
           return;
-        case "qualities":
-          router.push({ path: "/qualities/new", query: folderId ? { folder: folderId } : {} });
-          return;
         case "entities": {
-          const saved = await StudioApi.saveContent<EntityRecord>("entities", newEntityDraft(folderId));
+          const templates = studioState.entityTemplates;
+          let newDraft: EntityRecord;
+          let chosenTemplate: EntityTemplateRecord | undefined;
+          if (templates.length > 0) {
+            const promptOptions = [
+              "0. Empty Entity (no template)",
+              ...templates.map((t, i) => `${i + 1}. ${t.name} (${t.root_tag})`)
+            ].join("\n");
+            const choice = window.prompt(
+              `Create an Entity:\nSelect an Entity Template to base it on, or 0 for an empty entity:\n${promptOptions}`,
+              "0"
+            );
+            if (choice === null) return;
+            const num = parseInt(choice.trim(), 10);
+            if (!isNaN(num) && num >= 1 && num <= templates.length) {
+              chosenTemplate = templates[num - 1];
+            } else if (choice.trim() && choice.trim() !== "0") {
+              chosenTemplate = templates.find(t => t.name.toLowerCase() === choice.trim().toLowerCase() || t.id === choice.trim());
+            }
+          }
+          if (chosenTemplate) {
+            newDraft = {
+              id: "",
+              template_id: chosenTemplate.id,
+              name: `New ${chosenTemplate.name}`,
+              root_tag: chosenTemplate.root_tag,
+              description: chosenTemplate.description || "",
+              folder_id: folderId,
+              thumbnail: chosenTemplate.thumbnail || null,
+              tags: [...chosenTemplate.tags],
+              properties: chosenTemplate.properties.map((tp) => ({
+                ...tp,
+                value: tp.value !== undefined && tp.value !== null ? tp.value : tp.default,
+              })),
+              traits: chosenTemplate.traits.map((tt) => ({
+                ...JSON.parse(JSON.stringify(tt)),
+                id: crypto.randomUUID(),
+              })),
+            };
+          } else {
+            newDraft = {
+              id: "",
+              template_id: null,
+              name: "New Entity",
+              root_tag: "character",
+              description: "",
+              folder_id: folderId,
+              thumbnail: null,
+              tags: [],
+              properties: [],
+              traits: [],
+            };
+          }
+          const saved = await StudioApi.saveContent<EntityRecord>("entities", newDraft);
+          if (!saved.id?.trim()) throw new Error("The server did not return an ID for the new entity.");
           await refreshWorkspace(["entities"]);
-          router.push(`/entities/${saved.id}`);
+          router.push(`/entities/${encodeURIComponent(saved.id)}`);
+          return;
+        }
+        case "entity_templates": {
+          const saved = await StudioApi.saveContent<EntityTemplateRecord>("entity_templates", newEntityTemplateDraft(folderId, "character"));
+          if (!saved.id?.trim()) throw new Error("The server did not return an ID for the new entity template.");
+          await refreshWorkspace(["entity_templates"]);
+          router.push(`/entity-templates/${encodeURIComponent(saved.id)}`);
           return;
         }
         case "trait_templates": {
@@ -284,6 +340,65 @@ export function useProjectTree() {
     }
   }
 
+  async function createNewProject(name?: string) {
+    const chosenName = name?.trim() || window.prompt("New project name:", "My Project");
+    if (!chosenName || !chosenName.trim()) return;
+    if (!window.confirm(`Create new project '${chosenName.trim()}'? Current workspace will be reset.`)) return;
+    try {
+      await refreshWorkspace();
+      const world = studioState.entities.find((entity) => entity.id === "world") ?? {
+        id: "world",
+        name: "World",
+        root_tag: "world",
+        description: "",
+        tags: [],
+        properties: [],
+        traits: [],
+      };
+      const bundle = {
+        format: "decision-narrative-project",
+        schema_version: 5,
+        project: {
+          id: `project-${Date.now()}`,
+          name: chosenName.trim(),
+          revision: 1,
+        },
+        content: {
+          entities: [world],
+          entity_templates: [],
+          gameplay_tags: studioState.gameplayTags.filter((tag) => tag.protected),
+          storylets: [],
+          events: [],
+          scenarios: [],
+          folders: [],
+          trait_templates: studioState.traitTemplates.filter((template) => template.system),
+          assets: [],
+        },
+      };
+      await StudioApi.importBundle(bundle);
+      await refreshWorkspace();
+      notify(`Created new project '${chosenName.trim()}'`, "success");
+      router.push("/project");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    }
+  }
+
+  async function deleteItem(row: TreeRow) {
+    if (row.kind !== "item" || !row.root || !row.id) return;
+    if (row.root === "entities" && row.id === "world") {
+      notify("World entity is intrinsic and cannot be deleted", "error");
+      return;
+    }
+    if (!window.confirm(`Delete ${row.label}?`)) return;
+    try {
+      await StudioApi.deleteContent(row.root, row.id);
+      await refreshWorkspace([row.root as ContentRoot]);
+      notify(`Deleted '${row.label}'`, "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    }
+  }
   return {
     roots: CONTENT_ROOTS,
     rows,
@@ -300,5 +415,7 @@ export function useProjectTree() {
     moveTo,
     dragPayload,
     openRow,
+    createNewProject,
+    deleteItem,
   };
 }

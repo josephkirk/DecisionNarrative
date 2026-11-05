@@ -17,20 +17,16 @@ const {
 const editingItem = ref<CodexRecord | null>(null);
 const route = useRoute();
 const interactionContext = inject(interactionContextKey);
-const contextEntityTypes: Record<string, string> = {
-  npc_behaviors: "npc_behavior",
-  events: "event",
-};
 watch(() => [activeCategory.value, selectedId.value, editingItem.value], () => {
   const item = editingItem.value;
   if (!item) {
     interactionContext?.setFocus({ entity: null, selection: null });
     return;
   }
-  const label = "title" in item ? item.title : item.action;
+  const label = item.title;
   const id = item.id || label;
   interactionContext?.setFocus({
-    entity: { type: contextEntityTypes[activeCategory.value] ?? activeCategory.value, id, label, data: JSON.parse(JSON.stringify(item)) },
+    entity: { type: "event", id, label, data: JSON.parse(JSON.stringify(item)) },
     selection: { type: "codex_record", id, label },
   });
 }, { deep: true });
@@ -38,12 +34,8 @@ watch(() => [activeCategory.value, selectedId.value, editingItem.value], () => {
 function openRequestedEntity() {
   const category = route.query.category;
   const id = route.query.id;
-  if (typeof category !== "string" || typeof id !== "string") return;
-  const codexCategory = CODEX_CATEGORIES.find((item) => item.id === category);
-  if (!codexCategory) return;
-  activeCategory.value = codexCategory.id;
-  const source = codexCategory.id === "npc_behaviors" ? studioState.npcBehaviors : studioState.events;
-  const requested = source.find((item) => item.id === id);
+  if (category !== "events" || typeof id !== "string") return;
+  const requested = studioState.events.find((item) => item.id === id);
   if (requested) selectItem(requested);
 }
 
@@ -54,14 +46,10 @@ onMounted(async () => {
 watch(() => [route.query.category, route.query.id], openRequestedEntity);
 
 const currentList = computed(() => {
-  const items: CodexRecord[] =
-    activeCategory.value === "npc_behaviors" ? studioState.npcBehaviors : studioState.events;
+  const items: CodexRecord[] = studioState.events;
   if (!searchQuery.value.trim()) return items;
   const q = searchQuery.value.toLowerCase();
-  return items.filter((item) => {
-    const text = ("title" in item ? item.title : item.action).toLowerCase();
-    return text.includes(q) || item.id.toLowerCase().includes(q);
-  });
+  return items.filter((item) => item.title.toLowerCase().includes(q) || item.id.toLowerCase().includes(q));
 });
 
 function selectItem(item: CodexRecord) {
@@ -70,25 +58,31 @@ function selectItem(item: CodexRecord) {
 }
 
 function saveEditingItem(category: CodexCategory, item: CodexRecord | null) {
-  if (!item) return;
-  void saveItem(category, item);
+  if (item) void saveItem(category, item);
 }
 
 function createNew() {
-  const category = activeCategory.value;
-  if (category === "npc_behaviors") {
-    editingItem.value = { id: "npc_new", actor_id: "", priority: 10, conditions: {}, action: "wait", effects: [] };
-  } else {
-    editingItem.value = { id: "event_new", title: "New Event", description: "", event_type: "world", trigger: {}, effects: {} };
+  const id = `event_${Date.now().toString(36)}`;
+  editingItem.value = { id, title: "New Event", description: "", event_type: "world", trigger: {}, effects: {}, delay_turns: 0, repeatable: false };
+  selectedId.value = id;
+}
+
+function updateJsonField(field: "trigger" | "effects", event: Event) {
+  if (!editingItem.value) return;
+  const raw = (event.target as HTMLTextAreaElement).value.trim();
+  try {
+    editingItem.value[field] = raw ? JSON.parse(raw) : {};
+  } catch {
+    // Invalid JSON preserved until valid
   }
 }
 
 function itemLabel(item: CodexRecord): string {
-  return "title" in item ? item.title : item.action;
+  return item.title;
 }
 
 function itemDetail(item: CodexRecord): string {
-  return "event_type" in item ? item.event_type : item.id;
+  return item.event_type;
 }
 </script>
 
@@ -97,7 +91,7 @@ function itemDetail(item: CodexRecord): string {
     <!-- Master list -->
     <div style="width:320px; border-right:1px solid var(--border-subtle); display:flex; flex-direction:column; background:var(--bg-card);">
       <div style="padding:14px 16px; border-bottom:1px solid var(--border-subtle);">
-        <div style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:10px;">
+        <div v-if="CODEX_CATEGORIES.length > 1" style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:10px;">
           <button
             v-for="cat in CODEX_CATEGORIES"
             :key="cat.id"
@@ -110,8 +104,8 @@ function itemDetail(item: CodexRecord): string {
         </div>
 
         <div style="display:flex; gap:8px;">
-          <input v-model="searchQuery" class="form-input" placeholder="Filter..." style="flex:1;" />
-          <button class="btn btn-secondary" @click="createNew">+</button>
+          <input v-model="searchQuery" class="form-input" placeholder="Filter…" aria-label="Filter events" style="flex:1;" />
+          <button class="btn btn-secondary" title="New event" aria-label="New event" @click="createNew">+</button>
         </div>
       </div>
 
@@ -135,62 +129,64 @@ function itemDetail(item: CodexRecord): string {
             <div style="font-weight:600; font-size:13px;">{{ itemLabel(item) }}</div>
             <div style="font-size:11px; color:var(--text-muted);">{{ itemDetail(item) }}</div>
           </div>
-          <button class="btn" style="padding:2px 6px; color:var(--status-danger);" @click.stop="deleteItem(activeCategory, item.id)">✕</button>
+          <button class="btn" style="padding:2px 6px; color:var(--status-danger);" :title="'Delete ' + itemLabel(item)" :aria-label="'Delete ' + itemLabel(item)" @click.stop="deleteItem(activeCategory, item.id)">✕</button>
         </div>
       </div>
     </div>
 
     <!-- Detail edit canvas -->
     <div style="flex:1; padding:24px 32px; overflow-y:auto;">
-      <div v-if="!editingItem" style="text-align:center; padding:60px; color:var(--text-muted);">
-        Select an item from the list or create a new one.
+      <div v-if="!editingItem" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px; color:var(--text-muted); gap:12px;">
+        <span style="font-size:14px;">Select an event from the list or create a new one.</span>
+        <button class="btn btn-primary" type="button" @click="createNew">+ New event</button>
       </div>
 
       <div v-else style="max-width:640px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-          <h2 style="font-size:18px; font-weight:700;">Edit {{ activeCategory === "npc_behaviors" ? "NPC Rule" : "Event" }}</h2>
-          <button class="btn btn-primary" @click="saveEditingItem(activeCategory, editingItem)">Save Record</button>
+          <h2 style="font-size:18px; font-weight:700;">Edit event</h2>
+          <button class="btn btn-primary" @click="saveEditingItem(activeCategory, editingItem)">Save record</button>
         </div>
 
         <div v-if="activeCategory === 'events' && 'title' in editingItem">
           <div class="form-group">
-            <label class="form-label">Event ID</label>
-            <input v-model="editingItem.id" class="form-input" />
+            <label class="form-label" for="event-id">Event ID</label>
+            <input id="event-id" v-model="editingItem.id" class="form-input" />
           </div>
           <div class="form-group">
-            <label class="form-label">Title</label>
-            <input v-model="editingItem.title" class="form-input" />
+            <label class="form-label" for="event-title">Title</label>
+            <input id="event-title" v-model="editingItem.title" class="form-input" />
           </div>
           <div class="form-group">
-            <label class="form-label">Event Type</label>
-            <select v-model="editingItem.event_type" class="form-select">
-              <option value="world">World Event</option>
-              <option value="canon">Canon Event</option>
+            <label class="form-label" for="event-type">Event type</label>
+            <select id="event-type" v-model="editingItem.event_type" class="form-select">
+              <option value="world">World event</option>
+              <option value="canon">Canon event</option>
             </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="event-desc">Description</label>
+            <textarea id="event-desc" v-model="editingItem.description" class="form-textarea" placeholder="Event description…"></textarea>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div class="form-group">
+              <label class="form-label">Delay (turns)</label>
+              <input v-model.number="editingItem.delay_turns" type="number" min="0" class="form-input" />
+            </div>
+            <div class="form-group" style="display:flex; align-items:center; gap:8px; margin-top:24px;">
+              <input id="event-repeatable" v-model="editingItem.repeatable" type="checkbox" />
+              <label for="event-repeatable" class="form-label" style="margin:0; cursor:pointer;">Repeatable</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Trigger condition (JSON)</label>
+            <textarea class="form-textarea" rows="3" :value="JSON.stringify(editingItem.trigger || {}, null, 2)" placeholder="{}" @change="updateJsonField('trigger', $event)"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Effects (JSON)</label>
+            <textarea class="form-textarea" rows="3" :value="JSON.stringify(editingItem.effects || {}, null, 2)" placeholder="{}" @change="updateJsonField('effects', $event)"></textarea>
           </div>
         </div>
 
-        <div v-else-if="'action' in editingItem">
-          <div class="form-group">
-            <label class="form-label">Rule ID</label>
-            <input v-model="editingItem.id" class="form-input" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Actor</label>
-            <select v-model="editingItem.actor_id" class="form-select">
-              <option value="">Choose a character</option>
-              <option v-for="character in studioState.characters" :key="character.id" :value="character.id">{{ character.name }}</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Priority</label>
-            <input v-model.number="editingItem.priority" type="number" class="form-input" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Action</label>
-            <input v-model="editingItem.action" class="form-input" />
-          </div>
-        </div>
       </div>
     </div>
   </div>

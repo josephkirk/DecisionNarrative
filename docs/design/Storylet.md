@@ -1,5 +1,7 @@
 # TECHNICAL NARRATIVE DESIGN DOCUMENT: STORYLET ARCHITECTURE & ENGINE SPECIFICATION
 
+> **Current implementation note:** This document contains broad architectural and historical comparisons. The implemented contract uses typed `EntityProperty` values, not a separate quality model or storylet-local variables. Author preconditions in the dedicated graph tab with `Get Entity -> Get Entity Property -> Compare -> Condition`; use `And`/`Or` for boolean composition, `Has Entity Tag` dot notation for membership/state tags, and `Apply Command` for supported mutations. The current graph and runtime contracts in `docs/design/chrono-decision-engine.md` and `docs/design/entity-trait-quality.md` take precedence over illustrative examples below.
+
 ---
 
 ## I. EXECUTIVE SUMMARY & FIRST-PRINCIPLE ARCHITECTURE
@@ -50,113 +52,41 @@ By making narrative content an explicit reader and writer of game state, narrati
 
 ## II. THE ANATOMY OF A STORYLET (DATA SCHEMA & SPECIFICATION)
 
-A storylet is defined as an atomic narrative unit comprising five foundational attributes:
+A storylet has authored metadata, typed Entity properties, a read-only candidate gate, a Story Graph, content, choices, and supported state mutations. It does not own a separate Quality or storylet-local Variable model.
 
-```
-+-------------------------------------------------------------------------+
-|                           STORYLET ANATOMY                              |
-|                                                                         |
-|  1. IDENTIFIER & METADATA (ID, Tags, Priority, Weight, Repeatability)   |
-|  2. PRECONDITIONS       (Logical Predicates / State Queries)            |
-|  3. CONTENT PAYLOAD     (Text, Dialogue Quips, Templated Parameters)    |
-|  4. INTERNAL CHOICES    (Player Options & Local Branching)             |
-|  5. EFFECTS / MUTATIONS (State Changes, Quality Increments, Events)     |
-+-------------------------------------------------------------------------+
-```
+### 2.1 Graph contract
 
-### 2.1 Core Schema Specification (JSON Implementation)
-Below is the authoritative JSON schema for a production-grade storylet node, incorporating support for static gating, dynamic entity binding, state mutations, and internal branching choices:
+Each storylet stores two distinct graphs:
 
-```json
-{
-  "storylet_id": "stl_baker_secret_confrontation",
-  "metadata": {
-    "title": "Confronting the Baker",
-    "group_tag": "investigation_act_2",
-    "urgency_weight": 75,
-    "repeatability": "once_ever",
-    "cooldown_turns": 0,
-    "cluster_type": "player_controlled_passage"
-  },
-  "parameters": [
-    {
-      "param_name": "suspect",
-      "query": "character.has_tag('baker') && character.relationship('player') < 0"
-    },
-    {
-      "param_name": "location",
-      "query": "environment.current_room == 'bakery_cellar'"
-    }
-  ],
-  "preconditions": {
-    "all_of": [
-      { "variable": "qualities.investigation_stage", "op": "gte", "value": 3 },
-      { "variable": "inventory.has_evidence_letter", "op": "eq", "value": true },
-      { "variable": "menaces.suspicion", "op": "lt", "value": 80 }
-    ],
-    "any_of": [
-      { "variable": "qualities.faction_guards", "op": "gte", "value": 10 },
-      { "variable": "traits.intimidating", "op": "eq", "value": true }
-    ]
-  },
-  "content": {
-    "text_template": "You step into the damp cellar of $location. $suspect freezes, hiding a stained pouch behind a sack of flour.",
-    "speaker_id": "$suspect",
-    "vo_asset_id": "vo_baker_cellar_01"
-  },
-  "choices": [
-    {
-      "choice_id": "ch_present_letter",
-      "label": "Present the blood-stained letter.",
-      "conditions": [
-        { "variable": "inventory.has_evidence_letter", "op": "eq", "value": true }
-      ],
-      "effects": {
-        "qualities.investigation_stage": 4,
-        "qualities.baker_confessed": true,
-        "menaces.suspicion": "+10"
-      },
-      "divert_target": "stl_baker_confession_outcome"
-    },
-    {
-      "choice_id": "ch_attack_baker",
-      "label": "Draw your weapon without warning.",
-      "conditions": [],
-      "effects": {
-        "world.baker_alive": false,
-        "menaces.notoriety": "+25"
-      },
-      "divert_target": null
-    }
-  ],
-  "effects": {
-    "qualities.cellar_searched": true
-  }
-}
-```
+- **Preconditions** is evaluated before a storylet enters a consideration pool. It is read-only and can resolve entities, read typed Entity properties, compare values, query dot-notation Entity tags, combine booleans with `And`/`Or`, and route a boolean through `Condition Node` to valid/reject End nodes. Only a valid-candidate End admits the storylet.
+- **Story Graph** owns the selected storylet's scene flow. `Condition Node` consumes a boolean data input and routes flow through `true` or `false`; predicate nodes such as `Has Entity Tag` emit a boolean data value instead of branching themselves. `Apply Command` mutates a declared Entity property. Supported Chrono operations are exposed only where the runtime can execute them.
 
-### 2.2 Preconditions & Triggers
-Preconditions serve as logical gates that evaluate whether a storylet is available. These evaluate against boolean flags, numeric thresholds, inventory items, character traits, or physical locations:
+The two graph tabs replace the former list of `all_of`, `any_of`, visited-location, and met-character preconditions. Location and character membership checks use `Has Entity Tag` with tags such as `location.market.visited` and `character.guide.met`.
 
-* **Deterministic Predicates:** Standard comparative checks (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`).
-* **Dynamic Query Binding (Parameterized Storylets):** Systems like *Starfreighter* extend preconditions by searching the world model for entities that satisfy a query (e.g., `find any character where relationship == 'rival'`) and dynamically binding them to variables in the storylet text and choices.
-* **Natural Language Triggers (LLM Hybrids):** In frameworks like *Drama Llama*, hardcoded logical predicates are replaced by natural language conditions (e.g., *"If the player confronts the baker while carrying the silver locket at midnight"*), evaluated at runtime by a Large Language Model.
+### 2.2 Typed Entity properties
 
-### 2.3 Payload & Text Instantiation
+Properties belong to Entities and use the shared typed property mechanism: Boolean, String, Float, Integer, Asset Link, or Entity Reference. Numeric qualities and narrative flags are ordinary typed Entity properties; there is no parallel numeric-only Quality system. `Get Entity` resolves an Entity, `Get Entity Property` reads a declared property, `Compare` produces a boolean, and `Apply Command` performs supported mutations such as set, add, subtract, or toggle.
+
+### 2.3 Preconditions & candidate selection
+
+Precondition graph evaluation is deterministic and completes before candidate scoring or selection. The graph must be valid and read-only; unsupported nodes or unresolved property/tag inputs make authoring validation fail rather than being ignored. `And` and `Or` combine boolean data inputs; the `Condition Node` owns flow branches.
+
+### 2.4 Payload & text instantiation
+
 Content ranges from a single line of reactive dialogue ("bark") to a multi-paragraph interactive scene:
+
 * **Static Text:** Direct authored strings.
-* **Templated Substitution:** Injecting dynamic variables, character pronouns, or street names directly into prose (e.g., `"$suspect draws a knife in $location"`).
-* **Replacement Grammars:** Utilizing generative grammars (such as Tracery) internally to ensure that repeated executions of a storylet yield varied surface prose while preserving identical logical state impacts.
+* **Templated Substitution:** Inject dynamic entity bindings, pronouns, or street names into prose (e.g., `"$suspect draws a knife in $location"`).
+* **Replacement Grammars:** Use generative grammars internally when varied surface prose must preserve identical logical state impacts.
 * **Dialogue Quips:** Micro-units of conversation tied to specific topics, speaker beliefs, or emotional states.
 
-### 2.4 Effects & State Modifications
-When a storylet is played, its effects execute, mutating the World State. Effects include:
-* Modifying numeric qualities (`qualities.tension += 5`).
-* Setting narrative flags (`flags.met_informant = true`).
-* Injecting new goals or "wishlist items" into a planner's spec (*Effect-Driven Story Specs*).
-* Granting or consuming items, triggering audio/VFX events, or unlocking new areas.
+### 2.5 Effects & State Modifications
 
-### 2.5 Repeatability & Lifecycle Policies
+`Apply Command` mutates a declared typed Entity property through the supported command operation. Tags represent membership or boolean state; typed properties represent boolean, textual, numeric, asset-link, or entity-reference values. Both are Entity state, not separate Quality and Variable stores.
+
+Storylet effects include supported Entity-property updates, planner inputs, and gameplay actions exposed by the runtime. Unsupported commands are rejected during graph validation rather than silently ignored.
+
+### 2.6 Repeatability & Lifecycle Policies
 Storylets must explicitly declare their lifecycle parameters:
 1. **Once-Ever (Non-Repeatable):** Permanently retired from the candidate pool upon first execution (e.g., major plot beats, character deaths).
 2. **Always Repeatable:** Continuously available whenever preconditions are met (e.g., basic shop transactions, generic travel events).
@@ -165,7 +95,7 @@ Storylets must explicitly declare their lifecycle parameters:
 
 ---
 
-## III. WORLD STATE MANAGEMENT & THE SYMBOLIC QUALITY ECONOMY
+## III. WORLD STATE MANAGEMENT & TYPED ENTITY PROPERTIES
 
 ### 3.1 State Architecture: Call History vs. Monolithic Saves
 Traditional save systems serialize every entity's position, transform, and internal variable state in the level—a process prone to massive save file bloat and co-op synchronization errors.
@@ -182,31 +112,15 @@ A superior pattern, demonstrated in *Dying Light 2*, is the **Call Stack / Histo
 
 To roll back state (for co-op joining, debugging, or rewind mechanics), the system rewinds the call history and re-applies nodes. When a node mutates a variable, it stores a copy of the *previous* value inside the node instance itself, allowing instant rollback in a single frame without storing massive redundant data in save files.
 
-### 3.2 The Quality Economy Taxonomy
-Following Failbetter Games' *Quality-Based Narrative* (QBN) paradigm, world state is categorized into five functional types of variables ("Qualities"):
+### 3.2 Typed Entity properties, not a separate Quality system
 
-```
-+-------------------------------------------------------------------------+
-|                          THE QUALITY ECONOMY                            |
-+-------------------+-----------------------------------------------------+
-| QUALITY TYPE      | SYSTEMIC FUNCTION & EXAMPLES                        |
-+-------------------+-----------------------------------------------------+
-| 1. CURRENCIES     | Spendable resources (e.g., Gold, Laudanum, Favor)   |
-| 2. METRICS        | Stat levels gating capability (e.g., Watchful, XP)  |
-| 3. TOOLS          | Discrete unlock keys (e.g., Evidence, Cellar Key)   |
-| 4. TERRITORY      | Progress trackers (e.g., Investigation Stage 1->5)  |
-| 5. MENACES        | Failure/Risk meters (e.g., Suspicion, Wound Level)  |
-+-------------------+-----------------------------------------------------+
-```
+The runtime has no independent Quality store. Values such as currency, capability, inventory facts, progress, and risk belong to an Entity as declared custom properties. A property has one declared type: Boolean, String, Float, Integer, Asset Link, or Entity Reference. `Get Entity Property` reads it, `Compare` produces a boolean, and `Apply Command` performs only the operations supported for that type.
 
-1. **Currencies:** Spendable, fungible resources consumed to take specific narrative branches (e.g., *Money*, *Influence*, *Secret Rumors*).
-2. **Metrics:** Permanent or semi-permanent attributes that represent character capability and gate access to specialized approaches (e.g., *Dangerous*, *Persuasive*, *Academic Knowledge*).
-3. **Tools:** Possessions or unlocked facts that grant unique narrative callbacks or solutions without necessarily being consumed (e.g., *Silver Locket*, *Key to Vault*).
-4. **Territory / Progress Qualities:** Linear or phased integers that track advancement through specific narrative spines or quest arcs (e.g., *Relationship with Aunt = 3*, *Railroad Built = 12*).
-5. **Menaces:** Negative accumulator qualities tracking risk, danger, or physical/mental degeneration (e.g., *Nightmares*, *Suspicion*, *Injury*). When a menace reaches a critical threshold (e.g., *Suspicion = 100*), the dispatcher automatically forces high-priority "crisis storylets" (e.g., *Arrested and Imprisoned*), redirecting the player's focus.
+Boolean membership and state labels use Entity gameplay tags, queried through `Has Entity Tag` with dot notation. Use properties for typed values and tags for categorical membership; neither is a storylet-local Variable or a separate numeric-only Quality.
 
 ### 3.3 Abstraction & Fungibility
-To prevent the "content treadmill" (where authors must write unique content for every hyper-specific situation), qualities must be designed to be **fungible**—transferable in meaning across multiple contexts. For example, a quality called *Bribe Commodity* can be used across dozens of unrelated storylets (bribing a guard, bribing an archivist, bribing a merchant), allowing a single storylet template to process diverse inventory items.
+
+To prevent the "content treadmill," authors can reuse typed property keys and Entity tags across storylets. For example, a declared `influence` property can be compared or mutated wherever that Entity participates, while a tag can express a reusable membership such as `faction.guard`.
 
 ---
 

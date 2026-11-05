@@ -1,0 +1,82 @@
+
+=== v1 single-player (Teodor is an NPC) [wanderer] (20000 seeded runs) ===
+endings: E2 The Keeper Comes Home=2.4% | E4 Low Water=97.6%
+benedek identified via: piece_together=9.4% | customs_ledger=0.7%
+distinct past-telling orders (>=2 reveals): 11; top: P1>P2=12.8% | P1>P2>P3=1.3% | P1>P4=1.2% | P4>P1=0.6%
+runs where gossip tipped Benedek off: 22.5%
+coverage-hole moments (suspects + faces Benedek, no affordance): 26310 total, 0 filled by bluff storylet
+actions with only fallback content available: 49.3%
+invariant violations: 0
+sample causal chain: D1 morning mara:ask_rosa_openly@inn -> D1 evening rosa:gossips_to_benedek@inn -> D1 evening benedek:takes_ferry@inn
+
+=== v1 co-op (Mara + Teodor are players) [wanderer] (20000 seeded runs) ===
+endings: E1 Light Restored=0.1% | E2 The Keeper Comes Home=4.8% | E3 A Ledger With a Name=4.0% | E4 Low Water=91.1%
+benedek identified via: customs_ledger=34.5% | piece_together=34.1%
+distinct past-telling orders (>=2 reveals): 29; top: P2>P1=19.5% | P2>P3=19.2% | P1>P2=11.0% | P2>P1>P3=10.5%
+runs where gossip tipped Benedek off: 26.0%
+coverage-hole moments (suspects + faces Benedek, no affordance): 44775 total, 0 filled by bluff storylet
+actions with only fallback content available: 41.6%
+invariant violations: 0
+sample causal chain: D1 morning mara:ask_rosa_openly@inn -> D1 evening rosa:gossips_to_benedek@inn -> D1 evening benedek:takes_ferry@inn
+
+=== v2 single-player + approved LLM-drafted bluff [wanderer] (20000 seeded runs) ===
+endings: E2 The Keeper Comes Home=2.4% | E3 A Ledger With a Name=0.1% | E4 Low Water=97.4%
+benedek identified via: piece_together=9.4% | customs_ledger=0.7% | bluff_benedek=0.1%
+distinct past-telling orders (>=2 reveals): 11; top: P1>P2=12.8% | P1>P2>P3=1.3% | P1>P4=1.2% | P4>P1=0.6%
+runs where gossip tipped Benedek off: 22.5%
+coverage-hole moments (suspects + faces Benedek, no affordance): 26309 total, 95 filled by bluff storylet
+actions with only fallback content available: 49.3%
+invariant violations: 0
+sample causal chain: D1 morning mara:ask_rosa_openly@inn -> D1 evening rosa:gossips_to_benedek@inn -> D1 evening benedek:takes_ferry@inn
+
+=== v2 co-op + approved LLM-drafted bluff [wanderer] (20000 seeded runs) ===
+endings: E1 Light Restored=0.7% | E2 The Keeper Comes Home=4.2% | E3 A Ledger With a Name=21.0% | E4 Low Water=74.2%
+benedek identified via: piece_together=30.2% | customs_ledger=25.0% | bluff_benedek=16.9%
+distinct past-telling orders (>=2 reveals): 29; top: P2>P1=20.3% | P2>P3=18.2% | P1>P2=10.9% | P2>P1>P3=9.8%
+runs where gossip tipped Benedek off: 24.1%
+coverage-hole moments (suspects + faces Benedek, no affordance): 40730 total, 9468 filled by bluff storylet
+actions with only fallback content available: 41.1%
+invariant violations: 0
+sample causal chain: D1 morning mara:ask_rosa_openly@inn -> D1 evening rosa:gossips_to_benedek@inn -> D1 evening benedek:takes_ferry@inn
+
+=== v1 single-player (Teodor is an NPC) [investigator] (20000 seeded runs) ===
+endings: E2 The Keeper Comes Home=17.9% | E4 Low Water=82.1%
+benedek identified via: piece_together=14.1% | customs_ledger=0.1%
+distinct past-telling orders (>=2 reveals): 9; top: P1>P2=67.8% | P1>P4>P2=10.7% | P1>P4=7.0% | P2>P1=1.2%
+runs where gossip tipped Benedek off: 45.8%
+coverage-hole moments (suspects + faces Benedek, no affordance): 19942 total, 0 filled by bluff storylet
+actions with only fallback content available: 40.3%
+invariant violations: 0
+sample causal chain: D1 morning mara:ask_rosa_openly@inn -> D1 evening rosa:gossips_to_benedek@inn -> D1 evening benedek:takes_ferry@inn
+
+=== v1 co-op (Mara + Teodor are players) [investigator] (20000 seeded runs) ===
+endings: E1 Light Restored=0.8% | E2 The Keeper Comes Home=74.1% | E3 A Ledger With a Name=0.7% | E4 Low Water=24.4%
+benedek identified via: piece_together=92.4% | customs_ledger=6.7%
+distinct past-telling orders (>=2 reveals): 17; top: P2>P1>P4=66.7% | P2>P1=20.4% | P2>P3>P1>P4=2.7% | P2>P3>P1=1.9%
+runs where gossip tipped Benedek off: 46.8%
+coverage-hole moments (suspects + faces Benedek, no affordance): 22724 total, 0 filled by bluff storylet
+actions with only fallback content available: 47.7%
+invariant violations: 0
+sample causal chain: D1 morning mara:ask_rosa_openly@inn -> D1 evening rosa:gossips_to_benedek@inn -> D1 evening benedek:takes_ferry@inn
+
+=== v2 single-player + approved LLM-drafted bluff [investigator] (20000 seeded runs) ===
+endings: E2 The Keeper Comes Home=17.9% | E4 Low Water=82.1%
+benedek identified via: piece_together=14.1% | customs_ledger=0.1%
+distinct past-telling orders (>=2 reveals): 9; top: P1>P2=67.8% | P1>P4>P2=10.7% | P1>P4=7.0% | P2>P1=1.2%
+runs where gossip tipped Benedek off: 45.8%
+coverage-hole moments (suspects + faces Benedek, no affordance): 19942 total, 0 filled by bluff storylet
+actions with only fallback content available: 40.3%
+invariant violations: 0
+sample causal chain: D1 morning mara:ask_rosa_openly@inn -> D1 evening rosa:gossips_to_benedek@inn -> D1 evening benedek:takes_ferry@inn
+
+=== v2 co-op + approved LLM-drafted bluff [investigator] (20000 seeded runs) ===
+endings: E1 Light Restored=3.6% | E2 The Keeper Comes Home=71.1% | E3 A Ledger With a Name=2.5% | E4 Low Water=22.9%
+benedek identified via: piece_together=90.0% | customs_ledger=4.7% | bluff_benedek=4.5%
+distinct past-telling orders (>=2 reveals): 17; top: P2>P1>P4=66.3% | P2>P1=20.8% | P2>P3>P1>P4=2.6% | P2>P3>P1=2.0%
+runs where gossip tipped Benedek off: 44.7%
+coverage-hole moments (suspects + faces Benedek, no affordance): 22111 total, 1059 filled by bluff storylet
+actions with only fallback content available: 47.8%
+invariant violations: 0
+sample causal chain: D1 morning mara:ask_rosa_openly@inn -> D1 evening rosa:gossips_to_benedek@inn -> D1 evening benedek:takes_ferry@inn
+
+replay determinism: 2000 seeds re-run, 0 mismatches

@@ -24,7 +24,7 @@ fn line_protocol_keeps_sessions_alive_across_requests_and_starts_from_empty_stat
                 "id": "intro",
                 "name": "Introduction",
                 "player_start_location": "room",
-                "initial_qualities": {},
+                "initial_properties": {},
                 "actor_locations": {},
                 "storylet_ids": [],
                 "seed": 7

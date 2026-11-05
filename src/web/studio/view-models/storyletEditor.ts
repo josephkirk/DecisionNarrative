@@ -11,9 +11,10 @@ export function useStoryletEditorViewModel(storyletId?: string, folderId?: strin
 
   const draft = reactive<StoryletRecord>({
     id: storyletId || `stl_${Date.now().toString(36)}`,
+    title: "",
     revision: 1,
     approved_revision: null,
-    title: "",
+    created_at: Date.now(),
     ending: false,
     location_tags: [],
     group_tag: null,
@@ -22,7 +23,6 @@ export function useStoryletEditorViewModel(storyletId?: string, folderId?: strin
     repeatability: "always",
     cooldown_turns: 0,
     parameters: [],
-    preconditions: { all_of: [], any_of: [], visited_locations_any_of: [], met_characters_any_of: [] },
     content: {
       text_template: "",
       sceneOpening: "",
@@ -30,8 +30,9 @@ export function useStoryletEditorViewModel(storyletId?: string, folderId?: strin
     },
     choices: [],
     effects: {},
+    graph: { nodes: [], edges: [] },
+    precondition_graph: { nodes: [], edges: [] },
     folder_id: folderId ?? null,
-    created_at: Date.now(),
   });
 
   const isApproved = computed(() => {
@@ -104,7 +105,6 @@ export function useStoryletEditorViewModel(storyletId?: string, folderId?: strin
       choice_id: `choice_${nextIdx}`,
       label: `Choice ${nextIdx}`,
       effects: {},
-      conditions: [],
     });
   }
 
@@ -112,16 +112,6 @@ export function useStoryletEditorViewModel(storyletId?: string, folderId?: strin
     draft.choices.splice(index, 1);
   }
 
-  function addRoleParameter() {
-    draft.parameters.push({
-      param_name: "participant",
-      query: 'role == "witness"',
-    });
-  }
-
-  function removeRoleParameter(index: number) {
-    draft.parameters.splice(index, 1);
-  }
 
   return {
     activeTab,
@@ -134,7 +124,5 @@ export function useStoryletEditorViewModel(storyletId?: string, folderId?: strin
     approveStorylet,
     addChoice,
     removeChoice,
-    addRoleParameter,
-    removeRoleParameter,
   };
 }

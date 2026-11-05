@@ -2,38 +2,36 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 use storylet_engine::{
-    CharacterDefinition, ClusterType, Effect, EventDefinition, EventType, FactRef,
+    CharacterDefinition, StoryletClusterType, Effect, EventDefinition, EventType, FactRef,
     LocationDefinition, NpcBehaviorRule, Predicate, PredicateOp, PredicateSet, ProjectBundle,
-    QualityDefinition, QualityType, Repeatability, RoleRequirement, ScenarioDefinition,
+    PropertyDefinition, PropertyType, Repeatability, RoleRequirement, ScenarioDefinition,
     SceneContent, StoryletChoice, StoryletDefinition, StoryletRuntime, WorldCommand,
 };
 
 fn project() -> ProjectBundle {
     let mut project = ProjectBundle::empty("glass-town", "Glass Town");
-    project.qualities.insert(
+    project.properties.insert(
         "evidence.receipt_found".into(),
-        QualityDefinition {
+        PropertyDefinition {
             key: "evidence.receipt_found".into(),
-            kind: QualityType::Custom,
+            kind: PropertyType::Custom,
             default_value: json!(false),
             description: "Whether the missing receipt has been found".into(),
             min_value: 0.0,
             max_value: 100.0,
             is_hidden: false,
-            menace_crisis_storylet_id: None,
         },
     );
-    project.qualities.insert(
+    project.properties.insert(
         "evidence.read".into(),
-        QualityDefinition {
+        PropertyDefinition {
             key: "evidence.read".into(),
-            kind: QualityType::Custom,
+            kind: PropertyType::Custom,
             default_value: json!(false),
             description: "Whether the receipt has been read".into(),
             min_value: 0.0,
             max_value: 100.0,
             is_hidden: false,
-            menace_crisis_storylet_id: None,
         },
     );
     for (id, name) in [("market", "Covered Market"), ("archive", "Night Archive")] {
@@ -74,14 +72,14 @@ fn project() -> ProjectBundle {
             ending: false,
             location_tags: std::collections::BTreeSet::from(["archive".into()]),
             urgency_weight: 20.0,
-            cluster_type: ClusterType::PlayerControlledPassage,
+            cluster_type: StoryletClusterType::PlayerPassage,
             repeatability: Repeatability::Always,
             required_roles: vec![RoleRequirement {
                 role: "clerk".into(),
             }],
             trigger: PredicateSet {
                 all_of: vec![Predicate {
-                    fact: FactRef::Quality {
+                    fact: FactRef::Property {
                         key: "evidence.receipt_found".into(),
                     },
                     op: PredicateOp::Eq,
@@ -89,7 +87,6 @@ fn project() -> ProjectBundle {
                 }],
                 any_of: vec![],
             },
-            preconditions: Default::default(),
             content: SceneContent {
                 opening: "Nora unfolds a receipt.".into(),
             },
@@ -97,7 +94,7 @@ fn project() -> ProjectBundle {
                 id: "read".into(),
                 label: "Read it".into(),
                 requirements: PredicateSet::default(),
-                effects: vec![Effect::SetQuality {
+                effects: vec![Effect::SetProperty {
                     key: "evidence.read".into(),
                     value: json!(true),
                 }],
@@ -120,7 +117,7 @@ fn project() -> ProjectBundle {
                         value: json!("archive"),
                     },
                     Predicate {
-                        fact: FactRef::Quality {
+                        fact: FactRef::Property {
                             key: "evidence.receipt_found".into(),
                         },
                         op: PredicateOp::Eq,
@@ -130,7 +127,7 @@ fn project() -> ProjectBundle {
                 any_of: vec![],
             },
             action: "find_receipt".into(),
-            effects: vec![Effect::SetQuality {
+            effects: vec![Effect::SetProperty {
                 key: "evidence.receipt_found".into(),
                 value: json!(true),
             }],
@@ -142,7 +139,7 @@ fn project() -> ProjectBundle {
             id: "opening".into(),
             name: "A Missing Receipt".into(),
             player_start_location: "market".into(),
-            initial_qualities: BTreeMap::new(),
+            initial_properties: BTreeMap::new(),
             actor_locations: BTreeMap::new(),
             storylet_ids: vec!["find_receipt".into()],
             seed: 19,
@@ -184,7 +181,7 @@ fn player_movement_triggers_npc_cascade_and_unlocks_a_storylet_in_the_rust_runti
     assert_eq!(result.world.revision, 2);
     assert_eq!(result.world.turn, 1);
     assert_eq!(
-        result.world.qualities.get("evidence.receipt_found"),
+        result.world.properties.get("evidence.receipt_found"),
         Some(&json!(true))
     );
 
@@ -195,17 +192,16 @@ fn player_movement_triggers_npc_cascade_and_unlocks_a_storylet_in_the_rust_runti
 #[test]
 fn scenario_canon_and_world_events_fire_after_their_turn_and_are_recorded() {
     let mut authored = project();
-    authored.qualities.insert(
+    authored.properties.insert(
         "world.pressure".into(),
-        QualityDefinition {
+        PropertyDefinition {
             key: "world.pressure".into(),
-            kind: QualityType::Metric,
+            kind: PropertyType::Custom,
             default_value: json!(0),
             description: "Ambient pressure".into(),
             min_value: 0.0,
             max_value: 100.0,
             is_hidden: false,
-            menace_crisis_storylet_id: None,
         },
     );
     authored.events.insert(
@@ -216,7 +212,7 @@ fn scenario_canon_and_world_events_fire_after_their_turn_and_are_recorded() {
             description: "Nora confirms the receipt.".into(),
             trigger: PredicateSet {
                 all_of: vec![Predicate {
-                    fact: FactRef::Quality {
+                    fact: FactRef::Property {
                         key: "evidence.receipt_found".into(),
                     },
                     op: PredicateOp::Eq,
@@ -224,7 +220,7 @@ fn scenario_canon_and_world_events_fire_after_their_turn_and_are_recorded() {
                 }],
                 any_of: vec![],
             },
-            effects: vec![Effect::SetQuality {
+            effects: vec![Effect::SetProperty {
                 key: "evidence.read".into(),
                 value: json!(true),
             }],
@@ -240,7 +236,7 @@ fn scenario_canon_and_world_events_fire_after_their_turn_and_are_recorded() {
             title: "Rain reaches the archive".into(),
             description: "The gutters answer the storm.".into(),
             trigger: PredicateSet::default(),
-            effects: vec![Effect::AddQuality {
+            effects: vec![Effect::AddProperty {
                 key: "world.pressure".into(),
                 amount: 1.0,
             }],
@@ -263,7 +259,7 @@ fn scenario_canon_and_world_events_fire_after_their_turn_and_are_recorded() {
                 expected_revision: 0,
                 actor_id: "player".into(),
                 action: "wait".into(),
-                effects: vec![Effect::SetQuality {
+                effects: vec![Effect::SetProperty {
                     key: "evidence.receipt_found".into(),
                     value: json!(true),
                 }],
@@ -282,11 +278,11 @@ fn scenario_canon_and_world_events_fire_after_their_turn_and_are_recorded() {
     assert!(event_actions.contains(&"event:canon:canon_revelation"));
     assert!(event_actions.contains(&"event:world:weather_shift"));
     assert_eq!(
-        result.world.qualities.get("evidence.read"),
+        result.world.properties.get("evidence.read"),
         Some(&json!(true))
     );
     assert_eq!(
-        result.world.qualities.get("world.pressure"),
+        result.world.properties.get("world.pressure"),
         Some(&json!(1.0))
     );
 }
@@ -314,7 +310,7 @@ fn ending_choice_terminates_session_and_blocks_later_actions() {
                 actor_id: "player".into(),
                 action: "reveal".into(),
                 effects: vec![
-                    Effect::SetQuality {
+                    Effect::SetProperty {
                         key: "evidence.receipt_found".into(),
                         value: json!(true),
                     },
@@ -362,17 +358,16 @@ fn ending_choice_terminates_session_and_blocks_later_actions() {
 fn replaying_a_player_command_does_not_replay_its_npc_cascade() {
     let mut authored = project();
     authored.npc_behaviors.clear();
-    authored.qualities.insert(
+    authored.properties.insert(
         "actions.nora".into(),
-        QualityDefinition {
+        PropertyDefinition {
             key: "actions.nora".into(),
-            kind: QualityType::Custom,
+            kind: PropertyType::Custom,
             default_value: json!(0),
             description: "Number of times Nora acted".into(),
             min_value: 0.0,
             max_value: 100.0,
             is_hidden: false,
-            menace_crisis_storylet_id: None,
         },
     );
     authored.npc_behaviors.insert(
@@ -383,7 +378,7 @@ fn replaying_a_player_command_does_not_replay_its_npc_cascade() {
             priority: 1,
             conditions: PredicateSet::default(),
             action: "count_action".into(),
-            effects: vec![Effect::AddQuality {
+            effects: vec![Effect::AddProperty {
                 key: "actions.nora".into(),
                 amount: 1.0,
             }],
@@ -413,7 +408,7 @@ fn replaying_a_player_command_does_not_replay_its_npc_cascade() {
     assert!(retry.npc.events.is_empty());
     assert_eq!(retry.world.revision, first.world.revision);
     assert_eq!(retry.world.events.len(), first.world.events.len());
-    assert_eq!(retry.world.qualities.get("actions.nora"), Some(&json!(1.0)));
+    assert_eq!(retry.world.properties.get("actions.nora"), Some(&json!(1.0)));
 }
 
 #[test]
@@ -515,7 +510,7 @@ fn fork_replays_an_event_prefix_and_keeps_future_branch_actions_isolated() {
     assert_eq!(fork.world, original.world);
     assert_eq!(fork.world.events.len(), 3);
     assert_eq!(
-        fork.world.qualities.get("evidence.read"),
+        fork.world.properties.get("evidence.read"),
         Some(&json!(true))
     );
     assert_eq!(runtime.evaluate("branch", 0.15).unwrap().selected, None);
@@ -578,24 +573,34 @@ fn exported_session_restores_world_and_director_state_after_runtime_restart() {
     let restored = restarted.restore_session(saved.clone()).unwrap();
     assert_eq!(restored, before);
     assert_eq!(restarted.evaluate("durable", 0.15).unwrap().selected, None);
-    let mut legacy_json = serde_json::to_value(saved.clone()).unwrap();
-    legacy_json["format_version"] = json!(1);
-    legacy_json["session_id"] = json!("legacy");
-    let legacy_world = legacy_json["world"].as_object_mut().unwrap();
-    legacy_world.remove("location_tags");
-    legacy_world.remove("visited_locations");
-    legacy_world.remove("met_characters");
-    let legacy: storylet_engine::RuntimeSessionState = serde_json::from_value(legacy_json).unwrap();
+    let mut legacy = saved.clone();
+    legacy.format_version = 1;
+    legacy.session_id = "legacy".into();
+    let legacy_before = legacy.clone();
     let mut legacy_restart = StoryletRuntime::default();
-    let normalized = legacy_restart.restore_session(legacy).unwrap();
-    assert_eq!(normalized.world, before.world);
+    let error = legacy_restart.restore_session(legacy).unwrap_err();
     assert_eq!(
-        legacy_restart
-            .export_session("legacy")
-            .unwrap()
-            .format_version,
+        error,
+        storylet_engine::RuntimeError::InvalidSessionState(
+            "format version 1 is unsupported".into()
+        )
+    );
+    assert_eq!(
+        legacy_restart.export_session("legacy"),
+        Err(storylet_engine::RuntimeError::SessionNotFound {
+            session_id: "legacy".into(),
+        })
+    );
+    assert_eq!(legacy_before.format_version, 1);
+
+    let mut v2_restart = StoryletRuntime::default();
+    let restored_v2 = v2_restart.restore_session(saved.clone()).unwrap();
+    assert_eq!(restored_v2, before);
+    assert_eq!(
+        v2_restart.export_session("durable").unwrap().format_version,
         2
     );
+
     let mut tampered = saved;
     tampered.session_id = "tampered".into();
     tampered.world.events.pop();
@@ -631,7 +636,7 @@ fn eligible_storylet_choice_executes_through_runtime_and_retries_idempotently() 
         .unwrap();
     assert_eq!(result.world.turn, 2);
     assert_eq!(
-        result.world.qualities.get("evidence.read"),
+        result.world.properties.get("evidence.read"),
         Some(&json!(true))
     );
     assert_eq!(result.player.event.action, "storylet:find_receipt:read");

@@ -2,8 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use storylet_engine::chrono_dispatch::{
-    EffectKind, IdealMetricTarget, MetricGate, PredicateOperator, PredicateSubject,
-    QualityPredicate, StoryletDef, StoryletEffect, UnifiedDispatcher, WaypointTopicEdge,
+    EffectKind, StoryletDef, StoryletEffect, UnifiedDispatcher, WaypointTopicEdge,
     WaypointTopicGraph, WaypointTopicNode,
 };
 use storylet_engine::chrono_runtime::{
@@ -13,9 +12,9 @@ use storylet_engine::chrono_runtime::{
 };
 use storylet_engine::chrono_state::{
     AttributeValue, EdgePattern, EdgeTemplate, GameplayTagRegistry, GraphBinding, GraphLayer,
-    GraphMutation, GraphPattern, GraphTransformRule, MetricRegistry, MicroPassionDef, MutationOp,
-    PassionDirection, PassionMutation, PassionRegistry, PassionThresholdRule, RivalPassionLink,
-    StarNpcDef, TagBitset, VertexPattern, VertexTemplate, WorldStateTable, WorldVertex,
+    GraphMutation, GraphPattern, GraphTransformRule, MicroPassionDef, PassionDirection,
+    PassionMutation, PassionRegistry, PassionState, PassionThresholdRule, RivalPassionLink,
+    MutationOp, PassionBounds, StarNpcDef, TagBitset, VertexPattern, VertexTemplate, WorldStateTable, WorldVertex,
 };
 
 fn tags(names: &[&str]) -> GameplayTagRegistry {
@@ -47,6 +46,7 @@ fn asset(nodes: Vec<FlowNodeDef>, start_node_guid: u32) -> FlowGraphAsset {
         start_node_guid,
         nodes,
         edges: vec![],
+        data_edges: vec![],
     }
 }
 
@@ -76,13 +76,10 @@ fn test_rollback_identity_500_mutations() {
         "case.open",
         "clue.alpha",
         "clue.beta",
-        "quality.one",
-        "quality.two",
         "passion.high",
     ]);
-    let metric_registry = MetricRegistry::compile(["pressure".to_owned()]).unwrap();
     let mut storylets = Vec::new();
-    for (offset, tag_name) in ["clue.alpha", "clue.beta", "quality.one", "quality.two"]
+    for (offset, tag_name) in ["clue.alpha", "clue.beta", "clue.alpha", "clue.beta"]
         .into_iter()
         .enumerate()
     {
@@ -94,7 +91,7 @@ fn test_rollback_identity_500_mutations() {
         storylets.push(def);
     }
     let mut dispatcher = UnifiedDispatcher::new(storylets);
-    dispatcher.resolve(&registry, &metric_registry).unwrap();
+    dispatcher.resolve(&registry).unwrap();
     let passions = PassionRegistry::compile(
         [StarNpcDef {
             npc_id: 0,
@@ -113,7 +110,7 @@ fn test_rollback_identity_500_mutations() {
                     is_hidden: false,
                 },
             ],
-            macro_bounds: Default::default(),
+            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
             zero_sum_links: vec![RivalPassionLink {
                 target_character_id: 1,
                 source_passion_id: 1,
@@ -130,7 +127,7 @@ fn test_rollback_identity_500_mutations() {
                 weight: 1.0,
                 is_hidden: false,
             }],
-            macro_bounds: Default::default(),
+            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
             zero_sum_links: vec![],
         }],
         [PassionThresholdRule {
@@ -143,6 +140,7 @@ fn test_rollback_identity_500_mutations() {
     )
     .unwrap();
     let mut state = WorldStateTable::new();
+    state.passions = PassionState::with_capacity(2, 4);
     let mut attributes = BTreeMap::new();
     attributes.insert(
         "origin".to_owned(),
@@ -188,12 +186,10 @@ fn test_rollback_identity_500_mutations() {
         nodes: vec![
             WaypointTopicNode {
                 topic_id: "A".to_owned(),
-                revealed_clue_quality_id: Some("quality.one".to_owned()),
                 ..WaypointTopicNode::default()
             },
             WaypointTopicNode {
                 topic_id: "B".to_owned(),
-                revealed_clue_quality_id: Some("quality.two".to_owned()),
                 ..WaypointTopicNode::default()
             },
         ],
@@ -263,14 +259,7 @@ fn test_rollback_identity_500_mutations() {
                 },
                 NodeCategory::DynamicDispatcher,
             ),
-            node(
-                8,
-                NodeKind::SetMetric {
-                    metric_id: 0,
-                    delta: 0.25,
-                },
-                NodeCategory::Mutator,
-            ),
+            node(8, noop_mutation(), NodeCategory::Mutator),
         ],
         1,
     );
@@ -325,7 +314,6 @@ fn test_invoke_equivalence_qbn_chaining() {
         "clue.opportunity",
         "case.accused",
     ]);
-    let metrics = MetricRegistry::empty();
     let mut definitions = Vec::new();
     for (id, name) in [
         (100, "clue.means"),
@@ -353,15 +341,13 @@ fn test_invoke_equivalence_qbn_chaining() {
         let bit = registry.id(name).unwrap();
         def.effects_on_complete.push(StoryletEffect {
             target_id: name.to_owned(),
-            value: 1.0,
             kind: EffectKind::AddTag,
-            target_index: Some(bit),
             tag_mask: registry.ancestors_mask(bit).unwrap().clone(),
         });
         definitions.push(def);
     }
     let mut dispatcher = UnifiedDispatcher::new(definitions);
-    dispatcher.resolve(&registry, &metrics).unwrap();
+    dispatcher.resolve(&registry).unwrap();
     let mut open = MutationOp::default();
     open.add_global_tags
         .set_bit(registry.id("case.open").unwrap())
@@ -401,6 +387,7 @@ fn test_invoke_equivalence_qbn_chaining() {
                 target_pin_name: "In".to_owned(),
             },
         ],
+        data_edges: vec![],
     };
     let mut normal_state = WorldStateTable::new();
     let mut normal = FlowGraphInstance::new(1, graph.clone(), 55).unwrap();
@@ -578,158 +565,11 @@ fn invoke_declared_route_selects_one_branch() {
 }
 
 #[test]
-fn test_salience_phase_gate_and_fallback() {
-    const N: usize = 100;
-    let phase_bits = [200, 201, 202];
-    let mut pool = Vec::new();
-    for id in 0..N {
-        let mut def = repeatable_storylet(id as u16);
-        if id != 99 {
-            def.required_tags.set_bit(id as u16).unwrap();
-            let phase = if id >= 60 {
-                2
-            } else if id >= 40 {
-                1
-            } else {
-                0
-            };
-            def.required_arc_phases.set_bit(phase_bits[phase]).unwrap();
-            let mut mask = TagBitset::new();
-            mask.set_bit(id as u16).unwrap();
-            def.preconditions.push(QualityPredicate {
-                target_id: format!("tag.{id}"),
-                subject: PredicateSubject::Location,
-                operator: PredicateOperator::Eq,
-                comparison_value: 0.0,
-                specificity_weight: 1000.0 + id as f64,
-                entity_index: None,
-                target_index: Some(id as u16),
-                tag_mask: mask,
-            });
-        }
-        pool.push(def);
-    }
-    let dispatcher = UnifiedDispatcher::new(pool);
-    let graph = asset(
-        vec![node(
-            10,
-            NodeKind::SalienceSelector {
-                pool: (0..N as u16).collect(),
-                fallback_storylet_id: Some(99),
-                fallback_output_pin: String::new(),
-            },
-            NodeCategory::DynamicDispatcher,
-        )],
-        10,
-    );
-    let mut counts = [0usize; N];
-    let mut rng = 0x5155_414e_5449_5a45_u64;
-    for trajectory in 0..5_000 {
-        let target = trajectory % N;
-        let phase = if target >= 60 {
-            2
-        } else if target >= 40 {
-            1
-        } else {
-            0
-        };
-        let mut state = WorldStateTable::new();
-        state.global_tags.set_bit(phase_bits[phase]).unwrap();
-        state.global_tags.set_bit(target as u16).unwrap();
-        for id in 0..target {
-            let other_phase = if id >= 60 {
-                2
-            } else if id >= 40 {
-                1
-            } else {
-                0
-            };
-            if other_phase == phase && splitmix64(&mut rng) & 1 == 0 {
-                state.global_tags.set_bit(id as u16).unwrap();
-            }
-        }
-        for id in 0..N {
-            let other_phase = if id >= 60 {
-                2
-            } else if id >= 40 {
-                1
-            } else {
-                0
-            };
-            if other_phase != phase && splitmix64(&mut rng) & 3 == 0 {
-                state.global_tags.set_bit(id as u16).unwrap();
-            }
-        }
-        let mut instance =
-            FlowGraphInstance::new(trajectory as u64, graph.clone(), trajectory as u64).unwrap();
-        let mut ctx = RuntimeContext::new(&mut state, &dispatcher);
-        let coverage = instance.salience_coverage(&ctx, 10).unwrap();
-        // 99 is the fallback and intentionally has no arc-phase mask, so it is
-        // not an eligible candidate.
-        if target != 99 {
-            assert!(coverage.eligible.contains(&(target as u16)));
-        }
-        assert!(coverage.has_fallback);
-        instance.force_complete(&mut ctx, 10, "Out", None).unwrap();
-        let chosen = instance.node(10).unwrap().chosen_storylet_id.unwrap() as usize;
-        assert!(
-            chosen == 99
-                || (chosen < 40 && phase == 0)
-                || (40..60).contains(&chosen) && phase == 1
-                || (60..99).contains(&chosen) && phase == 2
-        );
-        counts[chosen] += 1;
-    }
-    assert_eq!(counts.iter().sum::<usize>(), 5_000);
-    assert!(counts[..40].iter().sum::<usize>() > 0);
-    assert!(counts[40..60].iter().sum::<usize>() > 0);
-    assert!(counts[60..99].iter().sum::<usize>() > 0);
-
-    let orphaned: Vec<usize> = counts
-        .iter()
-        .enumerate()
-        .filter_map(|(storylet_id, activations)| (*activations == 0).then_some(storylet_id))
-        .collect();
-    println!("Salience activation histogram: {counts:?}");
-    println!("Orphaned storylet IDs (zero activations): {orphaned:?}");
-    let mut state = WorldStateTable::new();
-    let mut instance = FlowGraphInstance::new(1, graph.clone(), 1).unwrap();
-    let mut ctx = RuntimeContext::new(&mut state, &dispatcher);
-    instance.force_complete(&mut ctx, 10, "Out", None).unwrap();
-    assert_eq!(instance.node(10).unwrap().chosen_storylet_id, Some(99));
-    let no_fallback = asset(
-        vec![node(
-            11,
-            NodeKind::SalienceSelector {
-                pool: (0..99u16).collect(),
-                fallback_storylet_id: None,
-                fallback_output_pin: String::new(),
-            },
-            NodeCategory::DynamicDispatcher,
-        )],
-        11,
-    );
-    let mut state = WorldStateTable::new();
-    let mut instance = FlowGraphInstance::new(2, no_fallback, 1).unwrap();
-    let mut ctx = RuntimeContext::new(&mut state, &dispatcher);
-    assert!(matches!(
-        instance.force_complete(&mut ctx, 11, "Out", None),
-        Err(GraphError::NoSalienceMatch { .. })
-    ));
-}
-
-#[test]
 fn test_waypoint_diversion_and_rollback() {
-    let registry = tags(&[
-        "quality.god",
-        "quality.people",
-        "clue.popular_unrest",
-        "quality.revolution",
-    ]);
+    let registry = tags(&["clue.popular_unrest"]);
     let dispatcher = UnifiedDispatcher::new(vec![]);
-    let topic = |id: &str, quality: &str, player_only: bool| WaypointTopicNode {
+    let topic = |id: &str, player_only: bool| WaypointTopicNode {
         topic_id: id.to_owned(),
-        revealed_clue_quality_id: Some(quality.to_owned()),
         is_player_only_trigger: player_only,
         ..WaypointTopicNode::default()
     };
@@ -743,11 +583,11 @@ fn test_waypoint_diversion_and_rollback() {
     };
     let graph = WaypointTopicGraph {
         nodes: vec![
-            topic("ThePeople", "quality.people", false),
-            topic("God", "quality.god", false),
-            topic("Government", "clue.popular_unrest", false),
-            topic("Royalty", "quality.people", false),
-            topic("Revolution", "quality.revolution", true),
+            topic("ThePeople", false),
+            topic("God", false),
+            topic("Government", false),
+            topic("Royalty", false),
+            topic("Revolution", true),
         ],
         edges: vec![
             edge("e_people_god", "ThePeople", "God", 1.0),
@@ -794,10 +634,6 @@ fn test_waypoint_diversion_and_rollback() {
         instance.node(7).unwrap().current_topic_id.as_str(),
         "Government"
     );
-    assert!(ctx
-        .state
-        .global_tags
-        .bit(registry.id("clue.popular_unrest").unwrap()));
     assert_eq!(
         instance.next_topic_step(&ctx, 7).unwrap().edge_id,
         "e_government_royalty"
@@ -834,10 +670,6 @@ fn test_waypoint_diversion_and_rollback() {
         .edge_use_counts
         .values()
         .all(|count| *count == 0));
-    assert!(!ctx
-        .state
-        .global_tags
-        .bit(registry.id("clue.popular_unrest").unwrap()));
     assert_eq!(
         instance.next_topic_step(&ctx, 7).unwrap().edge_id,
         "e_people_god"
@@ -886,7 +718,7 @@ fn passion_threshold_events_activate_and_cancel_on_rollback() {
                 weight: 1.0,
                 is_hidden: false,
             }],
-            macro_bounds: Default::default(),
+            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
             zero_sum_links: vec![],
         }],
         [PassionThresholdRule {
@@ -900,6 +732,7 @@ fn passion_threshold_events_activate_and_cancel_on_rollback() {
     .unwrap();
     let dispatcher = UnifiedDispatcher::new(vec![]);
     let mut state = WorldStateTable::new();
+    state.passions = PassionState::with_capacity(1, 1);
     state.passions.micro[0] = 0.0;
     state.passions.macro_values[0] = 0.0;
     state.passions.active[0] = true;
@@ -929,6 +762,7 @@ fn passion_threshold_events_activate_and_cancel_on_rollback() {
     assert!(ctx.state.global_tags.bit(threshold_tag_bit));
     let history = instance.call_history().to_vec();
     let mut replay_state = WorldStateTable::new();
+    replay_state.passions = PassionState::with_capacity(1, 1);
     replay_state.passions.micro[0] = 0.0;
     replay_state.passions.macro_values[0] = 0.0;
     replay_state.passions.active[0] = true;
@@ -950,17 +784,6 @@ fn passion_threshold_events_activate_and_cancel_on_rollback() {
     assert_eq!(cancelled[0].node_guid, 1);
     assert!(!ctx.state.global_tags.bit(threshold_tag_bit));
 }
-#[test]
-fn missing_metric_gate_bounds_round_trip_as_finite_unbounded_values() {
-    let gate: MetricGate = serde_json::from_str(r#"{"metric_id":7}"#).unwrap();
-    assert_eq!(gate.min, f32::MIN);
-    assert_eq!(gate.max, f32::MAX);
-
-    let json = serde_json::to_string(&gate).unwrap();
-    let restored: MetricGate = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored, gate);
-}
-
 #[test]
 fn graph_transform_assets_and_world_attributes_round_trip() {
     let mut state = WorldStateTable::new();
@@ -1216,63 +1039,6 @@ fn checkout_replays_without_duplicating_history_entries() {
 }
 
 #[test]
-fn salience_ideal_weights_change_the_winner() {
-    let registry = tags(&["bonus"]);
-    let metric_registry = MetricRegistry::compile(["pressure".to_owned()]).unwrap();
-    let build = |weight: f32| {
-        let mut weighted = repeatable_storylet(1);
-        weighted.required_arc_phases.set_bit(0).unwrap();
-        weighted.ideal_vector.push(IdealMetricTarget {
-            metric_id: 0,
-            target: 0.0,
-            weight,
-        });
-        weighted.preconditions.push(QualityPredicate {
-            target_id: "bonus".to_owned(),
-            subject: PredicateSubject::Location,
-            operator: PredicateOperator::Eq,
-            comparison_value: 0.0,
-            specificity_weight: 2.0,
-            entity_index: None,
-            target_index: None,
-            tag_mask: TagBitset::new(),
-        });
-        let mut plain = repeatable_storylet(2);
-        plain.required_arc_phases.set_bit(0).unwrap();
-        plain.ideal_vector.push(IdealMetricTarget {
-            metric_id: 0,
-            target: 0.0,
-            weight: 1.0,
-        });
-        let mut dispatcher = UnifiedDispatcher::new(vec![weighted, plain]);
-        dispatcher.resolve(&registry, &metric_registry).unwrap();
-        dispatcher
-    };
-    let mut table = WorldStateTable::new();
-    table.metrics[0] = 100.0;
-    table.global_tags.set_bit(0).unwrap();
-    table
-        .global_tags
-        .set_bit(registry.id("bonus").unwrap())
-        .unwrap();
-    let completed = BTreeSet::new();
-
-    // With weight 4 on the specific candidate, its distance penalty loses.
-    let heavy = build(4.0);
-    assert_eq!(
-        heavy.match_most_salient(&[1, 2], &table, &completed, 7),
-        Some(2)
-    );
-
-    // With equal weights, the predicate specificity makes candidate 1 win.
-    let equal = build(1.0);
-    assert_eq!(
-        equal.match_most_salient(&[1, 2], &table, &completed, 7),
-        Some(1)
-    );
-}
-
-#[test]
 fn signal_token_is_flat() {
     assert!(std::mem::size_of::<SignalToken>() <= 32);
     assert_eq!(std::mem::align_of::<SignalToken>(), 8);
@@ -1402,12 +1168,11 @@ fn bridge_path_walks_every_hop_and_orders_pins() {
 #[test]
 fn select_storylet_rejects_ids_outside_the_pool() {
     let registry = tags(&["case.open"]);
-    let metric_registry = MetricRegistry::empty();
     let mut dispatcher = UnifiedDispatcher::new(vec![
         repeatable_storylet(5),
         repeatable_storylet(6),
     ]);
-    dispatcher.resolve(&registry, &metric_registry).unwrap();
+    dispatcher.resolve(&registry).unwrap();
     let mut hub = node(
         1,
         NodeKind::QbnHub {
@@ -1442,11 +1207,10 @@ fn select_storylet_rejects_ids_outside_the_pool() {
 #[test]
 fn select_storylet_rejects_ineligible_deck_members() {
     let registry = tags(&["case.open", "case.closed"]);
-    let metric_registry = MetricRegistry::empty();
     let mut locked = repeatable_storylet(5);
     locked.required_tags.set_bit(registry.id("case.closed").unwrap()).unwrap();
     let mut dispatcher = UnifiedDispatcher::new(vec![locked]);
-    dispatcher.resolve(&registry, &metric_registry).unwrap();
+    dispatcher.resolve(&registry).unwrap();
     let mut hub = node(
         1,
         NodeKind::QbnHub {
@@ -1537,7 +1301,6 @@ fn cancel_keeps_the_mission_scope_for_reconcile_replay() {
 #[test]
 fn salience_rejects_candidates_without_an_arc_phase() {
     let registry = tags(&["tag.match", "phase.act1"]);
-    let metric_registry = MetricRegistry::empty();
     let phase_bit = registry.id("phase.act1").unwrap();
     let mut gated_def = repeatable_storylet(1);
     gated_def
@@ -1548,7 +1311,7 @@ fn salience_rejects_candidates_without_an_arc_phase() {
     let mut fallback_dispatcher =
         UnifiedDispatcher::new(vec![gated_def, repeatable_storylet(2)]);
     fallback_dispatcher
-        .resolve(&registry, &metric_registry)
+        .resolve(&registry)
         .unwrap();
     let graph = asset(
         vec![node(
@@ -1838,11 +1601,10 @@ fn backward_scrub_reverses_the_timeline_window() {
 #[test]
 fn present_deck_hides_storylets_on_millisecond_cooldown() {
     let registry = tags(&["case.open"]);
-    let metric_registry = MetricRegistry::empty();
     let mut storylet = repeatable_storylet(5);
     storylet.cooldown_ms = 100;
     let mut dispatcher = UnifiedDispatcher::new(vec![storylet]);
-    dispatcher.resolve(&registry, &metric_registry).unwrap();
+    dispatcher.resolve(&registry).unwrap();
     let mut hub = node(
         1,
         NodeKind::QbnHub {
@@ -1872,11 +1634,10 @@ fn present_deck_hides_storylets_on_millisecond_cooldown() {
 #[test]
 fn once_only_completion_lock_is_global_across_hubs() {
     let registry = tags(&["case.open"]);
-    let metric_registry = MetricRegistry::empty();
     let mut def = repeatable_storylet(5);
     def.is_repeatable = false;
     let mut dispatcher = UnifiedDispatcher::new(vec![def]);
-    dispatcher.resolve(&registry, &metric_registry).unwrap();
+    dispatcher.resolve(&registry).unwrap();
     let mut first = node(
         1,
         NodeKind::QbnHub {
@@ -2022,7 +1783,7 @@ fn empty_passion_pool_is_rejected() {
             npc_id: 0,
             trust_inertia: 0.0,
             micro_passions: vec![],
-            macro_bounds: Default::default(),
+            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
             zero_sum_links: vec![],
         }],
         [],
@@ -2048,13 +1809,14 @@ fn macro_passions_clamp_to_the_spec_range() {
                 weight: 1.0,
                 is_hidden: false,
             }],
-            macro_bounds: Default::default(),
+            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
             zero_sum_links: vec![],
         }],
         [],
     )
     .unwrap();
     let mut state = WorldStateTable::new();
+    state.passions = PassionState::with_capacity(1, 2);
     state.passions.active[1] = true;
     let mut flags = TagBitset::new();
 
@@ -2087,7 +1849,7 @@ fn threshold_events_follow_the_value_transition() {
                 weight: 1.0,
                 is_hidden: false,
             }],
-            macro_bounds: Default::default(),
+            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
             zero_sum_links: vec![],
         }],
         [PassionThresholdRule {
@@ -2100,6 +1862,7 @@ fn threshold_events_follow_the_value_transition() {
     )
     .unwrap();
     let mut state = WorldStateTable::new();
+    state.passions = PassionState::with_capacity(1, 2);
     state.passions.active[1] = true;
     state.global_tags.set_bit(bit).unwrap();
     let mut flags = state.global_tags;
@@ -2122,6 +1885,7 @@ fn threshold_events_follow_the_value_transition() {
     // A below-threshold move emits nothing even when an external write left
     // the tag set.
     let mut quiet = WorldStateTable::new();
+    quiet.passions = PassionState::with_capacity(1, 2);
     quiet.passions.active[1] = true;
     quiet.global_tags.set_bit(bit).unwrap();
     let mut quiet_flags = quiet.global_tags;

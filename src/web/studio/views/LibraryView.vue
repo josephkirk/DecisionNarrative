@@ -3,7 +3,7 @@ import { inject, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useLibraryViewModel } from "../view-models/library.ts";
 import { interactionContextKey } from "../interactionContext.ts";
-
+import { thumbnailUrl } from "../thumbnails.ts";
 const router = useRouter();
 const {
   loading,
@@ -43,9 +43,22 @@ onMounted(async () => {
 function openStorylet(id: string) {
   router.push(`/storylets/${id}/edit`);
 }
-
 function createStorylet() {
   router.push("/storylets/new");
+}
+
+let searchDebounce: ReturnType<typeof setTimeout> | undefined;
+function onSearchInput() {
+  filters.page = 1;
+  if (searchDebounce) clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => {
+    loadLibrary();
+  }, 200);
+}
+
+function onFilterChange() {
+  filters.page = 1;
+  loadLibrary();
 }
 </script>
 
@@ -55,63 +68,92 @@ function createStorylet() {
     <header class="view-header">
       <div style="display:flex; align-items:center; gap:16px;">
         <h1 class="view-title">Storylets</h1>
-        <span class="badge">{{ result.total }} Total</span>
+        <span class="badge">{{ result.total }} total</span>
       </div>
 
       <div style="display:flex; align-items:center; gap:10px;">
         <button class="btn btn-primary" @click="createStorylet">
-          + New Storylet
+          + New storylet
         </button>
       </div>
     </header>
 
     <div style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
-      <div style="padding:12px 20px; border-bottom:1px solid var(--border-subtle); display:flex; gap:12px; align-items:center; background:var(--bg-card); flex-wrap:wrap;">
-        <input
-          v-model="filters.q"
-          class="form-input"
-          placeholder="Search title, text, or group tag..."
-          style="width: 240px;"
-          @input="loadLibrary"
-        />
+      <div class="library-filters" style="padding:12px 20px; border-bottom:1px solid var(--border-subtle); display:flex; gap:12px; align-items:flex-end; background:var(--bg-card); flex-wrap:wrap;">
+        <div class="filter-field">
+          <label class="filter-label" for="lib-search">Search</label>
+          <input
+            id="lib-search"
+            v-model="filters.q"
+            class="form-input"
+            placeholder="Search title, text, or group tag…"
+            aria-label="Search storylets"
+            style="width: 240px;"
+            @input="onSearchInput"
+          />
+        </div>
 
-        <select v-model="filters.status" class="form-select" style="width: 130px;" @change="loadLibrary">
-          <option value="all">All Status</option>
-          <option value="approved">Approved</option>
-          <option value="draft">Drafts</option>
-        </select>
+        <div class="filter-field">
+          <label class="filter-label" for="lib-status">Status</label>
+          <select id="lib-status" v-model="filters.status" class="form-select" aria-label="Filter by approval status" style="width: 130px;" @change="onFilterChange">
+            <option value="all">All status</option>
+            <option value="approved">Approved</option>
+            <option value="draft">Drafts</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label class="filter-label" for="lib-location">Location tag</label>
+          <select id="lib-location" v-model="filters.location_tag" class="form-select" aria-label="Filter by location tag" style="width: 160px;" @change="onFilterChange">
+            <option value="">All location tags</option>
+            <option v-for="tag in result.available_location_tags" :key="tag" :value="tag">
+              {{ tag }}
+            </option>
+          </select>
+        </div>
 
-        <select v-model="filters.location_tag" class="form-select" style="width: 160px;" @change="loadLibrary">
-          <option value="">All Location Tags</option>
-          <option v-for="tag in result.available_location_tags" :key="tag" :value="tag">
-            {{ tag }}
-          </option>
-        </select>
-
-        <select v-model="filters.ending" class="form-select" style="width: 130px;" @change="loadLibrary">
-          <option value="all">All Scenes</option>
-          <option value="ending">Endings Only</option>
-          <option value="non-ending">Non-Endings</option>
-        </select>
-
-        <select v-model="filters.sort" class="form-select" style="width: 130px;" @change="loadLibrary">
-          <option value="title">Sort: Title</option>
-          <option value="created_desc">Sort: Newest</option>
-        </select>
-
-        <button class="btn btn-secondary" style="margin-left:auto;" @click="resetFilters">
+        <div class="filter-field">
+          <label class="filter-label" for="lib-ending">Scene type</label>
+          <select id="lib-ending" v-model="filters.ending" class="form-select" aria-label="Filter by scene ending type" style="width: 130px;" @change="onFilterChange">
+            <option value="all">All scenes</option>
+            <option value="ending">Endings only</option>
+            <option value="non-ending">Non-endings</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label class="filter-label" for="lib-sort">Sort by</label>
+          <select id="lib-sort" v-model="filters.sort" class="form-select" aria-label="Sort storylets by" style="width: 130px;" @change="onFilterChange">
+            <option value="title">Sort: Title</option>
+            <option value="created_desc">Sort: Newest</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" style="margin-left:auto; align-self:flex-end;" @click="resetFilters">
           Reset
         </button>
       </div>
 
-      <div class="view-content">
-        <div v-if="loading" style="padding: 40px; text-align:center; color:var(--text-muted);">
-          Loading storylet deck...
+      <div class="view-content scroll-fade-mask">
+        <div v-if="loading" class="card-grid" aria-label="Loading storylets">
+          <div v-for="n in 6" :key="n" class="skeleton-card">
+            <div class="skeleton-header">
+              <div class="skeleton-line skeleton-title"></div>
+              <div class="skeleton-badge"></div>
+            </div>
+            <div class="skeleton-line skeleton-excerpt"></div>
+            <div class="skeleton-line skeleton-excerpt short"></div>
+            <div class="skeleton-footer">
+              <div class="skeleton-pill"></div>
+              <div class="skeleton-pill short"></div>
+            </div>
+          </div>
         </div>
 
-        <div v-else-if="result.items.length === 0" style="padding: 60px; text-align:center; color:var(--text-muted);">
-          <p style="font-size:15px; font-weight:500;">No storylets found</p>
-          <p style="font-size:12px; margin-top:6px;">Try adjusting your search query or filters.</p>
+        <div v-else-if="result.items.length === 0" class="empty-state" style="padding: 60px; text-align:center; color:var(--text-muted); display:flex; flex-direction:column; align-items:center; gap:12px;">
+          <p style="font-size:15px; font-weight:500; color:var(--text-main);">No storylets found</p>
+          <p style="font-size:12px; margin-top:0;">Try adjusting your search query or filters.</p>
+          <div style="display:flex; gap:12px; margin-top:8px;">
+            <button class="btn btn-primary" @click="createStorylet">+ New storylet</button>
+            <button class="btn btn-secondary" @click="resetFilters">Reset filters</button>
+          </div>
         </div>
 
         <div v-else class="card-grid">
@@ -122,6 +164,9 @@ function createStorylet() {
             @click="openStorylet(item.id)"
           >
             <div>
+              <div v-if="thumbnailUrl(item.thumbnail)" style="margin-bottom:8px; border-radius:6px; overflow:hidden; max-height:120px; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.3);">
+                <img :src="thumbnailUrl(item.thumbnail) ?? ''" style="width:100%; height:120px; object-fit:cover;" :alt="item.title" />
+              </div>
               <div class="card-header">
                 <h3 class="card-title">{{ item.title }}</h3>
                 <div style="display:flex; gap:4px;">
@@ -141,8 +186,9 @@ function createStorylet() {
                 <span>{{ item.choice_count }} choices</span>
                 <button
                   class="btn"
-                  style="padding:2px 6px; font-size:11px; color:var(--status-danger);"
+                  style="padding:4px 8px; font-size:11px; color:var(--status-danger); min-height:28px;"
                   title="Delete storylet"
+                  aria-label="Delete storylet"
                   @click.stop="deleteStorylet(item.id)"
                 >
                   ✕

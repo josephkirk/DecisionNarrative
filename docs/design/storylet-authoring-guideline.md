@@ -17,7 +17,7 @@ A storylet is both authored prose and a deterministic operator on project state.
 - Every node is reachable from Start and can reach an End node.
 - Every Choice target and effect refers to a valid project record or supported operation.
 - A Go To Location node must be targeted directly by a Choice and select an existing project location.
-- Conditions and variables use the correct global or storylet-local scope.
+- Candidate eligibility belongs in the separate Preconditions graph, which evaluates before a storylet enters a consideration pool. Read typed Entity properties with `Get Entity` and `Get Entity Property`, build predicates with `Compare` or `Has Entity Tag`, combine booleans with `And`/`Or`, then route through `Condition Node`. Storylet-local variables are not supported; store persistent custom values on Entities.
 - Review each branch for meaningful player intent and an observable consequence.
 
 ## Writing and revision

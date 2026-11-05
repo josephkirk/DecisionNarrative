@@ -9,7 +9,7 @@ use axum::{
         IntoResponse, Response,
         sse::{Event, KeepAlive, Sse},
     },
-    routing::{delete, get, post},
+    routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -42,141 +42,113 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
     let mut router = Router::new()
         .route("/", get(index_handler))
         .route("/health", get(health))
-        .route("/api/health", get(health))
-        .route("/api/v2/authoring-options", get(get_authoring_options))
+        .route("/api/v3/authoring-options", get(get_authoring_options))
         .route(
-            "/api/v2/context",
+            "/api/v3/context",
             get(get_interaction_context).post(post_interaction_context),
         )
         .route(
-            "/api/v2/project",
+            "/api/v3/project",
             get(get_project_meta).patch(patch_project_meta),
         )
+        .route("/api/v3/project-bundle", get(export_bundle))
+        .route("/api/v3/project-bundle/validate", post(validate_bundle))
+        .route("/api/v3/project-bundle/import", post(import_bundle))
+        .route("/api/v3/library", get(query_library))
         .route(
-            "/api/v1/project",
-            get(get_project_meta).patch(patch_project_meta),
-        )
-        .route("/api/v2/project-bundle", get(export_bundle))
-        .route("/api/v1/project-bundle", get(export_bundle))
-        .route("/api/v2/project-bundle/validate", post(validate_bundle))
-        .route("/api/v1/project-bundle/validate", post(validate_bundle))
-        .route("/api/v2/project-bundle/import", post(import_bundle))
-        .route("/api/v1/project-bundle/import", post(import_bundle))
-        // Library query
-        .route("/api/v2/library", get(query_library))
-        // Content CRUD
-        .route(
-            "/api/v2/content/{entity}",
+            "/api/v3/content/{entity}",
             get(list_content).post(save_content),
         )
         .route(
-            "/api/v2/content/{entity}/{id}",
+            "/api/v3/content/{entity}/{id}",
             get(get_content).put(update_content).delete(delete_content),
         )
-        .route("/api/v2/content/{entity}/{id}/move", post(move_content))
+        .route("/api/v3/content/{entity}/{id}/move", post(move_content))
         .route(
-            "/api/v2/content/{entity}/{id}/references",
+            "/api/v3/content/{entity}/{id}/references",
             get(get_content_references),
         )
         .route(
-            "/api/v2/files",
+            "/api/v3/files",
             post(upload_file).layer(DefaultBodyLimit::max(crate::files::MAX_UPLOAD_BYTES)),
         )
-        .route("/api/v2/files/{*path}", get(get_project_file))
-        .route("/api/v2/storylets/{id}/approve", post(approve_storylet))
-        // Direct legacy aliases
-        .route("/api/qualities", get(list_qualities).post(save_quality))
-        .route("/api/qualities/{id}", delete(delete_quality))
+        .route("/api/v3/files/{*path}", get(get_project_file))
+        .route("/api/v3/storylets/{id}/approve", post(approve_storylet))
+        .route("/api/v3/scenarios", get(list_scenarios).post(save_scenario))
         .route(
-            "/api/npc-behaviors",
-            get(list_npc_behaviors).post(save_npc_behavior),
-        )
-        .route("/api/npc-behaviors/{id}", delete(delete_npc_behavior))
-        .route("/api/storylets", get(list_storylets).post(save_storylet))
-        .route("/api/storylets/{id}", delete(delete_storylet))
-        .route("/api/storylets/{id}/approve", post(approve_storylet))
-        .route("/api/events", get(list_events).post(save_event))
-        .route("/api/events/{id}", delete(delete_event))
-        // Scenarios
-        .route("/api/v2/scenarios", get(list_scenarios).post(save_scenario))
-        .route("/api/v1/scenarios", get(list_scenarios).post(save_scenario))
-        .route(
-            "/api/v2/scenarios/{id}",
+            "/api/v3/scenarios/{id}",
             get(get_scenario)
                 .put(save_scenario_with_id)
                 .delete(delete_scenario),
         )
+        .route("/api/v3/scenarios/preview", post(preview_scenario))
+        .route("/api/v3/audio/inspect", get(inspect_audio_file))
         .route(
-            "/api/v1/scenarios/{id}",
-            get(get_scenario)
-                .put(save_scenario_with_id)
-                .delete(delete_scenario),
-        )
-        .route("/api/v2/scenarios/preview", post(preview_scenario))
-        .route("/api/v2/audio/inspect", get(inspect_audio_file))
-        // Playtest sessions
-        .route(
-            "/api/v1/playtests/from-workspace",
+            "/api/v3/playtests/from-workspace",
             post(create_playtest_from_workspace),
         )
         .route(
-            "/api/v1/playtests",
+            "/api/v3/playtests",
             get(list_playtests).post(create_playtest),
         )
-        .route("/api/v1/playtests/restore", post(restore_playtest))
+        .route("/api/v3/playtests/restore", post(restore_playtest))
         .route(
-            "/api/v1/playtests/{id}",
+            "/api/v3/playtests/{id}",
             get(get_playtest_snapshot).delete(delete_playtest),
         )
         .route(
-            "/api/v1/playtests/{id}/commands",
+            "/api/v3/playtests/{id}/commands",
             post(apply_playtest_command),
         )
         .route(
-            "/api/v1/playtests/{id}/choices",
+            "/api/v3/playtests/{id}/choices",
             post(apply_playtest_choice),
         )
-        .route("/api/v1/playtests/{id}/director", get(evaluate_director))
-        .route("/api/v1/playtests/{id}/events", get(get_playtest_events))
-        .route("/api/v1/playtests/{id}/stream", get(playtest_stream))
-        .route("/api/v1/playtests/{id}/fork", post(fork_playtest))
-        .route("/api/v1/playtests/{id}/export", get(export_playtest))
-        // ChronoFlow v5 playtests; this is the primary runtime surface.
+        .route("/api/v3/playtests/{id}/director", get(evaluate_director))
+        .route("/api/v3/playtests/{id}/events", get(get_playtest_events))
+        .route("/api/v3/playtests/{id}/stream", get(playtest_stream))
+        .route("/api/v3/playtests/{id}/fork", post(fork_playtest))
+        .route("/api/v3/playtests/{id}/export", get(export_playtest))
         .route(
-            "/api/v2/playtests",
+            "/api/v3/chrono/playtests",
             get(list_chrono_playtests).post(create_chrono_playtest),
         )
-        .route("/api/v2/playtests/{id}", get(get_chrono_playtest))
-        .route("/api/v2/playtests/{id}/tick", post(tick_chrono_playtest))
         .route(
-            "/api/v2/playtests/{id}/signal",
+            "/api/v3/chrono/playtests/{id}",
+            get(get_chrono_playtest),
+        )
+        .route(
+            "/api/v3/chrono/playtests/{id}/tick",
+            post(tick_chrono_playtest),
+        )
+        .route(
+            "/api/v3/chrono/playtests/{id}/signal",
             post(signal_chrono_playtest),
         )
         .route(
-            "/api/v2/playtests/{id}/choose",
+            "/api/v3/chrono/playtests/{id}/choose",
             post(choose_chrono_playtest),
         )
         .route(
-            "/api/v2/playtests/{id}/divert",
+            "/api/v3/chrono/playtests/{id}/divert",
             post(divert_chrono_playtest),
         )
         .route(
-            "/api/v2/playtests/{id}/invoke",
+            "/api/v3/chrono/playtests/{id}/invoke",
             post(invoke_chrono_playtest),
         )
         .route(
-            "/api/v2/playtests/{id}/rollback",
+            "/api/v3/chrono/playtests/{id}/rollback",
             post(rollback_chrono_playtest),
         )
         .route(
-            "/api/v2/playtests/{id}/scrub",
+            "/api/v3/chrono/playtests/{id}/scrub",
             post(scrub_chrono_playtest),
         )
         .route(
-            "/api/v2/playtests/{id}/reconcile",
+            "/api/v3/chrono/playtests/{id}/reconcile",
             post(reconcile_chrono_playtest),
         )
-        // MCP JSON-RPC
         .route("/mcp", post(handle_http_mcp))
         .layer(cors)
         .with_state(service);
@@ -610,46 +582,7 @@ async fn approve_storylet(
     }
 }
 
-// Aliases
-async fn list_qualities(State(s): State<StudioService>) -> Response {
-    list_content(State(s), Path("qualities".into())).await
-}
-async fn save_quality(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
-    save_content(State(s), Path("qualities".into()), Json(p)).await
-}
-async fn delete_quality(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    delete_content(State(s), Path(("qualities".into(), id))).await
-}
 
-async fn list_npc_behaviors(State(s): State<StudioService>) -> Response {
-    list_content(State(s), Path("npc_behaviors".into())).await
-}
-async fn save_npc_behavior(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
-    save_content(State(s), Path("npc_behaviors".into()), Json(p)).await
-}
-async fn delete_npc_behavior(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    delete_content(State(s), Path(("npc_behaviors".into(), id))).await
-}
-
-async fn list_storylets(State(s): State<StudioService>) -> Response {
-    list_content(State(s), Path("storylets".into())).await
-}
-async fn save_storylet(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
-    save_content(State(s), Path("storylets".into()), Json(p)).await
-}
-async fn delete_storylet(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    delete_content(State(s), Path(("storylets".into(), id))).await
-}
-
-async fn list_events(State(s): State<StudioService>) -> Response {
-    list_content(State(s), Path("events".into())).await
-}
-async fn save_event(State(s): State<StudioService>, Json(p): Json<Value>) -> Response {
-    save_content(State(s), Path("events".into()), Json(p)).await
-}
-async fn delete_event(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    delete_content(State(s), Path(("events".into(), id))).await
-}
 
 // Scenarios
 async fn list_scenarios(State(s): State<StudioService>) -> Response {

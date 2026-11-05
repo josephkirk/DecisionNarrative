@@ -2,13 +2,12 @@ import type {
   AssetRecord,
   ContentRoot,
   EntityRecord,
-  EntityType,
+  EntityTemplateRecord,
   FolderRecord,
-  QualityRecord,
   StoryletRecord,
   TraitTemplateRecord,
 } from "./contracts.ts";
-import { entityTypeLabel } from "./entityModel.ts";
+import { rootTagLabel } from "./entityModel.ts";
 
 export interface ContentRootDefinition {
   root: ContentRoot;
@@ -20,7 +19,7 @@ export interface ContentRootDefinition {
 export const CONTENT_ROOTS: ContentRootDefinition[] = [
   { root: "storylets", label: "Storylets", kind: "storylets", newLabel: "New Storylet" },
   { root: "entities", label: "Entities", kind: "entities", newLabel: "New Entity" },
-  { root: "qualities", label: "Qualities", kind: "qualities", newLabel: "New Quality" },
+  { root: "entity_templates", label: "Entity Templates", kind: "entity_templates", newLabel: "New Entity Template" },
   { root: "trait_templates", label: "Trait Templates", kind: "trait_templates", newLabel: "New Trait Template" },
   { root: "assets", label: "Assets", kind: "assets", newLabel: "New Asset" },
 ];
@@ -31,18 +30,12 @@ export function rootDefinition(root: string): ContentRootDefinition | undefined 
 
 export function itemRoute(root: ContentRoot | string, id: string): string {
   switch (root) {
-    case "storylets":
-      return `/storylets/${encodeURIComponent(id)}/edit`;
-    case "entities":
-      return `/entities/${encodeURIComponent(id)}`;
-    case "qualities":
-      return `/qualities/${encodeURIComponent(id)}`;
-    case "trait_templates":
-      return `/trait-templates/${encodeURIComponent(id)}`;
-    case "assets":
-      return `/assets/${encodeURIComponent(id)}`;
-    default:
-      return "/";
+    case "entities": return `/entities/${encodeURIComponent(id)}`;
+    case "storylets": return `/storylets/${encodeURIComponent(id)}/edit`;
+    case "entity_templates": return `/entity-templates/${encodeURIComponent(id)}`;
+    case "trait_templates": return `/trait-templates/${encodeURIComponent(id)}`;
+    case "assets": return `/assets/${encodeURIComponent(id)}`;
+    default: return "/";
   }
 }
 
@@ -53,7 +46,7 @@ export interface TreeItem {
   folderId: string | null;
   thumbnail: string | null;
   detail: string;
-  entityType?: EntityType;
+  rootTag?: string;
 }
 
 export interface TreeSource {
@@ -62,9 +55,6 @@ export interface TreeSource {
   items: TreeItem[];
 }
 
-function qualityDetail(quality: QualityRecord): string {
-  return quality.type;
-}
 
 function storyletDetail(storylet: StoryletRecord): string {
   const approved = storylet.approved_revision === storylet.revision;
@@ -72,7 +62,7 @@ function storyletDetail(storylet: StoryletRecord): string {
 }
 
 function templateDetail(template: TraitTemplateRecord): string {
-  const count = template.properties.length;
+  const count = template.properties?.length ?? 0;
   return `${count} propert${count === 1 ? "y" : "ies"}`;
 }
 
@@ -84,8 +74,8 @@ function assetDetail(asset: AssetRecord): string {
 export interface BuildTreeInput {
   projectName: string;
   folders: FolderRecord[];
-  qualities: QualityRecord[];
   entities: EntityRecord[];
+  entityTemplates: EntityTemplateRecord[];
   traitTemplates: TraitTemplateRecord[];
   assets: AssetRecord[];
   storylets: StoryletRecord[];
@@ -99,7 +89,7 @@ export function buildTreeItems(input: BuildTreeInput): TreeSource {
       id: storylet.id,
       label: storylet.title,
       folderId: storylet.folder_id ?? null,
-      thumbnail: null,
+      thumbnail: storylet.thumbnail ?? null,
       detail: storyletDetail(storylet),
     });
   }
@@ -110,18 +100,19 @@ export function buildTreeItems(input: BuildTreeInput): TreeSource {
       label: entity.name,
       folderId: entity.folder_id ?? null,
       thumbnail: entity.thumbnail ?? null,
-      detail: entityTypeLabel(entity.type),
-      entityType: entity.type,
+      detail: rootTagLabel(entity.root_tag),
+      rootTag: entity.root_tag,
     });
   }
-  for (const quality of input.qualities) {
+  for (const entity of input.entityTemplates) {
     items.push({
-      root: "qualities",
-      id: quality.name,
-      label: quality.name,
-      folderId: quality.folder_id ?? null,
-      thumbnail: null,
-      detail: qualityDetail(quality),
+      root: "entity_templates",
+      id: entity.id,
+      label: entity.name,
+      folderId: entity.folder_id ?? null,
+      thumbnail: entity.thumbnail ?? null,
+      detail: rootTagLabel(entity.root_tag),
+      rootTag: entity.root_tag,
     });
   }
   for (const template of input.traitTemplates) {
@@ -159,7 +150,7 @@ export interface TreeRow {
   folderId?: string | null;
   thumbnail?: string | null;
   detail?: string;
-  entityType?: EntityType;
+  rootTag?: string;
   hasChildren: boolean;
   expanded: boolean;
 }
@@ -284,7 +275,7 @@ export function flattenTree(input: {
       folderId: item.folderId,
       thumbnail: item.thumbnail,
       detail: item.detail,
-      entityType: item.entityType,
+      rootTag: item.rootTag,
       hasChildren: false,
       expanded: false,
     });

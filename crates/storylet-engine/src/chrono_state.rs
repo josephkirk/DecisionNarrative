@@ -16,10 +16,10 @@ use serde::{Deserialize, Serialize};
 pub const WORD_COUNT: usize = 4;
 /// Maximum number of compilable gameplay tags: `WORD_COUNT * 64`.
 pub const MAX_TAGS: usize = WORD_COUNT * 64;
-/// Maximum number of continuous metric slots (REQ-DOD-04).
-pub const MAX_METRICS: usize = 512;
 /// Maximum number of per-entity tag containers.
 pub const MAX_ENTITIES: usize = 256;
+/// Maximum number of dense passion values.
+pub const MAX_PASSIONS: usize = 256;
 /// Longest accepted gameplay tag string.
 pub const MAX_TAG_LENGTH: usize = 128;
 /// Maximum candidate assignments explored while matching a graph pattern.
@@ -184,6 +184,9 @@ pub enum AttributeValue {
     Float(f64),
     Bool(bool),
     String(String),
+    Asset(String),
+    EntityRef(String),
+    Array(Vec<AttributeValue>),
     Tag(u16),
 }
 
@@ -200,6 +203,7 @@ impl AttributeValue {
     fn is_finite(&self) -> bool {
         match self {
             AttributeValue::Float(value) => value.is_finite(),
+            AttributeValue::Array(values) => values.iter().all(AttributeValue::is_finite),
             _ => true,
         }
     }
@@ -370,23 +374,6 @@ pub struct GraphDiffRecord {
     pub previous_attributes: BTreeMap<String, BTreeMap<String, Option<AttributeValue>>>,
 }
 
-/// One entry of the compressed sparse row coupling matrix (REQ-DOD-05).
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ZeroSumLink {
-    pub source_metric_id: u16,
-    pub target_metric_id: u16,
-    pub weight: f32,
-}
-
-/// One metric threshold rule that writes a global tag bit. Used by MENACE
-/// quality thresholds; macro-passion rules live on `PassionRegistry`.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MetricThresholdRule {
-    pub metric_id: u16,
-    pub threshold_tag_bit: u16,
-    pub trigger_value: f32,
-    pub hysteresis: f32,
-}
 
 /// Immutable, dense, deterministic gameplay tag registry (REQ-DOD-03).
 ///
@@ -399,23 +386,15 @@ pub struct GameplayTagRegistry {
     tag_to_id: BTreeMap<String, u16>,
     ancestors: Vec<TagBitset>,
     descendants: Vec<TagBitset>,
-    /// CSR row offsets over `MAX_METRICS` rows; `entries` is sorted by
-    /// `(source_metric_id, target_metric_id)`.
-    row_offsets: Vec<u32>,
-    entries: Vec<ZeroSumLink>,
-    threshold_rules: Vec<MetricThresholdRule>,
 }
 
 impl GameplayTagRegistry {
-    /// Empty registry: no tags, no coupling links, no threshold rules.
+    /// Empty registry with no compiled tags.
     pub fn empty() -> Self {
         GameplayTagRegistry {
             tag_to_id: BTreeMap::new(),
             ancestors: Vec::new(),
             descendants: Vec::new(),
-            row_offsets: vec![0; MAX_METRICS + 1],
-            entries: Vec::new(),
-            threshold_rules: Vec::new(),
         }
     }
 
@@ -471,117 +450,6 @@ impl GameplayTagRegistry {
         Ok(registry)
     }
 
-    /// Returns a registry with the given coupling links, sorted deterministically.
-    pub fn with_coupling_links(
-        mut self,
-        links: impl IntoIterator<Item = ZeroSumLink>,
-    ) -> Result<Self, ChronoStateError> {
-        let mut sorted: BTreeSet<(u16, u16, u32)> = BTreeSet::new();
-        for link in links {
-            if link.source_metric_id as usize >= MAX_METRICS
-                || link.target_metric_id as usize >= MAX_METRICS
-            {
-                return Err(ChronoStateError::MetricIndexOutOfRange {
-                    index: link.source_metric_id,
-                });
-            }
-            if !link.weight.is_finite() {
-                return Err(ChronoStateError::NonFiniteMetric {
-                    metric_id: link.source_metric_id,
-                    value: link.weight,
-                });
-            }
-            if !sorted.insert((
-                link.source_metric_id,
-                link.target_metric_id,
-                link.weight.to_bits(),
-            )) {
-                return Err(ChronoStateError::DuplicateCouplingLink {
-                    source_metric_id: link.source_metric_id,
-                    target_metric_id: link.target_metric_id,
-                });
-            }
-        }
-
-        let mut entries = Vec::with_capacity(sorted.len());
-        for (source, target, weight_bits) in sorted {
-            entries.push(ZeroSumLink {
-                source_metric_id: source,
-                target_metric_id: target,
-                weight: f32::from_bits(weight_bits),
-            });
-        }
-
-        let mut row_offsets = vec![0u32; MAX_METRICS + 1];
-        for (index, entry) in entries.iter().enumerate() {
-            let row = entry.source_metric_id as usize;
-            for offset in row + 1..=MAX_METRICS {
-                row_offsets[offset] = index as u32 + 1;
-            }
-        }
-
-        self.row_offsets = row_offsets;
-        self.entries = entries;
-        Ok(self)
-    }
-
-    /// Returns a registry with the given threshold rules, sorted deterministically.
-    pub fn with_threshold_rules(
-        mut self,
-        rules: impl IntoIterator<Item = MetricThresholdRule>,
-    ) -> Result<Self, ChronoStateError> {
-        let mut sorted: BTreeSet<(u16, u16, u32, u32)> = BTreeSet::new();
-        for rule in rules {
-            if rule.metric_id as usize >= MAX_METRICS {
-                return Err(ChronoStateError::MetricIndexOutOfRange {
-                    index: rule.metric_id,
-                });
-            }
-            if rule.threshold_tag_bit as usize >= MAX_TAGS {
-                return Err(ChronoStateError::TagIndexOutOfRange {
-                    index: rule.threshold_tag_bit,
-                });
-            }
-            if !rule.trigger_value.is_finite() || !rule.hysteresis.is_finite() {
-                return Err(ChronoStateError::NonFiniteMetric {
-                    metric_id: rule.metric_id,
-                    value: rule.trigger_value,
-                });
-            }
-            if rule.hysteresis < 0.0 {
-                return Err(ChronoStateError::InvalidHysteresis {
-                    metric_id: rule.metric_id,
-                    value: rule.hysteresis,
-                });
-            }
-            if !sorted.insert((
-                rule.metric_id,
-                rule.threshold_tag_bit,
-                rule.trigger_value.to_bits(),
-                rule.hysteresis.to_bits(),
-            )) {
-                return Err(ChronoStateError::DuplicateThresholdRule {
-                    metric_id: rule.metric_id,
-                    threshold_tag_bit: rule.threshold_tag_bit,
-                });
-            }
-        }
-
-        self.threshold_rules = sorted
-            .into_iter()
-            .map(
-                |(metric_id, threshold_tag_bit, trigger_bits, hysteresis_bits)| {
-                    MetricThresholdRule {
-                        metric_id,
-                        threshold_tag_bit,
-                        trigger_value: f32::from_bits(trigger_bits),
-                        hysteresis: f32::from_bits(hysteresis_bits),
-                    }
-                },
-            )
-            .collect();
-        Ok(self)
-    }
 
     pub fn tag_count(&self) -> usize {
         self.tag_to_id.len()
@@ -629,128 +497,9 @@ impl GameplayTagRegistry {
         }
     }
 
-    /// Direct coupling links out of one metric row, in deterministic order.
-    pub fn links_for(&self, metric_id: u16) -> &[ZeroSumLink] {
-        if metric_id as usize >= MAX_METRICS {
-            return &[];
-        }
-        let start = self.row_offsets[metric_id as usize] as usize;
-        let end = self.row_offsets[metric_id as usize + 1] as usize;
-        &self.entries[start..end]
-    }
-
-    pub fn threshold_rules(&self) -> &[MetricThresholdRule] {
-        &self.threshold_rules
-    }
 }
 
-/// Deterministic metric-name registry. Metric indices are a separate index
-/// space from gameplay tag ids: quality, passion, and waypoint-weight
-/// predicates and effects resolve here, while tag membership resolves through
-/// `GameplayTagRegistry`. `ZeroSumLink` and `MetricThresholdRule` use metric
-/// indices from this space.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct MetricRegistry {
-    name_to_index: BTreeMap<String, u16>,
-}
 
-impl MetricRegistry {
-    pub fn empty() -> Self {
-        MetricRegistry {
-            name_to_index: BTreeMap::new(),
-        }
-    }
-
-    /// Compiles metric names into dense indices in deterministic sorted order.
-    pub fn compile(names: impl IntoIterator<Item = String>) -> Result<Self, ChronoStateError> {
-        let mut unique = BTreeSet::new();
-        for name in names {
-            if name.is_empty() {
-                return Err(ChronoStateError::EmptyMetricName);
-            }
-            if name.len() > MAX_TAG_LENGTH || !is_valid_hierarchical_name(&name) {
-                return Err(ChronoStateError::InvalidMetricName { name });
-            }
-            if !unique.insert(name.clone()) {
-                return Err(ChronoStateError::DuplicateMetricName { name });
-            }
-        }
-        if unique.len() > MAX_METRICS {
-            return Err(ChronoStateError::MetricLimitExceeded {
-                count: unique.len(),
-            });
-        }
-        let mut registry = MetricRegistry::empty();
-        for (index, name) in unique.iter().enumerate() {
-            registry.name_to_index.insert(name.clone(), index as u16);
-        }
-        Ok(registry)
-    }
-
-    pub fn id(&self, name: &str) -> Option<u16> {
-        self.name_to_index.get(name).copied()
-    }
-
-    pub fn name(&self, index: u16) -> Option<&str> {
-        self.name_to_index
-            .iter()
-            .find(|(_, position)| **position == index)
-            .map(|(name, _)| name.as_str())
-    }
-
-    pub fn count(&self) -> usize {
-        self.name_to_index.len()
-    }
-}
-
-/// Membership of a set of entities plus the role tags accumulated from their
-/// entity rows. Both halves are recorded as XOR masks in `BijectiveDelta` so
-/// that rollback restores them exactly.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MembershipMask {
-    /// Per-entity membership bits (entity index space).
-    pub entity_mask: TagBitset,
-    /// Role/location tags accumulated from the members' entity rows.
-    pub tag_mask: TagBitset,
-}
-
-impl MembershipMask {
-    pub fn new() -> Self {
-        MembershipMask {
-            entity_mask: TagBitset::new(),
-            tag_mask: TagBitset::new(),
-        }
-    }
-
-    /// Reverses the two halves of a membership record.
-    pub fn apply_membership_xor(&mut self, entity_xor: &TagBitset, tag_xor: &TagBitset) {
-        self.entity_mask.apply_xor(entity_xor);
-        self.tag_mask.apply_xor(tag_xor);
-    }
-}
-
-/// Clamping bounds for one metric slot. `unbounded()` spans every finite f32
-/// value, avoiding non-finite sentinels in JSON snapshots.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MetricBound {
-    pub min: f32,
-    pub max: f32,
-}
-
-impl MetricBound {
-    pub const fn unbounded() -> Self {
-        MetricBound {
-            min: f32::MIN,
-            max: f32::MAX,
-        }
-    }
-}
-
-impl Default for MetricBound {
-    fn default() -> Self {
-        Self::unbounded()
-    }
-}
 
 /// One micro-passion slot for a Star NPC: its weight toward the macro passion
 /// and whether it is hidden from the player (`passion_pool` entry).
@@ -796,6 +545,11 @@ pub struct PassionThresholdRule {
     pub linked_graph_asset_id: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PassionBounds {
+    pub min: f32,
+    pub max: f32,
+}
 /// A Star NPC: micro-passions, trust inertia, clamped macro bounds, and
 /// zero-sum rival links.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -803,7 +557,7 @@ pub struct StarNpcDef {
     pub npc_id: u16,
     pub trust_inertia: f32,
     pub micro_passions: Vec<MicroPassionDef>,
-    pub macro_bounds: MetricBound,
+    pub macro_bounds: PassionBounds,
     pub zero_sum_links: Vec<RivalPassionLink>,
 }
 
@@ -848,7 +602,7 @@ impl PassionRegistry {
             // ambiguous authoring instead of emitting contradictory events.
             if !threshold_bits.insert(rule.threshold_tag_bit) {
                 return Err(ChronoStateError::DuplicateThresholdRule {
-                    metric_id: npc_id,
+                    passion_id: npc_id,
                     threshold_tag_bit: rule.threshold_tag_bit,
                 });
             }
@@ -924,7 +678,7 @@ impl PassionRegistry {
 
 /// Data-oriented world state table (REQ-DOD-04).
 ///
-/// Entity tag containers and metrics are indexed by dense tag index. Vertex and
+/// Entity tag containers and passions are indexed by dense tag index. Vertex and
 /// edge tables are kept sorted by id so that a graph transformation and its
 /// reversal restore byte-identical tables.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -934,12 +688,6 @@ pub struct WorldStateTable {
     /// Per-entity tag containers (locations, characters, items).
     #[serde(default)]
     pub entity_tags: Vec<TagBitset>,
-    /// Continuous qualities and waypoint weights.
-    #[serde(default)]
-    pub metrics: Vec<f32>,
-    /// Per-metric clamping bounds, parallel to `metrics`.
-    #[serde(default)]
-    pub metric_bounds: Vec<MetricBound>,
     /// Dense Star-NPC passion pool, active passions, and derived macro values.
     #[serde(default)]
     pub passions: PassionState,
@@ -949,60 +697,36 @@ pub struct WorldStateTable {
     pub edges: Vec<WorldEdge>,
     #[serde(default)]
     pub current_location_entity: Option<u16>,
-    /// Location tags contributed by the current location. Movement removes
-    /// exactly these bits before adding the new location's row, so unrelated
-    /// arc/quality flags are never clobbered.
     #[serde(default)]
     pub current_location_tag_mask: TagBitset,
-    /// Visited locations: per-entity membership bits plus the location role
-    /// tags accumulated from those entity rows.
-    #[serde(default)]
-    pub visited_location_tags: MembershipMask,
-    /// Met characters: per-entity membership bits plus the character role tags
-    /// accumulated from those entity rows.
-    #[serde(default)]
-    pub met_character_tags: MembershipMask,
 }
 
 impl WorldStateTable {
-    /// Canonical table: `MAX_ENTITIES` entity containers and `MAX_METRICS`
-    /// metric slots, all zeroed.
     pub fn new() -> Self {
-        WorldStateTable {
+        Self {
             global_tags: TagBitset::new(),
             entity_tags: vec![TagBitset::new(); MAX_ENTITIES],
-            metrics: vec![0.0; MAX_METRICS],
-            metric_bounds: vec![MetricBound::unbounded(); MAX_METRICS],
-            passions: PassionState::with_capacity(MAX_ENTITIES, MAX_METRICS),
+            passions: PassionState::with_capacity(MAX_ENTITIES, 0),
             vertices: Vec::new(),
             edges: Vec::new(),
             current_location_entity: None,
             current_location_tag_mask: TagBitset::new(),
-            visited_location_tags: MembershipMask::new(),
-            met_character_tags: MembershipMask::new(),
         }
     }
 
-    /// Smaller table for a bounded scenario; sizes are capped at the maxima.
-    pub fn with_capacity(entity_count: usize, metric_count: usize) -> Self {
+    pub fn with_capacity(entity_count: usize) -> Self {
         let entities = entity_count.min(MAX_ENTITIES);
-        let metrics = metric_count.min(MAX_METRICS);
-        WorldStateTable {
+        Self {
             global_tags: TagBitset::new(),
             entity_tags: vec![TagBitset::new(); entities],
-            metrics: vec![0.0; metrics],
-            metric_bounds: vec![MetricBound::unbounded(); metrics],
+            passions: PassionState::with_capacity(entities, 0),
             vertices: Vec::new(),
             edges: Vec::new(),
             current_location_entity: None,
             current_location_tag_mask: TagBitset::new(),
-            visited_location_tags: MembershipMask::new(),
-            passions: PassionState::with_capacity(entities, metrics),
-            met_character_tags: MembershipMask::new(),
         }
     }
 
-    /// Grows the entity container array up to `MAX_ENTITIES`.
     pub fn ensure_entity(&mut self, entity_id: u16) -> Result<(), ChronoStateError> {
         let needed = entity_id as usize + 1;
         if needed > MAX_ENTITIES {
@@ -1011,24 +735,6 @@ impl WorldStateTable {
         if needed > self.entity_tags.len() {
             self.entity_tags.resize(needed, TagBitset::new());
         }
-        Ok(())
-    }
-    /// Sets the clamping bounds for one metric slot. The bound applies to every
-    /// planned write, including coupled writes, while the delta still records
-    /// the exact prior value for undo.
-    pub fn set_metric_bound(
-        &mut self,
-        metric_id: u16,
-        min: f32,
-        max: f32,
-    ) -> Result<(), ChronoStateError> {
-        if metric_id as usize >= self.metric_bounds.len() {
-            return Err(ChronoStateError::MetricIndexOutOfRange { index: metric_id });
-        }
-        if min.is_nan() || max.is_nan() || min > max {
-            return Err(ChronoStateError::InvalidMetricBound { index: metric_id });
-        }
-        self.metric_bounds[metric_id as usize] = MetricBound { min, max };
         Ok(())
     }
 
@@ -1118,6 +824,89 @@ impl WorldStateTable {
         self.vertices
             .get(index)
             .filter(|v| v.vertex_id == vertex_id)
+    }
+    pub fn vertex_mut(&mut self, vertex_id: &str) -> Option<&mut WorldVertex> {
+        let index = self
+            .vertices
+            .partition_point(|v| v.vertex_id.as_str() < vertex_id);
+        self.vertices
+            .get_mut(index)
+            .filter(|v| v.vertex_id == vertex_id)
+    }
+
+    /// Apply one reversible typed property command to a vertex. Property keys are
+    /// stored exactly as supplied (callers commonly use the `prop.` namespace).
+    /// Existing values are never silently coerced: `set`, arithmetic, and toggle
+    /// all preserve the property's declared type.
+    pub fn apply_property_command(
+        &mut self,
+        vertex_id: &str,
+        key: &str,
+        operation: &str,
+        value: AttributeValue,
+    ) -> Result<GraphDiffRecord, ChronoStateError> {
+        if key.is_empty() {
+            return Err(ChronoStateError::EmptyAttributeKey);
+        }
+        if !value.is_finite() {
+            return Err(ChronoStateError::NonFiniteAttributeValue {
+                vertex_id: vertex_id.to_owned(),
+                key: key.to_owned(),
+                value: value.as_f64().unwrap_or_default(),
+            });
+        }
+        let vertex = self.vertex_mut(vertex_id).ok_or_else(|| ChronoStateError::VertexNotFound {
+            vertex_id: vertex_id.to_owned(),
+        })?;
+        let previous = vertex.attributes.get(key).cloned();
+        let next = match operation {
+            "set" => {
+                if let Some(existing) = &previous {
+                    if std::mem::discriminant(existing) != std::mem::discriminant(&value) {
+                        return Err(ChronoStateError::AttributeTypeMismatch { key: key.to_owned() });
+                    }
+                }
+                value
+            }
+            "toggle" => match (previous.as_ref(), value) {
+                (Some(AttributeValue::Bool(current)), AttributeValue::Bool(_)) =>
+                    AttributeValue::Bool(!current),
+                _ => return Err(ChronoStateError::AttributeTypeMismatch { key: key.to_owned() }),
+            },
+            "add" | "subtract" => {
+                let amount = value.as_f64().ok_or_else(|| ChronoStateError::AttributeTypeMismatch { key: key.to_owned() })?;
+                let current = previous.as_ref().and_then(AttributeValue::as_f64)
+                    .ok_or_else(|| ChronoStateError::AttributeTypeMismatch { key: key.to_owned() })?;
+                let result = if operation == "add" { current + amount } else { current - amount };
+                if !result.is_finite() {
+                    return Err(ChronoStateError::NonFiniteAttributeValue {
+                        vertex_id: vertex_id.to_owned(), key: key.to_owned(), value: result,
+                    });
+                }
+                match previous {
+                    Some(AttributeValue::Int(_)) if result.fract() == 0.0 =>
+                        AttributeValue::Int(result as i64),
+                    Some(AttributeValue::Float(_)) => AttributeValue::Float(result),
+                    _ => return Err(ChronoStateError::AttributeTypeMismatch { key: key.to_owned() }),
+                }
+            }
+            _ => return Err(ChronoStateError::InvalidAttributeOperation),
+        };
+        vertex.attributes.insert(key.to_owned(), next);
+        let mut diff = GraphDiffRecord::default();
+        diff.previous_attributes.entry(vertex_id.to_owned()).or_default()
+            .insert(key.to_owned(), previous);
+        Ok(diff)
+    }
+
+    /// Revert a property command using the same graph-diff machinery as graph
+    /// transforms. This keeps property writes reversible without a second
+    /// property/passion value store.
+    pub fn revert_property_command(
+        &mut self,
+        diff: &GraphDiffRecord,
+    ) -> Result<(), ChronoStateError> {
+        self.revert_graph_transform(diff)
     }
 
     pub fn edge(&self, edge_id: &str) -> Option<&WorldEdge> {
@@ -1576,78 +1365,38 @@ pub struct MutationOp {
     pub add_global_tags: TagBitset,
     pub remove_global_tags: TagBitset,
     #[serde(default)]
-    pub metric_deltas: Vec<(u16, f32)>,
-    #[serde(default)]
     pub entity_tag_ops: Vec<EntityTagMutation>,
-    /// Reversible player movement: sets the current location entity and marks
-    /// the destination visited. `None` leaves the location unchanged.
+    /// Reversible player movement: sets the current location entity.
     #[serde(default)]
     pub move_player: Option<u16>,
-    /// Records a visited-location bit for the given entity.
-    #[serde(default)]
-    pub visit_location: Option<u16>,
-    /// Records a met-character bit for the given entity.
-    #[serde(default)]
-    pub meet_character: Option<u16>,
 }
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MetricUndoPair {
-    pub metric_id: u16,
-    pub old_value: f32,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EntityMaskPair {
     pub entity_id: u16,
     pub xor_mask: TagBitset,
 }
 
-/// Universal reversible record: XOR masks for tags plus the first prior value
-/// per metric (REQ-REV-02).
+/// Universal reversible record for tag, passion, and graph changes.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BijectiveDelta {
     pub global_xor_mask: TagBitset,
     #[serde(default)]
     pub entity_xor_masks: Vec<EntityMaskPair>,
     #[serde(default)]
-    pub metric_undos: Vec<MetricUndoPair>,
-    #[serde(default)]
-    pub visited_location_entity_xor: TagBitset,
-    #[serde(default)]
-    pub visited_location_xor: TagBitset,
-    #[serde(default)]
-    pub met_character_entity_xor: TagBitset,
-    #[serde(default)]
-    pub met_character_xor: TagBitset,
-    #[serde(default)]
     pub location_tag_mask_xor: TagBitset,
     #[serde(default)]
     pub previous_current_location: Option<u16>,
-    /// Inverse cache for Star-NPC passion mutations and threshold flags.
     #[serde(default)]
     pub passion_delta: Option<PassionDelta>,
-    /// Reversible layered-world graph transformations in application order.
     #[serde(default)]
     pub graph_diffs: Vec<GraphDiffRecord>,
 }
 
 impl BijectiveDelta {
-    pub fn has_recorded_metric(&self, metric_id: u16) -> bool {
-        self.metric_undos
-            .iter()
-            .any(|undo| undo.metric_id == metric_id)
-    }
-
     pub fn is_empty(&self) -> bool {
         self.global_xor_mask.is_empty()
             && self.location_tag_mask_xor.is_empty()
-            && self.visited_location_entity_xor.is_empty()
-            && self.visited_location_xor.is_empty()
-            && self.met_character_entity_xor.is_empty()
-            && self.met_character_xor.is_empty()
             && self.entity_xor_masks.is_empty()
-            && self.metric_undos.is_empty()
             && self.passion_delta.is_none()
             && self.graph_diffs.is_empty()
     }
@@ -1662,46 +1411,27 @@ pub fn apply_mutation(
     apply_mutation_with_registry(state, op, &GameplayTagRegistry::empty())
 }
 
-/// Applies a mutation through the registry: metric deltas, single-pass CSR
+/// Applies a mutation through the registry: passion deltas, single-pass CSR
 /// zero-sum propagation, deterministic threshold evaluation, entity tag masks,
-/// and the visited/met/location bookkeeping. Every input is validated before
-/// anything changes, so a failed call leaves the state untouched.
 pub fn apply_mutation_with_registry(
     state: &mut WorldStateTable,
     op: &MutationOp,
     registry: &GameplayTagRegistry,
 ) -> Result<BijectiveDelta, ChronoStateError> {
-    let plan = plan_metric_changes(state, op, registry)?;
-    validate_threshold_rules(state, registry)?;
     validate_entity_bounds(state, op)?;
-
-    let mut delta = BijectiveDelta::default();
-    delta.previous_current_location = state.current_location_entity;
-
-    // Actor presence markers are recomputed from `located_at` edges before any
-    // other state changes, so explicit entity op masks still win afterwards.
-    if let Some(entity_id) = op.move_player {
-        if let Some(bit) = registry.id(LOCATION_CURRENT_TAG) {
-            let location_vertex_id = state
+    let moved_location_vertex = op
+        .move_player
+        .map(|entity_id| {
+            state
                 .vertex_for_entity(entity_id)
                 .map(|vertex| vertex.vertex_id.clone())
-                .ok_or_else(|| ChronoStateError::EntityVertexMissing { index: entity_id })?;
-            state.sync_actor_presence(&mut delta, &location_vertex_id, bit, LOCATED_AT_RELATION)?;
-        }
-    }
-
-    // Metrics: record the first prior value per metric, then write the planned
-    // value. Iterating the plan in sorted order keeps the record deterministic.
-    for (metric_id, new_value) in &plan {
-        delta.metric_undos.push(MetricUndoPair {
-            metric_id: *metric_id,
-            old_value: state.metrics[*metric_id as usize],
-        });
-        state.metrics[*metric_id as usize] = *new_value;
-    }
-
-    // Global tags. The location contribution is swapped first so that explicit
-    // op masks and threshold bits are never clobbered by movement.
+                .ok_or(ChronoStateError::EntityVertexMissing { index: entity_id })
+        })
+        .transpose()?;
+    let mut delta = BijectiveDelta {
+        previous_current_location: state.current_location_entity,
+        ..Default::default()
+    };
     let mut new_global = state.global_tags;
     let mut new_location_mask = state.current_location_tag_mask;
     if let Some(entity_id) = op.move_player {
@@ -1712,30 +1442,17 @@ pub fn apply_mutation_with_registry(
         for word in 0..WORD_COUNT {
             new_global.words[word] |= new_location_mask.words[word];
         }
+        state.current_location_entity = Some(entity_id);
     }
     for word in 0..WORD_COUNT {
-        new_global.words[word] = (new_global.words[word] | op.add_global_tags.words[word])
-            & !op.remove_global_tags.words[word];
-    }
-
-    // Threshold evaluation with hysteresis, in deterministic rule order.
-    for rule in registry.threshold_rules() {
-        let value = state.metrics[rule.metric_id as usize];
-        let active = new_global.bit(rule.threshold_tag_bit);
-        if !active {
-            if value >= rule.trigger_value {
-                new_global.set_bit(rule.threshold_tag_bit)?;
-            }
-        } else if value < rule.trigger_value - rule.hysteresis {
-            new_global.clear_bit(rule.threshold_tag_bit)?;
-        }
+        new_global.words[word] =
+            (new_global.words[word] | op.add_global_tags.words[word])
+                & !op.remove_global_tags.words[word];
     }
     delta.global_xor_mask = state.global_tags.xor_with(&new_global);
     delta.location_tag_mask_xor = state.current_location_tag_mask.xor_with(&new_location_mask);
     state.global_tags = new_global;
     state.current_location_tag_mask = new_location_mask;
-
-    // Per-entity tag containers.
     for item in &op.entity_tag_ops {
         let before = state.entity_tags[item.entity_id as usize];
         let container = &mut state.entity_tags[item.entity_id as usize];
@@ -1751,40 +1468,27 @@ pub fn apply_mutation_with_registry(
             });
         }
     }
-
-    // Player movement, visited locations, and met characters. Each records the
-    // prior pointer plus the exact membership and tag-mask bits it flipped.
-    if let Some(entity_id) = op.move_player {
-        mark_membership(state, &mut delta, entity_id, true)?;
-        state.current_location_entity = Some(entity_id);
+    if let (Some(location_vertex_id), Some(current_tag)) = (
+        moved_location_vertex,
+        registry.id(LOCATION_CURRENT_TAG),
+    ) {
+        state.sync_actor_presence(
+            &mut delta,
+            &location_vertex_id,
+            current_tag,
+            LOCATED_AT_RELATION,
+        )?;
     }
-    if let Some(entity_id) = op.visit_location {
-        mark_membership(state, &mut delta, entity_id, true)?;
-    }
-    if let Some(entity_id) = op.meet_character {
-        mark_membership(state, &mut delta, entity_id, false)?;
-    }
-
     Ok(delta)
 }
 
-/// Reverses a delta, restoring tag bitsets and float bit patterns exactly.
 pub fn revert_delta(
     state: &mut WorldStateTable,
     delta: &BijectiveDelta,
 ) -> Result<(), ChronoStateError> {
     for pair in &delta.entity_xor_masks {
         if pair.entity_id as usize >= state.entity_tags.len() {
-            return Err(ChronoStateError::EntityIndexOutOfRange {
-                index: pair.entity_id,
-            });
-        }
-    }
-    for undo in &delta.metric_undos {
-        if undo.metric_id as usize >= state.metrics.len() {
-            return Err(ChronoStateError::MetricIndexOutOfRange {
-                index: undo.metric_id,
-            });
+            return Err(ChronoStateError::EntityIndexOutOfRange { index: pair.entity_id });
         }
     }
     for graph_diff in delta.graph_diffs.iter().rev() {
@@ -1793,26 +1497,12 @@ pub fn revert_delta(
     if let Some(passion_delta) = &delta.passion_delta {
         revert_passion_delta(&mut state.passions, passion_delta, &mut state.global_tags)?;
     }
-
     state.global_tags.apply_xor(&delta.global_xor_mask);
-    state
-        .current_location_tag_mask
-        .apply_xor(&delta.location_tag_mask_xor);
-    state.visited_location_tags.apply_membership_xor(
-        &delta.visited_location_entity_xor,
-        &delta.visited_location_xor,
-    );
-    state
-        .met_character_tags
-        .apply_membership_xor(&delta.met_character_entity_xor, &delta.met_character_xor);
+    state.current_location_tag_mask.apply_xor(&delta.location_tag_mask_xor);
     for pair in &delta.entity_xor_masks {
         state.entity_tags[pair.entity_id as usize].apply_xor(&pair.xor_mask);
     }
-    for undo in &delta.metric_undos {
-        state.metrics[undo.metric_id as usize] = undo.old_value;
-    }
     state.current_location_entity = delta.previous_current_location;
-
     Ok(())
 }
 
@@ -1831,7 +1521,7 @@ impl PassionState {
 
     pub fn with_capacity(npc_count: usize, passion_count: usize) -> Self {
         let npcs = npc_count.min(MAX_ENTITIES);
-        let passions = passion_count.min(MAX_METRICS);
+        let passions = passion_count.min(MAX_PASSIONS);
         PassionState {
             micro: vec![0.0; passions],
             macro_values: vec![0.0; npcs],
@@ -1887,7 +1577,7 @@ pub fn apply_passion_mutation(
     let mut active_plan = BTreeMap::new();
     for (passion_id, wanted) in &op.active_ops {
         if *passion_id as usize >= state.active.len() {
-            return Err(ChronoStateError::MetricIndexOutOfRange { index: *passion_id });
+            return Err(ChronoStateError::PassionIndexOutOfRange { index: *passion_id });
         }
         if registry.owner_of(*passion_id).is_none() {
             return Err(ChronoStateError::UnknownMicroPassion {
@@ -1902,7 +1592,7 @@ pub fn apply_passion_mutation(
     for (passion_id, change) in &op.micro_deltas {
         let passion_id = *passion_id;
         if passion_id as usize >= state.micro.len() {
-            return Err(ChronoStateError::MetricIndexOutOfRange { index: passion_id });
+            return Err(ChronoStateError::PassionIndexOutOfRange { index: passion_id });
         }
         if registry.owner_of(passion_id).is_none() {
             return Err(ChronoStateError::UnknownMicroPassion { passion_id });
@@ -1988,7 +1678,7 @@ pub fn apply_passion_mutation(
                     || micro.passion_id as usize >= state.active.len()
             })
         {
-            return Err(ChronoStateError::MetricIndexOutOfRange {
+            return Err(ChronoStateError::PassionIndexOutOfRange {
                 index: micro.passion_id,
             });
         }
@@ -2010,16 +1700,16 @@ pub fn apply_passion_mutation(
             total_weight += micro.weight;
         }
         if !weighted_sum.is_finite() || !total_weight.is_finite() {
-            return Err(ChronoStateError::MetricOverflow {
-                metric_id: npc.npc_id,
+            return Err(ChronoStateError::PassionOverflow {
+                passion_id: npc.npc_id,
                 value: weighted_sum,
             });
         }
         if total_weight > 0.0 {
             let raw = weighted_sum / total_weight + npc.trust_inertia;
             if !raw.is_finite() {
-                return Err(ChronoStateError::MetricOverflow {
-                    metric_id: npc.npc_id,
+                return Err(ChronoStateError::PassionOverflow {
+                    passion_id: npc.npc_id,
                     value: raw,
                 });
             }
@@ -2028,7 +1718,7 @@ pub fn apply_passion_mutation(
             let min = npc.macro_bounds.min.max(-100.0);
             let max = npc.macro_bounds.max.min(100.0);
             if min > max {
-                return Err(ChronoStateError::InvalidMetricBound { index: npc.npc_id });
+                return Err(ChronoStateError::InvalidPassionBound { index: npc.npc_id });
             }
             macro_plan.insert(npc.npc_id, raw.clamp(min, max));
         }
@@ -2113,12 +1803,12 @@ pub fn revert_passion_delta(
 ) -> Result<(), ChronoStateError> {
     for (passion_id, _) in &delta.micro_undos {
         if *passion_id as usize >= state.micro.len() {
-            return Err(ChronoStateError::MetricIndexOutOfRange { index: *passion_id });
+            return Err(ChronoStateError::PassionIndexOutOfRange { index: *passion_id });
         }
     }
     for (passion_id, _) in &delta.active_undos {
         if *passion_id as usize >= state.active.len() {
-            return Err(ChronoStateError::MetricIndexOutOfRange { index: *passion_id });
+            return Err(ChronoStateError::PassionIndexOutOfRange { index: *passion_id });
         }
     }
     for (npc_id, _) in &delta.macro_undos {
@@ -2146,15 +1836,15 @@ fn add_planned_passion_value(
     index: u16,
 ) -> Result<(), ChronoStateError> {
     if !change.is_finite() {
-        return Err(ChronoStateError::NonFiniteMetric {
-            metric_id: index,
+        return Err(ChronoStateError::NonFinitePassion {
+            passion_id: index,
             value: change,
         });
     }
     let next = base + change;
     if !next.is_finite() {
-        return Err(ChronoStateError::MetricOverflow {
-            metric_id: index,
+        return Err(ChronoStateError::PassionOverflow {
+            passion_id: index,
             value: next,
         });
     }
@@ -2179,17 +1869,17 @@ fn validate_star_npc(npc: &StarNpcDef) -> Result<(), ChronoStateError> {
         || npc.macro_bounds.max.is_nan()
         || npc.macro_bounds.min > npc.macro_bounds.max
     {
-        return Err(ChronoStateError::InvalidMetricBound { index: npc.npc_id });
+        return Err(ChronoStateError::InvalidPassionBound { index: npc.npc_id });
     }
     for micro in &npc.micro_passions {
-        if micro.passion_id as usize >= MAX_METRICS {
-            return Err(ChronoStateError::MetricIndexOutOfRange {
+        if micro.passion_id as usize >= MAX_PASSIONS {
+            return Err(ChronoStateError::PassionIndexOutOfRange {
                 index: micro.passion_id,
             });
         }
         if !micro.weight.is_finite() {
-            return Err(ChronoStateError::NonFiniteMetric {
-                metric_id: micro.passion_id,
+            return Err(ChronoStateError::NonFinitePassion {
+                passion_id: micro.passion_id,
                 value: micro.weight,
             });
         }
@@ -2201,8 +1891,8 @@ fn validate_star_npc(npc: &StarNpcDef) -> Result<(), ChronoStateError> {
             });
         }
         if !link.weight.is_finite() {
-            return Err(ChronoStateError::NonFiniteMetric {
-                metric_id: link.source_passion_id,
+            return Err(ChronoStateError::NonFinitePassion {
+                passion_id: link.source_passion_id,
                 value: link.weight,
             });
         }
@@ -2217,119 +1907,14 @@ fn validate_passion_threshold(rule: &PassionThresholdRule) -> Result<(), ChronoS
         });
     }
     if !rule.trigger_value.is_finite() {
-        return Err(ChronoStateError::NonFiniteMetric {
-            metric_id: rule.npc_id,
+        return Err(ChronoStateError::NonFinitePassion {
+            passion_id: rule.npc_id,
             value: rule.trigger_value,
         });
     }
     Ok(())
 }
 
-fn mark_membership(
-    state: &mut WorldStateTable,
-    delta: &mut BijectiveDelta,
-    entity_id: u16,
-    visited: bool,
-) -> Result<(), ChronoStateError> {
-    if entity_id as usize >= state.entity_tags.len() {
-        return Err(ChronoStateError::EntityIndexOutOfRange { index: entity_id });
-    }
-    let row = state.entity_tags[entity_id as usize];
-    let membership = if visited {
-        &mut state.visited_location_tags
-    } else {
-        &mut state.met_character_tags
-    };
-    let before_entity = membership.entity_mask;
-    let before_tags = membership.tag_mask;
-    membership.entity_mask.set_bit(entity_id)?;
-    membership.tag_mask.merge(&row);
-    let entity_xor = before_entity.xor_with(&membership.entity_mask);
-    let tag_xor = before_tags.xor_with(&membership.tag_mask);
-    if visited {
-        delta.visited_location_entity_xor = entity_xor;
-        delta.visited_location_xor = tag_xor;
-    } else {
-        delta.met_character_entity_xor = entity_xor;
-        delta.met_character_xor = tag_xor;
-    }
-    Ok(())
-}
-
-fn plan_metric_changes(
-    state: &WorldStateTable,
-    op: &MutationOp,
-    registry: &GameplayTagRegistry,
-) -> Result<BTreeMap<u16, f32>, ChronoStateError> {
-    let mut plan: BTreeMap<u16, f32> = BTreeMap::new();
-    for (metric_id, change) in &op.metric_deltas {
-        add_planned_metric(&mut plan, state, *metric_id, *change)?;
-        for link in registry.links_for(*metric_id) {
-            let contribution = change * link.weight;
-            if !contribution.is_finite() {
-                return Err(ChronoStateError::NonFiniteMetric {
-                    metric_id: link.target_metric_id,
-                    value: contribution,
-                });
-            }
-            add_planned_metric(&mut plan, state, link.target_metric_id, contribution)?;
-        }
-    }
-    Ok(plan)
-}
-
-fn add_planned_metric(
-    plan: &mut BTreeMap<u16, f32>,
-    state: &WorldStateTable,
-    metric_id: u16,
-    change: f32,
-) -> Result<(), ChronoStateError> {
-    if change.is_nan() || change.is_infinite() {
-        return Err(ChronoStateError::NonFiniteMetric {
-            metric_id,
-            value: change,
-        });
-    }
-    if metric_id as usize >= state.metrics.len() {
-        return Err(ChronoStateError::MetricIndexOutOfRange { index: metric_id });
-    }
-    let base = plan
-        .get(&metric_id)
-        .copied()
-        .unwrap_or(state.metrics[metric_id as usize]);
-    let next = base + change;
-    if !next.is_finite() {
-        return Err(ChronoStateError::MetricOverflow {
-            metric_id,
-            value: next,
-        });
-    }
-    let bound = state.metric_bounds[metric_id as usize];
-    if bound.min.is_nan() || bound.max.is_nan() || bound.min > bound.max {
-        return Err(ChronoStateError::InvalidMetricBound { index: metric_id });
-    }
-    plan.insert(metric_id, next.clamp(bound.min, bound.max));
-    Ok(())
-}
-
-fn validate_threshold_rules(
-    state: &WorldStateTable,
-    registry: &GameplayTagRegistry,
-) -> Result<(), ChronoStateError> {
-    for rule in registry.threshold_rules() {
-        if rule.metric_id as usize >= state.metrics.len() {
-            return Err(ChronoStateError::MetricIndexOutOfRange {
-                index: rule.metric_id,
-            });
-        }
-        if rule.threshold_tag_bit as usize >= MAX_TAGS {
-            return Err(ChronoStateError::TagIndexOutOfRange {
-                index: rule.threshold_tag_bit,
-            });
-        }
-    }
-    Ok(())
-}
 
 fn validate_entity_bounds(
     state: &WorldStateTable,
@@ -2337,22 +1922,13 @@ fn validate_entity_bounds(
 ) -> Result<(), ChronoStateError> {
     for item in &op.entity_tag_ops {
         if item.entity_id as usize >= state.entity_tags.len() {
-            return Err(ChronoStateError::EntityIndexOutOfRange {
-                index: item.entity_id,
-            });
+            return Err(ChronoStateError::EntityIndexOutOfRange { index: item.entity_id });
         }
     }
-    for entity_id in [op.move_player, op.visit_location, op.meet_character]
-        .into_iter()
-        .flatten()
-    {
+    if let Some(entity_id) = op.move_player {
         if entity_id as usize >= state.entity_tags.len() {
             return Err(ChronoStateError::EntityIndexOutOfRange { index: entity_id });
         }
-    }
-    // A move target must be a location vertex; a missing or non-location vertex
-    // is rejected before anything mutates.
-    if let Some(entity_id) = op.move_player {
         let vertex = state
             .vertex_for_entity(entity_id)
             .ok_or_else(|| ChronoStateError::EntityVertexMissing { index: entity_id })?;
@@ -2474,17 +2050,17 @@ pub enum ChronoStateError {
     TagLimitExceeded {
         count: usize,
     },
-    EmptyMetricName,
-    InvalidMetricName {
+    EmptyPassionName,
+    InvalidPassionName {
         name: String,
     },
-    DuplicateMetricName {
+    DuplicatePassionName {
         name: String,
     },
-    MetricLimitExceeded {
+    PassionLimitExceeded {
         count: usize,
     },
-    InvalidMetricBound {
+    InvalidPassionBound {
         index: u16,
     },
     EntityVertexMissing {
@@ -2497,30 +2073,30 @@ pub enum ChronoStateError {
     TagIndexOutOfRange {
         index: u16,
     },
-    MetricIndexOutOfRange {
+    PassionIndexOutOfRange {
         index: u16,
     },
     EntityIndexOutOfRange {
         index: u16,
     },
-    NonFiniteMetric {
-        metric_id: u16,
+    NonFinitePassion {
+        passion_id: u16,
         value: f32,
     },
-    MetricOverflow {
-        metric_id: u16,
+    PassionOverflow {
+        passion_id: u16,
         value: f32,
     },
     InvalidHysteresis {
-        metric_id: u16,
+        passion_id: u16,
         value: f32,
     },
     DuplicateCouplingLink {
-        source_metric_id: u16,
-        target_metric_id: u16,
+        source_passion_id: u16,
+        target_passion_id: u16,
     },
     DuplicateThresholdRule {
-        metric_id: u16,
+        passion_id: u16,
         threshold_tag_bit: u16,
     },
     EmptyVertexId,
@@ -2547,6 +2123,10 @@ pub enum ChronoStateError {
         key: String,
         value: f64,
     },
+    AttributeTypeMismatch {
+        key: String,
+    },
+    InvalidAttributeOperation,
     PatternIndexOutOfRange {
         index: usize,
     },
@@ -2590,22 +2170,22 @@ impl fmt::Display for ChronoStateError {
                 formatter,
                 "{count} tags exceed the {MAX_TAGS} tag bitset capacity"
             ),
-            Self::EmptyMetricName => write!(formatter, "metric name must not be empty"),
-            Self::InvalidMetricName { name } => {
+            Self::EmptyPassionName => write!(formatter, "passion name must not be empty"),
+            Self::InvalidPassionName { name } => {
                 write!(
                     formatter,
-                    "metric name '{name}' is not a valid hierarchical name"
+                    "passion name '{name}' is not a valid hierarchical name"
                 )
             }
-            Self::DuplicateMetricName { name } => {
-                write!(formatter, "metric name '{name}' is duplicated")
+            Self::DuplicatePassionName { name } => {
+                write!(formatter, "passion name '{name}' is duplicated")
             }
-            Self::MetricLimitExceeded { count } => write!(
+            Self::PassionLimitExceeded { count } => write!(
                 formatter,
-                "{count} metric names exceed the {MAX_METRICS} metric array capacity"
+                "{count} passion names exceed the {MAX_PASSIONS} passion array capacity"
             ),
-            Self::InvalidMetricBound { index } => {
-                write!(formatter, "metric {index} has an invalid clamping bound")
+            Self::InvalidPassionBound { index } => {
+                write!(formatter, "passion {index} has an invalid clamping bound")
             }
             Self::EntityVertexMissing { index } => {
                 write!(formatter, "entity {index} has no world graph vertex")
@@ -2619,10 +2199,10 @@ impl fmt::Display for ChronoStateError {
             Self::TagIndexOutOfRange { index } => {
                 write!(formatter, "tag index {index} is outside the bitset")
             }
-            Self::MetricIndexOutOfRange { index } => {
+            Self::PassionIndexOutOfRange { index } => {
                 write!(
                     formatter,
-                    "metric index {index} is outside the metric array"
+                    "passion index {index} is outside the passion array"
                 )
             }
             Self::EntityIndexOutOfRange { index } => {
@@ -2631,37 +2211,37 @@ impl fmt::Display for ChronoStateError {
                     "entity index {index} is outside the entity table"
                 )
             }
-            Self::NonFiniteMetric { metric_id, value } => {
+            Self::NonFinitePassion { passion_id, value } => {
                 write!(
                     formatter,
-                    "metric {metric_id} change must be finite, got {value}"
+                    "passion {passion_id} change must be finite, got {value}"
                 )
             }
-            Self::MetricOverflow { metric_id, value } => {
-                write!(formatter, "metric {metric_id} would overflow to {value}")
+            Self::PassionOverflow { passion_id, value } => {
+                write!(formatter, "passion {passion_id} would overflow to {value}")
             }
             Self::InvalidHysteresis {
-                metric_id,
+                passion_id,
                 value,
             } => {
                 write!(
                     formatter,
-                    "hysteresis for metric {metric_id} must be a non-negative finite value, got {value}"
+                    "hysteresis for passion {passion_id} must be a non-negative finite value, got {value}"
                 )
             }
             Self::DuplicateCouplingLink {
-                source_metric_id,
-                target_metric_id,
+                source_passion_id,
+                target_passion_id,
             } => write!(
                 formatter,
-                "coupling link {source_metric_id} -> {target_metric_id} is duplicated"
+                "coupling link {source_passion_id} -> {target_passion_id} is duplicated"
             ),
             Self::DuplicateThresholdRule {
-                metric_id,
+                passion_id,
                 threshold_tag_bit,
             } => write!(
                 formatter,
-                "threshold rule for metric {metric_id} on tag bit {threshold_tag_bit} is duplicated"
+                "threshold rule for passion {passion_id} on tag bit {threshold_tag_bit} is duplicated"
             ),
             Self::EmptyVertexId => write!(formatter, "vertex id must not be empty"),
             Self::EmptyEdgeId => write!(formatter, "edge id must not be empty"),
@@ -2692,6 +2272,8 @@ impl fmt::Display for ChronoStateError {
                     "attribute '{key}' on vertex '{vertex_id}' must be finite, got {value}"
                 )
             }
+            Self::AttributeTypeMismatch { key } => write!(formatter, "attribute '{key}' has an incompatible type"),
+            Self::InvalidAttributeOperation => write!(formatter, "invalid attribute operation"),
             Self::PatternIndexOutOfRange { index } => {
                 write!(formatter, "graph pattern index {index} is out of range")
             }
@@ -2752,43 +2334,6 @@ mod tests {
         registry.id(name).expect("tag must be compiled")
     }
 
-    #[test]
-    fn registries_are_deterministic_and_separate() {
-        let tags = GameplayTagRegistry::compile(names(&["A", "B", "Quality.Courage"])).unwrap();
-        let shuffled = GameplayTagRegistry::compile(names(&["Quality.Courage", "B", "A"])).unwrap();
-        assert_eq!(tags, shuffled);
-        assert_eq!(tags.id("A"), Some(0));
-        assert_eq!(tags.id("Quality.Courage"), Some(2));
-
-        let metrics = MetricRegistry::compile(names(&["Quality.Courage"])).unwrap();
-        assert_eq!(
-            metrics,
-            MetricRegistry::compile(names(&["Quality.Courage"])).unwrap()
-        );
-        assert_eq!(metrics.id("Quality.Courage"), Some(0));
-        assert_eq!(metrics.count(), 1);
-        assert_eq!(metrics.name(0), Some("Quality.Courage"));
-
-        // The two index spaces never cross: a name registered in one is absent
-        // from the other.
-        assert_eq!(metrics.id("A"), None);
-        assert_eq!(tags.id("Passion.Anxiety"), None);
-        assert_eq!(tags.tag(2), Some("Quality.Courage"));
-
-        // Writing metric index 0 does not touch tag bit 2.
-        let mut state = WorldStateTable::with_capacity(1, 4);
-        let delta = apply_mutation(
-            &mut state,
-            &MutationOp {
-                metric_deltas: vec![(0, 5.0)],
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(state.metrics[0], 5.0);
-        assert!(!state.global_tags.bit(2));
-        assert_eq!(delta.global_xor_mask, TagBitset::new());
-    }
 
     #[test]
     fn move_player_updates_actor_presence_and_reverts_exactly() {
@@ -2800,7 +2345,7 @@ mod tests {
         ]))
         .unwrap();
 
-        let mut state = WorldStateTable::with_capacity(3, 8);
+        let mut state = WorldStateTable::with_capacity(3);
         state.entity_tags[0]
             .set_bit(tag_bit(&registry, "location.start"))
             .unwrap();
@@ -2854,13 +2399,6 @@ mod tests {
 
         assert_eq!(state.current_location_entity, Some(1));
         assert!(state.entity_tags[2].bit(tag_bit(&registry, "location.current")));
-        assert!(state.visited_location_tags.entity_mask.bit(1));
-        assert!(
-            state
-                .visited_location_tags
-                .tag_mask
-                .bit(tag_bit(&registry, "location.cave"))
-        );
         assert!(!state.global_tags.bit(tag_bit(&registry, "location.start")));
         assert!(state.global_tags.bit(tag_bit(&registry, "role.trickster")));
         assert!(
@@ -2892,89 +2430,7 @@ mod tests {
         assert_eq!(state, before);
     }
 
-    #[test]
-    fn met_character_entity_and_tag_masks_revert_exactly() {
-        let registry =
-            GameplayTagRegistry::compile(names(&["qbn.opening", "role.trickster"])).unwrap();
-        let mut state = WorldStateTable::with_capacity(2, 4);
-        state.entity_tags[1]
-            .set_bit(tag_bit(&registry, "role.trickster"))
-            .unwrap();
-        let before = state.clone();
 
-        let op = MutationOp {
-            add_global_tags: TagBitset::from_words([1, 0, 0, 0]),
-            meet_character: Some(1),
-            ..Default::default()
-        };
-        let delta = apply_mutation_with_registry(&mut state, &op, &registry).unwrap();
-
-        assert!(state.met_character_tags.entity_mask.bit(1));
-        assert!(
-            state
-                .met_character_tags
-                .tag_mask
-                .bit(tag_bit(&registry, "role.trickster"))
-        );
-        assert!(delta.met_character_entity_xor.bit(1));
-        assert!(delta.met_character_xor.bit(1));
-
-        revert_delta(&mut state, &delta).unwrap();
-        assert_eq!(state, before);
-        assert_eq!(
-            serde_json::to_string(&state).unwrap(),
-            serde_json::to_string(&before).unwrap()
-        );
-    }
-
-    #[test]
-    fn metric_bounds_clamp_coupled_writes_and_undo_exactly() {
-        let registry = GameplayTagRegistry::empty()
-            .with_coupling_links([ZeroSumLink {
-                source_metric_id: 0,
-                target_metric_id: 1,
-                weight: 0.5,
-            }])
-            .unwrap();
-
-        let mut state = WorldStateTable::with_capacity(1, 2);
-        state.set_metric_bound(0, 0.0, 10.0).unwrap();
-        state.set_metric_bound(1, -5.0, 5.0).unwrap();
-        state.metrics[0] = 8.0;
-        let before = state.clone();
-
-        let delta = apply_mutation_with_registry(
-            &mut state,
-            &MutationOp {
-                metric_deltas: vec![(0, 20.0)],
-                ..Default::default()
-            },
-            &registry,
-        )
-        .unwrap();
-        assert_eq!(state.metrics[0], 10.0);
-        assert_eq!(state.metrics[1], 5.0);
-        assert_eq!(
-            delta.metric_undos,
-            vec![
-                MetricUndoPair {
-                    metric_id: 0,
-                    old_value: 8.0
-                },
-                MetricUndoPair {
-                    metric_id: 1,
-                    old_value: 0.0
-                }
-            ]
-        );
-
-        revert_delta(&mut state, &delta).unwrap();
-        assert_eq!(state, before);
-        assert_eq!(
-            state.set_metric_bound(0, 10.0, 0.0),
-            Err(ChronoStateError::InvalidMetricBound { index: 0 })
-        );
-    }
 
     #[test]
     fn deterministic_roundtrip_restores_exact_state() {
@@ -2986,22 +2442,9 @@ mod tests {
             "loc.4",
             "location.current",
         ]))
-        .unwrap()
-        .with_coupling_links([ZeroSumLink {
-            source_metric_id: 0,
-            target_metric_id: 1,
-            weight: 0.5,
-        }])
-        .unwrap()
-        .with_threshold_rules([MetricThresholdRule {
-            metric_id: 1,
-            threshold_tag_bit: 0,
-            trigger_value: 3.0,
-            hysteresis: 1.0,
-        }])
         .unwrap();
 
-        let mut state = WorldStateTable::with_capacity(5, 8);
+        let mut state = WorldStateTable::with_capacity(5);
         state.vertices.push(WorldVertex {
             vertex_id: "actor".to_string(),
             layer: GraphLayer::Character,
@@ -3025,7 +2468,6 @@ mod tests {
                 weight: 0.0,
             });
         }
-        state.set_metric_bound(0, -10.0, 10.0).unwrap();
         let original = state.clone();
 
         let ops: Vec<MutationOp> = (0..500)
@@ -3035,7 +2477,6 @@ mod tests {
                 let entity = (step % 5) as u16;
                 MutationOp {
                     add_global_tags: mask,
-                    metric_deltas: vec![(0, 0.25), (1, -0.5)],
                     entity_tag_ops: vec![EntityTagMutation {
                         entity_id: entity,
                         add_tags: mask,
@@ -3095,7 +2536,7 @@ mod tests {
                             is_hidden: true,
                         },
                     ],
-                    macro_bounds: MetricBound {
+                    macro_bounds: PassionBounds {
                         min: -100.0,
                         max: 100.0,
                     },
@@ -3115,7 +2556,7 @@ mod tests {
                         weight: 1.0,
                         is_hidden: false,
                     }],
-                    macro_bounds: MetricBound {
+                    macro_bounds: PassionBounds {
                         min: -100.0,
                         max: 100.0,
                     },

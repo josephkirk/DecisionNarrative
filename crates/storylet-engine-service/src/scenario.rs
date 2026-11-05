@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::contracts::{
-    CharacterRecord, LocationRecord, QualityRecord, ResolvedScenarioStart, ScenarioRecord,
+    CharacterRecord, LocationRecord, ResolvedScenarioStart, ScenarioRecord,
     StartLocationPolicy,
 };
 
@@ -127,11 +127,6 @@ pub fn get_character_attribute(char: &CharacterRecord, key: &str) -> Option<Valu
     if let Some(ref schedule) = char.schedule {
         if let Some(val) = schedule.get(trimmed) {
             return Some(Value::String(val.clone()));
-        }
-    }
-    if let Some(ref qualities) = char.qualities {
-        if let Some(val) = qualities.get(trimmed) {
-            return Some(val.clone());
         }
     }
     crate::entities::attribute_path(&char.attributes, trimmed)
@@ -338,7 +333,6 @@ pub fn resolve_actor_population(
 
 pub fn resolve_scenario_start(
     scenario: &ScenarioRecord,
-    qualities: &[QualityRecord],
     locations: &[LocationRecord],
     characters: &[CharacterRecord],
 ) -> ResolvedScenarioStart {
@@ -368,14 +362,8 @@ pub fn resolve_scenario_start(
         "scenario.actor_population",
     );
 
-    // Effective qualities: default values from qualities, overridden by initial_qualities
-    let mut effective_qualities = BTreeMap::new();
-    for q in qualities {
-        effective_qualities.insert(q.name.clone(), Value::from(q.value));
-    }
-    for (k, v) in &scenario.initial_qualities {
-        effective_qualities.insert(k.clone(), v.clone());
-    }
+    // Preserve authored typed property overrides; defaults are resolved by the runtime entity store.
+    let effective_properties = scenario.initial_properties.clone();
 
     // Actors per location
     let mut actors_per_location: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -393,7 +381,7 @@ pub fn resolve_scenario_start(
         player_start_location,
         actor_locations,
         active_actor_ids,
-        effective_qualities,
+        effective_properties,
         seed,
         actors_per_location,
         issues,

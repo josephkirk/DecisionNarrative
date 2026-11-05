@@ -18,7 +18,7 @@ pub struct ActorState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FactRef {
-    Quality {
+    Property {
         key: String,
     },
     CurrentLocation,
@@ -67,34 +67,13 @@ pub struct PredicateSet {
     pub any_of: Vec<Predicate>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum VisitedLocationRequirement {
-    LocationId { location_id: String },
-    LocationTag { tag: String },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum MetCharacterRequirement {
-    CharacterId { character_id: String },
-    RoleTag { role: String },
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoryletPreconditions {
-    #[serde(default)]
-    pub visited_locations_any_of: Vec<VisitedLocationRequirement>,
-    #[serde(default)]
-    pub met_characters_any_of: Vec<MetCharacterRequirement>,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleRequirement {
     pub role: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SceneContent {
     pub opening: String,
 }
@@ -115,12 +94,13 @@ pub struct StoryletChoice {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ClusterType {
-    Linear,
-    PlayerControlledPassage,
-    Wheel,
-    Aftermath,
+pub enum StoryletClusterType {
+    LinearProgression,
+    PlayerPassage,
+    WheelDeck,
+    AftermathAccelerator,
 }
+
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -143,13 +123,12 @@ pub struct StoryletDefinition {
     #[serde(default)]
     pub location_tags: BTreeSet<String>,
     pub urgency_weight: f64,
-    pub cluster_type: ClusterType,
+    pub cluster_type: StoryletClusterType,
     pub repeatability: Repeatability,
     #[serde(default)]
     pub required_roles: Vec<RoleRequirement>,
     pub trigger: PredicateSet,
     #[serde(default)]
-    pub preconditions: StoryletPreconditions,
     pub content: SceneContent,
     #[serde(default)]
     pub choices: Vec<StoryletChoice>,
@@ -184,8 +163,6 @@ pub enum CandidateRejection {
     NotApproved,
     InvalidDefinition,
     WrongLocation,
-    VisitedLocationRequirementNotMet,
-    MetCharacterRequirementNotMet,
     TriggerFailed { predicate_index: usize },
     MissingRole { role: String },
     RoleUnavailable { role: String },
@@ -305,7 +282,7 @@ fn evaluate_one(
         let current_tags = world
             .current_location
             .as_ref()
-            .and_then(|location| world.location_tags.get(location));
+            .and_then(|location| world.entity_tags.get(location));
         if !current_tags.is_some_and(|tags| {
             tags.iter()
                 .any(|tag| definition.location_tags.contains(tag))
@@ -399,73 +376,6 @@ fn evaluate_one(
             .insert(requirement.role.clone(), actor_id.clone());
     }
 
-    let has_visited_location = |location_id: &str| {
-        world.visited_locations.contains(location_id)
-            || world.current_location.as_deref() == Some(location_id)
-    };
-    if !definition.preconditions.visited_locations_any_of.is_empty() {
-        let matched = definition
-            .preconditions
-            .visited_locations_any_of
-            .iter()
-            .any(|requirement| match requirement {
-                VisitedLocationRequirement::LocationId { location_id } => {
-                    has_visited_location(location_id)
-                }
-                VisitedLocationRequirement::LocationTag { tag } => {
-                    let was_here = |location_id: &str| {
-                        world
-                            .location_tags
-                            .get(location_id)
-                            .is_some_and(|tags| tags.contains(tag))
-                    };
-                    world
-                        .visited_locations
-                        .iter()
-                        .any(|location_id| was_here(location_id))
-                        || world.current_location.as_deref().is_some_and(was_here)
-                }
-            });
-        if !matched {
-            reject(
-                &mut result,
-                CandidateRejection::VisitedLocationRequirementNotMet,
-            );
-            return result;
-        }
-    }
-    if !definition.preconditions.met_characters_any_of.is_empty() {
-        let character_is_met = |character_id: &str| {
-            world.met_characters.contains(character_id)
-                || world.current_location.as_ref().is_some_and(|location_id| {
-                    world
-                        .actors
-                        .get(character_id)
-                        .is_some_and(|actor| &actor.current_location == location_id)
-                })
-        };
-        let matched = definition
-            .preconditions
-            .met_characters_any_of
-            .iter()
-            .any(|requirement| match requirement {
-                MetCharacterRequirement::CharacterId { character_id } => {
-                    character_is_met(character_id)
-                }
-                MetCharacterRequirement::RoleTag { role } => {
-                    world.actors.iter().any(|(character_id, actor)| {
-                        actor.role_tags.contains(role) && character_is_met(character_id)
-                    })
-                }
-            });
-        if !matched {
-            reject(
-                &mut result,
-                CandidateRejection::MetCharacterRequirementNotMet,
-            );
-            return result;
-        }
-    }
 
     let mut match_count = 0;
     for (index, predicate) in definition.trigger.all_of.iter().enumerate() {
@@ -506,10 +416,10 @@ fn evaluate_one(
         0.0
     };
     let tension_delta: f64 = match definition.cluster_type {
-        ClusterType::Aftermath => 0.25,
-        ClusterType::Linear => 0.15,
-        ClusterType::PlayerControlledPassage => -0.05,
-        ClusterType::Wheel => 0.05,
+        StoryletClusterType::AftermathAccelerator => 0.25,
+        StoryletClusterType::LinearProgression => 0.15,
+        StoryletClusterType::PlayerPassage => -0.05,
+        StoryletClusterType::WheelDeck => 0.05,
     };
     let slope = if target_tension_slope.is_finite() {
         target_tension_slope
@@ -527,7 +437,7 @@ fn evaluate_one(
 
 pub(crate) fn predicate_matches(predicate: &Predicate, world: &WorldState) -> bool {
     let actual = match &predicate.fact {
-        FactRef::Quality { key } => world.qualities.get(key).cloned(),
+        FactRef::Property { key } => world.properties.get(key).cloned(),
         FactRef::CurrentLocation => world
             .current_location
             .as_ref()

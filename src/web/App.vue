@@ -14,10 +14,6 @@ watch(() => route.fullPath, () => { interactionFocus.value = null; });
 const interactionContext = computed(() => buildInteractionContext({
   route: { name: route.name, path: route.path, fullPath: route.fullPath, params: route.params, query: route.query },
   project: studioState.project,
-  activePlaytestSessionId: studioState.activePlaytestSessionId,
-  activeChronoPlaytestSessionId: studioState.activeChronoPlaytestSessionId,
-  activeChronoPlaytestSnapshot: studioState.activeChronoPlaytestSnapshot,
-  activePlaytestSnapshot: studioState.activePlaytestSnapshot,
   focus: interactionFocus.value,
 }));
 function setInteractionFocus(focus: InteractionFocus | null) {
@@ -44,6 +40,7 @@ watch(interactionContext, (context) => {
 const TREE_WIDTH_KEY = "dn.studio.treeWidth";
 const treeWidth = ref(readTreeWidth());
 const resizing = ref(false);
+const isTreeCollapsed = ref(false);
 
 function readTreeWidth(): number {
   try {
@@ -97,11 +94,23 @@ onMounted(async () => {
 <template>
   <div class="studio-root">
     <header class="studio-toolbar">
+      <button
+        type="button"
+        class="sidebar-toggle-btn"
+        :aria-label="isTreeCollapsed ? 'Expand project tree' : 'Collapse project tree'"
+        :title="isTreeCollapsed ? 'Expand project tree' : 'Collapse project tree'"
+        @click="isTreeCollapsed = !isTreeCollapsed"
+      >
+        <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <line x1="9" y1="3" x2="9" y2="21"/>
+        </svg>
+      </button>
+
       <div class="studio-toolbar__brand">
         <span class="studio-toolbar__title">DecisionNarrative</span>
         <span class="studio-toolbar__subtitle">Storylet Studio</span>
       </div>
-
       <nav class="studio-toolbar__nav">
         <router-link
           v-for="item in NAVIGATION_ITEMS"
@@ -119,10 +128,15 @@ onMounted(async () => {
     </header>
 
     <div class="studio-body">
-      <aside class="project-tree-panel" :style="{ width: `${treeWidth}px` }">
+      <aside
+        :class="['project-tree-panel', isTreeCollapsed && 'is-collapsed']"
+        :style="{ width: isTreeCollapsed ? '0px' : `${treeWidth}px` }"
+        :aria-hidden="isTreeCollapsed"
+      >
         <ProjectTree />
       </aside>
       <div
+        v-if="!isTreeCollapsed"
         class="project-tree-resizer"
         role="separator"
         aria-orientation="vertical"
@@ -136,6 +150,8 @@ onMounted(async () => {
         <div
           v-if="studioState.notification"
           :class="['notification-toast', studioState.notification.type]"
+          :role="studioState.notification.type === 'error' ? 'alert' : 'status'"
+          aria-live="polite"
         >
           <span>{{ studioState.notification.message }}</span>
         </div>

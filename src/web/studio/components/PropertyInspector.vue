@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
-import type { NarrativeNode, NarrativeGraph, DialogueSection, DialogueItem, LocalVariableDefinition, GraphLayer, AttributeOp, AttributeValueType, AttributeValue, GraphBinding, VertexPattern } from "../narrativeGraphTypes.ts";
-import { applyJumpPreconditions, isGraphTransformNode, isPassionMutationNode } from "../narrativeGraphTypes.ts";
-import type { ChronoQualityPredicate, MetCharacterPrecondition, QualityCondition, StoryletRecord, VisitedLocationPrecondition } from "../contracts.ts";
+import { ref, computed, watch } from "vue";
+import type { NarrativeNode, NarrativeGraph, DialogueSection, DialogueItem, GraphLayer, AttributeOp, AttributeValueType, AttributeValue, GraphBinding, VertexPattern } from "../narrativeGraphTypes.ts";
+import { applyCommandOperationsForType, isGraphTransformNode, isPassionMutationNode } from "../narrativeGraphTypes.ts";
+import type { EntityProperty, PropertyType, StoryletRecord } from "../contracts.ts";
 import TagEditor from "./TagEditor.vue";
+import ThumbnailPicker from "./ThumbnailPicker.vue";
 import { normalizeTagName, uniqueTagNames, buildTagIndex } from "../tagData.ts";
 import { studioState, notify } from "../state.ts";
-
 const props = defineProps<{
   storylet: StoryletRecord;
   graph: NarrativeGraph;
+  graphMode?: "story" | "preconditions";
   selectedNode: NarrativeNode | null;
   storylets: StoryletRecord[];
 }>();
@@ -30,31 +31,160 @@ function emitGraphUpdate(node: NarrativeNode | null = props.selectedNode) {
   emit("update-graph", graph);
 }
 
-// Available roles in storylet + default Narrator and Player
-const availableRoles = computed(() => {
-  const roles = props.storylet.parameters.map((p) => p.param_name);
-  if (!roles.includes("Narrator")) roles.unshift("Narrator");
-  return roles;
-});
+function eventValue(event: Event): string {
+  return (event.target as HTMLInputElement | HTMLSelectElement).value;
+}
+
+// Registered role choices; player remains the runtime actor sentinel.
+const availableRoles = computed(() => uniqueTagNames([
+  ...roleTagOptions.value,
+  ...props.storylet.parameters.map((p) => p.param_name),
+]));
 
 const tagIndex = computed(() => buildTagIndex({
-  characters: studioState.characters,
-  locations: studioState.locations,
+  gameplayTags: studioState.gameplayTags,
+  entities: studioState.entities,
+  entityTemplates: studioState.entityTemplates,
+  traitTemplates: studioState.traitTemplates,
   storylets: [...props.storylets.filter((storylet) => storylet.id !== props.storylet.id), { ...props.storylet, graph: props.graph }],
 }));
-const roleTagOptions = computed(() => uniqueTagNames([
-  "Narrator",
-  ...studioState.characters.map((character) => character.role),
-  ...props.storylet.parameters.map((parameter) => parameter.param_name),
-  ...tagIndex.value.filter((tag) => tag.kind === "role").map((tag) => tag.name),
-]));
+
+const runtimeEntityOptions = computed(() => [
+  ...studioState.entities.map((entity) => ({ path: entity.id, label: `${entity.name} (${entity.root_tag})` })),
+  ...studioState.entityTemplates.map((entity) => ({ path: entity.id, label: `${entity.name} (${entity.root_tag})` })),
+]);
+type GraphPropertyType = Exclude<PropertyType, "json" | "storylet" | "tag">;
+type GraphPropertyOption = { key: string; name: string; type: GraphPropertyType };
+function isGraphProperty(property: EntityProperty): property is EntityProperty & { type: GraphPropertyType } {
+  return property.type !== "json" && property.type !== "storylet" && property.type !== "tag";
+}
+
+function entityForPath(path: string | undefined) {
+  if (!path) return undefined;
+  const normalized = path.trim();
+  return studioState.entities.find((entity) => entity.id === normalized) ?? studioState.entityTemplates.find((entity) => entity.id === normalized);
+}
+
+function incomingEntityNode(node: NarrativeNode): NarrativeNode | undefined {
+  const edge = props.graph.edges.find((candidate) =>
+    candidate.kind === "data" && candidate.to_node === node.id &&
+    (candidate.to_port === "entity" || candidate.to_port === "target" || candidate.to_port === "input"),
+  );
+  return edge ? props.graph.nodes.find((candidate) => candidate.id === edge.from_node) : undefined;
+}
+
+function propertiesForEntitySource(node: NarrativeNode): EntityProperty[] {
+  const source = incomingEntityNode(node);
+  if (!source) return [];
+  if (source.type === "get_entity") return source.entity_path ? entityForPath(source.entity_path)?.properties ?? [] : [];
+  if (source.type === "get_entity_property" && source.value_type === "entity") {
+    const sourceEntityNode = incomingEntityNode(source);
+    const sourceEntity = sourceEntityNode?.type === "get_entity"
+      ? entityForPath(sourceEntityNode.entity_path)
+      : undefined;
+    const reference = sourceEntity?.properties.find((property) =>
+      property.key === source.property_key && property.type === "entity" && !property.is_array,
+    );
+    if (!reference) return [];
+    const entities = studioState.entityTemplates;
+    if (!entities.length) return [];
+    const common = new Map(
+      (entities[0]?.properties ?? [])
+        .filter((property) => !property.is_array)
+        .map((property) => [property.key, property]),
+    );
+    for (const entity of entities.slice(1)) {
+      for (const key of [...common.keys()]) {
+        const property = entity.properties.find((candidate) =>
+          key === candidate.key && !candidate.is_array && candidate.type === common.get(key)?.type,
+        );
+        if (!property) common.delete(key);
+      }
+    }
+    return [...common.values()];
+  }
+  return [];
+}
+
+const entityPropertyOptions = computed<GraphPropertyOption[]>(() => {
+  if (!props.selectedNode || !["get_entity_property", "apply_command"].includes(props.selectedNode.type)) return [];
+  const seen = new Set<string>();
+  return propertiesForEntitySource(props.selectedNode)
+    .filter(isGraphProperty)
+    .filter((property) => !property.is_array && !seen.has(property.key) && seen.add(property.key))
+    .map((property) => ({ key: property.key, name: property.name || property.key, type: property.type }));
+});
+
+const entityPropertyUnavailableReason = computed(() => {
+  const node = props.selectedNode;
+  if (!node || !["get_entity_property", "apply_command"].includes(node.type) || entityPropertyOptions.value.length) return "";
+  const source = incomingEntityNode(node);
+  if (!source) return "Connect an Entity source to choose a property.";
+  if (source.type === "get_entity") {
+    const path = source.entity_path?.trim();
+    if (!path) return "Select an Entity in the connected Get Entity node first.";
+    const entity = entityForPath(path);
+    if (!entity) return `Connected Entity "${path}" is not loaded in this workspace.`;
+    if (!entity.properties.some((property) => !property.is_array)) {
+      return `Connected Entity Template "${entity.name}" has no scalar custom properties. Add one under Entity Templates → ${entity.name} → Properties.`;
+    }
+  }
+  if (source.type === "get_entity_property" && source.value_type === "entity") {
+    return "The connected Entity reference has no scalar property shared by all possible targets.";
+  }
+  return "The connected source has no compatible scalar Entity property schema.";
+});
+
+function selectEntityProperty(node: NarrativeNode, key: string) {
+  const property = entityPropertyOptions.value.find((option) => option.key === key);
+  node.property_key = property?.key ?? "";
+  node.value_type = property?.type;
+  node.value = property?.type === "bool"
+    ? false
+    : property?.type === "int" || property?.type === "float"
+      ? 0
+      : "";
+  if (node.type === "apply_command") {
+    const operation = node.operation;
+    const validOperation = property?.type === "bool"
+      ? operation === "set" || operation === "toggle"
+      : property?.type === "int" || property?.type === "float"
+        ? operation === "set" || operation === "add" || operation === "subtract"
+        : operation === "set";
+    if (!validOperation) node.operation = "set";
+  }
+  emitGraphUpdate(node);
+}
+const applyCommandOperations = computed(() => {
+  const type = props.selectedNode?.type === "apply_command"
+    ? props.selectedNode.value_type
+    : undefined;
+  return applyCommandOperationsForType(type);
+});
+
+watch(
+  () => [props.selectedNode?.type, props.selectedNode?.value_type] as const,
+  () => {
+    const node = props.selectedNode;
+    if (!node || node.type !== "apply_command") return;
+    const valid = applyCommandOperations.value.some((option) => option.value === node.operation);
+    if (!valid) {
+      node.operation = "set";
+      emitGraphUpdate(node);
+    }
+  },
+);
+const catalogTagNames = computed(() => uniqueTagNames(studioState.gameplayTags.map((tag) => tag.name)));
+const roleTagOptions = computed(() => catalogTagNames.value.filter((name) => name.startsWith("character.")));
 const targetRoles = computed(() => uniqueTagNames(["player", ...roleTagOptions.value]));
-const emotionTagOptions = computed(() => tagIndex.value.filter((tag) => tag.kind === "emotion").map((tag) => tag.name));
-const actionTagOptions = computed(() => tagIndex.value.filter((tag) => tag.kind === "action").map((tag) => tag.name));
-const locationTagOptions = computed(() => uniqueTagNames([
-  ...studioState.locations.flatMap((location) => location.tags ?? []),
-  ...tagIndex.value.filter((tag) => tag.kind === "location").map((tag) => tag.name),
-]));
+const emotionTagOptions = computed(() => catalogTagNames.value.filter((name) => name === "emotion" || name.startsWith("emotion.")));
+const actionTagOptions = computed(() => catalogTagNames.value.filter((name) => name === "action" || name.startsWith("action.")));
+const locationTagOptions = computed(() => catalogTagNames.value.filter((name) => name === "location" || name.startsWith("location.")));
+const targetGameplayTagOptions = computed(() => {
+  const target = studioState.entityTemplates.find((entity) => entity.id === props.selectedNode?.target_entity_id);
+  const root = target?.root_tag;
+  return catalogTagNames.value.filter((name) => !root || name === root || name.startsWith(`${root}.`));
+});
 const requiredRoleNames = computed({
   get: () => uniqueTagNames(props.storylet.parameters.map((parameter) => parameter.param_name)),
   set: (values: string[]) => {
@@ -68,224 +198,8 @@ const locationTags = computed({
   get: () => uniqueTagNames(props.storylet.location_tags ?? []),
   set: (values: string[]) => { props.storylet.location_tags = uniqueTagNames(values); emit("update-storylet"); },
 });
-const chronoUrgencyColorTag = computed({
-  get: () => props.storylet.chrono?.urgency_color_tag ?? "Standard",
-  set: (value: string) => {
-    ensureChrono().urgency_color_tag = normalizeTagName(value);
-    emit("update-storylet");
-  },
-});
-function ensureChrono() {
-  if (!props.storylet.chrono) props.storylet.chrono = {
-    display_priority: 0,
-    urgency_color_tag: "Standard",
-    is_repeatable: props.storylet.repeatability !== "once_ever",
-    cooldown_ms: 0,
-    preconditions: [],
-    required_tags: [],
-    required_any_tags: [],
-    forbidden_tags: [],
-    required_arc_phases: [],
-    ideal_state_vector: {},
-    ideal_state_weights: {},
-    salience_bonus_tags: [],
-    effects_on_complete: [],
-  };
-  return props.storylet.chrono;
-}
-const chronoArcPhases = computed({
-  get: () => uniqueTagNames(props.storylet.chrono?.required_arc_phases ?? []),
-  set: (values: string[]) => { ensureChrono().required_arc_phases = uniqueTagNames(values); emit("update-storylet"); },
-});
-const chronoRequiredTags = computed({
-  get: () => uniqueTagNames(props.storylet.chrono?.required_tags ?? []),
-  set: (values: string[]) => { ensureChrono().required_tags = uniqueTagNames(values); emit("update-storylet"); },
-});
-const chronoRequiredAnyTags = computed({
-  get: () => uniqueTagNames(props.storylet.chrono?.required_any_tags ?? []),
-  set: (values: string[]) => { ensureChrono().required_any_tags = uniqueTagNames(values); emit("update-storylet"); },
-});
-const chronoForbiddenTags = computed({
-  get: () => uniqueTagNames(props.storylet.chrono?.forbidden_tags ?? []),
-  set: (values: string[]) => { ensureChrono().forbidden_tags = uniqueTagNames(values); emit("update-storylet"); },
-});
-type ChronoJsonField = "ideal_state_vector" | "ideal_state_weights" | "effects_on_complete";
-function chronoJson(field: ChronoJsonField) {
-  const emptyValue = field === "effects_on_complete" ? [] : {};
-  return JSON.stringify(props.storylet.chrono?.[field] ?? emptyValue, null, 2);
-}
-function updateChronoJson(field: ChronoJsonField, event: Event) {
-  const target = event.target as HTMLTextAreaElement;
-  try {
-    const value: unknown = JSON.parse(target.value);
-    if (field === "effects_on_complete" ? !Array.isArray(value) : !value || Array.isArray(value) || typeof value !== "object") {
-      throw new Error(field === "effects_on_complete" ? "Expected a JSON array" : "Expected a JSON object");
-    }
-    (ensureChrono() as unknown as Record<string, unknown>)[field] = value;
-    target.setCustomValidity("");
-    emit("update-storylet");
-  } catch (error) {
-    target.setCustomValidity(error instanceof Error ? error.message : "Invalid JSON");
-    target.reportValidity();
-  }
-}
+const locationOptions = computed(() => studioState.entityTemplates.filter((entity) => entity.root_tag === "location").sort((a, b) => a.name.localeCompare(b.name)));
 
-function eventValue(event: Event): string {
-  return (event.currentTarget as HTMLInputElement).value;
-}
-function addChronoPredicate() {
-  const target = globalQualities.value[0] ?? locationTagOptions.value[0] ?? "";
-  if (!target) {
-    notify("Add a quality or location tag before defining a ChronoFlow predicate", "info");
-    return;
-  }
-  ensureChrono().preconditions.push({
-    target_id: target,
-    subject: globalQualities.value.includes(target) ? "metric" : "location",
-    operator: "gte",
-    comparison_value: 1,
-    specificity_weight: 1,
-  });
-  emit("update-storylet");
-}
-function setChronoPredicate(
-  index: number,
-  field: keyof ChronoQualityPredicate,
-  value: string | number,
-) {
-  if (typeof value === "number" && !Number.isFinite(value)) return;
-  const predicates = [...ensureChrono().preconditions];
-  const predicate = predicates[index];
-  if (!predicate) return;
-  const updated = { ...predicate, [field]: value } as ChronoQualityPredicate;
-  if (field === "subject" && updated.subject !== "metric") {
-    updated.operator = "eq";
-    updated.comparison_value = 1;
-  }
-  predicates[index] = updated;
-  ensureChrono().preconditions = predicates;
-  emit("update-storylet");
-}
-function removeChronoPredicate(index: number) {
-  ensureChrono().preconditions = ensureChrono().preconditions.filter((_, current) => current !== index);
-  emit("update-storylet");
-}
-function updateChronoNumber(field: "display_priority" | "cooldown_ms", event: Event) {
-  const input = event.target as HTMLInputElement;
-  const value = Number(input.value);
-  const validInteger = Number.isSafeInteger(value);
-  const validRange = field === "display_priority"
-    ? value >= -2147483648 && value <= 2147483647
-    : value >= 0;
-  if (!validInteger || !validRange) {
-    input.setCustomValidity(field === "display_priority"
-      ? "Priority must be a signed 32-bit integer"
-      : "Cooldown must be a non-negative integer");
-    input.reportValidity();
-    return;
-  }
-  input.setCustomValidity("");
-  ensureChrono()[field] = value;
-  emit("update-storylet");
-}
-function updateChronoRepeatable(event: Event) {
-  ensureChrono().is_repeatable = (event.target as HTMLInputElement).checked;
-  emit("update-storylet");
-}
-function initializeChronoOnOpen(event: Event) {
-  if ((event.currentTarget as HTMLDetailsElement).open && !props.storylet.chrono) {
-    ensureChrono();
-    emit("update-storylet");
-  }
-}
-const chronoSalienceTags = computed({
-  get: () => uniqueTagNames(props.storylet.chrono?.salience_bonus_tags ?? []),
-  set: (values: string[]) => { ensureChrono().salience_bonus_tags = uniqueTagNames(values); emit("update-storylet"); },
-});
-function updatePreconditions(values: Partial<StoryletRecord["preconditions"]>) {
-  props.storylet.preconditions = { ...props.storylet.preconditions, ...values };
-  emit("update-storylet");
-}
-const visitedLocationTags = computed({
-  get: () => uniqueTagNames((props.storylet.preconditions.visited_locations_any_of ?? []).flatMap((r) => r.kind === "location_tag" ? [r.tag] : [])),
-  set: (values: string[]) => updatePreconditions({ visited_locations_any_of: [
-    ...(props.storylet.preconditions.visited_locations_any_of ?? []).filter((r) => r.kind === "location_id"),
-    ...uniqueTagNames(values).map((tag): VisitedLocationPrecondition => ({ kind: "location_tag", tag })),
-  ] }),
-});
-const visitedLocationIds = computed({
-  get: () => (props.storylet.preconditions.visited_locations_any_of ?? []).flatMap((r) => r.kind === "location_id" ? [r.location_id] : []),
-  set: (values: string[]) => updatePreconditions({ visited_locations_any_of: [
-    ...(props.storylet.preconditions.visited_locations_any_of ?? []).filter((r) => r.kind === "location_tag"),
-    ...[...new Set(values)].map((location_id): VisitedLocationPrecondition => ({ kind: "location_id", location_id })),
-  ] }),
-});
-const metCharacterRoleTags = computed({
-  get: () => uniqueTagNames((props.storylet.preconditions.met_characters_any_of ?? []).flatMap((r) => r.kind === "role_tag" ? [r.role] : [])),
-  set: (values: string[]) => updatePreconditions({ met_characters_any_of: [
-    ...(props.storylet.preconditions.met_characters_any_of ?? []).filter((r) => r.kind === "character_id"),
-    ...uniqueTagNames(values).map((role): MetCharacterPrecondition => ({ kind: "role_tag", role })),
-  ] }),
-});
-const metCharacterIds = computed({
-  get: () => (props.storylet.preconditions.met_characters_any_of ?? []).flatMap((r) => r.kind === "character_id" ? [r.character_id] : []),
-  set: (values: string[]) => updatePreconditions({ met_characters_any_of: [
-    ...(props.storylet.preconditions.met_characters_any_of ?? []).filter((r) => r.kind === "role_tag"),
-    ...[...new Set(values)].map((character_id): MetCharacterPrecondition => ({ kind: "character_id", character_id })),
-  ] }),
-});
-const locationOptions = computed(() => [...studioState.locations].sort((a, b) => a.name.localeCompare(b.name)));
-const characterOptions = computed(() => [...studioState.characters].sort((a, b) => a.name.localeCompare(b.name)));
-const qualityConditionGroups = [{ key: "all_of", label: "All of" }, { key: "any_of", label: "Any of" }] as const;
-type QualityConditionGroup = typeof qualityConditionGroups[number]["key"];
-function updateQualityConditions(group: QualityConditionGroup, conditions: QualityCondition[]) { updatePreconditions({ [group]: conditions }); }
-function addQualityCondition(group: QualityConditionGroup) {
-  const quality = globalQualities.value[0];
-  if (!quality) { notify("Add a project quality before defining a quality precondition", "info"); return; }
-  updateQualityConditions(group, [...(props.storylet.preconditions[group] ?? []), { variable: quality, op: "gte", value: 1 }]);
-}
-function removeQualityCondition(group: QualityConditionGroup, index: number) {
-  updateQualityConditions(group, (props.storylet.preconditions[group] ?? []).filter((_, current) => current !== index));
-}
-function setQualityCondition(group: QualityConditionGroup, index: number, field: keyof QualityCondition, value: unknown) {
-  const conditions = [...(props.storylet.preconditions[group] ?? [])]; const condition = conditions[index];
-  if (!condition) return; conditions[index] = { ...condition, [field]: value }; updateQualityConditions(group, conditions);
-}
-
-// All project qualities + local variables
-const globalQualities = computed(() => studioState.qualities.map((q) => q.name));
-const localVariables = computed(() => props.graph.local_variables || []);
-
-
-// Local variable creation
-const newVarName = ref("");
-const newVarType = ref<"boolean" | "number" | "string">("number");
-const newVarDefault = ref<any>(0);
-
-function addLocalVariable() {
-  if (!newVarName.value.trim()) return;
-  if (!props.graph.local_variables) props.graph.local_variables = [];
-
-  let val: any = newVarDefault.value;
-  if (newVarType.value === "number") val = Number(val) || 0;
-  else if (newVarType.value === "boolean") val = Boolean(val);
-  else val = String(val);
-
-  props.graph.local_variables.push({
-    name: newVarName.value.trim(),
-    type: newVarType.value,
-    default_value: val,
-  });
-
-  newVarName.value = "";
-  emitGraphUpdate();
-  notify("Added local variable", "success");
-}
-
-function removeLocalVariable(idx: number) {
-  props.graph.local_variables?.splice(idx, 1);
-  emitGraphUpdate();
-}
 
 // Dialogue Sections & Items
 function addSection(node: NarrativeNode) {
@@ -309,10 +223,10 @@ function addDialogueLine(sec: DialogueSection) {
   sec.items.push({
     kind: "line",
     id: lineId,
-    speaker_role: availableRoles.value[0] || "Narrator",
+    speaker_role: availableRoles.value[0] || "",
     target_role: "player",
     content: "",
-    emotion_tag: "neutral",
+    emotion_tag: "",
   });
   emitGraphUpdate();
 }
@@ -323,7 +237,7 @@ function addIdleAction(sec: DialogueSection) {
     kind: "idle_action",
     id: actId,
     action_type: "lookat",
-    actor_role: availableRoles.value[0] || "Narrator",
+    actor_role: availableRoles.value[0] || "player",
     target: "player",
     duration: 1.5,
   });
@@ -374,7 +288,7 @@ async function handleAudioBrowse(event: Event, item: any) {
 async function checkAudioBackend(item: any) {
   if (!item.audio_path) return;
   try {
-    const res = await fetch(`/api/v2/audio/inspect?path=${encodeURIComponent(item.audio_path)}`);
+    const res = await fetch(`/api/v3/audio/inspect?path=${encodeURIComponent(item.audio_path)}`);
     const data = await res.json();
     if (data.exists && Number.isFinite(data.duration)) {
       item.duration = data.duration;
@@ -390,39 +304,7 @@ async function checkAudioBackend(item: any) {
   }
 }
 
-// Variable Node Assignment
-function addAssignment(node: NarrativeNode) {
-  if (!node.assignments) node.assignments = [];
-  node.assignments.push({
-    scope: "global",
-    quality: globalQualities.value[0] || "tension",
-    op: "set",
-    value: 1,
-  });
-  emitGraphUpdate();
-}
 
-function removeAssignment(node: NarrativeNode, idx: number) {
-  node.assignments?.splice(idx, 1);
-  emitGraphUpdate();
-}
-
-// Conditional Node Rule
-function addConditionRule(node: NarrativeNode) {
-  if (!node.conditions) node.conditions = [];
-  node.conditions.push({
-    scope: "global",
-    variable: globalQualities.value[0] || "tension",
-    op: "gte",
-    value: 1,
-  });
-  emitGraphUpdate();
-}
-
-function removeConditionRule(node: NarrativeNode, idx: number) {
-  node.conditions?.splice(idx, 1);
-  emitGraphUpdate();
-}
 
 // Graph Transform Node (ChronoFlow v5)
 const graphLayers: GraphLayer[] = ["location", "character", "item", "fact"];
@@ -524,35 +406,11 @@ function removeEntry(node: NarrativeNode, entries: unknown[], index: number) {
   emitGraphUpdate(node);
 }
 
-// End Node Jump Precondition Auto-Sync
-function autoSetJumpPreconditions(node: NarrativeNode) {
-  if (!node.jump_to_storylet) return;
-  const target = props.storylets.find((s) => s.id === node.jump_to_storylet);
-  if (!target) {
-    notify(`Target storylet '${node.jump_to_storylet}' not found`, "error");
-    return;
-  }
-
-  const updated = applyJumpPreconditions(target, props.storylet);
-  emit("update-storylet");
-  if (updated.length > 0) {
-    notify(`Applied preconditions to effects: ${updated.join(", ")}`, "success");
-  } else {
-    notify("Target storylet has no preconditions to set", "info");
-  }
-}
 function handleJumpTargetChange(node: NarrativeNode) {
   if (node.jump_to_storylet) {
-    // Jump and terminal are mutually exclusive; choosing a destination clears
-    // the default terminal flag so the transition is not silently ignored.
     node.is_terminal = false;
   }
   emitGraphUpdate(node);
-  if (node.jump_to_storylet) {
-    autoSetJumpPreconditions(node);
-  } else {
-    emit("update-storylet");
-  }
 }
 function setNodeStringArray(node: NarrativeNode, field: "deck_storylet_ids" | "candidate_pool_ids", event: Event) {
   const select = event.target as HTMLSelectElement;
@@ -578,7 +436,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
     <div v-if="selectedNode" class="inspector-content">
       <div class="panel-header">
         <div style="display:flex; align-items:center; gap:8px;">
-          <span :class="['type-badge', selectedNode.type]">{{ selectedNode.type.toUpperCase() }}</span>
+          <span :class="['type-badge', selectedNode.type]">{{ selectedNode.type === 'condition' ? 'CONDITION NODE' : selectedNode.type.toUpperCase() }}</span>
           <h3 class="panel-title">{{ selectedNode.title }}</h3>
         </div>
         <button class="btn btn-danger" style="font-size:11px; padding:3px 8px;" @click="$emit('delete-node', selectedNode.id)">
@@ -587,8 +445,8 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
       </div>
 
       <div class="form-group">
-        <label class="field-label">Node Title</label>
-        <input v-model="selectedNode.title" class="form-input" @input="emitGraphUpdate(selectedNode)" />
+        <label class="field-label" for="node-title-input">Node Title</label>
+        <input id="node-title-input" v-model="selectedNode.title" aria-label="Node title" class="form-input" @input="emitGraphUpdate(selectedNode)" />
       </div>
 
       <!-- DIALOG NODE -->
@@ -602,11 +460,11 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 
         <div v-for="(sec, sIdx) in selectedNode.sections" :key="sec.id" class="dialogue-section-card">
           <div class="section-card-header">
-            <input v-model="sec.title" class="section-title-input" @input="emitGraphUpdate(selectedNode)" />
+            <input v-model="sec.title" class="section-title-input" aria-label="Dialogue section title" @input="emitGraphUpdate(selectedNode)" />
             <div style="display:flex; gap:4px;">
-              <button class="btn-micro" @click="addDialogueLine(sec)">+ Line</button>
-              <button class="btn-micro" @click="addIdleAction(sec)">+ Idle Action</button>
-              <button class="btn-micro danger" @click="removeSection(selectedNode, sIdx)">✕</button>
+              <button class="btn-micro" aria-label="Add dialogue line" @click="addDialogueLine(sec)">+ Line</button>
+              <button class="btn-micro" aria-label="Add idle action" @click="addIdleAction(sec)">+ Idle Action</button>
+              <button class="btn-micro danger" aria-label="Remove dialogue section" @click="removeSection(selectedNode, sIdx)">✕</button>
             </div>
           </div>
 
@@ -616,39 +474,39 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
               <div v-if="item.kind === 'line'">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                   <span style="font-size:10px; font-weight:700; color:var(--accent-purple);">💬 DIALOGUE</span>
-                  <button class="btn-micro danger" @click="removeItem(sec, iIdx)">✕</button>
+                  <button class="btn-micro danger" aria-label="Remove dialogue item" @click="removeItem(sec, iIdx)">✕</button>
                 </div>
 
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;">
                   <div>
                     <label class="field-sublabel">Speaker Role</label>
-                    <TagEditor v-model="item.speaker_role" :options="roleTagOptions" :multiple="false" label="Speaker role" placeholder="Choose or create role" @update:model-value="emitGraphUpdate(selectedNode)" />
+                    <TagEditor v-model="item.speaker_role" :options="roleTagOptions" :allow-create="false" :multiple="false" label="Speaker role" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
                   </div>
                   <div>
                     <label class="field-sublabel">Addressed To</label>
-                    <TagEditor v-model="item.target_role" :options="targetRoles" :multiple="false" label="Addressed to role" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
+                    <TagEditor v-model="item.target_role" :options="targetRoles" :allow-create="false" :multiple="false" label="Addressed to role" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
                   </div>
                 </div>
 
                 <div style="margin-bottom:6px;">
-                  <label class="field-sublabel">Dialogue Text</label>
-                  <textarea v-model="item.content" class="form-textarea" style="min-height:48px; font-size:11px; padding:4px;" @input="emitGraphUpdate(selectedNode)"></textarea>
+                  <label class="field-sublabel" :for="'dialogue-text-' + item.id">Dialogue Text</label>
+                  <textarea :id="'dialogue-text-' + item.id" v-model="item.content" aria-label="Dialogue text" class="form-textarea" style="min-height:48px; font-size:11px; padding:4px;" @input="emitGraphUpdate(selectedNode)"></textarea>
                 </div>
 
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;">
                   <div>
                     <label class="field-sublabel">Emotion Tag</label>
-                    <TagEditor v-model="item.emotion_tag" :options="emotionTagOptions" :multiple="false" label="Emotion tag" placeholder="Choose or create emotion" @update:model-value="emitGraphUpdate(selectedNode)" />
+                    <TagEditor v-model="item.emotion_tag" :options="emotionTagOptions" :allow-create="false" :multiple="false" label="Emotion tag" placeholder="Choose emotion" @update:model-value="emitGraphUpdate(selectedNode)" />
                   </div>
                   <div>
                     <label class="field-sublabel">Action Tag (Tied)</label>
-                    <TagEditor v-model="item.action_tag" :options="actionTagOptions" :multiple="false" label="Action tag" placeholder="Choose or create action" @update:model-value="emitGraphUpdate(selectedNode)" />
+                    <TagEditor v-model="item.action_tag" :options="actionTagOptions" :allow-create="false" :multiple="false" label="Action tag" placeholder="Choose action" @update:model-value="emitGraphUpdate(selectedNode)" />
                   </div>
                 </div>
 
                 <div v-if="item.action_tag" style="margin-bottom:6px;">
                   <label class="field-sublabel">Action Target</label>
-                  <TagEditor v-model="item.action_target" :options="targetRoles" :multiple="false" label="Action target" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
+                  <TagEditor v-model="item.action_target" :options="targetRoles" :allow-create="false" :multiple="false" label="Action target" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
                 </div>
 
                 <!-- Audio Link & Duration -->
@@ -661,9 +519,9 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
                     </label>
                   </div>
                   <div style="display:flex; gap:4px;">
-                    <input v-model="item.audio_path" class="form-input micro" style="flex:1;" placeholder="audio/line_01.mp3" @input="emitGraphUpdate(selectedNode)" />
-                    <button class="btn-micro" title="Check server file duration" @click="checkAudioBackend(item)">🔍</button>
-                    <input v-model.number="item.duration" type="number" step="0.1" class="form-input micro" style="width:60px;" placeholder="Sec" @input="emitGraphUpdate(selectedNode)" />
+                    <input v-model="item.audio_path" aria-label="Audio file path" class="form-input micro" style="flex:1;" placeholder="audio/line_01.mp3" @input="emitGraphUpdate(selectedNode)" />
+                    <button class="btn-micro" title="Check server file duration" aria-label="Check server file duration" @click="checkAudioBackend(item)">🔍</button>
+                    <input v-model.number="item.duration" aria-label="Audio duration in seconds" type="number" step="0.1" class="form-input micro" style="width:60px;" placeholder="Sec" @input="emitGraphUpdate(selectedNode)" />
                   </div>
                 </div>
               </div>
@@ -685,18 +543,18 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
                   </div>
                   <div>
                     <label class="field-sublabel">Actor Role</label>
-                    <TagEditor v-model="item.actor_role" :options="roleTagOptions" :multiple="false" label="Actor role" placeholder="Choose or create role" @update:model-value="emitGraphUpdate(selectedNode)" />
+                    <TagEditor v-model="item.actor_role" :options="roleTagOptions" :allow-create="false" :multiple="false" label="Actor role" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
                   </div>
                 </div>
 
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
                   <div>
                     <label class="field-sublabel">Target</label>
-                    <TagEditor v-model="item.target" :options="targetRoles" :multiple="false" label="Target role" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
+                    <TagEditor v-model="item.target" :options="targetRoles" :allow-create="false" :multiple="false" label="Target role" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
                   </div>
                   <div v-if="item.action_type === 'emote'">
                     <label class="field-sublabel">Emote Tag</label>
-                    <TagEditor v-model="item.emote" :options="actionTagOptions" :multiple="false" label="Emote action tag" placeholder="Choose or create action" @update:model-value="emitGraphUpdate(selectedNode)" />
+                    <TagEditor v-model="item.emote" :options="actionTagOptions" :allow-create="false" :multiple="false" label="Emote action tag" placeholder="Choose action" @update:model-value="emitGraphUpdate(selectedNode)" />
                   </div>
                   <div v-else>
                     <label class="field-sublabel">Duration (s)</label>
@@ -716,9 +574,9 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
       <div v-else-if="selectedNode.type === 'choice'">
         <div class="field-row-heading"><label class="field-label">Choice Options</label><button class="btn-micro" @click="addChoice(selectedNode)">+ Add Choice</button></div>
         <div v-for="(choice, index) in selectedNode.choices || []" :key="choice.id" class="choice-editor-row">
-          <input v-model="choice.text" class="form-input micro" placeholder="Choice text" @input="emitGraphUpdate(selectedNode)" />
-          <input v-model="choice.system_verb" class="form-input micro" placeholder="System verb (optional)" @input="emitGraphUpdate(selectedNode)" />
-          <button class="btn-micro danger" @click="removeChoice(selectedNode, index)">✕</button>
+          <input v-model="choice.text" aria-label="Choice text" class="form-input micro" placeholder="Choice text" @input="emitGraphUpdate(selectedNode)" />
+          <input v-model="choice.system_verb" aria-label="Choice system verb, optional" class="form-input micro" placeholder="System verb (optional)" @input="emitGraphUpdate(selectedNode)" />
+          <button class="btn-micro danger" title="Remove choice" aria-label="Remove choice" @click="removeChoice(selectedNode, index)">✕</button>
         </div>
       </div>
 
@@ -744,73 +602,11 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         </div>
       </div>
 
-      <!-- VARIABLE NODE -->
-      <div v-else-if="selectedNode.type === 'variable'">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <label class="field-label" style="margin-bottom:0;">Quality & Var Mutations</label>
-          <button class="btn btn-secondary" style="font-size:10px; padding:2px 6px;" @click="addAssignment(selectedNode)">
-            + Add Mutation
-          </button>
-        </div>
 
-        <div v-for="(a, idx) in selectedNode.assignments" :key="idx" class="mutation-row">
-          <select v-model="a.scope" class="form-select micro" style="width:75px;" @change="a.quality = a.scope === 'local' ? (localVariables[0]?.name || '') : (globalQualities[0] || 'tension'); emitGraphUpdate(selectedNode)">
-            <option value="global">Global</option>
-            <option value="local">Local</option>
-          </select>
-
-          <!-- Variable selection based on scope -->
-          <select v-if="a.scope === 'global'" v-model="a.quality" class="form-select micro" style="flex:1;" @change="emitGraphUpdate(selectedNode)">
-            <option v-for="q in globalQualities" :key="q" :value="q">{{ q }}</option>
-          </select>
-          <select v-else v-model="a.quality" class="form-select micro" style="flex:1;" @change="emitGraphUpdate(selectedNode)">
-            <option v-for="v in localVariables" :key="v.name" :value="v.name">{{ v.name }}</option>
-          </select>
-
-          <select v-model="a.op" class="form-select micro" style="width:55px;" @change="emitGraphUpdate(selectedNode)">
-            <option value="set">=</option>
-            <option value="add">+</option>
-          </select>
-
-          <input v-model="a.value" class="form-input micro" style="width:65px;" @input="emitGraphUpdate(selectedNode)" />
-          <button class="btn-micro danger" @click="removeAssignment(selectedNode, idx)">✕</button>
-        </div>
-      </div>
-
-      <!-- CONDITIONAL NODE -->
-      <div v-else-if="selectedNode.type === 'conditional'">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <label class="field-label" style="margin-bottom:0;">Condition Rules</label>
-          <button class="btn btn-secondary" style="font-size:10px; padding:2px 6px;" @click="addConditionRule(selectedNode)">
-            + Add Rule
-          </button>
-        </div>
-
-        <div v-for="(c, idx) in selectedNode.conditions" :key="idx" class="mutation-row">
-          <select v-model="c.scope" class="form-select micro" style="width:75px;" @change="c.variable = c.scope === 'local' ? (localVariables[0]?.name || '') : (globalQualities[0] || 'tension'); emitGraphUpdate(selectedNode)">
-            <option value="global">Global</option>
-            <option value="local">Local</option>
-          </select>
-
-          <select v-if="c.scope === 'global'" v-model="c.variable" class="form-select micro" style="flex:1;" @change="emitGraphUpdate(selectedNode)">
-            <option v-for="q in globalQualities" :key="q" :value="q">{{ q }}</option>
-          </select>
-          <select v-else v-model="c.variable" class="form-select micro" style="flex:1;" @change="emitGraphUpdate(selectedNode)">
-            <option v-for="v in localVariables" :key="v.name" :value="v.name">{{ v.name }}</option>
-          </select>
-
-          <select v-model="c.op" class="form-select micro" style="width:55px;" @change="emitGraphUpdate(selectedNode)">
-            <option value="eq">==</option>
-            <option value="neq">!=</option>
-            <option value="gte">&gt;=</option>
-            <option value="lte">&lt;=</option>
-            <option value="gt">&gt;</option>
-            <option value="lt">&lt;</option>
-          </select>
-
-          <input v-model="c.value" class="form-input micro" style="width:65px;" @input="emitGraphUpdate(selectedNode)" />
-          <button class="btn-micro danger" @click="removeConditionRule(selectedNode, idx)">✕</button>
-        </div>
+      <!-- BOOLEAN CONDITION SWITCH -->
+      <div v-else-if="selectedNode.type === 'condition'">
+        <div class="field-label">Condition Node</div>
+        <p class="field-help">Routes the boolean received from a connected predicate node through True or False.</p>
       </div>
 
       <!-- GRAPH TRANSFORM NODE -->
@@ -982,7 +778,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
           <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.op.active_ops, index)">✕</button>
         </div>
 
-        <p class="field-help">Passion ids are u16 metric indices; deltas and active-pool flags apply through the runtime passion model.</p>
+        <p class="field-help">Passion ids are u16 passion indices; deltas and active-pool flags apply through the runtime passion model.</p>
       </div>
 
       <div v-else-if="selectedNode.type === 'qbn_storylet_hub'">
@@ -1039,8 +835,8 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         </div>
       </div>
 
-      <div v-else-if="selectedNode.type === 'logic_all' || selectedNode.type === 'logic_any'">
-        <p class="field-help">{{ selectedNode.type === 'logic_all' ? 'Continue after all incoming branches complete.' : 'Continue after the selected incoming branch completes.' }}</p>
+      <div v-else-if="selectedNode.type === 'and' || selectedNode.type === 'or'">
+        <p class="field-help">{{ selectedNode.type === 'and' ? 'AND combines all incoming boolean values.' : 'OR combines incoming boolean values.' }}</p>
       </div>
 
       <div v-else-if="selectedNode.type === 'scene_section'">
@@ -1071,39 +867,146 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         </div>
       </div>
 
-      <!-- END NODE -->
-      <div v-else-if="selectedNode.type === 'end'">
-        <div class="form-group">
-          <label class="field-label">Terminal Climax</label>
-          <input v-model="selectedNode.is_terminal" type="checkbox" @change="emitGraphUpdate(selectedNode)" />
-          <span style="font-size:12px; margin-left:8px;">Marks scene resolution / finale</span>
+      <!-- ADD / REMOVE ENTITY TAG -->
+      <div v-else-if="selectedNode.type === 'add_entity_tag' || selectedNode.type === 'remove_entity_tag'">
+        <div class="panel-header">
+          <h3 class="panel-title">{{ selectedNode.type === 'add_entity_tag' ? 'Add Entity Tag' : 'Remove Entity Tag' }}</h3>
         </div>
-
-        <div class="form-group" style="background:rgba(0,0,0,0.25); padding:10px; border-radius:8px;">
-          <label class="field-label" style="color:var(--accent-purple);">Jump To Storylet</label>
-          <select v-model="selectedNode.jump_to_storylet" class="form-select" @change="handleJumpTargetChange(selectedNode)">
-            <option :value="undefined">-- None (End Scene) --</option>
-            <option v-for="s in props.storylets" :key="s.id" :value="s.id">
-              {{ s.title }} ({{ s.id }})
+        <div class="form-group">
+          <label class="field-label">Target Entity</label>
+          <select v-model="selectedNode.target_entity_id" class="form-select" @change="emitGraphUpdate()">
+            <option value="world">World (Global)</option>
+            <option v-for="e in studioState.entityTemplates.filter(item => item.id !== 'world')" :key="e.id" :value="e.id">
+              {{ e.name }} ({{ e.root_tag }})
             </option>
           </select>
-
-          <div v-if="selectedNode.jump_to_storylet" style="margin-top:8px;">
-            <button class="btn btn-primary" style="font-size:11px; width:100%;" @click="autoSetJumpPreconditions(selectedNode)">
-              ⚡ Auto-Set Precondition Qualities
-            </button>
-            <p style="font-size:10px; color:var(--text-muted); margin-top:4px;">
-              Chooses source effects that satisfy each target precondition. Unsupported predicates are skipped.
-            </p>
-          </div>
+          <small class="field-sublabel">Tags are applied to this entity's gameplay tags container.</small>
         </div>
+        <div class="form-group">
+          <label class="field-label">Tag Name</label>
+          <TagEditor v-model="selectedNode.tag" :options="targetGameplayTagOptions" :allow-create="false" :multiple="false" label="Tag name" placeholder="Choose a registered gameplay tag" @update:model-value="emitGraphUpdate()" />
+          <small class="field-sublabel" style="display:block; margin-top:4px;">Canonical tag: <strong>{{ selectedNode.tag || '(none)' }}</strong></small>
+        </div>
+      </div>
+
+      <!-- HAS ENTITY TAG -->
+      <div v-else-if="selectedNode.type === 'get_entity'">
+        <div class="form-group">
+          <label class="field-label">Entity</label>
+          <select
+            :value="selectedNode.entity_path || ''"
+            class="form-select"
+            @change="selectedNode.entity_path = eventValue($event); emitGraphUpdate(selectedNode)"
+          >
+            <option value="">Choose an entity</option>
+            <option v-for="entity in runtimeEntityOptions" :key="entity.path" :value="entity.path">{{ entity.label }}</option>
+          </select>
+        </div>
+      </div>
+      <div v-else-if="selectedNode.type === 'get_entity_property'">
+        <div class="form-group">
+          <label class="field-label">Property</label>
+          <select :value="selectedNode.property_key || ''" class="form-select" :disabled="!entityPropertyOptions.length" @change="selectEntityProperty(selectedNode, eventValue($event))">
+            <option value="">Choose a property</option>
+            <option v-for="property in entityPropertyOptions" :key="property.key" :value="property.key">{{ property.name }} ({{ property.type }})</option>
+          </select>
+          <small v-if="entityPropertyUnavailableReason" class="field-sublabel">{{ entityPropertyUnavailableReason }}</small>
+        </div>
+      </div>
+      <div v-else-if="selectedNode.type === 'apply_command'">
+        <div class="form-group">
+          <label class="field-label">Property</label>
+          <select :value="selectedNode.property_key || ''" class="form-select" :disabled="!entityPropertyOptions.length" @change="selectEntityProperty(selectedNode, eventValue($event))">
+            <option value="">Choose a property</option>
+            <option v-for="property in entityPropertyOptions" :key="property.key" :value="property.key">{{ property.name }} ({{ property.type }})</option>
+          </select>
+          <small v-if="entityPropertyUnavailableReason" class="field-sublabel">{{ entityPropertyUnavailableReason }}</small>
+        </div>
+        <div class="form-group"><label class="field-label">Operation</label><select v-model="selectedNode.operation" class="form-select" @change="emitGraphUpdate(selectedNode)"><option v-for="operation in applyCommandOperations" :key="operation.value" :value="operation.value">{{ operation.label }}</option></select></div>
+        <div class="form-group"><label class="field-label">Command Value</label>
+          <select v-if="selectedNode.value_type === 'bool'" v-model="selectedNode.value" class="form-select" @change="emitGraphUpdate(selectedNode)"><option :value="true">True</option><option :value="false">False</option></select>
+          <input v-else v-model="selectedNode.value" :type="selectedNode.value_type === 'int' || selectedNode.value_type === 'float' ? 'number' : 'text'" class="form-input" @input="selectedNode.value = (selectedNode.value_type === 'int' ? Number.parseInt(String(selectedNode.value), 10) : selectedNode.value_type === 'float' ? Number.parseFloat(String(selectedNode.value)) : selectedNode.value); emitGraphUpdate(selectedNode)" />
+        </div>
+      </div>
+      <div v-else-if="selectedNode.type === 'compare'">
+        <div class="field-label">Compare</div>
+        <label class="field-label">Value Type<select v-model="selectedNode.value_type" class="form-select" @change="emitGraphUpdate(selectedNode)"><option value="bool">Bool</option><option value="int">Int</option><option value="float">Float</option><option value="string">String</option><option value="asset">Asset</option><option value="entity">Entity Ref</option></select></label>
+        <label class="field-label">Typed value
+          <select v-if="selectedNode.value_type === 'bool'" v-model="selectedNode.value" class="form-select" @change="emitGraphUpdate(selectedNode)"><option :value="true">True</option><option :value="false">False</option></select>
+          <input v-else v-model="selectedNode.value" :type="selectedNode.value_type === 'int' || selectedNode.value_type === 'float' ? 'number' : 'text'" class="form-input" @input="selectedNode.value = (selectedNode.value_type === 'int' ? Number.parseInt(String(selectedNode.value), 10) : selectedNode.value_type === 'float' ? Number.parseFloat(String(selectedNode.value)) : selectedNode.value); emitGraphUpdate(selectedNode)" />
+        </label>
+      </div>
+      <div v-else-if="selectedNode.type === 'has_entity_tag'">
+        <div class="panel-header">
+          <h3 class="panel-title">Has Entity Tag (Condition)</h3>
+        </div>
+        <div class="form-group">
+          <label class="field-label">Target Entity</label>
+          <select v-model="selectedNode.target_entity_id" class="form-select" @change="emitGraphUpdate()">
+            <option value="world">World (Global)</option>
+            <option v-for="e in studioState.entityTemplates.filter(item => item.id !== 'world')" :key="e.id" :value="e.id">
+              {{ e.name }} ({{ e.root_tag }})
+            </option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="field-label">Tag Query</label>
+          <TagEditor v-model="selectedNode.tag" :options="targetGameplayTagOptions" :allow-create="false" :multiple="false" label="Tag query" placeholder="Choose a registered gameplay tag" @update:model-value="emitGraphUpdate()" />
+          <small class="field-sublabel" style="display:block; margin-top:4px;">Canonical tag: <strong>{{ selectedNode.tag || '(none)' }}</strong></small>
+        </div>
+        <div class="form-group">
+          <label class="field-label">Match Mode</label>
+          <select v-model="selectedNode.match_mode" class="form-select" @change="emitGraphUpdate()">
+            <option value="all">All Tags (AND)</option>
+            <option value="any">Any Tag (OR)</option>
+          </select>
+        </div>
+        <div class="form-hint" style="padding:10px; background:rgba(0,0,0,0.2); border-radius:6px; margin-top:10px;">
+          Emits one boolean value for a connected Condition Node or boolean combinator.
+        </div>
+      </div>
+
+
+      <!-- END NODE -->
+      <div v-else-if="selectedNode.type === 'end'">
+        <div v-if="props.graphMode === 'preconditions'" class="form-group">
+          <label class="field-label">Candidate result</label>
+          <select
+            :value="selectedNode.precondition_result === false ? 'false' : 'true'"
+            class="form-select"
+            @change="selectedNode.precondition_result = ($event.target as HTMLSelectElement).value === 'true'; emitGraphUpdate(selectedNode)"
+          >
+            <option value="true">Valid candidate</option>
+            <option value="false">Reject candidate</option>
+          </select>
+        </div>
+        <template v-else>
+          <div class="form-group">
+            <label class="field-label">Terminal Climax</label>
+            <input v-model="selectedNode.is_terminal" type="checkbox" @change="emitGraphUpdate(selectedNode)" />
+            <span style="font-size:12px; margin-left:8px;">Marks scene resolution / finale</span>
+          </div>
+          <div class="form-group" style="background:rgba(0,0,0,0.25); padding:10px; border-radius:8px;">
+            <label class="field-label" style="color:var(--accent-purple);">Jump To Storylet</label>
+            <select v-model="selectedNode.jump_to_storylet" class="form-select" @change="handleJumpTargetChange(selectedNode)">
+              <option :value="undefined">-- None (End Scene) --</option>
+              <option v-for="s in props.storylets" :key="s.id" :value="s.id">{{ s.title }} ({{ s.id }})</option>
+            </select>
+          </div>
+        </template>
       </div>
     </div>
 
-    <!-- 2. STORYLET PROPERTIES (when clicked on empty canvas) -->
+    <!-- Storylet settings (when clicked on empty canvas) -->
+    <div v-else-if="props.graphMode === 'preconditions'" class="inspector-content">
+      <div class="panel-header"><h3 class="panel-title">Precondition Graph</h3></div>
+      <p class="field-help">Has Entity Tag, Get Entity Property, And, and Or emit typed boolean values through data pins. Connect the result to a Condition Node to choose the True or False flow. Entity tags use dotted notation.</p>
+    </div>
+
+    <!-- Storylet settings (when clicked on empty canvas) -->
     <div v-else class="inspector-content">
       <div class="panel-header">
-        <h3 class="panel-title">Storylet Properties</h3>
+        <h3 class="panel-title">Storylet Settings</h3>
         <span class="badge" style="font-size:10px;">{{ storylet.id }}</span>
       </div>
 
@@ -1113,8 +1016,16 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
       </div>
 
       <div class="form-group">
+        <label class="field-label">Thumbnail</label>
+        <ThumbnailPicker
+          :model-value="storylet.thumbnail ?? null"
+          :label="storylet.title"
+          @update:model-value="storylet.thumbnail = $event; $emit('update-storylet')"
+        />
+      </div>
+      <div class="form-group">
         <label class="field-label">Location Tags</label>
-        <TagEditor v-model="locationTags" :options="locationTagOptions" label="Storylet location tags" placeholder="Choose or create location tags" />
+        <TagEditor v-model="locationTags" :options="locationTagOptions" :allow-create="false" label="Storylet location tags" placeholder="Choose location tags" />
         <small class="field-sublabel">Eligible at any location sharing one of these tags; leave empty for any location.</small>
       </div>
 
@@ -1126,10 +1037,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
             <option value="linear_progression">Linear Progression</option>
             <option value="wheel_deck">Wheel Deck</option>
             <option value="aftermath_accelerator">Aftermath Accelerator</option>
-            <option value="player_controlled_passage">Passage (legacy)</option>
-            <option value="linear">Linear (legacy)</option>
-            <option value="wheel">Wheel (legacy)</option>
-            <option value="aftermath">Aftermath (legacy)</option>
           </select>
         </div>
 
@@ -1144,167 +1051,22 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         </div>
       </div>
 
-      <details class="form-group chrono-settings" @toggle="initializeChronoOnOpen">
-        <summary class="field-label">ChronoFlow Settings</summary>
-        <p class="precondition-help">Authored QBN surfacing, salience, and timeline settings used by ChronoFlow.</p>
-        <div class="chrono-fields">
-          <label>Priority<input :value="storylet.chrono?.display_priority ?? 0" type="number" min="-2147483648" max="2147483647" step="1" class="form-input micro" @input="updateChronoNumber('display_priority', $event)" /></label>
-          <label class="field-sublabel">Urgency color tag</label>
-          <TagEditor v-model="chronoUrgencyColorTag" :options="tagIndex.map((tag) => tag.name)" :multiple="false" label="Urgency color tag" placeholder="Choose or create urgency tag" />
-          <label>Cooldown (ms)<input :value="storylet.chrono?.cooldown_ms ?? 0" type="number" min="0" step="1" class="form-input micro" @input="updateChronoNumber('cooldown_ms', $event)" /></label>
-          <label class="chrono-checkbox"><input :checked="storylet.chrono?.is_repeatable ?? storylet.repeatability !== 'once_ever'" type="checkbox" @change="updateChronoRepeatable" /> Repeatable</label>
-        </div>
-        <label class="field-sublabel">Required tags (all)</label>
-        <TagEditor v-model="chronoRequiredTags" :options="tagIndex.map((tag) => tag.name)" label="Required tags" placeholder="Choose or create required tags" />
-        <label class="field-sublabel">Required tags (any)</label>
-        <TagEditor v-model="chronoRequiredAnyTags" :options="tagIndex.map((tag) => tag.name)" label="Required-any tags" placeholder="Choose or create required tags" />
-        <label class="field-sublabel">Forbidden tags</label>
-        <TagEditor v-model="chronoForbiddenTags" :options="tagIndex.map((tag) => tag.name)" label="Forbidden tags" placeholder="Choose or create forbidden tags" />
-        <label class="field-sublabel">Required arc phases</label>
-        <TagEditor v-model="chronoArcPhases" label="Required arc phases" placeholder="Choose or create phases" />
-        <label class="field-sublabel">Salience bonus tags</label>
-        <TagEditor v-model="chronoSalienceTags" label="Salience bonus tags" placeholder="Choose or create tags" />
-        <details class="precondition-options">
-          <summary>Advanced predicates and effects</summary>
-          <div class="chrono-predicate-heading">
-            <label class="field-sublabel">Additional predicates</label>
-            <button type="button" class="btn-micro" @click="addChronoPredicate">+</button>
-          </div>
-          <div v-for="(predicate, index) in (storylet.chrono?.preconditions ?? [])" :key="index" class="chrono-predicate-row">
-            <select :value="predicate.subject" class="form-select micro" :aria-label="'Predicate ' + (index + 1) + ' subject'" @change="setChronoPredicate(index, 'subject', ($event.target as HTMLSelectElement).value)">
-              <option value="metric">Quality / passion</option>
-              <option value="location">Current location</option>
-              <option value="visited">Visited location</option>
-              <option value="met_character">Met character</option>
-              <option value="entity">Entity tag</option>
-            </select>
-            <input :value="predicate.target_id" class="form-input micro" :list="'chrono-targets-' + index" :aria-label="'Predicate ' + (index + 1) + ' target'" @change="setChronoPredicate(index, 'target_id', ($event.target as HTMLInputElement).value)" />
-            <datalist :id="'chrono-targets-' + index">
-              <option v-for="quality in globalQualities" :key="'q:' + quality" :value="quality" />
-              <option v-for="tag in tagIndex" :key="'t:' + tag.name" :value="tag.name" />
-              <option v-for="location in studioState.locations" :key="'l:' + location.id" :value="'location.' + location.id" />
-              <option v-for="character in studioState.characters" :key="'c:' + character.id" :value="'character.' + character.id" />
-            </datalist>
-            <select :value="predicate.operator" class="form-select micro" :aria-label="'Predicate ' + (index + 1) + ' operator'" @change="setChronoPredicate(index, 'operator', ($event.target as HTMLSelectElement).value)">
-              <option value="eq">=</option><option value="neq">≠</option>
-              <option v-if="predicate.subject === 'metric'" value="gt">&gt;</option>
-              <option v-if="predicate.subject === 'metric'" value="gte">≥</option>
-              <option v-if="predicate.subject === 'metric'" value="lt">&lt;</option>
-              <option v-if="predicate.subject === 'metric'" value="lte">≤</option>
-            </select>
-            <input :value="predicate.comparison_value" type="number" step="any" class="form-input micro" :aria-label="'Predicate ' + (index + 1) + ' comparison value'" @change="setChronoPredicate(index, 'comparison_value', Number(($event.target as HTMLInputElement).value))" />
-            <input v-if="predicate.subject === 'entity'" :value="predicate.entity_index ?? 0" type="number" min="0" max="255" class="form-input micro" aria-label="Entity row index" @change="setChronoPredicate(index, 'entity_index', Number(($event.target as HTMLInputElement).value))" />
-            <button type="button" class="btn-micro danger" :aria-label="'Remove predicate ' + (index + 1)" @click="removeChronoPredicate(index)">×</button>
-          </div>
-          <label class="field-sublabel">Ideal state vector (JSON object)</label>
-          <textarea :value="chronoJson('ideal_state_vector')" class="form-textarea chrono-json" spellcheck="false" @change="updateChronoJson('ideal_state_vector', $event)"></textarea>
-          <label class="field-sublabel">Ideal state weights (JSON object, default 1.0)</label>
-          <textarea :value="chronoJson('ideal_state_weights')" class="form-textarea chrono-json" spellcheck="false" @change="updateChronoJson('ideal_state_weights', $event)"></textarea>
-          <label class="field-sublabel">Completion effects (JSON array)</label>
-          <textarea :value="chronoJson('effects_on_complete')" class="form-textarea chrono-json" spellcheck="false" @change="updateChronoJson('effects_on_complete', $event)"></textarea>
-        </details>
-      </details>
-
-      <!-- LOCAL VARIABLES -->
-      <div class="form-group" style="background:rgba(0,0,0,0.2); padding:10px; border-radius:8px; border:1px solid var(--border-subtle);">
-        <label class="field-label" style="color:var(--accent-purple);">Local Storylet Variables</label>
-        <p style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-          Variables scoped solely to this storylet. Condition and Variable nodes can check/mutate them.
-        </p>
-
-        <div v-for="(lv, idx) in graph.local_variables" :key="idx" class="local-var-row">
-          <span style="font-weight:700; font-size:11px;">{{ lv.name }}</span>
-          <span class="badge" style="font-size:9px;">{{ lv.type }}</span>
-          <span style="font-size:10px; color:var(--text-muted); flex:1;">= {{ lv.default_value }}</span>
-          <button class="btn-micro danger" @click="removeLocalVariable(idx)">✕</button>
-        </div>
-
-        <div style="display:flex; gap:4px; margin-top:8px;">
-          <input v-model="newVarName" class="form-input micro" placeholder="var_name" style="flex:1;" />
-          <select v-model="newVarType" class="form-select micro" style="width:75px;">
-            <option value="number">Number</option>
-            <option value="boolean">Boolean</option>
-            <option value="string">String</option>
-          </select>
-          <input v-model="newVarDefault" class="form-input micro" placeholder="Default" style="width:60px;" />
-          <button class="btn btn-secondary" style="font-size:10px; padding:2px 6px;" @click="addLocalVariable">+</button>
-        </div>
-      </div>
 
       <!-- ACTOR ROLES -->
       <div class="form-group">
         <label class="field-label">Character Roles Required</label>
-        <TagEditor v-model="requiredRoleNames" :options="roleTagOptions" label="Required character roles" placeholder="Choose or create required roles" />
-      </div>
-      <!-- STORYLET PRECONDITIONS -->
-      <div class="form-group preconditions-panel">
-        <label class="field-label">Preconditions</label>
-        <p class="precondition-help">Every enabled group is required. Within visited-location and met-character groups, any selected option is sufficient.</p>
-        <div class="precondition-group">
-          <div class="precondition-heading"><span>Quality checks</span></div>
-          <p class="precondition-help">All checks must pass; at least one “any” check must pass when that list is used.</p>
-          <div v-for="group in qualityConditionGroups" :key="group.key" class="quality-condition-group">
-            <div class="precondition-heading"><span>{{ group.label }}</span><button type="button" class="btn-micro" @click="addQualityCondition(group.key)">+</button></div>
-            <div v-for="(condition, index) in (storylet.preconditions[group.key] ?? [])" :key="index" class="quality-condition-row">
-              <select :value="condition.variable" class="form-select micro" :aria-label="group.label + ' quality'" @change="setQualityCondition(group.key, index, 'variable', ($event.target as HTMLSelectElement).value)">
-                <option v-if="!globalQualities.includes(condition.variable)" :value="condition.variable">{{ condition.variable }}</option>
-                <option v-for="quality in globalQualities" :key="quality" :value="quality">{{ quality }}</option>
-              </select>
-              <select :value="condition.op" class="form-select micro" :aria-label="group.label + ' operator'" @change="setQualityCondition(group.key, index, 'op', ($event.target as HTMLSelectElement).value)">
-                <option value="eq">=</option><option value="neq">≠</option><option value="gt">&gt;</option><option value="gte">≥</option><option value="lt">&lt;</option><option value="lte">≤</option>
-              </select>
-              <input :value="condition.value" type="number" class="form-input micro" :aria-label="group.label + ' value'" @input="setQualityCondition(group.key, index, 'value', Number(($event.target as HTMLInputElement).value))" />
-              <button type="button" class="btn-micro danger" :aria-label="'Remove ' + group.label.toLowerCase() + ' quality check'" @click="removeQualityCondition(group.key, index)">✕</button>
-            </div>
-          </div>
-        </div>
-        <div class="precondition-group">
-          <div class="precondition-heading"><span>Locations visited</span></div>
-          <p class="precondition-help">The player must have visited at least one selected location or a location with one selected tag.</p>
-          <TagEditor v-model="visitedLocationTags" :options="locationTagOptions" label="Visited location tags" placeholder="Choose or create location tags" />
-          <details class="precondition-options">
-            <summary>Specific locations ({{ visitedLocationIds.length }} selected)</summary>
-            <label v-for="location in locationOptions" :key="location.id" class="precondition-option">
-              <input v-model="visitedLocationIds" type="checkbox" :value="location.id" />
-              <span>{{ location.name }}</span>
-            </label>
-            <p v-if="!locationOptions.length" class="precondition-help">Add a location to select a specific visited place.</p>
-          </details>
-        </div>
-        <div class="precondition-group">
-          <div class="precondition-heading"><span>Characters met</span></div>
-          <p class="precondition-help">The player must have met a character with one selected role or one selected character.</p>
-          <TagEditor v-model="metCharacterRoleTags" :options="roleTagOptions" label="Met character roles" placeholder="Choose or create character roles" />
-          <details class="precondition-options">
-            <summary>Specific characters ({{ metCharacterIds.length }} selected)</summary>
-            <label v-for="character in characterOptions" :key="character.id" class="precondition-option">
-              <input v-model="metCharacterIds" type="checkbox" :value="character.id" />
-              <span>{{ character.name }} <small>({{ character.role }})</small></span>
-            </label>
-            <p v-if="!characterOptions.length" class="precondition-help">Add a character to select a specific person.</p>
-          </details>
-        </div>
+        <TagEditor v-model="requiredRoleNames" :options="roleTagOptions" :allow-create="false" label="Required character roles" placeholder="Choose roles" />
       </div>
     </div>
   </aside>
 </template>
 
 <style scoped>
-.preconditions-panel { display: grid; gap: 8px; }
-.precondition-group { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--border-subtle); border-radius: 7px; background: rgba(0, 0, 0, 0.12); }
-.precondition-heading { display: flex; align-items: center; justify-content: space-between; color: var(--text-main); font-size: 11px; font-weight: 650; }
 .precondition-help { margin: 0; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
-.quality-condition-group { display: grid; gap: 5px; }
-.quality-condition-row { display: grid; grid-template-columns: minmax(0, 1fr) 58px 58px 24px; gap: 4px; }
-.precondition-options { display: grid; gap: 5px; max-height: 150px; overflow-y: auto; color: var(--text-main); font-size: 11px; }
-.precondition-options summary { cursor: pointer; color: var(--text-muted); }
-.precondition-option { display: flex; align-items: center; gap: 6px; font-size: 11px; }
-.precondition-option input { accent-color: var(--accent-purple); }
-.precondition-option small { color: var(--text-muted); }
 .property-inspector-panel {
   width: 340px;
-  background: #18181a;
-  border-left: 1px solid #2c2c2e;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border-subtle);
   overflow-y: auto;
   padding: 16px;
   display: flex;
@@ -1318,40 +1080,38 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
   align-items: center;
   margin-bottom: 14px;
   padding-bottom: 10px;
-  border-bottom: 1px solid #2c2c2e;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .panel-title {
   font-size: 14px;
   font-weight: 700;
   margin: 0;
-  color: #ffffff;
+  color: var(--text-main);
 }
 
 .type-badge {
   font-size: 9px;
   font-weight: 800;
   padding: 2px 6px;
-  border-radius: 4px;
-  color: #ffffff;
+  border-radius: var(--radius-xs, 3px);
+  color: #003640;
 }
 
-.type-badge.start { background: #10b981; }
-.type-badge.dialog { background: #8b5cf6; }
-.type-badge.choice { background: #a855f7; }
-.type-badge.variable { background: #3b82f6; }
-.type-badge.conditional { background: #eab308; }
-.type-badge.image { background: #ec4899; }
-.type-badge.teleport { background: #06b6d4; }
-.type-badge.end { background: #f43f5e; }
-.type-badge.graph_transform { background: #2563eb; }
-.type-badge.passion_mutation { background: #db2777; }
+.type-badge.start { background: var(--status-success); color: #fff; }
+.type-badge.dialog { background: var(--secondary); color: #fff; }
+.type-badge.choice { background: var(--tertiary); color: #000; }
+.type-badge.condition { background: var(--status-warning); color: #000; }
+.type-badge.image { background: #ec4899; color: #fff; }
+.type-badge.teleport { background: var(--accent); color: #003640; }
+.type-badge.end { background: var(--status-danger); color: #fff; }
+.type-badge.graph_transform { background: #2563eb; color: #fff; }
+.type-badge.passion_mutation { background: #db2777; color: #fff; }
 
 .field-label {
   font-size: 11px;
   font-weight: 700;
-  color: #aeaeb2;
-  text-transform: uppercase;
+  color: var(--text-muted);
   margin-bottom: 4px;
   display: block;
 }
@@ -1359,14 +1119,14 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 .field-sublabel {
   font-size: 10px;
   font-weight: 600;
-  color: #8e8e93;
+  color: var(--text-dim);
   margin-bottom: 2px;
   display: block;
 }
 
 .dialogue-section-card {
-  background: #242428;
-  border: 1px solid #38383c;
+  background: var(--surface-container-high, #212735);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
   margin-bottom: 10px;
   overflow: hidden;
@@ -1374,17 +1134,17 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 
 .section-card-header {
   padding: 6px 8px;
-  background: #2c2c30;
+  background: var(--bg-card-hover, #1e2024);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #38383c;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .section-title-input {
   background: transparent;
   border: none;
-  color: #ffffff;
+  color: var(--text-main);
   font-size: 11px;
   font-weight: 700;
   outline: none;
@@ -1398,26 +1158,13 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
   gap: 8px;
 }
 
-.chrono-settings {
-  padding: 9px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.16);
-}
-.chrono-settings > summary { cursor: pointer; }
-.chrono-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
-.chrono-fields label { color: var(--text-muted); font-size: 10px; }
-.chrono-predicate-heading { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 4px; }
-.chrono-predicate-row { display: grid; grid-template-columns: 1fr 1.2fr 44px 56px 52px 22px; gap: 3px; align-items: center; }
-.chrono-checkbox { display: flex; align-items: center; gap: 6px; }
-.chrono-json { min-height: 72px; font-family: monospace; font-size: 10px; }
 
 .field-help { color: var(--text-muted); font-size: 12px; }
 .field-row-heading { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
 .choice-editor-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 5px; margin-bottom: 6px; }
 .dialogue-item-card {
-  background: #1c1c1e;
-  border: 1px solid #323236;
+  background: var(--bg-input, #141720);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 8px;
 }
@@ -1430,9 +1177,9 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 }
 
 .btn-micro {
-  background: #38383c;
-  border: 1px solid #48484e;
-  color: #e5e5ea;
+  background: var(--surface-container-high, #212735);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
   font-size: 9px;
   font-weight: 700;
   padding: 2px 5px;
@@ -1441,11 +1188,11 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 }
 
 .btn-micro:hover {
-  background: #48484e;
+  background: var(--bg-card-hover);
 }
 
 .btn-micro.danger {
-  color: #ff453a;
+  color: var(--status-danger);
 }
 
 .btn-micro.danger:hover {
@@ -1454,13 +1201,12 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 
 .audio-browse-label {
   font-size: 10px;
-  color: #0a84ff;
+  color: var(--accent);
   cursor: pointer;
   font-weight: 600;
 }
 
-.mutation-row,
-.local-var-row {
+.mutation-row {
   display: flex;
   align-items: center;
   gap: 6px;

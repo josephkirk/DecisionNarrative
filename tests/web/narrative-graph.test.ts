@@ -1,39 +1,19 @@
 import { expect, test } from "bun:test";
 import type { StoryletRecord } from "../../src/web/studio/contracts.ts";
-import { applyJumpPreconditions, compileGraphToStorylet, isSafeImageUrl, validateNarrativeGraph, type NarrativeGraph } from "../../src/web/studio/narrativeGraphTypes.ts";
+import { applyCommandOperationsForType, buildGraphFromStorylet, compileGraphToStorylet, graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, validateNarrativeGraph, validatePreconditionGraph, type NarrativeGraph, type NarrativeNode } from "../../src/web/studio/narrativeGraphTypes.ts";
 
-test("jump preconditions produce effect values that satisfy supported operators", () => {
-  const target = {
-    preconditions: {
-      all_of: [
-        { variable: "equal", op: "eq", value: true },
-        { variable: "at_least", op: "gte", value: 3 },
-        { variable: "at_most", op: "lte", value: 8 },
-        { variable: "greater", op: "gt", value: 2.5 },
-        { variable: "less", op: "lt", value: 2.5 },
-        { variable: "different", op: "neq", value: "locked" },
-        { variable: "not_false", op: "neq", value: false },
-        { variable: "not_one", op: "neq", value: 1 },
-        { variable: "unsupported", op: "contains", value: "x" },
-      ],
-    },
-  } as unknown as StoryletRecord;
-  const source = { effects: {} } as unknown as StoryletRecord;
 
-  const updated = applyJumpPreconditions(target, source);
-
-  expect(source.effects).toEqual({
-    equal: true,
-    at_least: 3,
-    at_most: 8,
-    greater: 3.5,
-    less: 1.5,
-    different: "locked_other",
-    not_false: true,
-    not_one: 2,
-  });
-  expect(updated).toHaveLength(8);
-  expect(source.effects).not.toHaveProperty("unsupported");
+test("empty placeholder graphs initialize with connected start and end nodes", () => {
+  const storylet = {
+    id: "new",
+    graph: { nodes: [], edges: [] },
+    content: { text_template: "Opening." },
+    parameters: [],
+    choices: [],
+  } as StoryletRecord;
+  const graph = buildGraphFromStorylet(storylet);
+  expect(graph.nodes.map((node) => node.type)).toEqual(["start", "dialog", "end"]);
+  expect(validateNarrativeGraph(graph)).toEqual([]);
 });
 
 
@@ -64,11 +44,11 @@ test("storylet graph requires one Start and at least one reachable End", () => {
   };
   expect(validateNarrativeGraph(unsupportedMovement)).toContain("Go To Location node Move may only be targeted directly by a Choice branch.");
   expect(validateNarrativeGraph({ nodes: [null], edges: [] } as unknown as NarrativeGraph)).toContain("Graph nodes must have nonempty IDs and recognized types.");
-  expect(validateNarrativeGraph({ nodes: [], edges: [null] } as unknown as NarrativeGraph)).toContain("Graph edges must have nonempty IDs and valid endpoint fields.");
+  expect(validateNarrativeGraph({ nodes: [], edges: [null] } as unknown as NarrativeGraph)).toContain("Graph edges must have nonempty IDs, valid endpoint fields, and a valid kind.");
   const duplicateOutput = { ...graph, edges: [...graph.edges, { ...graph.edges[1]!, id: "dialog-end-duplicate" }] };
   expect(validateNarrativeGraph(duplicateOutput)).toContain("dialog node Dialog must have exactly one outgoing edge from its output port.");
   const wrongInputPort = { ...graph, edges: graph.edges.map((edge) => edge.id === "dialog-end" ? { ...edge, to_port: "output" } : edge) };
-  expect(validateNarrativeGraph(wrongInputPort)).toContain("Edge dialog-end must target an input port.");
+  expect(validateNarrativeGraph(wrongInputPort)).toContain("Flow edge dialog-end uses an invalid source or target port.");
   expect(validateNarrativeGraph({ ...graph, nodes: graph.nodes.filter((node) => node.type !== "end"), edges: graph.edges.filter((edge) => edge.to_node !== "end") }))
     .toContain("Graph must have at least one End node.");
   const multipleEnds: NarrativeGraph = {
@@ -93,29 +73,118 @@ test("storylet graph requires one Start and at least one reachable End", () => {
       graph.nodes[0]!,
       {
         id: "condition",
-        type: "conditional",
+        type: "condition",
         title: "Condition",
         x: 150,
         y: 0,
         width: 180,
         height: 120,
-        conditions: [{ scope: "global", variable: "trust", op: "gte", value: 1 }],
       },
+      { id: "tag", type: "has_entity_tag", title: "Has ready tag", target_entity_id: "world", tag: "flag.ready", x: 150, y: 150, width: 180, height: 100 },
       graph.nodes[2]!,
     ],
     edges: [
-      { id: "start-condition", from_node: "start", from_port: "output", to_node: "condition", to_port: "input" },
-      { id: "condition-true", from_node: "condition", from_port: "true", to_node: "end", to_port: "input" },
-      { id: "condition-false", from_node: "condition", from_port: "false", to_node: "end", to_port: "input" },
+      { id: "start-condition", from_node: "start", from_port: "output", to_node: "condition", to_port: "input", kind: "flow" },
+      { id: "tag-condition", from_node: "tag", from_port: "output", to_node: "condition", to_port: "input", kind: "data" },
+      { id: "condition-true", from_node: "condition", from_port: "true", to_node: "end", to_port: "input", kind: "flow" },
+      { id: "condition-false", from_node: "condition", from_port: "false", to_node: "end", to_port: "input", kind: "flow" },
     ],
   };
   expect(validateNarrativeGraph(conditionalGraph)).toEqual([]);
   expect(validateNarrativeGraph({ ...conditionalGraph, edges: conditionalGraph.edges.slice(0, 2) }))
-    .toContain("Conditional node Condition must have exactly one 'false' branch.");
-  expect(validateNarrativeGraph({
-    ...conditionalGraph,
-    nodes: conditionalGraph.nodes.map((node) => node.type === "conditional" ? { ...node, conditions: [] } : node),
-  })).toContain("Conditional node Condition must have at least one condition.");
+    .toContain("Condition Node Condition must have exactly one 'false' branch.");
+});
+
+test("precondition graphs switch predicate booleans into candidate End results", () => {
+  const graph: NarrativeGraph = {
+    nodes: [
+      { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
+      { id: "tag", type: "has_entity_tag", title: "Has visited tag", tag: "loc.chamber.visited", x: 150, y: 0, width: 180, height: 100 },
+      { id: "condition", type: "condition", title: "Switch", x: 350, y: 0, width: 180, height: 120 },
+      { id: "valid", type: "end", title: "Valid", precondition_result: true, x: 600, y: -50, width: 120, height: 80 },
+      { id: "reject", type: "end", title: "Reject", precondition_result: false, x: 600, y: 80, width: 120, height: 80 },
+    ],
+    edges: [
+      { id: "start-condition", from_node: "start", from_port: "output", to_node: "condition", to_port: "input", kind: "flow" },
+      { id: "tag-condition", from_node: "tag", from_port: "output", to_node: "condition", to_port: "input", kind: "data" },
+      { id: "condition-true-valid", from_node: "condition", from_port: "true", to_node: "valid", to_port: "input", kind: "flow" },
+      { id: "condition-false-reject", from_node: "condition", from_port: "false", to_node: "reject", to_port: "input", kind: "flow" },
+    ],
+  };
+  expect(validatePreconditionGraph(graph)).toEqual([]);
+  expect(validatePreconditionGraph({
+    ...graph,
+    nodes: graph.nodes.map((node) => node.id === "valid" ? { ...node, precondition_result: false } : node),
+  })).toContain("Precondition graph needs at least one valid-candidate End node.");
+  const sideEffectGraph: NarrativeGraph = {
+    nodes: [
+      { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
+      { id: "dialog", type: "dialog", title: "Side effect", x: 150, y: 0, width: 180, height: 100 },
+      { id: "end", type: "end", title: "Valid", precondition_result: true, x: 400, y: 0, width: 120, height: 80 },
+    ],
+    edges: [
+      { id: "start-dialog", from_node: "start", from_port: "output", to_node: "dialog", to_port: "input" },
+      { id: "dialog-end", from_node: "dialog", from_port: "output", to_node: "end", to_port: "input" },
+    ],
+  };
+  expect(validatePreconditionGraph(sideEffectGraph)).toContain("Precondition graph cannot contain dialog nodes.");
+});
+
+test("precondition predicates emit typed boolean outputs", () => {
+  const graph: NarrativeGraph = {
+    nodes: [
+      { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
+      { id: "entity", type: "get_entity", title: "World", entity_path: "world", x: 120, y: 0, width: 160, height: 100 },
+      { id: "property", type: "get_entity_property", title: "Trust", property_key: "trust", value_type: "int", x: 300, y: 0, width: 180, height: 100 },
+      { id: "compare", type: "compare", title: "Trust threshold", operator: "gte", value_type: "int", value: 33, x: 500, y: 0, width: 180, height: 100 },
+      { id: "condition", type: "condition", title: "Switch", x: 700, y: 0, width: 180, height: 120 },
+      { id: "valid", type: "end", title: "Valid", precondition_result: true, x: 920, y: -50, width: 120, height: 80 },
+      { id: "reject", type: "end", title: "Reject", precondition_result: false, x: 920, y: 100, width: 120, height: 80 },
+    ],
+    edges: [
+      { id: "start-condition", from_node: "start", from_port: "output", to_node: "condition", to_port: "input", kind: "flow" },
+      { id: "entity-property", from_node: "entity", from_port: "output", to_node: "property", to_port: "entity", kind: "data" },
+      { id: "property-compare", from_node: "property", from_port: "output", to_node: "compare", to_port: "input", kind: "data" },
+      { id: "compare-condition", from_node: "compare", from_port: "output", to_node: "condition", to_port: "input", kind: "data" },
+      { id: "switch-true", from_node: "condition", from_port: "true", to_node: "valid", to_port: "input", kind: "flow" },
+      { id: "switch-false", from_node: "condition", from_port: "false", to_node: "reject", to_port: "input", kind: "flow" },
+    ],
+  };
+  expect(validatePreconditionGraph(graph)).toEqual([]);
+});
+
+test("Compare input connections enforce the selected type, including Entity Ref", () => {
+  const makeGraph = (propertyType: NonNullable<NarrativeNode["value_type"]>, compareType: NonNullable<NarrativeNode["value_type"]>): NarrativeGraph => ({
+    nodes: [
+      { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
+      { id: "entity", type: "get_entity", title: "Entity", entity_path: "source", x: 100, y: 0, width: 160, height: 100 },
+      { id: "property", type: "get_entity_property", title: "Property", property_key: "value", value_type: propertyType, x: 300, y: 0, width: 180, height: 100 },
+      { id: "compare", type: "compare", title: "Compare", value_type: compareType, value: compareType === "int" ? 1 : "", x: 500, y: 0, width: 180, height: 100 },
+      { id: "condition", type: "condition", title: "Condition", x: 700, y: 0, width: 180, height: 120 },
+      { id: "valid", type: "end", title: "Valid", precondition_result: true, x: 920, y: -50, width: 120, height: 80 },
+      { id: "reject", type: "end", title: "Reject", precondition_result: false, x: 920, y: 100, width: 120, height: 80 },
+    ],
+    edges: [
+      { id: "start-condition", from_node: "start", from_port: "output", to_node: "condition", to_port: "input" },
+      { id: "entity-property", from_node: "entity", from_port: "output", to_node: "property", to_port: "entity", kind: "data" },
+      { id: "property-compare", from_node: "property", from_port: "output", to_node: "compare", to_port: "input", kind: "data" },
+      { id: "compare-condition", from_node: "compare", from_port: "output", to_node: "condition", to_port: "input", kind: "data" },
+      { id: "condition-valid", from_node: "condition", from_port: "true", to_node: "valid", to_port: "input" },
+      { id: "condition-reject", from_node: "condition", from_port: "false", to_node: "reject", to_port: "input" },
+    ],
+  });
+  const intCompare = makeGraph("int", "int");
+  expect(validateNarrativeGraph(intCompare)).toEqual([]);
+  expect(graphTargetPinType(intCompare.nodes[3]!, "input")).toBe("int");
+  expect(graphConnectionIsCompatible("int", intCompare.nodes[3]!, "input")).toBe(true);
+  expect(graphConnectionIsCompatible("string", intCompare.nodes[3]!, "input")).toBe(false);
+  expect(validateNarrativeGraph(makeGraph("int", "string"))).toContain("Data edge property-compare uses an invalid port or incompatible type.");
+
+  const entityCompare = makeGraph("entity", "entity");
+  expect(graphNodeValueType(entityCompare.nodes[2]!)).toBe("entity_ref");
+  expect(graphTargetPinType(entityCompare.nodes[3]!, "input")).toBe("entity_ref");
+  expect(graphConnectionIsCompatible("entity_ref", entityCompare.nodes[3]!, "input")).toBe(true);
+  expect(validateNarrativeGraph(entityCompare)).toEqual([]);
 });
 
 test("only terminal End nodes mark a storylet as an ending", () => {
@@ -131,9 +200,7 @@ test("only terminal End nodes mark a storylet as an ending", () => {
     repeatability: "always",
     cooldown_turns: 0,
     parameters: [],
-    preconditions: { all_of: [], any_of: [], visited_locations_any_of: [], met_characters_any_of: [] },
     content: { text_template: "", sceneOpening: "", dialogue_quips: [] },
-    choices: [],
     effects: {},
     created_at: 0,
   } as StoryletRecord);
@@ -196,4 +263,115 @@ test("image URL validation matches Rust and graph validation reports unsafe node
   expect(validateNarrativeGraph(graph)).toContain(
     "Image node Hero must have a safe HTTP(S) URL or project-relative path.",
   );
+});
+
+test("boolean precondition predicates and combinators use value sockets", () => {
+  const graph: NarrativeGraph = {
+    nodes: [
+      { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
+      { id: "entity", type: "get_entity", title: "World", entity_path: "world", x: 120, y: 160, width: 160, height: 100 },
+      { id: "property", type: "get_entity_property", title: "Trust", property_key: "trust", value_type: "int", x: 300, y: 160, width: 180, height: 100 },
+      { id: "compare", type: "compare", title: "Trust threshold", operator: "gte", value_type: "int", value: 33, x: 500, y: 160, width: 180, height: 100 },
+      { id: "tag", type: "has_entity_tag", title: "Ready", target_entity_id: "world", tag: "flag.ready", x: 300, y: 0, width: 180, height: 100 },
+      { id: "and", type: "and", title: "All", x: 520, y: 0, width: 160, height: 90 },
+      { id: "condition", type: "condition", title: "Branch", x: 720, y: 0, width: 160, height: 100 },
+      { id: "valid", type: "end", title: "Valid", precondition_result: true, x: 940, y: -50, width: 100, height: 80 },
+      { id: "reject", type: "end", title: "Reject", precondition_result: false, x: 940, y: 80, width: 100, height: 80 },
+    ],
+    edges: [
+      { id: "start-condition", from_node: "start", from_port: "output", to_node: "condition", to_port: "input", kind: "flow" },
+      { id: "entity-property", from_node: "entity", from_port: "output", to_node: "property", to_port: "entity", kind: "data" },
+      { id: "property-compare", from_node: "property", from_port: "output", to_node: "compare", to_port: "input", kind: "data" },
+      { id: "tag-and", from_node: "tag", from_port: "output", to_node: "and", to_port: "input", kind: "data" },
+      { id: "compare-and", from_node: "compare", from_port: "output", to_node: "and", to_port: "input", kind: "data" },
+      { id: "and-condition", from_node: "and", from_port: "output", to_node: "condition", to_port: "input", kind: "data" },
+      { id: "condition-valid", from_node: "condition", from_port: "true", to_node: "valid", to_port: "input", kind: "flow" },
+      { id: "condition-reject", from_node: "condition", from_port: "false", to_node: "reject", to_port: "input", kind: "flow" },
+    ],
+  };
+  expect(validatePreconditionGraph(graph)).toEqual([]);
+  const storyGraph: NarrativeGraph = {
+    nodes: [
+      { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
+      { id: "tag", type: "has_entity_tag", title: "Ready", target_entity_id: "world", tag: "flag.ready", x: 120, y: 0, width: 180, height: 100 },
+      { id: "tag2", type: "has_entity_tag", title: "Second", target_entity_id: "world", tag: "flag.second", x: 120, y: 120, width: 180, height: 100 },
+      { id: "or", type: "or", title: "Either", x: 320, y: 50, width: 160, height: 90 },
+      { id: "condition", type: "condition", title: "Switch", x: 520, y: 0, width: 160, height: 100 },
+      { id: "yes", type: "end", title: "Yes", x: 740, y: -40, width: 100, height: 80 },
+      { id: "no", type: "end", title: "No", x: 740, y: 60, width: 100, height: 80 },
+    ],
+    edges: [
+      { id: "start-condition", from_node: "start", from_port: "output", to_node: "condition", to_port: "input", kind: "flow" },
+      { id: "tag-or", from_node: "tag", from_port: "output", to_node: "or", to_port: "input", kind: "data" },
+      { id: "tag2-or", from_node: "tag2", from_port: "output", to_node: "or", to_port: "input", kind: "data" },
+      { id: "or-condition", from_node: "or", from_port: "output", to_node: "condition", to_port: "input", kind: "data" },
+      { id: "condition-yes", from_node: "condition", from_port: "true", to_node: "yes", to_port: "input", kind: "flow" },
+      { id: "condition-no", from_node: "condition", from_port: "false", to_node: "no", to_port: "input", kind: "flow" },
+    ],
+  };
+  expect(validateNarrativeGraph(storyGraph)).toEqual([]);
+  expect(validatePreconditionGraph(storyGraph)).toEqual([]);
+});
+test("Apply Command authors a typed literal and receives an Entity input", () => {
+  const graph: NarrativeGraph = {
+    nodes: [
+      { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
+      { id: "entity", type: "get_entity", title: "World", entity_path: "world", x: 120, y: 100, width: 160, height: 100 },
+      { id: "owner", type: "get_entity_property", title: "Owner", property_key: "owner", value_type: "entity", x: 300, y: 100, width: 180, height: 100 },
+      { id: "command", type: "apply_command", title: "Set Courage", property_key: "courage", operation: "set", value_type: "int", value: 4, x: 520, y: 0, width: 180, height: 120 },
+      { id: "end", type: "end", title: "End", x: 760, y: 0, width: 100, height: 80 },
+    ],
+    edges: [
+      { id: "start-command", from_node: "start", from_port: "output", to_node: "command", to_port: "input", kind: "flow" },
+      { id: "command-end", from_node: "command", from_port: "output", to_node: "end", to_port: "input", kind: "flow" },
+      { id: "entity-owner", from_node: "entity", from_port: "output", to_node: "owner", to_port: "entity", kind: "data" },
+      { id: "owner-command", from_node: "owner", from_port: "output", to_node: "command", to_port: "entity", kind: "data" },
+    ],
+  };
+  expect(validateNarrativeGraph(graph)).toEqual([]);
+  expect(validateNarrativeGraph({
+    ...graph,
+    nodes: graph.nodes.map((node) => node.id === "command" ? { ...node, operation: "toggle" as const } : node),
+  })).toContain("Apply Command node Set Courage can only toggle boolean properties.");
+  expect(validateNarrativeGraph({
+    ...graph,
+    edges: graph.edges.filter((edge) => edge.id !== "owner-command"),
+  })).toContain("Apply Command node Set Courage must have exactly one Entity data input.");
+});
+test("Apply Command operations follow the selected value type", () => {
+  expect(applyCommandOperationsForType("bool").map(({ value }) => value)).toEqual(["set", "toggle"]);
+  expect(applyCommandOperationsForType("int").map(({ value }) => value)).toEqual(["set", "add", "subtract"]);
+  expect(applyCommandOperationsForType("float").map(({ value }) => value)).toEqual(["set", "add", "subtract"]);
+  expect(applyCommandOperationsForType("string").map(({ value }) => value)).toEqual(["set"]);
+});
+
+test("Entity tag nodes accept only EntityRef target data inputs", () => {
+  const graph: NarrativeGraph = {
+    nodes: [
+      { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
+      { id: "entity", type: "get_entity", title: "Actor", entity_path: "actor", x: 120, y: 160, width: 160, height: 100 },
+      { id: "add", type: "add_entity_tag", title: "Add", target_entity_id: "world", tag: "flag.ready", x: 300, y: 0, width: 160, height: 100 },
+      { id: "remove", type: "remove_entity_tag", title: "Remove", target_entity_id: "world", tag: "flag.ready", x: 480, y: 0, width: 160, height: 100 },
+      { id: "has", type: "has_entity_tag", title: "Has", target_entity_id: "world", tag: "flag.ready", x: 660, y: 160, width: 160, height: 100 },
+      { id: "condition", type: "condition", title: "Branch", x: 840, y: 0, width: 160, height: 100 },
+      { id: "yes", type: "end", title: "Yes", x: 1060, y: -40, width: 100, height: 80 },
+      { id: "no", type: "end", title: "No", x: 1060, y: 80, width: 100, height: 80 },
+    ],
+    edges: [
+      { id: "start-add", from_node: "start", from_port: "output", to_node: "add", to_port: "input", kind: "flow" },
+      { id: "add-remove", from_node: "add", from_port: "output", to_node: "remove", to_port: "input", kind: "flow" },
+      { id: "remove-condition", from_node: "remove", from_port: "output", to_node: "condition", to_port: "input", kind: "flow" },
+      { id: "condition-yes", from_node: "condition", from_port: "true", to_node: "yes", to_port: "input", kind: "flow" },
+      { id: "condition-no", from_node: "condition", from_port: "false", to_node: "no", to_port: "input", kind: "flow" },
+      { id: "entity-add-target", from_node: "entity", from_port: "output", to_node: "add", to_port: "target", kind: "data" },
+      { id: "entity-remove-target", from_node: "entity", from_port: "output", to_node: "remove", to_port: "target", kind: "data" },
+      { id: "entity-has-target", from_node: "entity", from_port: "output", to_node: "has", to_port: "target", kind: "data" },
+      { id: "has-condition", from_node: "has", from_port: "output", to_node: "condition", to_port: "input", kind: "data" },
+    ],
+  };
+  expect(validateNarrativeGraph(graph)).toEqual([]);
+  expect(validateNarrativeGraph({
+    ...graph,
+    edges: graph.edges.map((edge) => edge.id === "entity-add-target" ? { ...edge, from_node: "has" } : edge),
+  }).some((issue) => issue.includes("invalid port or incompatible type"))).toBe(true);
 });

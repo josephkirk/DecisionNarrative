@@ -18,8 +18,8 @@ External MCP agents remain supported. The Vue studio publishes the active view, 
 
 ## Current authoring rules
 
-- Storylets may target location tags; a storylet with no location tags is not location-gated. Preconditions support quality conditions and visited-location/met-character IDs or tags/roles. Role parameters default to current-location binding; `location_policy: "any"` allows remote/abstract actors via JSON/MCP.
-- Graphs require exactly one Start and one or more End nodes, with every node reachable from Start and able to reach an End. Each End is terminal or a jump to another storylet; a jump takes precedence, and a dedicated ending requires every End to be terminal with no jump. Save validates before writing and approval checks the saved revision.
+- Preconditions are authored in each storylet's dedicated Preconditions graph tab; the separate Story Graph tab owns scene flow. Both graphs connect boolean predicate values to a Condition Node, which owns `true`/`false` flow branches. `Has Entity Tag` uses dot notation and outputs a boolean in both graphs. `Apply Command` performs supported authored mutations. There is no Quality Check node, separate Quality store, storylet-local Variable node, or legacy migration/shim claim. Chrono operations are graph nodes only where supported by runtime.
+- Story Graphs require exactly one Start and one or more End nodes, with every node reachable from Start and able to reach an End. Each End is terminal or a jump to another storylet; a jump takes precedence, and a dedicated ending requires every End to be terminal with no jump. Both graphs validate before save, and approval checks the saved revision.
 - Go To Location is a Choice-branch action and selects an existing project location.
 - Tag editing is inline with suggestions; Tag Manager shows tag references and opens the referenced record.
 - Content is authored in the studio or by a requested MCP agent. Approval remains an explicit user decision.
@@ -45,7 +45,7 @@ cargo test --manifest-path crates/storylet-engine/Cargo.toml
 cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 ```
 
-`bun run play` uses `data/storylet_studio_v2.db` and shares it with the default MCP server. `bun run play:fresh` opens the separate `data/storylet_studio_clean.db` workspace and skips legacy imports; it does not alter the v2 database. Use temporary or in-memory databases for isolated checks.
+`bun run play` uses `data/storylet_studio_v5.db` and shares it with the default MCP server. `bun run play:fresh` opens the separate `data/storylet_studio_v5_clean.db` workspace. Earlier schema versions are rejected without migration; use temporary or in-memory databases for isolated checks.
 
 ## Workspace safety
 

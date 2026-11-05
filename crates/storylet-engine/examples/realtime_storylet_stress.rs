@@ -511,10 +511,6 @@ impl World {
             hash ^= *word;
             hash = hash.wrapping_mul(0x1000_0000_01b3);
         }
-        for value in &self.state.metrics {
-            hash ^= value.to_bits() as u64;
-            hash = hash.wrapping_mul(0x1000_0000_01b3);
-        }
         for (item, count) in &self.inventory {
             for byte in item.bytes() {
                 hash ^= byte as u64;

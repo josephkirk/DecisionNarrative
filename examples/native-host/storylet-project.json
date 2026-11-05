@@ -31,7 +31,7 @@
       "approved": true,
       "location_id": "archive",
       "urgency_weight": 50.0,
-      "cluster_type": "player_controlled_passage",
+      "cluster_type": "player_passage",
       "repeatability": { "kind": "always" },
       "required_roles": [],
       "trigger": { "all_of": [], "any_of": [] },

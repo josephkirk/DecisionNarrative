@@ -20,7 +20,7 @@ pub enum RuntimeError {
     InvalidProject(Vec<ProjectIssue>),
     InvalidSessionState(String),
     UnknownLocation { location_id: String },
-    UnknownQuality { key: String },
+    UnknownProperty { key: String },
     Engine(EngineError),
 }
 
@@ -50,8 +50,8 @@ impl fmt::Display for RuntimeError {
                     "location '{location_id}' is not part of this project"
                 )
             }
-            Self::UnknownQuality { key } => {
-                write!(formatter, "quality '{key}' is not part of this project")
+            Self::UnknownProperty { key } => {
+                write!(formatter, "property '{key}' is not part of this project")
             }
             Self::Engine(error) => error.fmt(formatter),
         }
@@ -86,7 +86,6 @@ pub struct RuntimeSessionState {
     pub director: DirectorState,
 }
 
-const LEGACY_RUNTIME_SESSION_FORMAT_VERSION: u32 = 1;
 pub const RUNTIME_SESSION_FORMAT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -182,12 +181,9 @@ impl StoryletRuntime {
 
     pub fn restore_session(
         &mut self,
-        mut state: RuntimeSessionState,
+        state: RuntimeSessionState,
     ) -> Result<SessionSnapshot, RuntimeError> {
-        if !matches!(
-            state.format_version,
-            LEGACY_RUNTIME_SESSION_FORMAT_VERSION | RUNTIME_SESSION_FORMAT_VERSION
-        ) {
+        if state.format_version != RUNTIME_SESSION_FORMAT_VERSION {
             return Err(RuntimeError::InvalidSessionState(format!(
                 "format version {} is unsupported",
                 state.format_version
@@ -219,26 +215,7 @@ impl StoryletRuntime {
             ));
         }
         let replayed = crate::replay_events(initial, &state.world.events)?;
-        if state.format_version == LEGACY_RUNTIME_SESSION_FORMAT_VERSION {
-            if replayed != state.world {
-                // Older v1 snapshots omitted these indexes; reconstruct only those derived fields.
-                let mut normalized = state.world.clone();
-                normalized.location_tags.clone_from(&replayed.location_tags);
-                normalized
-                    .visited_locations
-                    .clone_from(&replayed.visited_locations);
-                normalized
-                    .met_characters
-                    .clone_from(&replayed.met_characters);
-                if replayed != normalized {
-                    return Err(RuntimeError::InvalidSessionState(
-                        "legacy event log does not reproduce the saved world".into(),
-                    ));
-                }
-            }
-            state.world = replayed;
-            state.format_version = RUNTIME_SESSION_FORMAT_VERSION;
-        } else if replayed != state.world {
+        if replayed != state.world {
             return Err(RuntimeError::InvalidSessionState(
                 "event log does not reproduce the saved world".into(),
             ));
@@ -726,15 +703,15 @@ fn validate_command_references(
 ) -> Result<(), RuntimeError> {
     for effect in &command.effects {
         match effect {
-            crate::Effect::SetQuality { key, .. } | crate::Effect::AddQuality { key, .. } => {
-                if !project.qualities.contains_key(key) {
-                    return Err(RuntimeError::UnknownQuality { key: key.clone() });
+            crate::Effect::SetProperty { key, .. } | crate::Effect::AddProperty { key, .. } => {
+                if !project.properties.contains_key(key) {
+                    return Err(RuntimeError::UnknownProperty { key: key.clone() });
                 }
             }
-            crate::Effect::TransferQuality { from, to, .. } => {
+            crate::Effect::TransferProperty { from, to, .. } => {
                 for key in [from, to] {
-                    if !project.qualities.contains_key(key) {
-                        return Err(RuntimeError::UnknownQuality { key: key.clone() });
+                    if !project.properties.contains_key(key) {
+                        return Err(RuntimeError::UnknownProperty { key: key.clone() });
                     }
                 }
             }

@@ -7,522 +7,110 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use storylet_engine::chrono_catalog::{StoryletCatalog, MAX_STORYLETS};
 use storylet_engine::chrono_dispatch::{
-    EffectKind, IdealMetricTarget, PredicateOperator, PredicateSubject, QualityPredicate,
-    RoleRequirement, StoryletClusterType, StoryletDef, StoryletEffect, UnifiedDispatcher,
+    RoleRequirement, StoryletClusterType, StoryletDef, UnifiedDispatcher,
 };
 use storylet_engine::chrono_state::{
-    AttributeValue, GameplayTagRegistry, GraphLayer, MAX_ENTITIES, MAX_METRICS, MAX_TAGS,
-    MetricRegistry, MetricThresholdRule, MicroPassionDef, PassionDirection, PassionRegistry,
-    PassionThresholdRule, RivalPassionLink, StarNpcDef, TagBitset, WorldEdge, WorldStateTable,
-    WorldVertex,
+    AttributeValue, GameplayTagRegistry, GraphLayer, MAX_ENTITIES, MAX_PASSIONS,
+    MicroPassionDef, PassionBounds, PassionDirection, PassionRegistry, PassionThresholdRule,
+    RivalPassionLink, StarNpcDef, TagBitset, WorldEdge, WorldStateTable, WorldVertex,
 };
 
 use crate::contracts::{
-    CharacterRecord, ChronoStoryletSettings, LocationRecord, QualityRecord, ScenarioRecord,
-    StoryletRecord, WorldObjectLayer, WorldObjectRecord,
+    CharacterRecord, ChronoStoryletSettings, EntityRecord, EntityProperty, EntityTemplateRecord,
+    LocationRecord, PropertyType,
+    ScenarioRecord, StoryletRecord, WorldObjectLayer, WorldObjectRecord,
 };
 
 #[derive(Clone, Debug)]
 pub struct CompiledChronoDispatch {
     pub registry: GameplayTagRegistry,
-    pub metrics: MetricRegistry,
     pub dispatcher: UnifiedDispatcher,
     catalog: StoryletCatalog,
-    pub metric_indices: BTreeMap<String, u16>,
     pub passion_registry: PassionRegistry,
     pub passion_indices: BTreeMap<(String, String), u16>,
+    pub entity_game_ids: BTreeMap<String, String>,
 }
 
 impl CompiledChronoDispatch {
     pub fn storylet_index(&self, id: &str) -> Option<u16> {
         self.catalog.resolve(id)
     }
-
     pub fn storylet_key(&self, index: u16) -> Option<&str> {
         self.catalog.key(index)
     }
-
     pub fn storylet_catalog(&self) -> &StoryletCatalog {
         &self.catalog
     }
-
     pub fn storylet_count(&self) -> usize {
         self.catalog.len()
     }
 }
 
-fn menace_crisis_tag(quality_name: &str) -> String {
-    format!("quality.crisis.{quality_name}")
-}
 
-/// Compile authored storylets and project names into bounded, deterministic dense IDs.
 pub fn compile_chrono_dispatch(
     storylets: &[StoryletRecord],
-    qualities: &[QualityRecord],
     locations: &[LocationRecord],
     characters: &[CharacterRecord],
 ) -> Result<CompiledChronoDispatch, String> {
-    compile_chrono_dispatch_inner(storylets, qualities, locations, characters, true)
+    compile_chrono_dispatch_with_world(
+        storylets, locations, characters, &[], &[], &[], &BTreeMap::new(),
+    )
 }
 
-/// Compile a candidate storylet without requiring its crisis targets to be in
-/// the candidate slice. Full-project compilation remains strict.
 pub fn compile_chrono_dispatch_for_storylet_validation(
-    storylets: &[StoryletRecord],
-    qualities: &[QualityRecord],
-    locations: &[LocationRecord],
-    characters: &[CharacterRecord],
+    storylets: &[StoryletRecord], locations: &[LocationRecord], characters: &[CharacterRecord],
 ) -> Result<CompiledChronoDispatch, String> {
-    compile_chrono_dispatch_inner(storylets, qualities, locations, characters, false)
+    compile_chrono_dispatch(storylets, locations, characters)
 }
 
-fn compile_chrono_dispatch_inner(
-    storylets: &[StoryletRecord],
-    qualities: &[QualityRecord],
-    locations: &[LocationRecord],
-    characters: &[CharacterRecord],
-    strict_crisis_targets: bool,
+pub fn compile_chrono_dispatch_with_world(
+    storylets: &[StoryletRecord], locations: &[LocationRecord], characters: &[CharacterRecord],
+    world_objects: &[WorldObjectRecord], world_tags: &[String],
+    entity_tag_seeds: &[(String, Vec<String>)], custom_entity_game_ids: &BTreeMap<String, String>,
 ) -> Result<CompiledChronoDispatch, String> {
-    let mut ordered_storylets: Vec<&StoryletRecord> = storylets.iter().collect();
-    ordered_storylets.sort_by(|left, right| left.id.cmp(&right.id));
-    if ordered_storylets.len() > MAX_STORYLETS {
-        return Err(format!(
-            "ChronoFlow supports at most {MAX_STORYLETS} dispatchable storylets; got {}",
-            ordered_storylets.len()
-        ));
-    }
+    let mut ordered: Vec<&StoryletRecord> = storylets.iter().collect();
+    ordered.sort_by_key(|s| s.id.as_str());
+    if ordered.len() > MAX_STORYLETS { return Err(format!("ChronoFlow supports at most {MAX_STORYLETS} storylets")); }
     let mut catalog = StoryletCatalog::new();
-    for storylet in &ordered_storylets {
-        catalog
-            .insert(&storylet.id, storylet.ending, 0, 0.0)
-            .map_err(|error| format!("storylet catalog: {error}"))?;
+    for s in &ordered { catalog.insert(&s.id, s.ending, 0, s.urgency_weight as f32).map_err(|e| e.to_string())?; }
+    catalog.freeze(0).map_err(|e| e.to_string())?;
+    let mut names = BTreeSet::from(["location.current".to_owned()]);
+    let mut entity_game_ids = custom_entity_game_ids.clone(); entity_game_ids.insert("world".into(), "world".into());
+    for l in locations {
+        entity_game_ids.entry(l.id.clone()).or_insert_with(|| l.id.clone());
+        names.insert(format!("location.{}", l.id));
+        names.extend(l.tags.iter().cloned());
     }
-    catalog.freeze(0).map_err(|error| format!("storylet catalog: {error}"))?;
-
-    let mut names = BTreeSet::new();
-    names.insert("location.current".into());
-    for location in locations {
-        names.insert(format!("location.{}", location.id));
-        names.extend(location.tags.iter().cloned());
+    for c in characters {
+        entity_game_ids.entry(c.id.clone()).or_insert_with(|| c.id.clone());
+        names.insert(format!("character.{}", c.id));
+        if !c.role.trim().is_empty() { names.insert(c.role.clone()); }
+        names.extend(c.thresholds.iter().enumerate().map(|(i,t)| passion_threshold_tag(c,t,i)));
     }
-    for character in characters {
-        names.insert(format!("character.{}", character.id));
-        if !character.role.trim().is_empty() {
-            names.insert(character.role.clone());
-        }
-        for (index, threshold) in character.thresholds.iter().enumerate() {
-            names.insert(passion_threshold_tag(character, threshold, index));
-        }
+    for o in world_objects {
+        entity_game_ids.entry(o.id.clone()).or_insert_with(|| o.id.clone());
     }
-    for quality in qualities.iter().filter(|quality| quality.kind == "tool") {
-        names.insert(format!("quality.{}", quality.name));
-    }
-    for quality in qualities
-        .iter()
-        .filter(|quality| quality.kind == "menace" && quality.menace_crisis_storylet_id.is_some())
-    {
-        names.insert(menace_crisis_tag(&quality.name));
-    }
-    for storylet in &ordered_storylets {
+    names.extend(world_tags.iter().map(|t|crate::chrono_graph_adapter::resolve_entity_tag("world",t,Some(&entity_game_ids))));
+    names.extend(entity_tag_seeds.iter().flat_map(|(gid,tags)|tags.iter().map(move|t|crate::chrono_graph_adapter::resolve_entity_tag(gid,t,None))));
+    for storylet in &ordered {
         names.extend(storylet.location_tags.iter().cloned());
-        names.extend(
-            storylet
-                .parameters
-                .iter()
-                .map(|parameter| parameter.param_name.clone()),
-        );
-        // The compiled role tag comes from `query`; register it too so a query
-        // naming a role different from the parameter label still resolves.
-        names.extend(
-            storylet
-                .parameters
-                .iter()
-                .filter_map(|parameter| crate::projection::parse_role_query(&parameter.query)),
-        );
         if let Some(settings) = &storylet.chrono {
             collect_settings_names(settings, &mut names);
         }
         if let Some(graph) = &storylet.graph {
-            collect_graph_tag_names(graph, &mut names);
+            collect_graph_tag_names(graph, &mut names, &entity_game_ids)?;
         }
-        collect_legacy_precondition_names(&storylet.preconditions, &mut names);
-        validate_legacy_reference_ids(storylet, locations, characters)?;
+        if let Some(graph) = &storylet.precondition_graph {
+            collect_precondition_graph_tag_names(graph, &mut names, &entity_game_ids);
+        }
     }
-    // Blank authored tags (an unfilled role or a cleared tag) carry no meaning
-    // and must not reach the registry, which rejects empty names.
-    names.retain(|name| !name.trim().is_empty());
-    if names.len() > MAX_TAGS {
-        return Err(format!(
-            "ChronoFlow tag registry supports at most {MAX_TAGS} names; got {}",
-            names.len()
-        ));
-    }
-
-    let registry = GameplayTagRegistry::compile(names.into_iter())
-        .map_err(|error| format!("Invalid ChronoFlow tag registry: {error}"))?;
-    let metrics = MetricRegistry::compile(qualities.iter().map(|quality| quality.name.clone()))
-        .map_err(|error| format!("Invalid ChronoFlow metric registry: {error}"))?;
-    let mut metric_indices = BTreeMap::new();
-    for quality in qualities {
-        let metric_id = metrics.id(&quality.name).ok_or_else(|| {
-            format!(
-                "quality {} is missing from the ChronoFlow metric registry",
-                quality.name
-            )
-        })?;
-        metric_indices.insert(quality.name.clone(), metric_id);
-    }
-
-
-    let mut threshold_rules = Vec::new();
-    for quality in qualities {
-        let Some(crisis_storylet_id) = &quality.menace_crisis_storylet_id else {
-            continue;
-        };
-        if quality.kind != "menace" {
-            return Err(format!(
-                "quality {} sets a crisis storylet but is not a menace",
-                quality.name
-            ));
-        }
-        if strict_crisis_targets && catalog.resolve(crisis_storylet_id).is_none() {
-            return Err(format!(
-                "menace quality {} references unknown crisis storylet {}",
-                quality.name, crisis_storylet_id
-            ));
-        }
-        let metric_id = metric_indices[&quality.name];
-        let threshold = quality.max_value as f32;
-        if !threshold.is_finite() {
-            return Err(format!(
-                "menace quality {} threshold exceeds f32 range",
-                quality.name
-            ));
-        }
-        let tag = menace_crisis_tag(&quality.name);
-        let tag_id = registry
-            .id(&tag)
-            .ok_or_else(|| format!("unregistered menace crisis tag {tag}"))?;
-        threshold_rules.push(MetricThresholdRule {
-            metric_id,
-            threshold_tag_bit: tag_id,
-            trigger_value: threshold,
-            hysteresis: 0.0,
-        });
-    }
-    let registry = registry
-        .with_threshold_rules(threshold_rules)
-        .map_err(|error| format!("Invalid ChronoFlow menace thresholds: {error}"))?;
-    let (passion_registry, passion_indices) =
-        compile_passion_registry(characters, locations, &registry)?;
-
-    let mut definitions = Vec::with_capacity(ordered_storylets.len());
-    for (storylet_index, storylet) in ordered_storylets.iter().enumerate() {
-        let settings = storylet.chrono.as_ref();
-        debug_assert_eq!(catalog.key(storylet_index as u16), Some(storylet.id.as_str()));
-        let mut definition = StoryletDef {
-            storylet_id: storylet_index as u16,
-            is_ending: storylet.ending,
-            display_priority: settings
-                .map(|settings| settings.display_priority)
-                .unwrap_or(0),
-            urgency_tag: settings
-                .map(|settings| settings.urgency_color_tag.trim())
-                .filter(|tag| !tag.is_empty())
-                .unwrap_or("Standard")
-                .to_owned(),
-            cluster_type: map_cluster_type(&storylet.cluster_type),
-            payload_node_guid: storylet_index as u32,
-            is_repeatable: settings
-                .map(|settings| settings.is_repeatable)
-                .unwrap_or(storylet.repeatability != "once_ever")
-                && storylet.repeatability != "once_ever",
-            cooldown_ms: settings
-                .map(|settings| i64::try_from(settings.cooldown_ms))
-                .transpose()
-                .map_err(|_| format!("storylet {} cooldown_ms exceeds i64 range", storylet.id))?
-                .unwrap_or(0),
-            cooldown_turns: if storylet.repeatability == "cooldown" {
-                u64::from(storylet.cooldown_turns)
-            } else {
-                0
-            },
-            required_roles: storylet
-                .parameters
-                .iter()
-                .map(|parameter| {
-                    // The role is authored in `query` (`role == "Detective"`);
-                    // the parameter name is only a variable label.
-                    let role = crate::projection::parse_role_query(&parameter.query).ok_or_else(
-                        || {
-                            format!(
-                                "storylet {} parameter {} has unsupported role query '{}'",
-                                storylet.id, parameter.param_name, parameter.query
-                            )
-                        },
-                    )?;
-                    let location_tag = match parameter.location_policy.trim() {
-                        "" | "current" => Some("location.current".into()),
-                        "any" => None,
-                        other => {
-                            return Err(format!(
-                                "storylet {} parameter {} has unsupported location_policy '{other}'",
-                                storylet.id, parameter.param_name
-                            ));
-                        }
-                    };
-                    Ok(RoleRequirement {
-                        role_tag: role,
-                        location_tag,
-                        ..RoleRequirement::default()
-                    })
-                })
-                .collect::<Result<Vec<_>, String>>()?,
-            ..StoryletDef::default()
-        };
-        for quality in qualities.iter().filter(|quality| {
-            quality.kind == "menace"
-                && quality.menace_crisis_storylet_id.as_deref() == Some(storylet.id.as_str())
-        }) {
-            let tag = menace_crisis_tag(&quality.name);
-            let tag_id = registry
-                .id(&tag)
-                .ok_or_else(|| format!("unregistered menace crisis tag {tag}"))?;
-            definition
-                .required_tags
-                .set_bit(tag_id)
-                .map_err(|error| error.to_string())?;
-        }
-        if let Some(settings) = settings {
-            add_tags(
-                &registry,
-                &mut definition.required_tags,
-                &settings.required_tags,
-                &storylet.id,
-                "required_tags",
-            )?;
-            add_any_tags(
-                &registry,
-                &mut definition.required_any_tags,
-                &settings.required_any_tags,
-                &storylet.id,
-                "required_any_tags",
-            )?;
-            add_any_tags(
-                &registry,
-                &mut definition.forbidden_tags,
-                &settings.forbidden_tags,
-                &storylet.id,
-                "forbidden_tags",
-            )?;
-            add_any_tags(
-                &registry,
-                &mut definition.required_arc_phases,
-                &settings.required_arc_phases,
-                &storylet.id,
-                "required_arc_phases",
-            )?;
-            // Bonus specificity counts exact tags. Expanding to the ancestor
-            // closure would score one authored bonus per ancestor and let
-            // sibling tags cross-trigger.
-            for name in &settings.salience_bonus_tags {
-                let index = registry.id(name).ok_or_else(|| {
-                    format!(
-                        "storylet {} salience_bonus_tags references unknown tag {name}",
-                        storylet.id
-                    )
-                })?;
-                definition
-                    .salience_bonus_tags
-                    .set_bit(index)
-                    .map_err(|error| {
-                        format!("storylet {} salience_bonus_tags: {error}", storylet.id)
-                    })?;
-            }
-
-            for (target, value) in &settings.ideal_state_vector {
-                let metric_id = metric_indices.get(target).copied().ok_or_else(|| {
-                    format!(
-                        "storylet {} ideal_state_vector references unknown quality {target}",
-                        storylet.id
-                    )
-                })?;
-                if !value.is_finite() {
-                    return Err(format!(
-                        "storylet {} ideal target for {target} must be finite",
-                        storylet.id
-                    ));
-                }
-                let target_value = *value as f32;
-                if !target_value.is_finite() {
-                    return Err(format!(
-                        "storylet {} ideal target for {target} exceeds f32 range",
-                        storylet.id
-                    ));
-                }
-                let weight = settings
-                    .ideal_state_weights
-                    .get(target)
-                    .copied()
-                    .unwrap_or(1.0);
-                if !weight.is_finite() || weight <= 0.0 {
-                    return Err(format!(
-                        "storylet {} ideal weight for {target} must be finite and positive",
-                        storylet.id
-                    ));
-                }
-                let weight = weight as f32;
-                if !weight.is_finite() {
-                    return Err(format!(
-                        "storylet {} ideal weight for {target} exceeds f32 range",
-                        storylet.id
-                    ));
-                }
-                definition.ideal_vector.push(IdealMetricTarget {
-                    metric_id,
-                    target: target_value,
-                    weight,
-                });
-            }
-            for predicate in &settings.preconditions {
-                let operator = map_operator(&predicate.operator).ok_or_else(|| {
-                    format!(
-                        "storylet {} has unsupported predicate operator {:?}",
-                        storylet.id, predicate.operator
-                    )
-                })?;
-                let subject = map_subject(&predicate.subject).ok_or_else(|| {
-                    format!(
-                        "storylet {} has unsupported predicate subject {:?}",
-                        storylet.id, predicate.subject
-                    )
-                })?;
-                if subject == PredicateSubject::Metric
-                    && !metric_indices.contains_key(&predicate.target_id)
-                {
-                    return Err(format!(
-                        "storylet {} metric predicate references unknown quality {}",
-                        storylet.id, predicate.target_id
-                    ));
-                }
-                definition.preconditions.push(QualityPredicate {
-                    target_id: predicate.target_id.clone(),
-                    subject,
-                    operator,
-                    comparison_value: predicate.comparison_value,
-                    specificity_weight: predicate.specificity_weight,
-                    entity_index: predicate.entity_index,
-                    target_index: None,
-                    tag_mask: TagBitset::new(),
-                });
-            }
-            for effect in &settings.effects_on_complete {
-                let kind = if effect.incremental {
-                    EffectKind::Increment
-                } else {
-                    EffectKind::Set
-                };
-                definition.effects_on_complete.push(StoryletEffect {
-                    target_id: effect.target_id.clone(),
-                    value: effect.value,
-                    kind,
-                    target_index: None,
-                    tag_mask: TagBitset::new(),
-                });
-                for tag in &effect.add_tags {
-                    let id = registry.id(tag).ok_or_else(|| {
-                        format!(
-                            "storylet {} completion effect references unknown tag {tag}",
-                            storylet.id
-                        )
-                    })?;
-                    registry
-                        .add_hierarchical(&mut definition.on_complete_mutation.add_global_tags, id)
-                        .map_err(|error| error.to_string())?;
-                }
-                for tag in &effect.remove_tags {
-                    let id = registry.id(tag).ok_or_else(|| {
-                        format!(
-                            "storylet {} completion effect references unknown tag {tag}",
-                            storylet.id
-                        )
-                    })?;
-                    registry
-                        .add_hierarchical(
-                            &mut definition.on_complete_mutation.remove_global_tags,
-                            id,
-                        )
-                        .map_err(|error| error.to_string())?;
-                }
-            }
-        }
-        let legacy_all_of =
-            legacy_quality_predicates(&storylet.preconditions, "all_of", &storylet.id)?;
-        for predicate in legacy_all_of {
-            if !metric_indices.contains_key(&predicate.target_id) {
-                return Err(format!(
-                    "storylet {} legacy condition references unknown quality {}",
-                    storylet.id, predicate.target_id
-                ));
-            }
-            definition.preconditions.push(predicate);
-        }
-        for (group_name, subject) in [
-            ("any_of", PredicateSubject::Metric),
-            ("visited_locations_any_of", PredicateSubject::Visited),
-            ("met_characters_any_of", PredicateSubject::MetCharacter),
-        ] {
-            let group = match subject {
-                PredicateSubject::Metric => {
-                    legacy_quality_predicates(&storylet.preconditions, group_name, &storylet.id)?
-                }
-                PredicateSubject::Visited | PredicateSubject::MetCharacter => {
-                    legacy_tag_predicates(
-                        &storylet.preconditions,
-                        group_name,
-                        subject,
-                        &storylet.id,
-                    )?
-                }
-                _ => Vec::new(),
-            };
-            if !group.is_empty() {
-                definition.any_of_precondition_groups.push(group);
-            }
-        }
-        if !storylet.location_tags.is_empty() {
-            let group = storylet
-                .location_tags
-                .iter()
-                .map(|tag| QualityPredicate {
-                    target_id: tag.clone(),
-                    subject: PredicateSubject::Location,
-                    operator: PredicateOperator::Eq,
-                    comparison_value: 1.0,
-                    specificity_weight: 1.0,
-                    entity_index: None,
-                    target_index: None,
-                    tag_mask: TagBitset::new(),
-                })
-                .collect();
-            definition.any_of_precondition_groups.push(group);
-        }
-        definitions.push(definition);
-    }
-
-    let mut dispatcher = UnifiedDispatcher::new(definitions);
-    dispatcher
-        .resolve(&registry, &metrics)
-        .map_err(|error| format!("ChronoFlow dispatcher compile failed: {error}"))?;
-    Ok(CompiledChronoDispatch {
-        registry,
-        metrics,
-        dispatcher,
-        catalog,
-        metric_indices,
-        passion_registry,
-        passion_indices,
-    })
+    names.retain(|n|!n.trim().is_empty());
+    let registry=GameplayTagRegistry::compile(names.into_iter()).map_err(|e|e.to_string())?;
+    let (passion_registry,passion_indices)=compile_passion_registry(characters,locations,&registry)?;
+    let mut defs=Vec::with_capacity(ordered.len());
+    for(i,s)in ordered.iter().enumerate(){let set=s.chrono.as_ref();let mut d=StoryletDef{storylet_id:i as u16,is_ending:s.ending,display_priority:set.map_or(0,|x|x.display_priority),urgency_tag:set.map_or("Standard".into(),|x|x.urgency_color_tag.clone()),cluster_type:map_cluster_type(&s.cluster_type)?,payload_node_guid:i as u32,is_repeatable:s.repeatability!="once_ever"&&set.map_or(true,|x|x.is_repeatable),cooldown_ms:set.map_or(0,|x|i64::try_from(x.cooldown_ms).unwrap_or(i64::MAX)),cooldown_turns:if s.repeatability=="cooldown"{s.cooldown_turns as u64}else{0},required_roles:s.parameters.iter().filter_map(|p|crate::projection::parse_role_query(&p.query).map(|r|RoleRequirement{role_tag:r,location_tag:(p.location_policy.trim()!="any").then(||"location.current".into()),..Default::default()})).collect(),..StoryletDef::default()};if let Some(set)=set{add_tags(&registry,&mut d.required_tags,&set.required_tags,&s.id,"required_tags")?;add_any_tags(&registry,&mut d.required_any_tags,&set.required_any_tags,&s.id,"required_any_tags")?;add_any_tags(&registry,&mut d.forbidden_tags,&set.forbidden_tags,&s.id,"forbidden_tags")?;add_any_tags(&registry,&mut d.required_arc_phases,&set.required_arc_phases,&s.id,"required_arc_phases")?;for tag in &set.salience_bonus_tags{let id=registry.id(tag).ok_or_else(||format!("unknown salience tag {tag}"))?;registry.add_hierarchical(&mut d.salience_bonus_tags,id).map_err(|e|e.to_string())?;}}defs.push(d);}
+    let mut dispatcher=UnifiedDispatcher::new(defs);dispatcher.resolve(&registry).map_err(|e|e.to_string())?;
+    Ok(CompiledChronoDispatch{registry,dispatcher,catalog,passion_registry,passion_indices,entity_game_ids})
 }
 
 fn passion_threshold_tag(
@@ -583,7 +171,7 @@ fn compile_passion_registry(
                 ));
             }
             let passion_id = u16::try_from(next_passion_id).map_err(|_| {
-                "ChronoFlow passion registry exceeds its fixed metric limit".to_string()
+                "ChronoFlow passion registry exceeds its fixed passion limit".to_string()
             })?;
             passion_indices.insert(
                 (character.id.clone(), passion.passion_id.clone()),
@@ -616,17 +204,12 @@ fn compile_passion_registry(
             ));
         }
     }
-    if next_passion_id > MAX_METRICS {
+    if next_passion_id > MAX_PASSIONS {
         return Err(format!(
-            "ChronoFlow supports at most {MAX_METRICS} micro passions"
+            "ChronoFlow supports at most {MAX_PASSIONS} micro passions"
         ));
     }
 
-    let metric_threshold_bits: BTreeSet<u16> = tags
-        .threshold_rules()
-        .iter()
-        .map(|rule| rule.threshold_tag_bit)
-        .collect();
     let mut stars = Vec::new();
     let mut thresholds = Vec::new();
     for character in ordered {
@@ -693,7 +276,7 @@ fn compile_passion_registry(
             npc_id,
             trust_inertia: character.trust_inertia as f32,
             micro_passions,
-            macro_bounds: storylet_engine::chrono_state::MetricBound {
+            macro_bounds: PassionBounds {
                 min: -100.0,
                 max: 100.0,
             },
@@ -714,12 +297,6 @@ fn compile_passion_registry(
             let threshold_tag_bit = tags
                 .id(&name)
                 .ok_or_else(|| format!("unregistered passion threshold tag {name}"))?;
-            if metric_threshold_bits.contains(&threshold_tag_bit) {
-                return Err(format!(
-                    "character {} threshold {name} shares a tag bit with a quality threshold",
-                    character.id
-                ));
-            }
             thresholds.push(PassionThresholdRule {
                 npc_id,
                 threshold_tag_bit,
@@ -734,141 +311,43 @@ fn compile_passion_registry(
     Ok((registry, passion_indices))
 }
 
-fn collect_legacy_precondition_names(
-    preconditions: &serde_json::Value,
-    names: &mut BTreeSet<String>,
-) {
-    if let Some(items) = preconditions
-        .get("visited_locations_any_of")
-        .and_then(serde_json::Value::as_array)
-    {
-        for item in items {
-            match item.get("kind").and_then(serde_json::Value::as_str) {
-                Some("location_id") => {
-                    if let Some(id) = item.get("location_id").and_then(serde_json::Value::as_str) {
-                        names.insert(format!("location.{id}"));
-                    }
-                }
-                Some("location_tag") => {
-                    if let Some(tag) = item.get("tag").and_then(serde_json::Value::as_str) {
-                        names.insert(tag.to_owned());
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    if let Some(items) = preconditions
-        .get("met_characters_any_of")
-        .and_then(serde_json::Value::as_array)
-    {
-        for item in items {
-            match item.get("kind").and_then(serde_json::Value::as_str) {
-                Some("character_id") => {
-                    if let Some(id) = item.get("character_id").and_then(serde_json::Value::as_str) {
-                        names.insert(format!("character.{id}"));
-                    }
-                }
-                Some("role_tag") => {
-                    if let Some(role) = item.get("role").and_then(serde_json::Value::as_str) {
-                        names.insert(role.to_owned());
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-}
 
-fn validate_legacy_reference_ids(
-    storylet: &StoryletRecord,
-    locations: &[LocationRecord],
-    characters: &[CharacterRecord],
+fn collect_graph_tag_names(
+    graph: &crate::narrative_graph::NarrativeGraph,
+    names: &mut BTreeSet<String>,
+    entity_game_ids: &BTreeMap<String, String>,
 ) -> Result<(), String> {
-    let visited = storylet
-        .preconditions
-        .get("visited_locations_any_of")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten();
-    for (index, condition) in visited.enumerate() {
-        match condition.get("kind").and_then(serde_json::Value::as_str) {
-            Some("location_id") => {
-                let id = condition
-                    .get("location_id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default();
-                if !locations.iter().any(|location| location.id == id) {
-                    return Err(format!(
-                        "storylet {} preconditions.visited_locations_any_of[{index}] references unknown location {id}",
-                        storylet.id
-                    ));
-                }
-            }
-            Some("location_tag") => {
-                let tag = condition
-                    .get("tag")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default();
-                if !locations.iter().any(|location| {
-                    location
-                        .tags
-                        .iter()
-                        .any(|authored| authored == tag || authored.starts_with(&format!("{tag}.")))
-                }) {
-                    return Err(format!(
-                        "storylet {} preconditions.visited_locations_any_of[{index}] references unknown location tag {tag}",
-                        storylet.id
-                    ));
-                }
-            }
-            _ => {}
-        }
-    }
-    let met = storylet
-        .preconditions
-        .get("met_characters_any_of")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten();
-    for (index, condition) in met.enumerate() {
-        match condition.get("kind").and_then(serde_json::Value::as_str) {
-            Some("character_id") => {
-                let id = condition
-                    .get("character_id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default();
-                if !characters.iter().any(|character| character.id == id) {
-                    return Err(format!(
-                        "storylet {} preconditions.met_characters_any_of[{index}] references unknown character {id}",
-                        storylet.id
-                    ));
-                }
-            }
-            Some("role_tag") => {
-                let role = condition
-                    .get("role")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default();
-                if !characters.iter().any(|character| {
-                    character.role == role || character.role.starts_with(&format!("{role}."))
-                }) {
-                    return Err(format!(
-                        "storylet {} preconditions.met_characters_any_of[{index}] references unknown character role {role}",
-                        storylet.id
-                    ));
-                }
-            }
-            _ => {}
-        }
-    }
+    let value = serde_json::to_value(graph)
+        .map_err(|error| format!("cannot serialize storylet graph tags: {error}"))?;
+    collect_graph_tag_value_names(&value, names, entity_game_ids);
     Ok(())
 }
 
-fn collect_graph_tag_names(value: &serde_json::Value, names: &mut BTreeSet<String>) {
+fn collect_graph_tag_value_names(
+    value: &serde_json::Value,
+    names: &mut BTreeSet<String>,
+    entity_game_ids: &BTreeMap<String, String>,
+) {
     match value {
         serde_json::Value::Object(fields) => {
+            let is_entity_tag_node = fields
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|t| matches!(t, "add_entity_tag" | "remove_entity_tag" | "has_entity_tag"));
+
+            if is_entity_tag_node {
+                let target = fields.get("target_entity_id").and_then(serde_json::Value::as_str).unwrap_or("world");
+                if let Some(tag) = fields.get("tag").and_then(serde_json::Value::as_str) {
+                    let clean = tag.trim();
+                    if !clean.is_empty() {
+                        names.insert(crate::chrono_graph_adapter::resolve_entity_tag(target, clean, Some(entity_game_ids)));
+                    }
+                }
+            }
             for (key, value) in fields {
+                if is_entity_tag_node && key == "tag" {
+                    continue;
+                }
                 let is_tag_field = matches!(
                     key.as_str(),
                     "tag"
@@ -899,17 +378,32 @@ fn collect_graph_tag_names(value: &serde_json::Value, names: &mut BTreeSet<Strin
                         _ => {}
                     }
                 }
-                collect_graph_tag_names(value, names);
+                collect_graph_tag_value_names(value, names, entity_game_ids);
             }
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                collect_graph_tag_names(item, names);
+                collect_graph_tag_value_names(item, names, entity_game_ids);
             }
         }
         _ => {}
     }
 }
+fn collect_precondition_graph_tag_names(
+    graph: &crate::narrative_graph::NarrativeGraph,
+    names: &mut BTreeSet<String>,
+    entity_game_ids: &BTreeMap<String, String>,
+) {
+    for node in &graph.nodes {
+        match &node.data {
+            crate::narrative_graph::NarrativeNodeData::HasEntityTag { target_entity_id, tag, .. } => {
+                if !tag.trim().is_empty() { names.insert(crate::chrono_graph_adapter::resolve_entity_tag(target_entity_id, tag, Some(entity_game_ids))); }
+            }
+            _ => {}
+        }
+    }
+}
+
 
 fn collect_settings_names(settings: &ChronoStoryletSettings, names: &mut BTreeSet<String>) {
     names.extend(settings.required_tags.iter().cloned());
@@ -917,15 +411,6 @@ fn collect_settings_names(settings: &ChronoStoryletSettings, names: &mut BTreeSe
     names.extend(settings.forbidden_tags.iter().cloned());
     names.extend(settings.required_arc_phases.iter().cloned());
     names.extend(settings.salience_bonus_tags.iter().cloned());
-    for predicate in &settings.preconditions {
-        if predicate.subject != "metric" {
-            names.insert(predicate.target_id.clone());
-        }
-    }
-    for effect in &settings.effects_on_complete {
-        names.extend(effect.add_tags.iter().cloned());
-        names.extend(effect.remove_tags.iter().cloned());
-    }
 }
 
 fn add_tags(
@@ -969,157 +454,44 @@ fn add_any_tags(
     Ok(())
 }
 
-fn map_operator(operator: &str) -> Option<PredicateOperator> {
-    match operator {
-        "eq" => Some(PredicateOperator::Eq),
-        "neq" => Some(PredicateOperator::Neq),
-        "gt" => Some(PredicateOperator::Gt),
-        "gte" => Some(PredicateOperator::Gte),
-        "lt" => Some(PredicateOperator::Lt),
-        "lte" => Some(PredicateOperator::Lte),
-        _ => None,
-    }
-}
-
-fn legacy_quality_predicates(
-    preconditions: &serde_json::Value,
-    group: &str,
-    storylet_id: &str,
-) -> Result<Vec<QualityPredicate>, String> {
-    let Some(value) = preconditions.get(group) else {
-        return Ok(Vec::new());
-    };
-    let predicates = value
-        .as_array()
-        .ok_or_else(|| format!("storylet {storylet_id} preconditions.{group} must be an array"))?;
-    predicates
-        .iter()
-        .enumerate()
-        .map(|(index, value)| {
-            let target_id = value.get("variable").and_then(serde_json::Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| format!("storylet {storylet_id} preconditions.{group}[{index}] needs a quality variable"))?;
-            let operator_name = value.get("op").and_then(serde_json::Value::as_str)
-                .ok_or_else(|| format!("storylet {storylet_id} preconditions.{group}[{index}] needs an operator"))?;
-            let operator = map_operator(operator_name)
-                .ok_or_else(|| format!("storylet {storylet_id} preconditions.{group}[{index}] has unsupported operator {operator_name}"))?;
-            let comparison_value = value.get("value").and_then(serde_json::Value::as_f64)
-                .ok_or_else(|| format!("storylet {storylet_id} preconditions.{group}[{index}] needs a numeric value"))?;
-            Ok(QualityPredicate {
-                target_id: target_id.to_owned(),
-                subject: PredicateSubject::Metric,
-                operator,
-                comparison_value,
-                specificity_weight: 1.0,
-                entity_index: None,
-                target_index: None,
-                tag_mask: TagBitset::new(),
-            })
-        })
-        .collect()
-}
-fn legacy_tag_predicates(
-    preconditions: &serde_json::Value,
-    group: &str,
-    subject: PredicateSubject,
-    storylet_id: &str,
-) -> Result<Vec<QualityPredicate>, String> {
-    let Some(value) = preconditions.get(group) else {
-        return Ok(Vec::new());
-    };
-    let items = value
-        .as_array()
-        .ok_or_else(|| format!("storylet {storylet_id} preconditions.{group} must be an array"))?;
-    items.iter().enumerate().map(|(index, item)| {
-        let kind = item.get("kind").and_then(serde_json::Value::as_str)
-            .ok_or_else(|| format!("storylet {storylet_id} preconditions.{group}[{index}] needs a kind"))?;
-        let target_id = match (subject, kind) {
-            (PredicateSubject::Visited, "location_id") => {
-                let id = item.get("location_id").and_then(serde_json::Value::as_str)
-                    .filter(|id| !id.trim().is_empty())
-                    .ok_or_else(|| format!("storylet {storylet_id} preconditions.{group}[{index}] needs a location_id"))?;
-                format!("location.{id}")
-            }
-            (PredicateSubject::Visited, "location_tag") => item.get("tag").and_then(serde_json::Value::as_str)
-                .filter(|tag| !tag.trim().is_empty())
-                .ok_or_else(|| format!("storylet {storylet_id} preconditions.{group}[{index}] needs a tag"))?
-                .to_owned(),
-            (PredicateSubject::MetCharacter, "character_id") => {
-                let id = item.get("character_id").and_then(serde_json::Value::as_str)
-                    .filter(|id| !id.trim().is_empty())
-                    .ok_or_else(|| format!("storylet {storylet_id} preconditions.{group}[{index}] needs a character_id"))?;
-                format!("character.{id}")
-            }
-            (PredicateSubject::MetCharacter, "role_tag") => item.get("role").and_then(serde_json::Value::as_str)
-                .filter(|role| !role.trim().is_empty())
-                .ok_or_else(|| format!("storylet {storylet_id} preconditions.{group}[{index}] needs a role"))?
-                .to_owned(),
-            _ => return Err(format!(
-                "storylet {storylet_id} preconditions.{group}[{index}] has unsupported kind {kind}"
-            )),
-        };
-        Ok(QualityPredicate {
-            target_id,
-            subject,
-            operator: PredicateOperator::Eq,
-            comparison_value: 1.0,
-            specificity_weight: 1.0,
-            entity_index: None,
-            target_index: None,
-            tag_mask: TagBitset::new(),
-        })
-    }).collect()
-}
-
-fn map_subject(subject: &str) -> Option<PredicateSubject> {
-    match subject {
-        "metric" => Some(PredicateSubject::Metric),
-        "location" => Some(PredicateSubject::Location),
-        "entity" => Some(PredicateSubject::Entity),
-        "visited" => Some(PredicateSubject::Visited),
-        "met_character" => Some(PredicateSubject::MetCharacter),
-        _ => None,
-    }
-}
-
-fn map_cluster_type(value: &str) -> StoryletClusterType {
+fn map_cluster_type(value: &str) -> Result<StoryletClusterType, String> {
     match value {
-        "linear" | "linear_progression" => StoryletClusterType::LinearProgression,
-        "wheel" | "wheel_deck" => StoryletClusterType::WheelDeck,
-        "aftermath" | "aftermath_accelerator" => StoryletClusterType::AftermathAccelerator,
-        "player_controlled_passage" | "player_passage" => StoryletClusterType::PlayerPassage,
-        _ => StoryletClusterType::PlayerPassage,
+        "linear_progression" => Ok(StoryletClusterType::LinearProgression),
+        "wheel_deck" => Ok(StoryletClusterType::WheelDeck),
+        "aftermath_accelerator" => Ok(StoryletClusterType::AftermathAccelerator),
+        "player_passage" => Ok(StoryletClusterType::PlayerPassage),
+        unsupported => Err(format!("unsupported cluster type '{unsupported}'")),
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct ChronoWorldSeed {
     pub state: WorldStateTable,
-    /// Stable dense row for each authored location or character ID.
+    /// Stable dense row for each location, character, item, or fact entity.
     pub entity_indices: BTreeMap<String, u16>,
 }
 
 /// Build the fixed-capacity world rows from the current project and resolved start.
 pub fn initialize_chrono_world(
     compiled: &CompiledChronoDispatch,
-    qualities: &[QualityRecord],
+    storylets: &[StoryletRecord],
+    world: &EntityRecord,
+    entities: &[EntityTemplateRecord],
     locations: &[LocationRecord],
     characters: &[CharacterRecord],
     world_objects: &[WorldObjectRecord],
+    world_tags: &[String],
+    entity_tag_seeds: &[(String, Vec<String>)],
     scenario: Option<&ScenarioRecord>,
     start_location_id: &str,
 ) -> Result<ChronoWorldSeed, String> {
     let mut ordered_locations: Vec<&LocationRecord> = locations.iter().collect();
-    ordered_locations.sort_by(|left, right| left.id.cmp(&right.id));
+    ordered_locations.sort_by_key(|location| location.id.as_str());
     let mut ordered_characters: Vec<&CharacterRecord> = characters.iter().collect();
-    ordered_characters.sort_by(|left, right| left.id.cmp(&right.id));
-    let mut ordered_tool_qualities: Vec<&QualityRecord> = qualities
-        .iter()
-        .filter(|quality| quality.kind == "tool")
-        .collect();
-    ordered_tool_qualities.sort_by(|left, right| left.name.cmp(&right.name));
-    let entity_count =
-        ordered_locations.len() + ordered_characters.len() + ordered_tool_qualities.len();
+    ordered_characters.sort_by_key(|character| character.id.as_str());
+    let mut ordered_world_objects: Vec<&WorldObjectRecord> = world_objects.iter().collect();
+    ordered_world_objects.sort_by_key(|object| object.id.as_str());
+    let entity_count = ordered_locations.len() + ordered_characters.len() + ordered_world_objects.len();
     if entity_count > MAX_ENTITIES {
         return Err(format!(
             "ChronoFlow supports at most {MAX_ENTITIES} location/character/tool entities; got {entity_count}"
@@ -1132,23 +504,23 @@ pub fn initialize_chrono_world(
         .collect();
     let mut entity_indices = BTreeMap::new();
     for (index, location) in ordered_locations.iter().enumerate() {
-        entity_indices.insert(format!("location:{}", location.id), index as u16);
+        entity_indices.insert(location.id.clone(), index as u16);
     }
     let mut character_indices = BTreeMap::new();
     for (offset, character) in ordered_characters.iter().enumerate() {
         let index = (ordered_locations.len() + offset) as u16;
-        entity_indices.insert(format!("character:{}", character.id), index);
+        entity_indices.insert(character.id.clone(), index);
         character_indices.insert(character.id.clone(), index);
     }
-    for (offset, quality) in ordered_tool_qualities.iter().enumerate() {
+    for (offset, object) in ordered_world_objects.iter().enumerate() {
         let index = (ordered_locations.len() + ordered_characters.len() + offset) as u16;
-        entity_indices.insert(format!("quality:{}", quality.name), index);
+        entity_indices.insert(object.id.clone(), index);
     }
     let current_location_entity = location_indices
         .get(start_location_id)
         .copied()
         .ok_or_else(|| format!("ChronoFlow start location {start_location_id} does not exist"))?;
-    let mut state = WorldStateTable::with_capacity(entity_count, MAX_METRICS);
+    let mut state = WorldStateTable::with_capacity(entity_count);
     state.current_location_entity = Some(current_location_entity);
 
     // Seed the dramatic arc phase so arc-gated content is reachable without an
@@ -1166,65 +538,36 @@ pub fn initialize_chrono_world(
             .map_err(|error| format!("scenario current_arc_phase: {error}"))?;
     }
 
-    for quality in qualities {
-        let metric_id = *compiled.metric_indices.get(&quality.name).ok_or_else(|| {
-            format!(
-                "quality {} was not compiled into the metric registry",
-                quality.name
-            )
-        })?;
-        let value =
-            match scenario.and_then(|scenario| scenario.initial_qualities.get(&quality.name)) {
-                Some(value) => value.as_f64().ok_or_else(|| {
-                    format!(
-                        "scenario quality {} must be numeric for ChronoFlow",
-                        quality.name
-                    )
-                })?,
-                None => quality.value,
-            };
-        let value = value as f32;
-        let min = quality.min_value as f32;
-        let max = quality.max_value as f32;
-        if !value.is_finite() || !min.is_finite() || !max.is_finite() || min > max {
-            return Err(format!(
-                "quality {} has invalid ChronoFlow value bounds",
-                quality.name
-            ));
-        }
-        state
-            .set_metric_bound(metric_id, min, max)
-            .map_err(|error| format!("invalid bounds for quality {}: {error}", quality.name))?;
-        let value = value.clamp(min, max);
-        state.metrics[metric_id as usize] = value;
-        if quality.kind == "menace" && quality.menace_crisis_storylet_id.is_some() {
-            let threshold = quality.max_value as f32;
-            if !threshold.is_finite() {
-                return Err(format!(
-                    "menace quality {} threshold exceeds f32 range",
-                    quality.name
-                ));
-            }
-            if value >= threshold {
-                let tag = menace_crisis_tag(&quality.name);
-                let tag_id = compiled
-                    .registry
-                    .id(&tag)
-                    .ok_or_else(|| format!("unregistered menace crisis tag {tag}"))?;
-                state
-                    .global_tags
-                    .set_bit(tag_id)
-                    .map_err(|error| error.to_string())?;
-            }
+    for tag in world_tags {
+        let resolved = crate::chrono_graph_adapter::resolve_entity_tag("world", tag, None);
+        if let Some(tag_id) = compiled.registry.id(&resolved) {
+            let _ = compiled.registry.add_hierarchical(&mut state.global_tags, tag_id);
         }
     }
 
-    let mut vertices = Vec::with_capacity(entity_count + qualities.len());
+    let runtime_entities: BTreeMap<&str, &EntityTemplateRecord> = entities
+        .iter()
+        .map(|entity| (entity.id.as_str(), entity))
+        .collect();
+    let mut vertices = Vec::with_capacity(entity_count + storylets.len() + 1);
+    let mut world_attributes = BTreeMap::new();
+    world_attributes.insert("name".into(), AttributeValue::String(world.name.clone()));
+    insert_entity_properties(&world.properties, &mut world_attributes)?;
+    vertices.push(WorldVertex {
+        vertex_id: "world".into(),
+        layer: GraphLayer::Fact,
+        entity_index: None,
+        attributes: world_attributes,
+    });
     let mut edges = Vec::new();
     for location in &ordered_locations {
         let entity_index = location_indices[&location.id];
-        let location_tag = format!("location.{}", location.id);
-        add_entity_tag(&compiled.registry, &mut state, entity_index, &location_tag)?;
+        add_entity_tag(
+            &compiled.registry,
+            &mut state,
+            entity_index,
+            &format!("location.{}", location.id),
+        )?;
         for tag in &location.tags {
             add_entity_tag(&compiled.registry, &mut state, entity_index, tag)?;
         }
@@ -1236,8 +579,18 @@ pub fn initialize_chrono_world(
             insert_json_attributes(value, "device", &mut attributes);
         }
         insert_json_attributes(&location.attributes, "", &mut attributes);
+        if let Some(entity) = runtime_entities.get(location.id.as_str()) {
+            insert_entity_properties(&entity.properties, &mut attributes)?;
+            add_entity_tag(&compiled.registry, &mut state, entity_index, &entity.root_tag)?;
+            for tag in &entity.tags {
+                let resolved = tag.trim();
+                if compiled.registry.id(resolved).is_some() {
+                    add_entity_tag(&compiled.registry, &mut state, entity_index, resolved)?;
+                }
+            }
+        }
         vertices.push(WorldVertex {
-            vertex_id: format!("location:{}", location.id),
+            vertex_id: location.id.clone(),
             layer: GraphLayer::Location,
             entity_index: Some(entity_index),
             attributes,
@@ -1251,33 +604,13 @@ pub fn initialize_chrono_world(
             }
             edges.push(WorldEdge {
                 edge_id: format!("connected:{}:{target_id}", location.id),
-                source_id: format!("location:{}", location.id),
-                target_id: format!("location:{target_id}"),
+                source_id: location.id.clone(),
+                target_id: target_id.clone(),
                 relation_type: "connected".into(),
                 weight: 1.0,
             });
         }
     }
-    let start_location = ordered_locations
-        .iter()
-        .find(|location| location.id == start_location_id)
-        .copied()
-        .ok_or_else(|| format!("ChronoFlow start location {start_location_id} does not exist"))?;
-    add_global_tag(
-        &compiled.registry,
-        &mut state.visited_location_tags.tag_mask,
-        &format!("location.{}", start_location.id),
-    )?;
-    add_hierarchical_tags(
-        &compiled.registry,
-        &mut state.visited_location_tags.tag_mask,
-        &start_location.tags,
-    )?;
-    state
-        .visited_location_tags
-        .entity_mask
-        .set_bit(current_location_entity)
-        .map_err(|error| error.to_string())?;
     state.current_location_tag_mask = state.entity_tags[current_location_entity as usize];
     state.global_tags.merge(&state.current_location_tag_mask);
 
@@ -1289,20 +622,21 @@ pub fn initialize_chrono_world(
             entity_index,
             &format!("character.{}", character.id),
         )?;
+        if let Some(entity) = runtime_entities.get(character.id.as_str()) {
+            add_entity_tag(&compiled.registry, &mut state, entity_index, &entity.root_tag)?;
+            for tag in &entity.tags {
+                let resolved = tag.trim();
+                if compiled.registry.id(resolved).is_some() {
+                    add_entity_tag(&compiled.registry, &mut state, entity_index, resolved)?;
+                }
+            }
+        }
         if !character.role.trim().is_empty() {
-            add_entity_tag(
-                &compiled.registry,
-                &mut state,
-                entity_index,
-                &character.role,
-            )?;
+            add_entity_tag(&compiled.registry, &mut state, entity_index, &character.role)?;
         }
         let mut attributes = BTreeMap::new();
         insert_json_attributes(&character.status_axes, "status", &mut attributes);
         insert_json_attributes(&character.needs, "need", &mut attributes);
-        if let Some(value) = &character.qualities {
-            insert_json_attributes(value, "quality", &mut attributes);
-        }
         if !character.agenda.is_empty() {
             attributes.insert(
                 "agenda".into(),
@@ -1316,8 +650,11 @@ pub fn initialize_chrono_world(
             );
         }
         insert_json_attributes(&character.attributes, "", &mut attributes);
+        if let Some(entity) = runtime_entities.get(character.id.as_str()) {
+            insert_entity_properties(&entity.properties, &mut attributes)?;
+        }
         vertices.push(WorldVertex {
-            vertex_id: format!("character:{}", character.id),
+            vertex_id: character.id.clone(),
             layer: GraphLayer::Character,
             entity_index: Some(entity_index),
             attributes,
@@ -1344,11 +681,22 @@ pub fn initialize_chrono_world(
             }
             edges.push(WorldEdge {
                 edge_id: format!("located:{}:{actor_location}", character.id),
-                source_id: format!("character:{}", character.id),
-                target_id: format!("location:{actor_location}"),
+                source_id: character.id.clone(),
+                target_id: actor_location.to_owned(),
                 relation_type: "located_at".into(),
                 weight: 1.0,
             });
+        }
+    }
+    for (gid, tags) in entity_tag_seeds {
+        let entity_index = entity_indices.get(gid).copied();
+        if let Some(entity_index) = entity_index {
+            for tag in tags {
+                let resolved = tag.trim().to_owned();
+                if compiled.registry.id(&resolved).is_some() {
+                    add_entity_tag(&compiled.registry, &mut state, entity_index, &resolved)?;
+                }
+            }
         }
     }
     seed_passion_state(
@@ -1357,80 +705,59 @@ pub fn initialize_chrono_world(
         &character_indices,
         &mut state,
     )?;
-    for quality in qualities {
-        let mut attributes = BTreeMap::new();
-        let metric_id = compiled
-            .metric_indices
-            .get(&quality.name)
-            .copied()
-            .ok_or_else(|| {
-                format!(
-                    "quality {} was not compiled into the metric registry",
-                    quality.name
-                )
-            })?;
-        attributes.insert(
-            "category".into(),
-            AttributeValue::String(quality.kind.clone()),
-        );
-        attributes.insert("metric_id".into(), AttributeValue::Int(metric_id as i64));
-        attributes.insert("min_value".into(), AttributeValue::Float(quality.min_value));
-        attributes.insert("max_value".into(), AttributeValue::Float(quality.max_value));
-        attributes.insert("is_hidden".into(), AttributeValue::Bool(quality.is_hidden));
-        if let Some(storylet_id) = &quality.menace_crisis_storylet_id {
-            attributes.insert(
-                "menace_crisis_storylet_id".into(),
-                AttributeValue::String(storylet_id.clone()),
-            );
-        }
-        let entity_index = if quality.kind == "tool" {
-            let index = *entity_indices
-                .get(&format!("quality:{}", quality.name))
-                .ok_or_else(|| {
-                    format!("tool quality {} has no assigned entity index", quality.name)
-                })?;
-            add_entity_tag(
-                &compiled.registry,
-                &mut state,
-                index,
-                &format!("quality.{}", quality.name),
-            )?;
-            Some(index)
-        } else {
-            None
-        };
-        vertices.push(WorldVertex {
-            vertex_id: format!("quality:{}", quality.name),
-            layer: if quality.kind == "tool" {
-                GraphLayer::Item
-            } else {
-                GraphLayer::Fact
-            },
-            entity_index,
-            attributes,
-        });
-    }
-    let mut ordered_world_objects: Vec<&WorldObjectRecord> = world_objects.iter().collect();
-    ordered_world_objects.sort_by(|left, right| left.id.cmp(&right.id));
     for object in ordered_world_objects {
-        let (prefix, layer) = match object.layer {
-            WorldObjectLayer::Item => ("item", GraphLayer::Item),
-            WorldObjectLayer::Fact => ("fact", GraphLayer::Fact),
+        let layer = match object.layer {
+            WorldObjectLayer::Item => GraphLayer::Item,
+            WorldObjectLayer::Fact => GraphLayer::Fact,
         };
         let mut attributes = BTreeMap::new();
         attributes.insert("name".into(), AttributeValue::String(object.name.clone()));
         insert_json_attributes(&object.attributes, "", &mut attributes);
+        if let Some(entity) = runtime_entities.get(object.id.as_str()) {
+            insert_entity_properties(&entity.properties, &mut attributes)?;
+        }
+        let entity_index = entity_indices[&object.id];
         vertices.push(WorldVertex {
-            vertex_id: format!("{prefix}:{}", object.id),
+            vertex_id: object.id.clone(),
             layer,
-            entity_index: None,
+            entity_index: Some(entity_index),
             attributes,
         });
     }
     vertices.sort_by(|left, right| left.vertex_id.cmp(&right.vertex_id));
     edges.sort_by(|left, right| left.edge_id.cmp(&right.edge_id));
     state.vertices = vertices;
-    state.edges = edges;
+    for (entity_id, values) in scenario
+        .map(|scenario| &scenario.initial_properties)
+        .into_iter()
+        .flatten()
+    {
+        let entity = runtime_entities.get(entity_id.as_str()).ok_or_else(|| {
+            format!("scenario initial_properties references unknown entity {entity_id}")
+        })?;
+        let vertex_id = entity_id.clone();
+        let vertex = state.vertices.iter_mut().find(|vertex| vertex.vertex_id == vertex_id)
+            .ok_or_else(|| format!("scenario initial_properties entity {entity_id} has no runtime vertex"))?;
+        for (key, value) in values {
+            if key.trim().is_empty() {
+                return Err(format!("scenario initial_properties for {entity_id} contains an empty property key"));
+            }
+            let property = entity.properties.iter().find(|property| property.key == *key)
+                .ok_or_else(|| format!("scenario initial_properties for {entity_id} references undeclared property {key}"))?;
+            if !crate::entities::value_shape_matches(property.property_type, property.is_array, value) {
+                return Err(format!("scenario initial_properties for {entity_id}.{key} has invalid {:?} value", property.property_type));
+            }
+            vertex.attributes.insert(format!("prop.{key}"), attribute_from_property_value(value, property.property_type, property.is_array)?);
+        }
+    }
+    for storylet in storylets {
+        state.vertices.push(WorldVertex {
+            vertex_id: format!("storylet:{}", storylet.id),
+            layer: GraphLayer::Fact,
+            entity_index: None,
+            attributes: BTreeMap::new(),
+        });
+    }
     Ok(ChronoWorldSeed {
         state,
         entity_indices,
@@ -1539,503 +866,48 @@ fn add_entity_tag(
         .map_err(|error| error.to_string())
 }
 
-fn add_global_tag(
-    registry: &GameplayTagRegistry,
-    target: &mut TagBitset,
-    tag: &str,
-) -> Result<(), String> {
-    let index = registry
-        .id(tag)
-        .ok_or_else(|| format!("unregistered global tag {tag}"))?;
-    registry
-        .add_hierarchical(target, index)
-        .map_err(|error| error.to_string())
+
+fn attribute_from_property_value(value: &serde_json::Value, property_type: PropertyType, is_array: bool) -> Result<AttributeValue, String> {
+    if !crate::entities::value_shape_matches(property_type, is_array, value) {
+        return Err(format!("invalid {:?} property value", property_type));
+    }
+    if is_array {
+        return Ok(AttributeValue::Array(value.as_array().expect("validated array").iter()
+            .map(|item| attribute_from_json(item, property_type)).collect::<Result<Vec<_>, _>>()?));
+    }
+    attribute_from_json(value, property_type)
 }
 
-fn add_hierarchical_tags(
-    registry: &GameplayTagRegistry,
-    target: &mut TagBitset,
-    tags: &[String],
-) -> Result<(), String> {
-    for tag in tags {
-        let index = registry
-            .id(tag)
-            .ok_or_else(|| format!("unregistered visited tag {tag}"))?;
-        registry
-            .add_hierarchical(target, index)
-            .map_err(|error| error.to_string())?;
+fn attribute_from_json(value: &serde_json::Value, property_type: PropertyType) -> Result<AttributeValue, String> {
+    if property_type == PropertyType::Json {
+        return Err("ChronoFlow does not support JSON entity properties".into());
+    }
+    match property_type {
+        PropertyType::Bool => value.as_bool().map(AttributeValue::Bool),
+        PropertyType::Int => value.as_i64().map(AttributeValue::Int),
+        PropertyType::Float => value.as_f64().map(AttributeValue::Float),
+        PropertyType::Asset => if value.is_null() { Some(AttributeValue::Asset(String::new())) } else { value.get("asset_id").and_then(serde_json::Value::as_str).map(|v| AttributeValue::Asset(v.to_owned())) },
+        PropertyType::Entity => if value.is_null() { Some(AttributeValue::EntityRef(String::new())) } else { value.as_str().map(|v| AttributeValue::EntityRef(v.to_owned())) },
+        PropertyType::Storylet => if value.is_null() { Some(AttributeValue::String(String::new())) } else { value.as_str().map(|v| AttributeValue::String(v.to_owned())) },
+        PropertyType::Tag => value.as_str().map(|v| AttributeValue::String(v.to_owned())),
+        PropertyType::String => value.as_str().map(|v| AttributeValue::String(v.to_owned())),
+        PropertyType::Json => return Err("ChronoFlow does not support JSON entity properties".into()),
+    }.ok_or_else(|| format!("invalid {:?} property value", property_type))
+}
+
+fn insert_entity_properties(properties: &[EntityProperty], attributes: &mut BTreeMap<String, AttributeValue>) -> Result<(), String> {
+    for property in properties {
+        if !property.key.trim().is_empty() {
+            let value = if property.value.is_null() {
+                crate::entities::default_value(property.property_type, property.is_array)
+            } else {
+                property.value.clone()
+            };
+            attributes.insert(format!("prop.{}", property.key), attribute_from_property_value(&value, property.property_type, property.is_array)?);
+        }
     }
     Ok(())
 }
-#[cfg(test)]
-mod tests {
-    use super::compile_chrono_dispatch;
-    use crate::contracts::{CharacterRecord, LocationRecord, QualityRecord, StoryletRecord};
-    use storylet_engine::chrono_state::{MutationOp, apply_mutation_with_registry, revert_delta};
-
-    #[test]
-    fn catalog_rejects_duplicate_keys_and_is_frozen_after_compile() {
-        let storylet = || {
-            serde_json::from_value::<StoryletRecord>(serde_json::json!({
-                "id": "scene-a",
-                "title": "Scene A",
-                "content": { "text_template": "A scene." },
-                "effects": {},
-                "created_at": 1
-            }))
-            .expect("valid storylet fixture")
-        };
-        let error = compile_chrono_dispatch(&[storylet(), storylet()], &[], &[], &[])
-            .expect_err("duplicate storylet keys must fail load");
-        assert!(error.contains("duplicate storylet key"), "{error}");
-
-        let compiled = compile_chrono_dispatch(&[storylet()], &[], &[], &[])
-            .expect("unique storylet compiles");
-        assert!(compiled.storylet_catalog().is_frozen());
-        assert_eq!(compiled.storylet_index("scene-a"), Some(0));
-        assert_eq!(compiled.storylet_key(0), Some("scene-a"));
-        assert_eq!(compiled.storylet_count(), 1);
-    }
-
-    #[test]
-    fn role_location_policy_defaults_to_current_and_can_be_any() {
-        let current: StoryletRecord = serde_json::from_value(serde_json::json!({
-            "id": "current-role",
-            "title": "Current Role",
-            "content": { "text_template": "A scene." },
-            "parameters": [{ "param_name": "guide", "query": "role == \"Role.Guide\"" }],
-            "effects": {},
-            "created_at": 1
-        }))
-        .expect("valid storylet fixture");
-        let any: StoryletRecord = serde_json::from_value(serde_json::json!({
-            "id": "any-role",
-            "title": "Any Role",
-            "content": { "text_template": "A scene." },
-            "parameters": [{
-                "param_name": "guide",
-                "query": "role == \"Role.Guide\"",
-                "location_policy": "any"
-            }],
-            "effects": {},
-            "created_at": 1
-        }))
-        .expect("valid storylet fixture");
-
-        let current =
-            compile_chrono_dispatch(&[current], &[], &[], &[]).expect("current policy compiles");
-        assert_eq!(
-            current.dispatcher.storylets[0].required_roles[0]
-                .location_tag
-                .as_deref(),
-            Some("location.current")
-        );
-
-        let any = compile_chrono_dispatch(&[any], &[], &[], &[]).expect("any policy compiles");
-        assert_eq!(
-            any.dispatcher.storylets[0].required_roles[0].location_tag,
-            None
-        );
-    }
-
-    #[test]
-    fn compiles_each_independent_legacy_precondition_group() {
-        let storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
-            "id": "scene-a",
-            "title": "Scene A",
-            "content": { "text_template": "A scene." },
-            "effects": {},
-            "created_at": 1,
-            "location_tags": ["Place.Museum"],
-            "preconditions": {
-                "any_of": [{ "variable": "Trust", "op": "gte", "value": 3 }],
-                "visited_locations_any_of": [{ "kind": "location_tag", "tag": "Place.City" }],
-                "met_characters_any_of": [{ "kind": "role_tag", "role": "Role.Guide" }]
-            }
-        }))
-        .expect("valid storylet fixture");
-        let quality = QualityRecord {
-            name: "Trust".into(),
-            kind: "metric".into(),
-            value: 0.0,
-            min_value: 0.0,
-            max_value: 100.0,
-            is_hidden: false,
-            menace_crisis_storylet_id: None,
-            description: None,
-            metadata: None,
-            folder_id: None,
-        };
-        let location: LocationRecord = serde_json::from_value(serde_json::json!({
-            "id": "museum",
-            "name": "Museum",
-            "description": "",
-            "tags": ["Place.City", "Place.Museum"]
-        }))
-        .expect("valid location fixture");
-        let character: CharacterRecord = serde_json::from_value(serde_json::json!({
-            "id": "guide",
-            "name": "Guide",
-            "role": "Role.Guide",
-            "home_location": "museum",
-            "current_location": "museum",
-            "status_axes": {},
-            "needs": {}
-        }))
-        .expect("valid character fixture");
-
-        let compiled = compile_chrono_dispatch(&[storylet], &[quality], &[location], &[character])
-            .expect("storylet should compile");
-
-        assert_eq!(compiled.dispatcher.storylets.len(), 1);
-        let groups = &compiled.dispatcher.storylets[0].any_of_precondition_groups;
-        assert_eq!(groups.len(), 4);
-        assert_eq!(
-            groups[0][0].subject,
-            storylet_engine::chrono_dispatch::PredicateSubject::Metric
-        );
-        assert_eq!(
-            groups[1][0].subject,
-            storylet_engine::chrono_dispatch::PredicateSubject::Visited
-        );
-        assert_eq!(
-            groups[2][0].subject,
-            storylet_engine::chrono_dispatch::PredicateSubject::MetCharacter
-        );
-        assert_eq!(
-            groups[3][0].subject,
-            storylet_engine::chrono_dispatch::PredicateSubject::Location
-        );
-    }
-
-    #[test]
-    fn compiles_more_than_256_dispatchable_storylets() {
-        let storylets = (0..501)
-            .map(|index| {
-                serde_json::from_value(serde_json::json!({
-                    "id": format!("storylet-{index:03}"),
-                    "title": format!("Storylet {index}"),
-                    "content": { "text_template": "A scene." },
-                    "effects": {},
-                    "created_at": 1
-                }))
-                .expect("valid storylet fixture")
-            })
-            .collect::<Vec<StoryletRecord>>();
-
-        let compiled = compile_chrono_dispatch(&storylets, &[], &[], &[])
-            .expect("501 dispatchable storylets fit the u16 ID range");
-
-        assert_eq!(compiled.dispatcher.storylets.len(), 501);
-        assert_eq!(
-            compiled.dispatcher.storylets.last().unwrap().storylet_id,
-            500
-        );
-    }
-
-    #[test]
-    fn seeds_location_roles_attributes_and_metrics_in_separate_state_spaces() {
-        let storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
-            "id": "scene-a",
-            "title": "Scene A",
-            "content": { "text_template": "A scene." },
-            "effects": {},
-            "created_at": 1
-        }))
-        .expect("valid storylet fixture");
-        let quality = QualityRecord {
-            name: "Trust".into(),
-            kind: "metric".into(),
-            value: 4.0,
-            min_value: 0.0,
-            max_value: 100.0,
-            is_hidden: false,
-            menace_crisis_storylet_id: None,
-            description: None,
-            metadata: None,
-            folder_id: None,
-        };
-        let tool_quality = QualityRecord {
-            name: "Clue".into(),
-            kind: "tool".into(),
-            value: 1.0,
-            min_value: 0.0,
-            max_value: 1.0,
-            is_hidden: false,
-            menace_crisis_storylet_id: None,
-            description: None,
-            metadata: None,
-            folder_id: None,
-        };
-        let location: LocationRecord = serde_json::from_value(serde_json::json!({
-            "id": "square",
-            "name": "Square",
-            "description": "",
-            "tags": ["Place.City"],
-            "environmental_params": { "danger": 2, "open": true }
-        }))
-        .expect("valid location fixture");
-        let character: CharacterRecord = serde_json::from_value(serde_json::json!({
-            "id": "guide",
-            "name": "Guide",
-            "role": "Role.Guide",
-            "home_location": "square",
-            "current_location": "square",
-            "status_axes": { "trust": 0.75 },
-            "needs": {}
-        }))
-        .expect("valid character fixture");
-        let compiled = compile_chrono_dispatch(
-            &[storylet],
-            &[quality.clone(), tool_quality.clone()],
-            &[location],
-            &[character],
-        )
-        .expect("storylet should compile");
-
-        let seed = super::initialize_chrono_world(
-            &compiled,
-            &[quality.clone(), tool_quality.clone()],
-            &[serde_json::from_value(serde_json::json!({
-                "id": "square",
-                "name": "Square",
-                "description": "",
-                "tags": ["Place.City"],
-                "environmental_params": { "danger": 2, "open": true }
-            }))
-            .expect("valid location fixture")],
-            &[serde_json::from_value(serde_json::json!({
-                "id": "guide",
-                "name": "Guide",
-                "role": "Role.Guide",
-                "home_location": "square",
-                "current_location": "square",
-                "status_axes": { "trust": 0.75 },
-                "needs": {}
-            }))
-            .expect("valid character fixture")],
-            &[],
-            None,
-            "square",
-        )
-        .expect("valid initial world");
-
-        let metric_id = compiled.metric_indices["Trust"] as usize;
-        assert_eq!(seed.state.metrics[metric_id], 4.0);
-        let location_tag = compiled.registry.id("Place.City").expect("tag registered");
-        assert!(seed.state.global_tags.bit(location_tag));
-        let current_tag = compiled
-            .registry
-            .id("location.current")
-            .expect("current marker registered");
-        let guide = seed.entity_indices["character:guide"] as usize;
-        assert!(seed.state.entity_tags[guide].bit(current_tag));
-        let location_vertex = seed
-            .state
-            .vertex("location:square")
-            .expect("location vertex");
-        assert_eq!(
-            location_vertex.attributes.get("environment.danger"),
-            Some(&storylet_engine::chrono_state::AttributeValue::Int(2)),
-        );
-        let guide_vertex = seed
-            .state
-            .vertex("character:guide")
-            .expect("character vertex");
-        assert_eq!(
-            guide_vertex.attributes.get("status.trust"),
-            Some(&storylet_engine::chrono_state::AttributeValue::Float(0.75)),
-        );
-        let quality_vertex = seed
-            .state
-            .vertex("quality:Trust")
-            .expect("quality fact vertex");
-        assert_eq!(
-            quality_vertex.layer,
-            storylet_engine::chrono_state::GraphLayer::Fact
-        );
-        assert_eq!(
-            quality_vertex.attributes.get("category"),
-            Some(&storylet_engine::chrono_state::AttributeValue::String(
-                "metric".into()
-            )),
-        );
-        let item_vertex = seed
-            .state
-            .vertex("quality:Clue")
-            .expect("quality item vertex");
-        assert_eq!(
-            item_vertex.layer,
-            storylet_engine::chrono_state::GraphLayer::Item
-        );
-        let item_index = seed.entity_indices["quality:Clue"] as usize;
-        assert_eq!(item_vertex.entity_index, Some(item_index as u16));
-        let tool_tag = compiled
-            .registry
-            .id("quality.Clue")
-            .expect("tool tag registered");
-        assert!(seed.state.entity_tags[item_index].bit(tool_tag));
-    }
-    #[test]
-    fn seeds_menace_crisis_tag_and_makes_crisis_storylet_eligible_at_threshold() {
-        let storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
-            "id": "crisis-scene",
-            "title": "Crisis",
-            "content": { "text_template": "The menace peaks." },
-            "effects": {},
-            "created_at": 1
-        }))
-        .expect("valid crisis storylet");
-        let menace = QualityRecord {
-            name: "Doom".into(),
-            kind: "menace".into(),
-            value: 10.0,
-            min_value: 0.0,
-            max_value: 5.0,
-            is_hidden: false,
-            menace_crisis_storylet_id: Some("crisis-scene".into()),
-            description: None,
-            metadata: None,
-            folder_id: None,
-        };
-        let location: LocationRecord = serde_json::from_value(serde_json::json!({
-            "id": "start",
-            "name": "Start",
-            "description": "",
-            "tags": []
-        }))
-        .expect("valid location fixture");
-        let compiled =
-            compile_chrono_dispatch(&[storylet], &[menace.clone()], &[location.clone()], &[])
-                .expect("menace crisis should compile");
-        let mut seed = super::initialize_chrono_world(
-            &compiled,
-            &[menace],
-            &[location],
-            &[],
-            &[],
-            None,
-            "start",
-        )
-                .expect("world should seed");
-        let crisis_tag = compiled
-            .registry
-            .id(&super::menace_crisis_tag("Doom"))
-            .expect("crisis tag registered");
-        assert!(seed.state.global_tags.bit(crisis_tag));
-        let metric_id = compiled.metric_indices["Doom"] as usize;
-        assert_eq!(seed.state.metrics[metric_id], 5.0);
-        assert_eq!(seed.state.metric_bounds[metric_id].max, 5.0);
-        assert!(
-            compiled
-                .dispatcher
-                .is_eligible(&compiled.dispatcher.storylets[0], &seed.state,)
-        );
-        let delta = apply_mutation_with_registry(
-            &mut seed.state,
-            &MutationOp {
-                metric_deltas: vec![(metric_id as u16, -1.0)],
-                ..MutationOp::default()
-            },
-            &compiled.registry,
-        )
-        .expect("falling below the crisis threshold clears its tag");
-        assert!(!seed.state.global_tags.bit(crisis_tag));
-        assert!(
-            !compiled
-                .dispatcher
-                .is_eligible(&compiled.dispatcher.storylets[0], &seed.state,)
-        );
-        revert_delta(&mut seed.state, &delta).expect("undo restores the crisis");
-        assert!(seed.state.global_tags.bit(crisis_tag));
-        assert_eq!(seed.state.metrics[metric_id], 5.0);
-    }
-    #[test]
-    fn partial_storylet_validation_defers_crisis_cross_reference_to_full_compile() {
-        let storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
-            "id": "unrelated-scene",
-            "title": "Unrelated",
-            "content": { "text_template": "Scene." },
-            "effects": {},
-            "created_at": 1
-        }))
-        .expect("valid storylet fixture");
-        let menace = QualityRecord {
-            name: "Doom".into(),
-            kind: "menace".into(),
-            value: 0.0,
-            min_value: 0.0,
-            max_value: 5.0,
-            is_hidden: false,
-            menace_crisis_storylet_id: Some("missing-crisis".into()),
-            description: None,
-            metadata: None,
-            folder_id: None,
-        };
-        assert!(
-            super::compile_chrono_dispatch(
-                std::slice::from_ref(&storylet),
-                std::slice::from_ref(&menace),
-                &[],
-                &[],
-            )
-            .is_err()
-        );
-        super::compile_chrono_dispatch_for_storylet_validation(&[storylet], &[menace], &[], &[])
-            .expect("an unrelated candidate must compile independently");
-    }
-    #[test]
-    fn seeds_active_weighted_passion_macro_and_threshold_state() {
-        let location: LocationRecord = serde_json::from_value(serde_json::json!({
-            "id": "harbor", "name": "Harbor", "description": "", "tags": []
-        }))
-        .unwrap();
-        let character: CharacterRecord = serde_json::from_value(serde_json::json!({
-            "id": "captain", "name": "Captain", "role": "Role.Captain",
-            "home_location": "harbor", "current_location": "harbor",
-            "passion_pool": [
-                {"passion_id": "loyalty", "current_value": 60.0, "weight": 0.5},
-                {"passion_id": "fear", "current_value": -100.0, "weight": 1.0}
-            ],
-            "active_passions": ["loyalty"],
-            "trust_inertia": 1.0,
-            "thresholds": [{
-                "threshold_id": "crisis", "trigger_value": 60.0,
-                "direction": "positive", "linked_graph_asset_id": "captain-crisis"
-            }]
-        }))
-        .unwrap();
-        let compiled = compile_chrono_dispatch(
-            &[],
-            &[],
-            std::slice::from_ref(&location),
-            std::slice::from_ref(&character),
-        )
-        .expect("valid passion records compile");
-        let seed = super::initialize_chrono_world(
-            &compiled,
-            &[],
-            std::slice::from_ref(&location),
-            std::slice::from_ref(&character),
-            &[],
-            None,
-            "harbor",
-        )
-        .expect("valid world seed");
-        let npc_id = seed.entity_indices["character:captain"] as usize;
-        let loyalty_id = compiled.passion_indices[&("captain".into(), "loyalty".into())] as usize;
-        let fear_id = compiled.passion_indices[&("captain".into(), "fear".into())] as usize;
-        assert_eq!(seed.state.passions.macro_values[npc_id], 61.0);
-        assert!(seed.state.passions.active[loyalty_id]);
-        assert!(!seed.state.passions.active[fear_id]);
-        let threshold_bit = compiled
-            .registry
-            .id("passion.threshold.captain.crisis")
-            .unwrap();
-        assert!(seed.state.global_tags.bit(threshold_bit));
-    }
-}
-
 fn insert_json_attributes(
     value: &serde_json::Value,
     prefix: &str,
@@ -2079,9 +951,18 @@ fn insert_json_attributes(
 mod world_object_vertex_tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn runtime_cluster_type_accepts_only_canonical_values() {
+        assert_eq!(map_cluster_type("player_passage"), Ok(StoryletClusterType::PlayerPassage));
+        assert_eq!(map_cluster_type("linear_progression"), Ok(StoryletClusterType::LinearProgression));
+        assert_eq!(map_cluster_type("wheel_deck"), Ok(StoryletClusterType::WheelDeck));
+        assert_eq!(map_cluster_type("aftermath_accelerator"), Ok(StoryletClusterType::AftermathAccelerator));
+        assert!(map_cluster_type("player_controlled_passage").is_err());
+    }
+
 
     #[test]
-    fn item_and_fact_entities_add_vertices_with_flattened_attributes() {
+    fn world_item_and_fact_entities_seed_typed_properties() {
         let location: LocationRecord = serde_json::from_value(json!({
             "id": "square",
             "name": "Square",
@@ -2089,7 +970,7 @@ mod world_object_vertex_tests {
             "tags": []
         }))
         .expect("valid location fixture");
-        let compiled = compile_chrono_dispatch(&[], &[], std::slice::from_ref(&location), &[])
+        let compiled = compile_chrono_dispatch(&[], std::slice::from_ref(&location), &[])
             .expect("empty storylet deck compiles");
         let item: WorldObjectRecord = serde_json::from_value(json!({
             "id": "lantern",
@@ -2105,19 +986,42 @@ mod world_object_vertex_tests {
             "attributes": { "prop": { "Verified": false } }
         }))
         .expect("valid fact fixture");
+        let world: EntityRecord = serde_json::from_value(json!({
+            "id": "world",
+            "name": "World",
+            "root_tag": "world",
+            "tags": [],
+            "properties": [{
+                "id": "mood",
+                "key": "mood",
+                "name": "Mood",
+                "type": "string",
+                "value": "calm"
+            }],
+        }))
+        .expect("valid world entity fixture");
 
         let seed = initialize_chrono_world(
             &compiled,
             &[],
+            &world,
+            &[],
             std::slice::from_ref(&location),
             &[],
             &[item, fact],
+            &[],
+            &[],
             None,
             "square",
         )
         .expect("world seeds with item and fact vertices");
+        let world_vertex = seed.state.vertex("world").expect("world property vertex");
+        assert_eq!(
+            world_vertex.attributes.get("prop.mood"),
+            Some(&AttributeValue::String("calm".into()))
+        );
 
-        let item_vertex = seed.state.vertex("item:lantern").expect("item vertex");
+        let item_vertex = seed.state.vertex("lantern").expect("item vertex");
         assert_eq!(
             item_vertex.attributes.get("prop.Rusty"),
             Some(&AttributeValue::Bool(true))
@@ -2130,13 +1034,134 @@ mod world_object_vertex_tests {
             item_vertex.attributes.get("name"),
             Some(&AttributeValue::String("Rusted Lantern".into()))
         );
-        assert!(item_vertex.entity_index.is_none());
+        assert_eq!(
+            item_vertex.entity_index,
+            seed.entity_indices.get("lantern").copied()
+        );
 
-        let fact_vertex = seed.state.vertex("fact:rumor").expect("fact vertex");
+        let fact_vertex = seed.state.vertex("rumor").expect("fact vertex");
         assert_eq!(
             fact_vertex.attributes.get("prop.Verified"),
             Some(&AttributeValue::Bool(false))
         );
-        assert!(seed.entity_indices.get("item:lantern").is_none());
+        assert!(seed.entity_indices.contains_key("lantern"));
+    }
+
+    #[test]
+    fn entity_property_types_survive_every_runtime_entity_seed_and_scenario_overrides() {
+        let world: EntityRecord = serde_json::from_value(json!({
+            "id": "world", "name": "World", "root_tag": "world", "tags": [],
+            "properties": [{ "id": "mood", "key": "mood", "name": "Mood", "type": "float", "value": 3 }]
+        })).expect("valid World fixture");
+        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
+            {
+                "id": "square", "name": "Square", "root_tag": "location", "tags": [],
+                "properties": [{ "id": "visited", "key": "visited", "name": "Visited", "type": "bool", "value": false }]
+            },
+            {
+                "id": "guard", "name": "Guard", "root_tag": "character", "tags": [],
+                "properties": [
+                    { "id": "score", "key": "score", "name": "Score", "type": "float", "value": 3 },
+                    { "id": "owner", "key": "owner", "name": "Owner", "type": "entity", "value": "square" },
+                    { "id": "empty_asset", "key": "empty_asset", "name": "Empty Asset", "type": "asset", "value": null },
+                    { "id": "empty_entity", "key": "empty_entity", "name": "Empty Entity", "type": "entity", "value": null },
+                    { "id": "unset_count", "key": "unset_count", "name": "Unset Count", "type": "int", "value": null }
+                ]
+            },
+            {
+                "id": "lantern", "name": "Lantern", "root_tag": "item", "tags": [],
+                "properties": [
+                    { "id": "heat", "key": "heat", "name": "Heat", "type": "float", "value": 5 },
+                    { "id": "art", "key": "art", "name": "Art", "type": "asset", "value": { "asset_id": "asset-lantern", "version": "v1" } },
+                    { "id": "owner", "key": "owner", "name": "Owner", "type": "entity", "value": "guard" },
+                    { "id": "steps", "key": "steps", "name": "Steps", "type": "int", "is_array": true, "value": [1, 2] }
+                ]
+            },
+            {
+                "id": "rumor", "name": "Rumor", "root_tag": "fact", "tags": [],
+                "properties": [{ "id": "verified", "key": "verified", "name": "Verified", "type": "bool", "value": true }]
+            }
+        ])).expect("valid Entity fixtures");
+        let records = crate::entities::runtime_records_with_world(
+            &world,
+            &entities,
+            &[],
+        );
+        let compiled = compile_chrono_dispatch_with_world(
+            &[],
+            &records.locations,
+            &records.characters,
+            &records.world_objects,
+            &records.world_tags,
+            &records.entity_tag_seeds,
+            &records.entity_game_ids,
+        )
+        .expect("Chrono dispatch compiles");
+        let seed = initialize_chrono_world(
+            &compiled,
+            &[],
+            &world,
+            &entities,
+            &records.locations,
+            &records.characters,
+            &records.world_objects,
+            &[],
+            &records.entity_tag_seeds,
+            None,
+            "square",
+        ).expect("typed entity properties seed");
+
+        assert_eq!(
+            seed.state.vertex("world").unwrap().attributes.get("prop.mood"),
+            Some(&AttributeValue::Float(3.0))
+        );
+        assert_eq!(
+            seed.state.vertex("square").unwrap().attributes.get("prop.visited"),
+            Some(&AttributeValue::Bool(false))
+        );
+        let character = seed.state.vertex("guard").unwrap();
+        assert_eq!(character.attributes.get("prop.score"), Some(&AttributeValue::Float(3.0)));
+        assert_eq!(character.attributes.get("prop.owner"), Some(&AttributeValue::EntityRef("square".into())));
+        assert_eq!(character.attributes.get("prop.empty_asset"), Some(&AttributeValue::Asset(String::new())));
+        assert_eq!(character.attributes.get("prop.empty_entity"), Some(&AttributeValue::EntityRef(String::new())));
+        assert_eq!(character.attributes.get("prop.unset_count"), Some(&AttributeValue::Int(0)));
+
+        let item = seed.state.vertex("lantern").unwrap();
+        assert_eq!(item.attributes.get("prop.heat"), Some(&AttributeValue::Float(5.0)));
+        assert_eq!(item.attributes.get("prop.art"), Some(&AttributeValue::Asset("asset-lantern".into())));
+        assert_eq!(item.attributes.get("prop.owner"), Some(&AttributeValue::EntityRef("guard".into())));
+        assert_eq!(
+            item.attributes.get("prop.steps"),
+            Some(&AttributeValue::Array(vec![AttributeValue::Int(1), AttributeValue::Int(2)]))
+        );
+        assert_eq!(
+            seed.state.vertex("rumor").unwrap().attributes.get("prop.verified"),
+            Some(&AttributeValue::Bool(true))
+        );
+
+        let scenario: ScenarioRecord = serde_json::from_value(json!({
+            "id": "typed-override",
+            "name": "Typed Override",
+            "seed": 1,
+            "start_location_policy": { "mode": "fixed", "location_id": "square" },
+            "initial_properties": { "guard": { "score": 9 } }
+        })).expect("valid scenario fixture");
+        let overridden = initialize_chrono_world(
+            &compiled,
+            &[],
+            &world,
+            &entities,
+            &records.locations,
+            &records.characters,
+            &records.world_objects,
+            &[],
+            &records.entity_tag_seeds,
+            Some(&scenario),
+            "square",
+        ).expect("typed scenario property override");
+        assert_eq!(
+            overridden.state.vertex("guard").unwrap().attributes.get("prop.score"),
+            Some(&AttributeValue::Float(9.0))
+        );
     }
 }

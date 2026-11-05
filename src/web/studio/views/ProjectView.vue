@@ -82,22 +82,22 @@ async function handleImport() {
         <label class="form-label">Project Name</label>
         <div style="display:flex; gap:10px;">
           <input v-model="nameInput" class="form-input" />
-          <button class="btn btn-primary" @click="save">Save Name</button>
+          <button class="btn btn-primary" @click="save">Save name</button>
         </div>
       </div>
 
       <!-- Export Bundle -->
       <div style="padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px; margin-bottom:20px;">
-        <h3 style="font-size:14px; font-weight:700; margin-bottom:8px;">EXPORT PROJECT</h3>
+        <h3 style="font-size:14px; font-weight:700; margin-bottom:8px;">Export project</h3>
         <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
-          Download complete portable project bundle v3 (entities, folders, trait templates, assets, storylets, and scenarios).
+          Download complete portable project bundle v5 (entity templates, folders, trait templates, gameplay tags, assets, storylets, events, and scenarios).
         </p>
-        <a href="/api/v2/project-bundle" class="btn btn-secondary" download>Export .storylet.json</a>
+        <a href="/api/v3/project-bundle" class="btn btn-secondary" download>Export .storylet.json</a>
       </div>
 
       <!-- Import Bundle -->
       <div style="padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px;">
-        <h3 style="font-size:14px; font-weight:700; margin-bottom:8px;">IMPORT & REPLACE WORKSPACE</h3>
+        <h3 style="font-size:14px; font-weight:700; margin-bottom:8px;">Import & replace workspace</h3>
         <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
           Inspect and validate an external project bundle before replacing your active workspace.
         </p>
@@ -109,7 +109,7 @@ async function handleImport() {
             :disabled="!isValid"
             @click="handleImport"
           >
-            Replace Project Content
+            Replace project content
           </button>
         </div>
 

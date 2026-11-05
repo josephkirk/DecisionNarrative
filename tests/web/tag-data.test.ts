@@ -1,28 +1,58 @@
 import { expect, test } from "bun:test";
-import { buildTagIndex, uniqueTagNames } from "../../src/web/studio/tagData.ts";
+import { buildHierarchicalTagTree, buildTagIndex, isValidGameplayTagSegment, renamedGameplayTagName, uniqueTagNames } from "../../src/web/studio/tagData.ts";
 
-test("tag names trim and deduplicate case-insensitively while preserving first spelling", () => {
-  expect(uniqueTagNames(["  Guard ", "guard", "", "Market", " market ", 1])).toEqual(["Guard", "Market"]);
+test("tag names deduplicate case-insensitively", () => {
+  expect(uniqueTagNames([" Guard ", "guard", "", "Market", " market "])).toEqual(["Guard", "Market"]);
 });
 
-test("tag index counts distinct entities and retains precise storylet jump anchors", () => {
+test("registered zero-reference tags remain in the catalog", () => {
+  const tags = buildTagIndex({ gameplayTags: [{ id: "1", name: "world.unused", protected: false }], entities: [], entityTemplates: [], storylets: [], traitTemplates: [] });
+  expect(tags).toContainEqual({ kind: "gameplay", name: "world.unused", references: [], registered: true, protected: false });
+});
+
+test("references use canonical names without entity prefixes and are unique per record", () => {
   const tags = buildTagIndex({
-    characters: [{ id: "char-1", name: "Ari", role: "Guard" }, { id: "char-2", name: "Bea", role: "guard" }],
-    locations: [{ id: "loc-1", name: "Market", tags: ["Public", "public"] }],
-    storylets: [
-      { id: "scene-1", title: "At the market", location_tags: ["PUBLIC"], parameters: [{ param_name: "GUARD" }], graph: { nodes: [
-        { id: "dialog-1", type: "dialog", title: "Arrival", speaker_role: "Guard", sections: [{ id: "sec-1", title: "Greeting", items: [
-          { id: "line-1", kind: "line", speaker_role: "Guard", target_role: "player", emotion_tag: "Wary", action_tag: "Points" },
-          { id: "idle-1", kind: "idle_action", actor_role: "Guard", target: "player", emote: "points" },
-        ] }] },
-      ] } },
-      { id: "scene-2", title: "Second visit", location_tags: ["public"], parameters: [], graph: null },
-    ],
+    gameplayTags: [],
+    entities: [],
+    entityTemplates: [{ id: "e1", object_id: "o", game_id: "game", name: "Ari", root_tag: "character", tags: ["world.garden"], properties: [], traits: [{ id: "t", template_id: "role", values: { role: "guard" } }] }],
+    storylets: [{ id: "s1", title: "Scene", location_tags: ["world.garden"], graph: { nodes: [{ id: "n1", tag: "world.garden" }] } } as never],
+    traitTemplates: [],
   });
-  const get = (kind: string, name: string) => tags.find((tag) => tag.kind === kind && tag.name.toLowerCase() === name.toLowerCase());
-  expect(get("role", "guard")?.references).toHaveLength(3);
-  expect(get("location", "public")?.references).toHaveLength(3);
-  expect(get("emotion", "wary")?.references[0]).toMatchObject({ entityId: "scene-1", nodeId: "dialog-1", itemId: "line-1" });
-  expect(get("action", "points")?.references).toHaveLength(1);
-  expect(get("action", "points")?.references[0]).toMatchObject({ entityId: "scene-1", itemId: "line-1" });
+  const garden = tags.find((tag) => tag.name === "world.garden");
+  expect(garden?.references).toHaveLength(2);
+  expect(garden?.references.every((ref) => ref.entityId !== "game.world.garden")).toBe(true);
+  expect(tags.find((tag) => tag.name === "guard")?.references).toHaveLength(1);
+  expect(tags.find((tag) => tag.name === "character")?.registered).toBe(false);
+});
+
+test("malformed paths are rejected and tree counts direct references only", () => {
+  const tags = buildTagIndex({ gameplayTags: [{ id: "1", name: "world", protected: false }, { id: "2", name: "world.garden", protected: false }, { id: "3", name: "world..bad", protected: false }], entities: [], entityTemplates: [{ id: "e", object_id: "o", game_id: "g", name: "E", root_tag: "world", tags: ["world.garden"], properties: [], traits: [] }], storylets: [], traitTemplates: [] });
+  expect(tags.some((tag) => tag.name.includes(".."))).toBe(false);
+  const tree = buildHierarchicalTagTree(tags);
+  expect(tree[0]?.totalCount).toBe(1);
+});
+
+test("intrinsic entity root and gameplay tags are counted as references", () => {
+  const tags = buildTagIndex({
+    gameplayTags: [
+      { id: "world", name: "world", protected: true },
+      { id: "weather", name: "world.weather", protected: false },
+    ],
+    entities: [{ id: "world", name: "World", root_tag: "world", tags: ["world.weather"], properties: [], traits: [] }],
+    entityTemplates: [],
+    storylets: [],
+    traitTemplates: [],
+  });
+  expect(tags.find((tag) => tag.name === "world")?.references.map((reference) => reference.entityId)).toEqual(["world"]);
+  expect(tags.find((tag) => tag.name === "world.weather")?.references[0]?.entityType).toBe("entity");
+});
+
+test("tag segments have the same validation for create and rename", () => {
+  expect(isValidGameplayTagSegment("custom_root")).toBe(true);
+  expect(isValidGameplayTagSegment("custom-root")).toBe(false);
+  expect(isValidGameplayTagSegment("bad name")).toBe(false);
+  expect(renamedGameplayTagName("mystery.sample", "active")).toBe("mystery.active");
+  expect(renamedGameplayTagName("mystery.sample", "a.b")).toBeNull();
+  expect(renamedGameplayTagName("mystery.sample", "1bad")).toBeNull();
+  expect(renamedGameplayTagName("mystery.sample", "")).toBeNull();
 });

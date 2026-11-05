@@ -4,22 +4,20 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+use storylet_engine::{RuntimeSessionState, WorldEvent};
 use crate::narrative_graph::NarrativeGraph;
 
 use crate::contracts::{
-    AssetRecord, EntityRecord, EventRecord, FolderRecord, LibraryPageResult, LibraryQuery,
-    LibrarySummaryItem, NpcBehaviorRecord, ProjectBundleContent, ProjectMetadata, QualityRecord,
-    ScenarioRecord, StoryletRecord, TraitTemplateRecord,
+    AssetRecord, EntityRecord, EntityTemplateRecord, EventRecord, FolderRecord, GameplayTagRecord,
+    LibraryPageResult, LibraryQuery, LibrarySummaryItem, ProjectBundleContent, ProjectMetadata,
+    ScenarioRecord, StoryletRecord, TraitTemplateRecord, SYSTEM_TRAIT_TEMPLATES,
 };
-use crate::entities::RuntimeRecords;
-
+use serde_json::{json, Value};
 /// Older records may carry an `ending` flag written before the graph became
 /// authoritative. Normalize on read so library filters and approvals see the
 /// same value the next save will persist.
 fn normalize_storylet_ending(mut storylet: StoryletRecord) -> StoryletRecord {
-    if let Some(value) = storylet.graph.clone()
-        && let Ok(graph) = serde_json::from_value::<NarrativeGraph>(value)
-    {
+    if let Some(graph) = storylet.graph.clone() {
         storylet.ending = graph.ending_from_graph();
     }
     storylet
@@ -51,188 +49,99 @@ impl Store {
     }
 
     fn init_schema(&self) -> Result<(), rusqlite::Error> {
+        let object_count: i64 = self.conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%'",
+            [], |row| row.get(0))?;
+        if object_count > 0 {
+            let marker: Option<String> = self.conn.query_row(
+                "SELECT value FROM store_metadata WHERE key = 'schema_version'", [],
+                |row| row.get(0)).optional()?;
+            if marker.as_deref() != Some("5") { return Err(rusqlite::Error::InvalidQuery); }
+            for column in ["last_result_json", "mutation_revision"] {
+                let present: bool = self.conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chrono_playtest_sessions') WHERE name=?1)",
+                    [column], |row| row.get(0))?;
+                if !present { return Err(rusqlite::Error::InvalidQuery); }
+            }
+            for table in ["project_metadata", "content_records", "interaction_context",
+                "store_metadata", "chrono_playtest_sessions", "runtime_sessions", "runtime_events"] {
+                let present: bool = self.conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                    [table], |row| row.get(0))?;
+                if !present { return Err(rusqlite::Error::InvalidQuery); }
+            }
+            let has_legacy_records: bool = self.conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM content_records WHERE
+                    entity IN ('qualities','npc_behaviors')
+                    OR (entity='trait_templates' AND id IN
+                        ('system.character','system.location','system.item','system.fact','system.other')))",
+                [], |row| row.get(0))?;
+            if has_legacy_records { return Err(rusqlite::Error::InvalidQuery); }
+            let canonical_templates: i64 = self.conn.query_row(
+                "SELECT count(*) FROM content_records WHERE entity='trait_templates' AND id IN
+                ('system.character_settings','system.location_settings','system.passion',
+                 'system.passion_threshold','system.passion_link')",
+                [], |row| row.get(0))?;
+            let protected_roots: i64 = self.conn.query_row(
+                "SELECT count(*) FROM content_records WHERE entity='gameplay_tags' AND id IN
+                ('character','location','item','fact','other','world')",
+                [], |row| row.get(0))?;
+            let has_world: bool = self.conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM content_records WHERE entity='entities' AND id='world')",
+                [], |row| row.get(0))?;
+            if canonical_templates != 5 || protected_roots != 6 || !has_world {
+                return Err(rusqlite::Error::InvalidQuery);
+            }
+        }
         self.conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA foreign_keys = ON;
-
+            "PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS project_metadata (
-                 singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-                 project_id TEXT NOT NULL,
-                 name TEXT NOT NULL,
-                 revision INTEGER NOT NULL DEFAULT 0
-             );
-
+                 singleton INTEGER PRIMARY KEY CHECK(singleton = 1), project_id TEXT NOT NULL,
+                 name TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0);
              CREATE TABLE IF NOT EXISTS content_records (
-                 entity TEXT NOT NULL,
-                 id TEXT NOT NULL,
-                 data_json TEXT NOT NULL,
-                 revision INTEGER NOT NULL DEFAULT 1,
-                 approved_revision INTEGER,
-                 updated_at INTEGER NOT NULL,
-                 PRIMARY KEY(entity, id)
-             );
-
+                 entity TEXT NOT NULL, id TEXT NOT NULL, data_json TEXT NOT NULL,
+                 revision INTEGER NOT NULL DEFAULT 1, approved_revision INTEGER,
+                 updated_at INTEGER NOT NULL, PRIMARY KEY(entity, id));
              CREATE INDEX IF NOT EXISTS idx_content_entity ON content_records(entity);
-
              CREATE TABLE IF NOT EXISTS interaction_context (
-                 singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-                 context_json TEXT NOT NULL,
-                 captured_at INTEGER NOT NULL,
-                 updated_at INTEGER NOT NULL,
-                 is_stale INTEGER NOT NULL DEFAULT 0
-             );
-             CREATE TABLE IF NOT EXISTS runtime_sessions (
-                 session_id TEXT PRIMARY KEY,
-                 project_id TEXT NOT NULL,
-                 revision TEXT NOT NULL,
-                 turn TEXT NOT NULL,
-                 state_json TEXT NOT NULL,
-                 updated_at TEXT NOT NULL
-             );
-
-             CREATE TABLE IF NOT EXISTS runtime_events (
-                 session_id TEXT NOT NULL,
-                 event_id TEXT NOT NULL,
-                 revision TEXT NOT NULL,
-                 event_json TEXT NOT NULL,
-                 PRIMARY KEY (session_id, event_id)
-             );
-
-             CREATE TABLE IF NOT EXISTS store_metadata (
-                 key TEXT PRIMARY KEY,
-                 value TEXT NOT NULL
-             );
-
+                 singleton INTEGER PRIMARY KEY CHECK(singleton = 1), context_json TEXT NOT NULL,
+                 captured_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+                 is_stale INTEGER NOT NULL DEFAULT 0);
+             CREATE TABLE IF NOT EXISTS store_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS chrono_playtest_sessions (
-                 session_id TEXT PRIMARY KEY,
-                 project_id TEXT NOT NULL,
-                 pinned_project_revision INTEGER NOT NULL,
-                 scenario_id TEXT NOT NULL,
-                 start_location_id TEXT NOT NULL,
-                 start_storylet_id TEXT NOT NULL,
-                 start_node_guid INTEGER NOT NULL,
-                 seed INTEGER NOT NULL,
-                 pinned_id_space_json TEXT NOT NULL,
-                 global_call_history_json TEXT NOT NULL,
+                 session_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+                 pinned_project_revision INTEGER NOT NULL, scenario_id TEXT NOT NULL,
+                 start_location_id TEXT NOT NULL, start_storylet_id TEXT NOT NULL,
+                 start_node_guid INTEGER NOT NULL, seed INTEGER NOT NULL,
+                 pinned_id_space_json TEXT NOT NULL, global_call_history_json TEXT NOT NULL,
                  scoped_call_histories_json TEXT NOT NULL,
                  pending_state_json TEXT NOT NULL DEFAULT '{}',
                  last_idempotency_key TEXT NOT NULL DEFAULT '',
-                 last_result_json TEXT NOT NULL DEFAULT '',
+                 last_result_json TEXT NOT NULL DEFAULT '{}',
                  mutation_revision INTEGER NOT NULL DEFAULT 0,
-                 created_at INTEGER NOT NULL,
-                 updated_at INTEGER NOT NULL
-             );",
-        )?;
-
-        // Migration: mutation retries must return the original payload, and
-        // optimistic concurrency needs a per-session mutation counter.
-        for (column, declaration) in [
-            ("last_idempotency_key", "TEXT NOT NULL DEFAULT ''"),
-            ("last_result_json", "TEXT NOT NULL DEFAULT ''"),
-            ("mutation_revision", "INTEGER NOT NULL DEFAULT 0"),
-        ] {
-            let present: bool = {
-                let mut stmt = self
-                    .conn
-                    .prepare("PRAGMA table_info(chrono_playtest_sessions)")?;
-                let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-                let mut found = false;
-                for col in rows {
-                    if col? == column {
-                        found = true;
-                        break;
-                    }
-                }
-                found
-            };
-            if !present {
-                let tx = self.conn.unchecked_transaction()?;
-                tx.execute(
-                    &format!(
-                        "ALTER TABLE chrono_playtest_sessions ADD COLUMN {column} {declaration}"
-                    ),
-                    [],
-                )?;
-                tx.commit()?;
-            }
-        }
-
-        // Migration: pending latent interactions are persisted alongside the
-        // call history so a rebuilt session can resume a paused Choice, QBN,
-        // Waiter, or scene section.
-        let has_pending_state: bool = {
-            let mut stmt = self
-                .conn
-                .prepare("PRAGMA table_info(chrono_playtest_sessions)")?;
-            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-            let mut found = false;
-            for col in rows {
-                if col? == "pending_state_json" {
-                    found = true;
-                    break;
-                }
-            }
-            found
-        };
-        if !has_pending_state {
-            let tx = self.conn.unchecked_transaction()?;
-            tx.execute(
-                "ALTER TABLE chrono_playtest_sessions ADD COLUMN pending_state_json TEXT NOT NULL DEFAULT '{}'",
-                [],
-            )?;
-            tx.commit()?;
-        }
-
-        // Migration: add is_stale to interaction_context if absent in existing DBs
-        let has_is_stale: bool = {
-            let mut stmt = self
-                .conn
-                .prepare("PRAGMA table_info(interaction_context)")?;
-            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-            let mut found = false;
-            for col in rows {
-                if col? == "is_stale" {
-                    found = true;
-                    break;
-                }
-            }
-            found
-        };
-        if !has_is_stale {
-            let tx = self.conn.unchecked_transaction()?;
-            tx.execute(
-                "ALTER TABLE interaction_context ADD COLUMN is_stale INTEGER NOT NULL DEFAULT 0",
-                [],
-            )?;
-            tx.commit()?;
-        }
-        let exists: bool = self
-            .conn
-            .query_row(
-                "SELECT 1 FROM project_metadata WHERE singleton = 1",
-                [],
-                |_| Ok(true),
-            )
-            .optional()?
-            .unwrap_or(false);
-
+                 created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS runtime_sessions (
+                 session_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+                 revision INTEGER NOT NULL, turn INTEGER NOT NULL,
+                 state_json TEXT NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS runtime_events (
+                 session_id TEXT NOT NULL, event_id TEXT NOT NULL,
+                 revision INTEGER NOT NULL, event_json TEXT NOT NULL,
+                 PRIMARY KEY(session_id, event_id));
+             CREATE INDEX IF NOT EXISTS idx_runtime_events_session
+                 ON runtime_events(session_id, event_id);")?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO store_metadata (key, value) VALUES ('schema_version', '5')", [])?;
+        let exists: bool = self.conn.query_row(
+            "SELECT 1 FROM project_metadata WHERE singleton = 1", [], |_| Ok(true))
+            .optional()?.is_some();
         if !exists {
             self.conn.execute(
-                "INSERT INTO project_metadata (singleton, project_id, name, revision) VALUES (1, 'workspace-project', 'Workspace', 0)",
-                [],
-            )?;
+                "INSERT INTO project_metadata (singleton, project_id, name, revision)
+                 VALUES (1, 'workspace-project', 'Workspace', 0)", [])?;
+            seed_protected_records(&self.conn)?;
         }
-
-        // Migration: fold legacy `characters`/`locations` rows into `entities`
-        // and drop retired storylet canvas fields.
-        let tx = self.conn.unchecked_transaction()?;
-        crate::entities::migrate_legacy_rows(&tx).map_err(|message| {
-            rusqlite::Error::ToSqlConversionFailure(Box::<dyn std::error::Error + Send + Sync>::from(
-                message,
-            ))
-        })?;
-        tx.commit()?;
-
+        ensure_world_entity(&self.conn)?;
         Ok(())
     }
 
@@ -331,29 +240,21 @@ impl Store {
         Ok(count > 0)
     }
 
-    // --- Typed Entity Helpers ---
-
-    pub fn list_qualities(&self) -> Result<Vec<QualityRecord>, rusqlite::Error> {
-        let json_list = self.list_content_json("qualities")?;
-        Ok(json_list
-            .into_iter()
-            .filter_map(|s| serde_json::from_str(&s).ok())
-            .collect())
-    }
-
-    pub fn save_quality(&self, q: &QualityRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(q)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-        self.save_content("qualities", &q.name, &json, 1, None)
+    pub fn list_entity_templates(&self) -> Result<Vec<EntityTemplateRecord>, rusqlite::Error> {
+        Ok(self.list_content_json("entity_templates")?.into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok()).collect())
     }
 
     pub fn list_entities(&self) -> Result<Vec<EntityRecord>, rusqlite::Error> {
-        let json_list = self.list_content_json("entities")?;
-        Ok(json_list
-            .into_iter()
-            .filter_map(|s| serde_json::from_str(&s).ok())
-            .collect())
+        Ok(self.list_content_json("entities")?.into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok()).collect())
     }
+
+    pub fn list_gameplay_tags(&self) -> Result<Vec<GameplayTagRecord>, rusqlite::Error> {
+        Ok(self.list_content_json("gameplay_tags")?.into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok()).collect())
+    }
+
 
     pub fn list_trait_templates(&self) -> Result<Vec<TraitTemplateRecord>, rusqlite::Error> {
         let json_list = self.list_content_json("trait_templates")?;
@@ -379,12 +280,6 @@ impl Store {
             .collect())
     }
 
-    /// Entities and trait templates projected into engine-facing records.
-    pub fn runtime_records(&self) -> Result<RuntimeRecords, rusqlite::Error> {
-        let entities = self.list_entities()?;
-        let templates = self.list_trait_templates()?;
-        Ok(crate::entities::runtime_records(&entities, &templates))
-    }
 
     /// Rewrite only the JSON payload of an existing row, leaving its revision
     /// and approval columns untouched (folder moves must not re-approve).
@@ -404,21 +299,6 @@ impl Store {
         Ok(count > 0)
     }
 
-    pub fn list_npc_behaviors(&self) -> Result<Vec<NpcBehaviorRecord>, rusqlite::Error> {
-        let json_list = self.list_content_json("npc_behaviors")?;
-        let mut list: Vec<NpcBehaviorRecord> = json_list
-            .into_iter()
-            .filter_map(|s| serde_json::from_str(&s).ok())
-            .collect();
-        list.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
-        Ok(list)
-    }
-
-    pub fn save_npc_behavior(&self, b: &NpcBehaviorRecord) -> Result<(), rusqlite::Error> {
-        let json = serde_json::to_string(b)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-        self.save_content("npc_behaviors", &b.id, &json, 1, None)
-    }
 
     pub fn list_events(&self) -> Result<Vec<EventRecord>, rusqlite::Error> {
         let json_list = self.list_content_json("events")?;
@@ -491,8 +371,7 @@ impl Store {
             ));
         }
         let graph = match st.graph.clone() {
-            Some(value) => serde_json::from_value::<NarrativeGraph>(value)
-                .map_err(|error| format!("Invalid storylet graph: {error}"))?,
+            Some(graph) => graph,
             None => NarrativeGraph::from_storylet(&st),
         };
         graph.validate().map_err(|issues| issues.join(" "))?;
@@ -713,6 +592,9 @@ impl Store {
         meta: &ProjectMetadata,
         content: &ProjectBundleContent,
     ) -> Result<u64, rusqlite::Error> {
+        if !crate::entities::validate_bundle_content(content).is_empty() {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -736,11 +618,26 @@ impl Store {
         let now = chrono_now_ms();
         insert_rows(
             &tx,
-            "qualities",
-            content.qualities.iter().map(|quality| {
+            "entities",
+            content.entities.iter().map(|entity| {
                 Ok((
-                    quality.name.clone(),
-                    serde_json::to_string(quality)
+                    entity.id.clone(),
+                    serde_json::to_string(entity)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                    1,
+                    None,
+                ))
+            }),
+            now,
+        )?;
+
+        insert_rows(
+            &tx,
+            "entity_templates",
+            content.entity_templates.iter().map(|template| {
+                Ok((
+                    template.id.clone(),
+                    serde_json::to_string(template)
                         .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
                     1,
                     None,
@@ -750,11 +647,11 @@ impl Store {
         )?;
         insert_rows(
             &tx,
-            "entities",
-            content.entities.iter().map(|entity| {
+            "gameplay_tags",
+            content.gameplay_tags.iter().map(|tag| {
                 Ok((
-                    entity.id.clone(),
-                    serde_json::to_string(entity)
+                    tag.id.clone(),
+                    serde_json::to_string(tag)
                         .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
                     1,
                     None,
@@ -820,20 +717,6 @@ impl Store {
         )?;
         insert_rows(
             &tx,
-            "npc_behaviors",
-            content.npc_behaviors.iter().map(|behavior| {
-                Ok((
-                    behavior.id.clone(),
-                    serde_json::to_string(behavior)
-                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
-                    1,
-                    None,
-                ))
-            }),
-            now,
-        )?;
-        insert_rows(
-            &tx,
             "events",
             content.events.iter().map(|event| {
                 Ok((
@@ -860,14 +743,15 @@ impl Store {
             }),
             now,
         )?;
+        seed_protected_records(&tx)?;
+        ensure_world_entity(&tx)?;
         tx.commit()?;
         Ok(next_revision as u64)
     }
 
     /// ChronoFlow v5 playtest sessions (REQ-CH-02): only the call-history
     /// arrays, the random seed, and pinned authoring metadata are stored — never
-    /// a serialized runtime instance or world snapshot. This table is additive;
-    /// the legacy `runtime_sessions` rows are never read or rewritten by it.
+    /// a serialized runtime instance or world snapshot.
     pub fn save_chrono_playtest_row(&self, row: &ChronoPlaytestRow) -> Result<(), rusqlite::Error> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
@@ -943,6 +827,69 @@ impl Store {
             .collect::<Result<Vec<_>, rusqlite::Error>>()?;
         Ok(rows)
     }
+    pub fn save_runtime_session(&self, state: &RuntimeSessionState) -> Result<(), rusqlite::Error> {
+        let json = serde_json::to_string(state)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        self.conn.execute(
+            "INSERT INTO runtime_sessions (session_id,project_id,revision,turn,state_json,updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(session_id) DO UPDATE SET project_id=excluded.project_id,
+             revision=excluded.revision, turn=excluded.turn, state_json=excluded.state_json,
+             updated_at=excluded.updated_at",
+            params![state.session_id, state.project_id, state.world.revision as i64,
+                state.world.turn as i64, json, chrono_now_ms()])?;
+        Ok(())
+    }
+
+    pub fn load_runtime_session(&self, session_id: &str) -> Result<Option<RuntimeSessionState>, rusqlite::Error> {
+        self.conn.query_row("SELECT state_json FROM runtime_sessions WHERE session_id=?1",
+            [session_id], |row| {
+                let raw: String = row.get(0)?;
+                serde_json::from_str(&raw).map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                    0, rusqlite::types::Type::Text, Box::new(e)))
+            }).optional()
+    }
+
+    pub fn delete_runtime_session(&self, session_id: &str) -> Result<bool, rusqlite::Error> {
+        Ok(self.conn.execute("DELETE FROM runtime_sessions WHERE session_id=?1", [session_id])? > 0)
+    }
+
+    pub fn append_runtime_event(&self, session_id: &str, event_id: &str, revision: u64, event: &WorldEvent) -> Result<(), rusqlite::Error> {
+        let json = serde_json::to_string(event)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        self.conn.execute("INSERT OR IGNORE INTO runtime_events (session_id,event_id,revision,event_json) VALUES (?1,?2,?3,?4)",
+            params![session_id, event_id, revision as i64, json])?;
+        Ok(())
+    }
+
+    pub fn list_runtime_events(&self, session_id: &str) -> Result<Vec<WorldEvent>, rusqlite::Error> {
+        let mut stmt = self.conn.prepare("SELECT event_json FROM runtime_events WHERE session_id=?1 ORDER BY revision, rowid")?;
+        let rows = stmt.query_map([session_id], |row| {
+            let raw: String = row.get(0)?;
+            serde_json::from_str(&raw).map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                0, rusqlite::types::Type::Text, Box::new(e)))
+        })?;
+        rows.collect()
+    }
+
+    pub fn list_runtime_sessions(&self) -> Result<Vec<RuntimeSessionState>, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT state_json FROM runtime_sessions ORDER BY session_id")?;
+        let rows = stmt.query_map([], |row| {
+            let raw: String = row.get(0)?;
+            serde_json::from_str(&raw).map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                0, rusqlite::types::Type::Text, Box::new(e)))
+        })?;
+        rows.collect()
+    }
+
+    pub fn ensure_session_id_has_no_archive(&self, session_id: &str) -> Result<(), rusqlite::Error> {
+        let count: i64 = self.conn.query_row("SELECT count(*) FROM runtime_events WHERE session_id=?1",
+            [session_id], |row| row.get(0))?;
+        if count > 0 { return Err(rusqlite::Error::InvalidQuery); }
+        Ok(())
+    }
+
 }
 
 /// One persisted ChronoFlow playtest session. JSON columns hold the global call
@@ -1022,4 +969,89 @@ fn chrono_now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+fn seed_protected_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
+    let roots = ["character", "location", "item", "fact", "other", "world"];
+    for name in roots {
+        let record = json!({"id": name, "name": name, "description": "",
+            "protected": true, "created_at": 0});
+        conn.execute(
+            "INSERT OR IGNORE INTO content_records (entity,id,data_json,revision,updated_at)
+             VALUES ('gameplay_tags',?1,?2,1,0)",
+            params![name, record.to_string()])?;
+    }
+    for template in SYSTEM_TRAIT_TEMPLATES {
+        let properties: Vec<Value> = template.properties.iter().map(|spec| json!({
+            "key": spec.key,
+            "name": spec.name,
+            "type": spec.property_type,
+            "is_array": spec.is_array,
+            "default": serde_json::from_str::<Value>(spec.default_json)
+                .expect("system trait default JSON must be valid"),
+        })).collect();
+        let id = format!("system.{}", template.key);
+        let record = json!({
+            "id": id,
+            "key": template.key,
+            "key_auto": false,
+            "name": template.name,
+            "description": "",
+            "folder_id": null,
+            "properties": properties,
+            "allow_multiple": template.allow_multiple,
+            "system": true,
+            "created_at": 0
+        });
+        conn.execute("INSERT OR IGNORE INTO content_records (entity,id,data_json,revision,updated_at) VALUES ('trait_templates',?1,?2,1,0)",
+            params![id, record.to_string()])?;
+    }
+    Ok(())
+}
+
+pub fn ensure_world_entity(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
+    let exists: bool = conn.query_row(
+        "SELECT 1 FROM content_records WHERE entity='entities' AND id='world'",
+        [], |_| Ok(true)).optional()?.unwrap_or(false);
+    if !exists {
+        let world = json!({"id":"world","name":"World","root_tag":"world","tags":[]});
+        conn.execute(
+            "INSERT INTO content_records (entity,id,data_json,revision,updated_at)
+             VALUES ('entities','world',?1,1,0)", params![world.to_string()])?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ChronoPlaytestRow, Store};
+
+    #[test]
+    fn chrono_playtest_row_round_trips() {
+        let store = Store::open_in_memory().expect("store");
+        let row = ChronoPlaytestRow {
+            session_id: "session-1".into(),
+            project_id: "project-1".into(),
+            pinned_project_revision: 3,
+            scenario_id: "scenario-1".into(),
+            start_location_id: "location-1".into(),
+            start_storylet_id: "storylet-1".into(),
+            start_node_guid: 7,
+            seed: 11,
+            pinned_id_space_json: "{\"entities\":[]}".into(),
+            global_call_history_json: "[]".into(),
+            scoped_call_histories_json: "{}".into(),
+            pending_state_json: "{}".into(),
+            last_idempotency_key: "key-1".into(),
+            last_result_json: "{\"ok\":true}".into(),
+            mutation_revision: 2,
+            created_at: 100,
+            updated_at: 101,
+        };
+        store.save_chrono_playtest_row(&row).expect("save");
+        assert_eq!(
+            store.get_chrono_playtest_row("session-1").expect("load"),
+            Some(row)
+        );
+    }
 }

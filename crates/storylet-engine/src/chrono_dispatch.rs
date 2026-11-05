@@ -2,12 +2,9 @@
 //! the QBN deck query, the salience matcher, and the waypoint topic navigator.
 //!
 //! `UnifiedDispatcher` is the single eligibility and scoring policy shared by the QBN
-//! deck and the salience match. Authoring data keeps the v5 vocabulary
-//! (`QualityPredicate`, `StoryletEffect`); `resolve` compiles target names into dense
-//! indices in the index space of their subject — metric names through the canonical `MetricRegistry`,
-//! tag names through `GameplayTagRegistry` — and the runtime effect policy stays
-//! `MutationOp`, so the bijective delta and rollback path owned by `chrono_state` is
-//! unchanged.
+//! deck and the salience match. Authoring data uses gameplay tags and role
+//! requirements; runtime effects remain `MutationOp`, so the bijective delta and
+//! rollback path owned by `chrono_state` is unchanged.
 //!
 //! Determinism: every query walks the deck in the caller's order, ties break by
 //! storylet ID or edge ID, and the salience tie pick comes from the caller's seed.
@@ -22,9 +19,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::chrono_completion::StoryletBitset;
-use crate::chrono_state::{
-    GameplayTagRegistry, MetricRegistry, MutationOp, TagBitset, WorldStateTable, MAX_TAGS,
-};
+use crate::chrono_state::{GameplayTagRegistry, MutationOp, TagBitset, WorldStateTable};
 
 /// Salience distance penalty coefficient, `alpha` in REQ-BB-04.
 pub const SALIENCE_DISTANCE_ALPHA: f64 = 0.05;
@@ -78,117 +73,22 @@ pub enum StoryletClusterType {
     AftermathAccelerator,
 }
 
-/// Comparison used by a `QualityPredicate`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PredicateOperator {
-    #[default]
-    Eq,
-    Neq,
-    Gt,
-    Gte,
-    Lt,
-    Lte,
-}
 
-/// Which row of the world a predicate reads. This keeps tag rules distinct from
-/// metric gates: only `PredicateSubject::Metric` reads `WorldStateTable.metrics`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PredicateSubject {
-    /// Continuous metric row; all six operators apply.
-    #[default]
-    Metric,
-    /// Current-location tag bit in the global row. The adapter writes the bit for the
-    /// actor's present location; `eq` means "at this location".
-    Location,
-    /// Discrete tag bit on one entity row.
-    Entity,
-    /// Visited tag bit in the global row.
-    Visited,
-    /// Met-character state. Reads the two masks the runtime keeps for it: the
-    /// character entity mask and the character/role tag mask.
-    MetCharacter,
-}
-
-/// One hard precondition. The same predicate feeds QBN eligibility and the salience
-/// specificity term, so there is no second rule engine.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct QualityPredicate {
-    /// Quality, passion, location, visited, or vertex-attribute target name.
-    pub target_id: String,
-    #[serde(default)]
-    pub subject: PredicateSubject,
-    pub operator: PredicateOperator,
-    pub comparison_value: f64,
-    /// Weight of this predicate in the salience specificity term.
-    #[serde(default = "default_specificity_weight")]
-    pub specificity_weight: f64,
-    /// Entity row for `PredicateSubject::Entity`; ignored for the other subjects.
-    #[serde(default)]
-    pub entity_index: Option<usize>,
-    /// Dense tag index written by `UnifiedDispatcher::resolve`. `None` means the
-    /// target is unresolved, and evaluation rejects the candidate.
-    #[serde(default)]
-    pub target_index: Option<u16>,
-    /// Ancestor closure mask written by `UnifiedDispatcher::resolve` for tag
-    /// subjects. Empty for `PredicateSubject::Metric`.
-    #[serde(default)]
-    pub tag_mask: TagBitset,
-}
-
-/// Fast numeric prefilter over the contiguous metric array. A gate is the branchless
-/// form of a range predicate on one metric index; it never reads tag bits.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct MetricGate {
-    pub metric_id: u16,
-    /// Lower bound, inclusive. A non-finite bound is treated as unbounded.
-    #[serde(default = "min_finite")]
-    pub min: f32,
-    /// Upper bound, inclusive. A non-finite bound is treated as unbounded.
-    #[serde(default = "max_finite")]
-    pub max: f32,
-}
-
-/// One term of the continuous salience target.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct IdealMetricTarget {
-    pub metric_id: u16,
-    pub target: f32,
-    /// Weight `v_j` of this term in the weighted Euclidean distance.
-    #[serde(default = "default_target_weight")]
-    pub weight: f32,
-}
-
-/// What one completion effect does. Numeric kinds read a metric index; tag kinds
-/// write the global tag masks of a `MutationOp`.
+/// What one completion effect does. Effects mutate gameplay tags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectKind {
-    /// `value` is added to the current metric value.
     #[default]
-    Increment,
-    /// `value` is assigned to the metric.
-    Set,
-    /// The compiled tag mask is added to the global tag row.
     AddTag,
-    /// The compiled tag mask is removed from the global tag row.
     RemoveTag,
 }
 
-/// Authoring form of a completion effect. `UnifiedDispatcher::compile_effects` folds
-/// these into a `MutationOp`; the runtime effect policy stays `MutationOp` so
-/// `revert_delta` keeps the exact inverse.
+/// Authoring form of a tag completion effect.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StoryletEffect {
     pub target_id: String,
-    pub value: f64,
     #[serde(default)]
     pub kind: EffectKind,
-    /// Dense metric index written by `UnifiedDispatcher::resolve`.
-    #[serde(default)]
-    pub target_index: Option<u16>,
-    /// Compiled tag mask for `AddTag` and `RemoveTag`, written by `resolve`.
     #[serde(default)]
     pub tag_mask: TagBitset,
 }
@@ -255,18 +155,10 @@ pub struct StoryletDef {
     /// Role selectors. A non-empty list requires at least one bound entity.
     #[serde(default)]
     pub required_roles: Vec<RoleRequirement>,
+    /// Optional pure candidate gate compiled from the authored precondition graph.
     #[serde(default)]
-    pub preconditions: Vec<QualityPredicate>,
-    /// Independent any-of groups. Each non-empty group must have at least one
-    /// matching predicate; a match in one group never satisfies another, so the
-    /// legacy numeric-quality, visited-location, and met-character groups stay
-    /// separate instead of being flattened into one OR.
-    #[serde(default)]
-    pub any_of_precondition_groups: Vec<Vec<QualityPredicate>>,
-    #[serde(default)]
-    pub metric_gates: Vec<MetricGate>,
-    #[serde(default)]
-    pub ideal_vector: Vec<IdealMetricTarget>,
+    pub precondition_graph: Option<crate::chrono_runtime::FlowGraphAsset>,
+
     /// Authoring effects; compiled into `on_complete_mutation`.
     #[serde(default)]
     pub effects_on_complete: Vec<StoryletEffect>,
@@ -295,16 +187,12 @@ pub struct StoryletDef {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WaypointTopicNode {
     pub topic_id: String,
-    /// NPCs never pathfind through this node; the player may still target it.
     #[serde(default)]
     pub is_player_only_trigger: bool,
     #[serde(default)]
     pub triggers_scene_exit: bool,
     #[serde(default)]
     pub exit_output_pin: String,
-    /// Quality unlocked when the topic is visited.
-    #[serde(default)]
-    pub revealed_clue_quality_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -364,12 +252,8 @@ pub enum CooldownUnit {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DispatchError {
-    /// A predicate or effect target name is not in the tag registry.
+    /// A topic or gameplay tag name is not registered.
     UnresolvedTarget { target_id: String },
-    /// A metric name is not in the metric registry.
-    UnresolvedMetric { target_id: String },
-    /// An effect value is not finite.
-    InvalidEffectValue { target_id: String, value: f64 },
     /// The weighted distance term is not finite.
     NonFiniteDistance { storylet_id: u16 },
     /// A storylet declares both a millisecond and a turn cooldown.
@@ -380,26 +264,8 @@ pub enum DispatchError {
     },
     /// A role selector has no distinct available actor.
     NoDistinctActorForRole { role_tag: String },
-    /// A predicate specificity weight is not finite or is negative.
-    InvalidPredicateWeight { target_id: String, weight: f64 },
-    /// An ideal-vector weight is not finite or is negative.
-    InvalidIdealWeight { metric_id: u16, weight: f64 },
-    /// A predicate comparison value is not finite.
-    InvalidComparisonValue { target_id: String, value: f64 },
-    /// A range operator was used on a tag subject, which only supports presence tests.
-    NonNumericSubject {
-        target_id: String,
-        subject: PredicateSubject,
-        operator: PredicateOperator,
-    },
-    /// An entity subject has no entity row.
-    EntityRowRequired { target_id: String },
-    /// A metric index is outside the contiguous metric array.
-    MetricIndexOutOfRange { metric_id: u16, len: usize },
     /// An entity row is outside the entity tag table.
     EntityIndexOutOfRange { entity_index: usize, len: usize },
-    /// A metric value is not finite.
-    NonFiniteMetric { metric_id: u16 },
     /// An edge cost or traversal penalty is negative or not finite.
     InvalidEdgeCost { edge_id: String, cost: f64 },
     /// A traversal count makes the dynamic edge cost non-finite.
@@ -417,109 +283,7 @@ pub enum DispatchError {
 
 impl fmt::Display for DispatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DispatchError::UnresolvedTarget { target_id } => {
-                write!(f, "target {target_id} is not in the tag registry")
-            }
-            DispatchError::InvalidPredicateWeight { target_id, weight } => {
-                write!(
-                    f,
-                    "predicate weight for {target_id} must be finite and non-negative, got {weight}"
-                )
-            }
-            DispatchError::InvalidIdealWeight { metric_id, weight } => {
-                write!(
-                    f,
-                    "ideal weight for metric {metric_id} must be finite and non-negative, got {weight}"
-                )
-            }
-            DispatchError::InvalidComparisonValue { target_id, value } => {
-                write!(
-                    f,
-                    "comparison value for {target_id} must be finite, got {value}"
-                )
-            }
-            DispatchError::UnresolvedMetric { target_id } => {
-                write!(f, "metric {target_id} is not in the metric registry")
-            }
-            DispatchError::InvalidEffectValue { target_id, value } => {
-                write!(
-                    f,
-                    "effect value for {target_id} must be finite, got {value}"
-                )
-            }
-            DispatchError::NonFiniteDistance { storylet_id } => {
-                write!(
-                    f,
-                    "salience distance term for storylet {storylet_id} is not finite"
-                )
-            }
-            DispatchError::CooldownUnitConflict {
-                storylet_id,
-                cooldown_ms,
-                cooldown_turns,
-            } => {
-                write!(
-                    f,
-                    "storylet {storylet_id} declares both cooldown_ms {cooldown_ms} and cooldown_turns {cooldown_turns}"
-                )
-            }
-            DispatchError::NoDistinctActorForRole { role_tag } => {
-                write!(f, "role {role_tag} has no distinct available actor")
-            }
-            DispatchError::NonNumericSubject {
-                target_id,
-                subject,
-                operator,
-            } => {
-                write!(
-                    f,
-                    "{operator:?} needs a numeric subject, but {target_id} is a {subject:?} subject"
-                )
-            }
-            DispatchError::EntityRowRequired { target_id } => {
-                write!(f, "entity subject for {target_id} needs an entity row")
-            }
-            DispatchError::MetricIndexOutOfRange { metric_id, len } => {
-                write!(
-                    f,
-                    "metric {metric_id} is outside the metric array of length {len}"
-                )
-            }
-            DispatchError::EntityIndexOutOfRange { entity_index, len } => {
-                write!(
-                    f,
-                    "entity row {entity_index} is outside the entity table of length {len}"
-                )
-            }
-            DispatchError::NonFiniteMetric { metric_id } => {
-                write!(f, "metric {metric_id} is not finite")
-            }
-            DispatchError::InvalidEdgeCost { edge_id, cost } => {
-                write!(
-                    f,
-                    "edge {edge_id} cost must be finite and non-negative, got {cost}"
-                )
-            }
-            DispatchError::InvalidTraversalCount { edge_id, count } => {
-                write!(
-                    f,
-                    "edge {edge_id} traversal count {count} makes the cost non-finite"
-                )
-            }
-            DispatchError::TopicNotFound { topic_id } => {
-                write!(f, "topic {topic_id} is not in the topic graph")
-            }
-            DispatchError::NoPathToGoal {
-                from_topic_id,
-                goal_topic_id,
-            } => {
-                write!(f, "no path from {from_topic_id} to {goal_topic_id}")
-            }
-            DispatchError::NoFallbackEdge { from_topic_id } => {
-                write!(f, "no path and no fallback edge from {from_topic_id}")
-            }
-        }
+        write!(f, "{self:?}")
     }
 }
 
@@ -617,134 +381,35 @@ impl UnifiedDispatcher {
             .find(|def| def.storylet_id == storylet_id)
     }
 
-    /// Compile every predicate, effect, and role target name into a dense index in
-    /// the index space of its subject: metric names through `MetricRegistry`, tag
-    /// names through `GameplayTagRegistry`. Checks that weights and numeric effect
-    /// values are finite and non-negative (effect values may be negative, only their
-    /// finiteness and `f32` representability are checked), and returns the number of
-    /// candidate instead of panicking.
-    pub fn resolve(
-        &mut self,
-        tags: &GameplayTagRegistry,
-        metrics: &MetricRegistry,
-    ) -> Result<usize, DispatchError> {
+    /// Compile gameplay tag and role references into dense registry indices.
+    pub fn resolve(&mut self, tags: &GameplayTagRegistry) -> Result<usize, DispatchError> {
         let mut resolved = 0;
         for def in &mut self.storylets {
-            for predicate in &mut def.preconditions {
-                Self::resolve_predicate(predicate, tags, metrics)?;
-                resolved += 1;
-            }
-            for group in &mut def.any_of_precondition_groups {
-                for predicate in group {
-                    Self::resolve_predicate(predicate, tags, metrics)?;
-                    resolved += 1;
-                }
-            }
-            // A gate or ideal target outside the metric array would otherwise
-            // make the storylet silently ineligible at evaluation time.
-            let metric_len = metrics.count();
-            for gate in &def.metric_gates {
-                if gate.metric_id as usize >= metric_len {
-                    return Err(DispatchError::MetricIndexOutOfRange {
-                        metric_id: gate.metric_id,
-                        len: metric_len,
-                    });
-                }
-            }
-            for ideal in &def.ideal_vector {
-                if ideal.metric_id as usize >= metric_len {
-                    return Err(DispatchError::MetricIndexOutOfRange {
-                        metric_id: ideal.metric_id,
-                        len: metric_len,
-                    });
-                }
-                if !ideal.weight.is_finite() || ideal.weight < 0.0 {
-                    return Err(DispatchError::InvalidIdealWeight {
-                        metric_id: ideal.metric_id,
-                        weight: f64::from(ideal.weight),
-                    });
-                }
-            }
             for role in &mut def.required_roles {
-                let index =
-                    tags.id(&role.role_tag)
-                        .ok_or_else(|| DispatchError::UnresolvedTarget {
-                            target_id: role.role_tag.clone(),
-                        })?;
-                let mask =
-                    tags.ancestors_mask(index)
-                        .ok_or_else(|| DispatchError::UnresolvedTarget {
-                            target_id: role.role_tag.clone(),
-                        })?;
+                let index = tags.id(&role.role_tag).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: role.role_tag.clone() })?;
                 role.role_index = Some(index);
-                role.role_mask = *mask;
+                role.role_mask = *tags.ancestors_mask(index).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: role.role_tag.clone() })?;
                 resolved += 1;
                 if let Some(location_tag) = &role.location_tag {
-                    let location_index =
-                        tags.id(location_tag)
-                            .ok_or_else(|| DispatchError::UnresolvedTarget {
-                                target_id: location_tag.clone(),
-                            })?;
-                    let location_mask = tags.ancestors_mask(location_index).ok_or_else(|| {
-                        DispatchError::UnresolvedTarget {
-                            target_id: location_tag.clone(),
-                        }
-                    })?;
-                    role.location_index = Some(location_index);
-                    role.location_mask = *location_mask;
+                    let index = tags.id(location_tag).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: location_tag.clone() })?;
+                    role.location_index = Some(index);
+                    role.location_mask = *tags.ancestors_mask(index).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: location_tag.clone() })?;
                     resolved += 1;
                 }
             }
             for effect in &mut def.effects_on_complete {
-                // Effect values may be negative; only finiteness and f32
-                // representability are checked here. Weights stay non-negative.
-                if !effect.value.is_finite() || !(effect.value as f32).is_finite() {
-                    return Err(DispatchError::InvalidEffectValue {
-                        target_id: effect.target_id.clone(),
-                        value: effect.value,
-                    });
-                }
-                let index = if matches!(effect.kind, EffectKind::AddTag | EffectKind::RemoveTag) {
-                    let tag_index = tags.id(&effect.target_id).ok_or_else(|| {
-                        DispatchError::UnresolvedTarget {
-                            target_id: effect.target_id.clone(),
-                        }
-                    })?;
-                    let mask = tags.ancestors_mask(tag_index).ok_or_else(|| {
-                        DispatchError::UnresolvedTarget {
-                            target_id: effect.target_id.clone(),
-                        }
-                    })?;
-                    effect.tag_mask = *mask;
-                    tag_index
-                } else {
-                    metrics.id(&effect.target_id).ok_or_else(|| {
-                        DispatchError::UnresolvedMetric {
-                            target_id: effect.target_id.clone(),
-                        }
-                    })?
-                };
-                effect.target_index = Some(index);
+                let index = tags.id(&effect.target_id).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: effect.target_id.clone() })?;
+                effect.tag_mask = *tags.ancestors_mask(index).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: effect.target_id.clone() })?;
                 resolved += 1;
-            }
-            for ideal in &def.ideal_vector {
-                let weight = f64::from(ideal.weight);
-                if !weight.is_finite() || weight < 0.0 {
-                    return Err(DispatchError::InvalidIdealWeight {
-                        metric_id: ideal.metric_id,
-                        weight,
-                    });
-                }
             }
         }
         Ok(resolved)
     }
 
     /// Hard eligibility: all-of and any-of tag masks, the dramatic arc phase gate,
-    /// metric gates, every predicate (each non-empty any-of group needs one match),
-    /// and a distinct available actor for every role selector. Completion locks are not
-    /// part of this check because they live in the caller's mask; use `is_playable` for
-    /// the deck view.
+    /// and a distinct available actor for every role selector. ChronoRuntime evaluates
+    /// the authored precondition graph before adding a storylet to a candidate pool.
+    /// Completion locks live in the caller's mask; use `is_playable` for the deck view.
     pub fn is_eligible(&self, def: &StoryletDef, table: &WorldStateTable) -> bool {
         self.try_is_eligible(def, table).unwrap_or(false)
     }
@@ -771,37 +436,6 @@ impl UnifiedDispatcher {
             && !table.global_tags.intersects(&def.required_arc_phases)
         {
             return Ok(false);
-        }
-        for gate in &def.metric_gates {
-            let Some(value) = metric_value(table, gate.metric_id) else {
-                return Ok(false);
-            };
-            if gate.min.is_finite() && value < f64::from(gate.min) {
-                return Ok(false);
-            }
-            if gate.max.is_finite() && value > f64::from(gate.max) {
-                return Ok(false);
-            }
-        }
-        for predicate in &def.preconditions {
-            if !self.evaluate_predicate(predicate, table)? {
-                return Ok(false);
-            }
-        }
-        for group in &def.any_of_precondition_groups {
-            if group.is_empty() {
-                continue;
-            }
-            let mut matched = false;
-            for predicate in group {
-                if self.evaluate_predicate(predicate, table)? {
-                    matched = true;
-                    break;
-                }
-            }
-            if !matched {
-                return Ok(false);
-            }
         }
         if !def.required_roles.is_empty() && self.bind_roles(def, table).is_err() {
             return Ok(false);
@@ -1022,241 +656,8 @@ impl UnifiedDispatcher {
         Ok(eligible.into_iter().map(|def| def.storylet_id).collect())
     }
 
-    /// Evaluate one predicate against the world table.
-    ///
-    /// `PredicateSubject::Metric` reads `table.metrics[index]` and supports all six
-    /// operators. Every tag subject matches hierarchically against the compiled
-    /// ancestor closure of its target and supports only the presence tests `eq`
-    /// (present) and `neq` (absent). `Visited` and `MetCharacter` read the two halves
-    /// of their membership masks: the per-entity bit from `entity_index`, or the tags
-    /// accumulated from those entity rows. `Location` reads the current-location row of
-    /// the global table. Out-of-range indices and non-finite values return typed
-    /// errors.
-    pub fn evaluate_predicate(
-        &self,
-        predicate: &QualityPredicate,
-        table: &WorldStateTable,
-    ) -> Result<bool, DispatchError> {
-        if !predicate.comparison_value.is_finite() {
-            return Err(DispatchError::InvalidComparisonValue {
-                target_id: predicate.target_id.clone(),
-                value: predicate.comparison_value,
-            });
-        }
-
-        // Membership subjects can name only an entity ID, so they may have no compiled
-        // tag index; either half of the mask satisfies the rule.
-        if matches!(
-            predicate.subject,
-            PredicateSubject::Visited | PredicateSubject::MetCharacter
-        ) {
-            if !matches!(
-                predicate.operator,
-                PredicateOperator::Eq | PredicateOperator::Neq
-            ) {
-                return Err(DispatchError::NonNumericSubject {
-                    target_id: predicate.target_id.clone(),
-                    subject: predicate.subject,
-                    operator: predicate.operator,
-                });
-            }
-            if predicate.entity_index.is_none() && predicate.target_index.is_none() {
-                return Err(DispatchError::EntityRowRequired {
-                    target_id: predicate.target_id.clone(),
-                });
-            }
-            let membership = if predicate.subject == PredicateSubject::Visited {
-                &table.visited_location_tags
-            } else {
-                &table.met_character_tags
-            };
-            let entity_hit = match predicate.entity_index {
-                Some(entity_index) => {
-                    if entity_index >= MAX_TAGS {
-                        return Err(DispatchError::EntityIndexOutOfRange {
-                            entity_index,
-                            len: MAX_TAGS,
-                        });
-                    }
-                    membership.entity_mask.bit(entity_index as u16)
-                }
-                None => false,
-            };
-            let tag_hit = predicate.target_index.is_some()
-                && membership.tag_mask.contains_all(&predicate.tag_mask);
-            let present = entity_hit || tag_hit;
-            return Ok(match predicate.operator {
-                PredicateOperator::Eq => present,
-                _ => !present,
-            });
-        }
-
-        let index = predicate
-            .target_index
-            .ok_or_else(|| DispatchError::UnresolvedTarget {
-                target_id: predicate.target_id.clone(),
-            })?;
-
-        if predicate.subject == PredicateSubject::Metric {
-            let value = metric_value(table, index).ok_or(DispatchError::MetricIndexOutOfRange {
-                metric_id: index,
-                len: table.metrics.len(),
-            })?;
-            let target = predicate.comparison_value;
-            return Ok(match predicate.operator {
-                PredicateOperator::Eq => value == target,
-                PredicateOperator::Neq => value != target,
-                PredicateOperator::Gt => value > target,
-                PredicateOperator::Gte => value >= target,
-                PredicateOperator::Lt => value < target,
-                PredicateOperator::Lte => value <= target,
-            });
-        }
-
-        if !matches!(
-            predicate.operator,
-            PredicateOperator::Eq | PredicateOperator::Neq
-        ) {
-            return Err(DispatchError::NonNumericSubject {
-                target_id: predicate.target_id.clone(),
-                subject: predicate.subject,
-                operator: predicate.operator,
-            });
-        }
-        let present = match predicate.subject {
-            PredicateSubject::Entity => {
-                let entity_index =
-                    predicate
-                        .entity_index
-                        .ok_or_else(|| DispatchError::EntityRowRequired {
-                            target_id: predicate.target_id.clone(),
-                        })?;
-                table
-                    .entity_tags
-                    .get(entity_index)
-                    .ok_or(DispatchError::EntityIndexOutOfRange {
-                        entity_index,
-                        len: table.entity_tags.len(),
-                    })?
-                    .contains_all(&predicate.tag_mask)
-            }
-            // Location matches against the current-location row of the global table,
-            // which the adapter keeps seeded with the current location's tags and
-            // updates reversibly on movement.
-            _ => table.global_tags.contains_all(&predicate.tag_mask),
-        };
-        Ok(match predicate.operator {
-            PredicateOperator::Eq => present,
-            _ => !present,
-        })
-    }
-
-    /// Resolve one predicate in the index space of its subject.
-    fn resolve_predicate(
-        predicate: &mut QualityPredicate,
-        tags: &GameplayTagRegistry,
-        metrics: &MetricRegistry,
-    ) -> Result<(), DispatchError> {
-        check_weight(&predicate.target_id, predicate.specificity_weight)?;
-        if !predicate.comparison_value.is_finite() {
-            return Err(DispatchError::InvalidComparisonValue {
-                target_id: predicate.target_id.clone(),
-                value: predicate.comparison_value,
-            });
-        }
-        // A membership rule may name only an entity ID; that form has no tag closure
-        // and is satisfied by the entity mask alone.
-        if matches!(
-            predicate.subject,
-            PredicateSubject::Visited | PredicateSubject::MetCharacter
-        ) && predicate.target_id.is_empty()
-        {
-            if predicate.entity_index.is_none() {
-                return Err(DispatchError::EntityRowRequired {
-                    target_id: String::new(),
-                });
-            }
-            return Ok(());
-        }
-        if predicate.subject == PredicateSubject::Metric {
-            let index = metrics.id(&predicate.target_id).ok_or_else(|| {
-                DispatchError::UnresolvedMetric {
-                    target_id: predicate.target_id.clone(),
-                }
-            })?;
-            predicate.target_index = Some(index);
-            return Ok(());
-        }
-        let index =
-            tags.id(&predicate.target_id)
-                .ok_or_else(|| DispatchError::UnresolvedTarget {
-                    target_id: predicate.target_id.clone(),
-                })?;
-        let mask = tags
-            .ancestors_mask(index)
-            .ok_or_else(|| DispatchError::UnresolvedTarget {
-                target_id: predicate.target_id.clone(),
-            })?;
-        predicate.target_index = Some(index);
-        predicate.tag_mask = *mask;
-        Ok(())
-    }
-
-    /// Every predicate of a storylet, all-of and any-of groups together, in
-    /// declaration order. Used by the single scoring path.
-    fn predicates<'a>(&self, def: &'a StoryletDef) -> impl Iterator<Item = &'a QualityPredicate> {
-        def.preconditions.iter().chain(
-            def.any_of_precondition_groups
-                .iter()
-                .flat_map(|group| group.iter()),
-        )
-    }
-
-    /// Salience score: boolean specificity minus the weighted Euclidean distance to
-    /// the ideal vector. Specificity is the sum of the weights of the matched
-    /// predicates plus the popcount of the matched bonus tags; authors normally
-    /// populate one of the two, and both are additive.
-    pub fn salience_score(
-        &self,
-        def: &StoryletDef,
-        table: &WorldStateTable,
-    ) -> Result<f64, DispatchError> {
-        let mut specificity = 0.0;
-        for predicate in self.predicates(def) {
-            if self.evaluate_predicate(predicate, table)? {
-                specificity += predicate.specificity_weight;
-            }
-        }
-        specificity += f64::from(
-            table
-                .global_tags
-                .popcount_intersection(&def.salience_bonus_tags),
-        );
-
-        let mut distance_squared = 0.0;
-        for ideal in &def.ideal_vector {
-            let weight = f64::from(ideal.weight);
-            if !weight.is_finite() || weight < 0.0 {
-                return Err(DispatchError::InvalidIdealWeight {
-                    metric_id: ideal.metric_id,
-                    weight,
-                });
-            }
-            let value = metric_value(table, ideal.metric_id).ok_or(
-                DispatchError::MetricIndexOutOfRange {
-                    metric_id: ideal.metric_id,
-                    len: table.metrics.len(),
-                },
-            )?;
-            let diff = value - f64::from(ideal.target);
-            distance_squared += weight * diff * diff;
-        }
-        if !distance_squared.is_finite() {
-            return Err(DispatchError::NonFiniteDistance {
-                storylet_id: def.storylet_id,
-            });
-        }
-        Ok(specificity - SALIENCE_DISTANCE_ALPHA * distance_squared.sqrt())
+    pub fn salience_score(&self, def: &StoryletDef, table: &WorldStateTable) -> Result<f64, DispatchError> {
+        Ok(f64::from(table.global_tags.popcount_intersection(&def.salience_bonus_tags)))
     }
 
     /// Salience match: score only playable candidates and return the best. Scores
@@ -1415,39 +816,12 @@ impl UnifiedDispatcher {
     /// these terms, so the runtime effect policy stays a single `MutationOp` and
     /// `revert_delta` keeps the exact inverse. Entity-scoped tag effects stay in
     /// `on_complete_mutation.entity_tag_ops`; this module does not build them.
-    pub fn compile_effects(
-        &self,
-        def: &StoryletDef,
-        table: &WorldStateTable,
-    ) -> Result<MutationOp, DispatchError> {
+    pub fn compile_effects(&self, def: &StoryletDef) -> Result<MutationOp, DispatchError> {
         let mut mutation = def.on_complete_mutation.clone();
         for effect in &def.effects_on_complete {
-            let index = effect
-                .target_index
-                .ok_or_else(|| DispatchError::UnresolvedMetric {
-                    target_id: effect.target_id.clone(),
-                })?;
             match effect.kind {
                 EffectKind::AddTag => mutation.add_global_tags.merge(&effect.tag_mask),
                 EffectKind::RemoveTag => mutation.remove_global_tags.merge(&effect.tag_mask),
-                _ => {
-                    let current =
-                        metric_value(table, index).ok_or(DispatchError::MetricIndexOutOfRange {
-                            metric_id: index,
-                            len: table.metrics.len(),
-                        })?;
-                    let delta = match effect.kind {
-                        EffectKind::Set => effect.value - current,
-                        _ => effect.value,
-                    };
-                    if !delta.is_finite() {
-                        return Err(DispatchError::InvalidEffectValue {
-                            target_id: effect.target_id.clone(),
-                            value: delta,
-                        });
-                    }
-                    mutation.metric_deltas.push((index, delta as f32));
-                }
             }
         }
         Ok(mutation)
@@ -1642,24 +1016,6 @@ fn augment_role(
     false
 }
 
-fn check_weight(target_id: &str, weight: f64) -> Result<(), DispatchError> {
-    if !weight.is_finite() || weight < 0.0 {
-        return Err(DispatchError::InvalidPredicateWeight {
-            target_id: target_id.to_owned(),
-            weight,
-        });
-    }
-    Ok(())
-}
-
-fn metric_value(table: &WorldStateTable, metric_id: u16) -> Option<f64> {
-    let value = *table.metrics.get(metric_id as usize)? as f64;
-    if value.is_finite() {
-        Some(value)
-    } else {
-        None
-    }
-}
 
 fn topic_index(graph: &WaypointTopicGraph, topic_id: &str) -> Result<usize, DispatchError> {
     graph

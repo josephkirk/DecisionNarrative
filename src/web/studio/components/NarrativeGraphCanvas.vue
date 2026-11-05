@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
-import { isSafeImageUrl, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType, type LocalVariableDefinition } from "../narrativeGraphTypes.ts";
+import { graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, GRAPH_PIN_COLORS, type GraphValueType, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType } from "../narrativeGraphTypes.ts";
 import { studioState, notify } from "../state.ts";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   initialGraph: NarrativeGraph;
   selectedNodeId: string | null;
-}>();
+  graphMode?: "story" | "preconditions";
+}>(), { graphMode: "story" });
 
 const emit = defineEmits<{
   (e: "update-graph", graph: NarrativeGraph): void;
@@ -23,8 +24,6 @@ const startPan = ref({ x: 0, y: 0 });
 // Graph state
 const nodes = ref<NarrativeNode[]>([]);
 const edges = ref<NarrativeEdge[]>([]);
-const localVariables = ref<LocalVariableDefinition[]>([]);
-
 // Dragging node
 const draggingNodeId = ref<string | null>(null);
 const dragStartPos = ref({ x: 0, y: 0 });
@@ -46,7 +45,6 @@ const selectedNode = computed(() => nodes.value.find((node) => node.id === selec
 watch(() => props.initialGraph, (graph) => {
   nodes.value = graph.nodes;
   edges.value = graph.edges;
-  localVariables.value = graph.local_variables || [];
 
   if (selectedNodeId.value && !graph.nodes.some((node) => node.id === selectedNodeId.value)) {
     selectedNodeId.value = null;
@@ -60,7 +58,10 @@ const contextMenu = ref<{ kind: "canvas" | "node" | "edge"; x: number; y: number
 const nodeSearch = ref("");
 const scissorStart = ref<{ x: number; y: number } | null>(null);
 const scissorEnd = ref<{ x: number; y: number } | null>(null);
-const nodeTypes: NodeType[] = ["start", "dialog", "choice", "variable", "conditional", "qbn_storylet_hub", "salience_selector", "waypoint_conversation", "waiter", "logic_all", "logic_any", "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "end"];
+const storyNodeTypes: NodeType[] = ["start", "dialog", "choice", "condition", "and", "or", "compare", "get_entity", "get_entity_property", "apply_command", "qbn_storylet_hub", "salience_selector", "waypoint_conversation", "waiter", "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "add_entity_tag", "remove_entity_tag", "has_entity_tag", "end"];
+const nodeTypes = computed<NodeType[]>(() => props.graphMode === "preconditions"
+  ? ["start", "get_entity", "get_entity_property", "compare", "condition", "and", "or", "has_entity_tag", "end"]
+  : storyNodeTypes);
 
 const failedImageNodes = ref(new Set<string>());
 watch(
@@ -76,7 +77,11 @@ watch(
 function markImageFailed(nodeId: string) {
   failedImageNodes.value.add(nodeId);
 }
-const matchingNodeTypes = computed(() => nodeTypes.filter((type) => type.replaceAll("_", " " ).includes(nodeSearch.value.trim().toLowerCase())));
+const matchingNodeTypes = computed(() => nodeTypes.value.filter((type) => nodeTypeLabel(type).toLowerCase().includes(nodeSearch.value.trim().toLowerCase())));
+function nodeTypeLabel(type: NodeType): string {
+  if (type === "condition") return "Condition Node";
+  return type.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
 const contextWorld = ref<{ x: number; y: number } | null>(null);
 
 const containerRef = ref<HTMLElement | null>(null);
@@ -85,7 +90,6 @@ function emitUpdate() {
   emit("update-graph", {
     nodes: nodes.value,
     edges: edges.value,
-    local_variables: localVariables.value,
   });
 }
 
@@ -237,27 +241,73 @@ function startConnection(e: MouseEvent, node: NarrativeNode, port: string, socke
   };
 }
 
+function sourcePinType(node: NarrativeNode, port: string): GraphValueType | "flow" {
+  if (port.startsWith("choice_") || (node.type === "condition" && ["true", "false"].includes(port)) ||
+    (node.type === "waypoint_conversation" && waypointExitPins(node).some((pin) => pin.id === port))) return "flow";
+  if (port === "output") {
+    if (node.type === "get_entity") return "entity_ref";
+    if (node.type === "get_entity_property") return graphNodeValueType(node) ?? "any";
+    if (["has_entity_tag", "compare", "and", "or"].includes(node.type)) return "bool";
+    return "flow";
+  }
+  return "flow";
+}
+
+
+function pinColor(node: NarrativeNode, port: string) {
+  return GRAPH_PIN_COLORS[sourcePinType(node, port)];
+}
+
+function targetPinColor(node: NarrativeNode, port: string) {
+  const type = graphTargetPinType(node, port);
+  return GRAPH_PIN_COLORS[type ?? "any"];
+}
+
+const activeConnectionColor = computed(() => {
+  const connection = activeConnection.value;
+  const source = connection && nodes.value.find((node) => node.id === connection.fromNode);
+  return source && connection ? GRAPH_PIN_COLORS[sourcePinType(source, connection.fromPort)] : GRAPH_PIN_COLORS.flow;
+});
+
+function edgeColor(edge: NarrativeEdge) {
+  if ((edge.kind ?? "flow") === "flow") return GRAPH_PIN_COLORS.flow;
+  const source = nodes.value.find((node) => node.id === edge.from_node);
+  return source ? GRAPH_PIN_COLORS[sourcePinType(source, edge.from_port)] : GRAPH_PIN_COLORS.any;
+}
+
+
 function completeConnection(e: MouseEvent, targetNode: NarrativeNode, port: string) {
   e.stopPropagation();
   if (!activeConnection.value) return;
-  if (activeConnection.value.fromNode === targetNode.id) return; // Disallow self-loops
-
-  // Remove existing edge from this same source port if exclusive
-  edges.value = edges.value.filter(
-    (edge) => !(edge.from_node === activeConnection.value!.fromNode && edge.from_port === activeConnection.value!.fromPort)
-  );
-
+  if (activeConnection.value.fromNode === targetNode.id) return;
+  const fromNode = nodes.value.find((node) => node.id === activeConnection.value!.fromNode);
+  if (!fromNode) return;
+  const sourceType = sourcePinType(fromNode, activeConnection.value.fromPort);
+  if (!graphConnectionIsCompatible(sourceType, targetNode, port)) {
+    activeConnection.value = null;
+    return;
+  }
+  if (sourceType === "flow") {
+    edges.value = edges.value.filter((edge) => !(edge.from_node === activeConnection.value!.fromNode && edge.from_port === activeConnection.value!.fromPort));
+  }
+  const allowsMultipleInputs = (targetNode.type === "and" || targetNode.type === "or") && sourceType !== "flow";
+  if (allowsMultipleInputs) {
+    edges.value = edges.value.filter((edge) => !(edge.to_node === targetNode.id && edge.from_node === activeConnection.value!.fromNode && edge.from_port === activeConnection.value!.fromPort));
+  } else {
+    edges.value = edges.value.filter((edge) => !(edge.to_node === targetNode.id && edge.to_port === port && edge.kind === (sourceType === "flow" ? "flow" : "data")));
+  }
   edges.value.push({
     id: `edge_${activeConnection.value.fromNode}_${activeConnection.value.fromPort}_${targetNode.id}`,
+    kind: sourceType === "flow" ? "flow" : "data",
     from_node: activeConnection.value.fromNode,
     from_port: activeConnection.value.fromPort,
     to_node: targetNode.id,
     to_port: port,
   });
-
   activeConnection.value = null;
   emitUpdate();
 }
+
 
 function removeEdge(edgeId: string) {
   edges.value = edges.value.filter((e) => e.id !== edgeId);
@@ -266,6 +316,7 @@ function removeEdge(edgeId: string) {
 }
 
 function removeNode(nodeId: string) {
+  if (!window.confirm("Delete this node and its connections?")) return;
   nodes.value = nodes.value.filter((n) => n.id !== nodeId);
   edges.value = edges.value.filter((e) => e.from_node !== nodeId && e.to_node !== nodeId);
   if (selectedNodeId.value === nodeId) {
@@ -304,29 +355,47 @@ function addNode(type: NodeType) {
   const baseNode: NarrativeNode = {
     id: nextId,
     type,
-    title: type.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" "),
+    title: nodeTypeLabel(type),
     x,
     y,
     width: 260,
     height: 160,
   };
+  if (type === "start") {
+    baseNode.text = "Begin Discovery";
+    baseNode.height = 80;
+  }
 
-  if (type === "dialog") {
-    baseNode.speaker_role = "Narrator";
+  if (type === "get_entity") {
+    baseNode.entity_path = "";
+    baseNode.height = 100;
+  } else if (type === "get_entity_property") {
+    baseNode.property_key = "";
+    baseNode.value_type = "string";
+    baseNode.height = 120;
+  } else if (type === "apply_command") {
+    baseNode.property_key = "";
+    baseNode.operation = "set";
+    baseNode.value_type = "string";
+    baseNode.value = "";
+    baseNode.height = 120;
+  } else if (type === "dialog") {
+    baseNode.speaker_role = "";
     baseNode.text = "Spoken text or monologue...";
-    baseNode.sections = [{ id: `section_${nextId}`, title: "Main Beat", items: [{ kind: "line", id: `line_${nextId}`, speaker_role: "Narrator", target_role: "player", content: "", emotion_tag: "neutral" }] }];
+    baseNode.sections = [{ id: `section_${nextId}`, title: "Main Beat", items: [{ kind: "line", id: `line_${nextId}`, speaker_role: "", target_role: "player", content: "", emotion_tag: "" }] }];
   } else if (type === "choice") {
     baseNode.choices = [
       { id: "choice_0", text: "Proceed ahead" },
       { id: "choice_1", text: "Turn back" },
     ];
     baseNode.height = 160;
-  } else if (type === "variable") {
-    baseNode.assignments = [{ scope: "global", quality: studioState.qualities[0]?.name || "tension", op: "add", value: 1 }];
+  } else if (type === "condition") {
     baseNode.height = 140;
-  } else if (type === "conditional") {
-    baseNode.conditions = [{ scope: "global", variable: studioState.qualities[0]?.name || "tension", op: "gte", value: 1 }];
-    baseNode.height = 140;
+  } else if (type === "compare") {
+    baseNode.operator = "eq";
+    baseNode.value_type = "string";
+    baseNode.value = "";
+    baseNode.height = 120;
   } else if (type === "image") {
     baseNode.image_url = "";
     baseNode.height = 140;
@@ -334,7 +403,7 @@ function addNode(type: NodeType) {
     baseNode.destination_storylet = "";
     baseNode.height = 100;
   } else if (type === "go_to_location") {
-    baseNode.location_id = studioState.locations[0]?.id ?? "";
+    baseNode.location_id = studioState.entityTemplates.find((entity) => entity.root_tag === "location")?.id ?? "";
     baseNode.height = 100;
   } else if (type === "qbn_storylet_hub") {
     baseNode.deck_storylet_ids = [];
@@ -371,6 +440,21 @@ function addNode(type: NodeType) {
   } else if (type === "passion_mutation") {
     baseNode.op = { micro_deltas: [], active_ops: [] };
     baseNode.height = 140;
+  } else if (type === "add_entity_tag") {
+    baseNode.target_entity_id = "world";
+    baseNode.tag = "";
+    baseNode.height = 110;
+  } else if (type === "remove_entity_tag") {
+    baseNode.target_entity_id = "world";
+    baseNode.tag = "";
+    baseNode.height = 110;
+  } else if (type === "has_entity_tag") {
+    baseNode.target_entity_id = "world";
+    baseNode.tag = "";
+    baseNode.match_mode = "all";
+    baseNode.height = 140;
+  } else if (type === "and" || type === "or") {
+    baseNode.height = 100;
   } else if (type === "end") {
     baseNode.is_terminal = true;
     baseNode.height = 80;
@@ -417,7 +501,7 @@ const computedEdges = computed(() => {
     } else if (fromNode.type === "waypoint_conversation") {
       const idx = waypointExitPins(fromNode).findIndex((pin) => pin.id === edge.from_port);
       if (idx >= 0) fromY = fromNode.y + 72 + idx * 30;
-    } else if (fromNode.type === "conditional") {
+    } else if (fromNode.type === "condition") {
       const idx = conditionalBranchPins.findIndex((pin) => pin.id === edge.from_port);
       if (idx >= 0) fromY = fromNode.y + 58 + idx * 30;
     }
@@ -425,8 +509,10 @@ const computedEdges = computed(() => {
     const startX = fromNode.x + fromNode.width;
     const startY = fromY;
     const endX = toNode.x;
-    const endY = toNode.y + 40;
-
+    const inputOffset = edge.kind === "data"
+      ? ["apply_command", "condition", "get_entity_property", "add_entity_tag", "remove_entity_tag", "has_entity_tag"].includes(toNode.type) ? 52 : 40
+      : toNode.type === "condition" || toNode.type === "apply_command" ? 18 : 40;
+    const endY = toNode.y + inputOffset;
     return {
       id: edge.id,
       path: calculateBezier(startX, startY, endX, endY),
@@ -434,6 +520,7 @@ const computedEdges = computed(() => {
       startY,
       endX,
       endY,
+      color: edgeColor(edge),
     };
   }).filter(Boolean);
 });
@@ -452,17 +539,27 @@ const computedEdges = computed(() => {
   >
     <!-- Top Floating Toolbar -->
     <div class="graph-toolbar">
-      <div style="display:flex; align-items:center; gap:8px;">
-        <span style="font-size:12px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">+ Add Node:</span>
-        <button class="node-tool-btn start" @click="addNode('start')">Start</button>
-        <button class="node-tool-btn dialog" @click="addNode('dialog')">Dialog</button>
-        <button class="node-tool-btn choice" @click="addNode('choice')">Choice</button>
-        <button class="node-tool-btn variable" @click="addNode('variable')">Variable</button>
-        <button class="node-tool-btn conditional" @click="addNode('conditional')">Conditional</button>
-        <button class="node-tool-btn image" @click="addNode('image')">Image</button>
-        <button class="node-tool-btn teleport" @click="addNode('teleport')">Teleport</button>
-        <button class="node-tool-btn go-to-location" @click="addNode('go_to_location')">Go To Location</button>
-        <button class="node-tool-btn end" @click="addNode('end')">End</button>
+      <div style="display:flex; align-items:center; gap:8px; min-width:0; max-width:calc(100% - 150px); overflow-x:auto;">
+        <button class="node-tool-btn" @click="addNode('start')">Start</button>
+        <button class="node-tool-btn" @click="addNode('get_entity')">Get entity</button>
+        <button class="node-tool-btn" @click="addNode('get_entity_property')">Get property</button>
+        <button class="node-tool-btn" @click="addNode('compare')">Compare</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('apply_command')">Apply command</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('dialog')">Dialog</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('choice')">Choice</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('qbn_storylet_hub')">QBN hub</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('salience_selector')">Salience</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('waypoint_conversation')">Waypoint</button>
+        <button class="node-tool-btn" @click="addNode('and')">And</button>
+        <button class="node-tool-btn" @click="addNode('or')">Or</button>
+        <button class="node-tool-btn" @click="addNode('condition')">Condition</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('image')">Image</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('teleport')">Teleport</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('go_to_location')">Go to location</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('add_entity_tag')">+ Tag</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('remove_entity_tag')">- Tag</button>
+        <button class="node-tool-btn" @click="addNode('has_entity_tag')">Has tag</button>
+        <button class="node-tool-btn" @click="addNode('end')">End</button>
       </div>
 
       <div style="display:flex; align-items:center; gap:8px;">
@@ -470,7 +567,7 @@ const computedEdges = computed(() => {
           {{ Math.round(zoom * 100) }}%
         </span>
         <button class="btn btn-secondary" style="font-size:11px; padding:3px 8px;" @click="zoom = 1.0; panX = 40; panY = 60;">Reset</button>
-        <button class="btn btn-primary" style="font-size:11px; padding:4px 10px;" @click="emitUpdate">Sync to Storylet</button>
+        <button v-if="props.graphMode === 'story'" class="btn btn-primary" style="font-size:11px; padding:4px 10px;" @click="emitUpdate">Sync to Storylet</button>
       </div>
     </div>
 
@@ -486,7 +583,7 @@ const computedEdges = computed(() => {
       <svg class="graph-svg-layer">
         <defs>
           <marker id="socket-arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1 L 8 5 L 0 9 z" fill="#ffd60a" />
+            <path d="M 0 1 L 8 5 L 0 9 z" fill="context-stroke" />
           </marker>
         </defs>
 
@@ -503,6 +600,7 @@ const computedEdges = computed(() => {
           <path
             :d="edge!.path"
             :class="['narrative-edge-line', selectedEdgeId === edge!.id ? 'selected' : '']"
+            :style="{ stroke: edge!.color }"
             marker-end="url(#socket-arrow)"
           />
         </g>
@@ -514,6 +612,7 @@ const computedEdges = computed(() => {
           v-if="activeConnection"
           :d="calculateBezier(activeConnection.startX, activeConnection.startY, activeConnection.currentX, activeConnection.currentY)"
           class="active-connecting-line"
+          :style="{ stroke: activeConnectionColor }"
         />
       </svg>
 
@@ -534,11 +633,11 @@ const computedEdges = computed(() => {
         <div class="node-header" @mousedown="startNodeDrag($event, node)">
           <div class="node-header-title">
             <span class="node-icon">
-              {{ node.type === 'start' ? '▶' : node.type === 'dialog' ? '💬' : node.type === 'choice' ? '🔀' : node.type === 'image' ? '🎨' : node.type === 'go_to_location' ? '📍' : node.type === 'graph_transform' ? '🕸️' : node.type === 'passion_mutation' ? '💗' : '⚙️' }}
+              {{ node.type === 'start' ? '▶' : node.type === 'dialog' ? '💬' : node.type === 'choice' ? '🔀' : node.type === 'image' ? '🎨' : node.type === 'go_to_location' ? '📍' : node.type === 'graph_transform' ? '🕸️' : node.type === 'passion_mutation' ? '💗' : node.type === 'add_entity_tag' ? '🏷️+' : node.type === 'remove_entity_tag' ? '🏷️-' : node.type === 'has_entity_tag' ? '🏷️?' : '⚙️' }}
             </span>
             <input v-model="node.title" class="node-title-input" @input="emitUpdate" />
           </div>
-          <button class="node-close-btn" @click.stop="removeNode(node.id)">✕</button>
+          <button class="node-close-btn" title="Delete node" aria-label="Delete node" @click.stop="removeNode(node.id)">✕</button>
         </div>
 
         <!-- Node Body Content based on Type -->
@@ -547,6 +646,22 @@ const computedEdges = computed(() => {
           <div v-if="node.type === 'start'">
             <div class="field-label">Entrypoint</div>
             <div style="font-size:12px; font-weight:600;">{{ node.text || 'Begin Scene' }}</div>
+          </div>
+          <div v-else-if="node.type === 'get_entity'">
+            <div class="field-label">Entity reference</div>
+            <div style="font-size:11px;">{{ node.entity_path || 'Choose an entity' }} · EntityRef output</div>
+          </div>
+          <div v-else-if="node.type === 'compare'">
+            <div class="field-label">Compare</div>
+            <div style="font-size:11px;">{{ node.operator || 'eq' }} {{ node.value ?? '' }} · Bool output</div>
+          </div>
+          <div v-else-if="node.type === 'get_entity_property'">
+            <div class="field-label">Get Entity Property</div>
+            <div style="font-size:11px;">{{ node.property_key || 'property key' }} · {{ node.value_type || 'typed value' }}</div>
+          </div>
+          <div v-else-if="node.type === 'apply_command'">
+            <div class="field-label">Apply Command</div>
+            <div style="font-size:11px;">{{ node.operation || 'set' }} {{ node.property_key || 'property key' }} = {{ node.value ?? '' }}</div>
           </div>
 
           <!-- DIALOG -->
@@ -566,6 +681,7 @@ const computedEdges = computed(() => {
               <!-- Sockets on each choice item -->
               <div
                 class="socket output-socket choice-socket"
+                :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }"
                 title="Connect this choice branch"
                 @mousedown="startConnection($event, node, `choice_${idx}`, 72 + idx * 36)"
               ></div>
@@ -593,7 +709,7 @@ const computedEdges = computed(() => {
 
           <div v-else-if="node.type === 'go_to_location'">
             <div class="field-label">Destination Location</div>
-            <div style="font-size:11px;">{{ studioState.locations.find((location) => location.id === node.location_id)?.name || 'Choose a location…' }}</div>
+            <div style="font-size:11px;">{{ studioState.entityTemplates.find((location) => location.id === node.location_id)?.name || 'Choose a location…' }}</div>
           </div>
 
           <div v-else-if="node.type === 'qbn_storylet_hub'">
@@ -609,23 +725,23 @@ const computedEdges = computed(() => {
             <div style="font-size:11px;">{{ node.topic_nodes?.length ?? 0 }} topics · {{ node.topic_edges?.length ?? 0 }} transitions</div>
             <div v-for="(pin, index) in waypointExitPins(node)" :key="pin.id" class="choice-option-row">
               <span style="font-size:11px; flex:1;">{{ pin.label }}</span>
-              <div class="socket output-socket choice-socket" :title="`Connect ${pin.label} exit`" @mousedown="startConnection($event, node, pin.id, 72 + index * 30)"></div>
+              <div class="socket output-socket choice-socket" :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }" :title="`Connect ${pin.label} exit`" @mousedown="startConnection($event, node, pin.id, 72 + index * 30)"></div>
             </div>
           </div>
           <div v-else-if="node.type === 'waiter'">
             <div class="field-label">Wait for gameplay event</div>
             <div style="font-size:11px;">{{ node.wait_event || 'Configure event…' }}</div>
           </div>
-          <div v-else-if="node.type === 'logic_all' || node.type === 'logic_any'">
-            <div class="field-label">{{ node.type === 'logic_all' ? 'All inputs required' : 'Any input routes' }}</div>
+          <div v-else-if="node.type === 'and' || node.type === 'or'">
+            <div class="field-label">{{ node.type === 'and' ? 'AND boolean' : 'OR boolean' }}</div>
+            <div style="font-size:11px;">Combines boolean inputs</div>
           </div>
-          <div v-else-if="node.type === 'conditional'">
-            <div class="field-label">Condition branches</div>
+          <div v-else-if="node.type === 'condition'">
+            <div class="field-label">Condition Node · Boolean switch input</div>
             <div v-for="(pin, index) in conditionalBranchPins" :key="pin.id" class="choice-option-row">
               <span style="font-size:11px; flex:1;">{{ pin.label }}</span>
-              <div class="socket output-socket choice-socket" :title="`Connect ${pin.label} branch`" @mousedown="startConnection($event, node, pin.id, 58 + index * 30)"></div>
+              <div class="socket output-socket choice-socket" :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }" :title="`Connect ${pin.label} branch`" @mousedown="startConnection($event, node, pin.id, 58 + index * 30)"></div>
             </div>
-            <div style="font-size:10px; color:var(--text-muted);">{{ node.conditions?.length ?? 0 }} condition rules</div>
           </div>
           <div v-else-if="node.type === 'scene_section'">
             <div class="field-label">Timeline section</div>
@@ -648,27 +764,47 @@ const computedEdges = computed(() => {
             <div class="field-label">Passion state change</div>
             <div style="font-size:11px;">{{ node.op?.micro_deltas?.length ?? 0 }} typed deltas · {{ node.op?.active_ops?.length ?? 0 }} active-pool ops</div>
           </div>
-          <!-- END -->
-          <div v-else-if="node.type === 'end'">
-            <div style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.jump_to_storylet || 'Terminal ending' }}</div>
+          <!-- ADD / REMOVE ENTITY TAG -->
+          <div v-else-if="node.type === 'add_entity_tag' || node.type === 'remove_entity_tag'">
+            <div class="field-label">{{ node.type === 'add_entity_tag' ? 'Add Entity Tag' : 'Remove Entity Tag' }}</div>
+            <div style="font-size:11px; font-weight:600; color:var(--text-main); margin-top:2px;">
+              {{ node.tag || 'No tag specified' }}
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+              Target: {{ node.target_entity_id === 'world' || !node.target_entity_id ? 'World (Global)' : (studioState.entityTemplates.find(e => e.id === node.target_entity_id)?.name || node.target_entity_id) }}
+            </div>
           </div>
-          <div v-else-if="node.type === 'variable'">{{ node.assignments?.length ?? 0 }} quality assignments</div>
-          <div v-else-if="node.type === 'conditional'">{{ node.conditions?.length ?? 0 }} condition rules</div>
-        </div>
 
-        <!-- Input Socket (Left edge) -->
-        <div
-          v-if="node.type !== 'start'"
-          class="socket input-socket"
-          title="Input connection port"
-          @mouseup="completeConnection($event, node, 'input')"
-        ></div>
+          <!-- HAS ENTITY TAG -->
+          <div v-else-if="node.type === 'has_entity_tag'">
+            <div class="field-label">Has Tag Query</div>
+            <div style="font-size:11px; font-weight:600; margin-bottom:4px; color:var(--text-main);">
+              {{ node.tag || 'No tag specified' }}
+            </div>
+            <div style="font-size:10px; color:var(--text-muted);">Boolean output</div>
+          </div>
+          <div v-else-if="node.type === 'end'">
+            <div v-if="props.graphMode === 'preconditions'" style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.precondition_result === false ? 'Reject candidate' : 'Valid candidate' }}</div>
+            <div v-else style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.jump_to_storylet || 'Terminal ending' }}</div>
+          </div>
+        </div>
+        <!-- Data/flow input sockets -->
+        <template v-if="node.type !== 'start'">
+          <div v-if="node.type === 'apply_command' || node.type === 'condition'" class="socket input-socket" style="top:18px" :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }" title="Flow input" @mouseup="completeConnection($event, node, 'input')"></div>
+          <div v-if="node.type === 'get_entity_property' || node.type === 'apply_command'" class="socket input-socket" style="top:52px" :style="{ backgroundColor: targetPinColor(node, 'entity') }" title="Entity data input" @mouseup="completeConnection($event, node, 'entity')"></div>
+          <div v-if="['add_entity_tag','remove_entity_tag','has_entity_tag'].includes(node.type)" class="socket input-socket" style="top:52px" :style="{ backgroundColor: targetPinColor(node, 'target') }" title="Optional target EntityRef input" @mouseup="completeConnection($event, node, 'target')"></div>
+          <div v-if="node.type === 'condition'" class="socket input-socket" style="top:52px" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Boolean data input" @mouseup="completeConnection($event, node, 'input')"></div>
+          <div v-if="node.type === 'and' || node.type === 'or'" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Boolean data input" @mouseup="completeConnection($event, node, 'input')"></div>
+          <div v-if="node.type === 'compare'" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Value data input" @mouseup="completeConnection($event, node, 'input')"></div>
+          <div v-if="!['get_entity', 'get_entity_property', 'apply_command', 'condition', 'has_entity_tag', 'compare', 'and', 'or'].includes(node.type)" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Flow input" @mouseup="completeConnection($event, node, 'input')"></div>
+        </template>
 
         <!-- Default Output Socket (Right edge) -->
         <div
-          v-if="node.type !== 'choice' && node.type !== 'end' && node.type !== 'conditional' && (node.type !== 'waypoint_conversation' || waypointExitPins(node).length === 0)"
+          v-if="node.type !== 'choice' && node.type !== 'end' && node.type !== 'condition' && (node.type !== 'waypoint_conversation' || waypointExitPins(node).length === 0)"
           class="socket output-socket"
           title="Output connection port"
+          :style="{ backgroundColor: pinColor(node, 'output') }"
           @mousedown="startConnection($event, node, 'output', 40)"
         ></div>
       </div>
@@ -676,7 +812,7 @@ const computedEdges = computed(() => {
     <div v-if="contextMenu" class="graph-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @mousedown.stop @click.stop>
       <template v-if="contextMenu.kind === 'canvas'">
         <input v-model="nodeSearch" class="form-input" placeholder="Search node types" autofocus @keydown.esc="contextMenu = null" />
-        <button v-for="type in matchingNodeTypes" :key="type" class="context-menu-item" @click="addNode(type)">+ {{ type }}</button>
+        <button v-for="type in matchingNodeTypes" :key="type" class="context-menu-item" @click="addNode(type)">+ {{ nodeTypeLabel(type) }}</button>
         <div v-if="!matchingNodeTypes.length" class="context-menu-empty">No matching node types</div>
       </template>
       <button v-else class="context-menu-item danger" @click="contextMenu.kind === 'node' ? removeNode(contextMenu.targetId!) : removeEdge(contextMenu.targetId!); contextMenu = null">Delete {{ contextMenu.kind }}</button>
@@ -690,8 +826,8 @@ const computedEdges = computed(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background-color: #121214;
-  background-image: radial-gradient(#2c2c2e 1.2px, transparent 1.2px);
+  background-color: var(--bg-canvas);
+  background-image: radial-gradient(#1d2332 1.2px, transparent 1.2px);
   background-size: 24px 24px;
   cursor: grab;
   user-select: none;
@@ -703,37 +839,41 @@ const computedEdges = computed(() => {
 
 .graph-toolbar {
   position: absolute;
-  top: 14px;
-  left: 20px;
-  right: 20px;
+  top: 12px;
+  left: 16px;
+  right: 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 14px;
-  background: rgba(30, 30, 34, 0.92);
-  backdrop-filter: blur(8px);
-  border: 1px solid #38383a;
-  border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0;
   z-index: 100;
 }
 
 .node-tool-btn {
-  background: #2c2c2e;
-  border: 1px solid #48484a;
-  color: #f2f2f7;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 4px 9px;
-  border-radius: 6px;
+  background: var(--surface-container-high, #212735);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 500;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 0;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: background-color 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .node-tool-btn:hover {
-  background: #3a3a3c;
-  border-color: #0a84ff;
+  background: var(--bg-card-hover);
+  border-color: var(--accent);
+  color: var(--accent);
 }
+
 
 .graph-surface {
   position: absolute;
@@ -792,20 +932,19 @@ const computedEdges = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  width: 190px;
+  width: 220px;
   max-height: min(360px, 70vh);
   padding: 8px;
   overflow: auto;
-  background: #232326;
-  border: 1px solid #48484a;
-  border-radius: 8px;
-  box-shadow: 0 8px 24px #0009;
+  background: var(--surface-container-high, #212735);
+  border: 1px solid var(--border-muted);
+  border-radius: 0;
 }
 
-.context-menu-item { padding: 6px 8px; text-align: left; color: #f2f2f7; background: transparent; border: 0; border-radius: 4px; cursor: pointer; text-transform: capitalize; }
-.context-menu-item:hover { background: #3a3a3c; }
-.context-menu-item.danger { color: #ff453a; }
-.context-menu-empty { padding: 6px 8px; color: #aeaeb2; font-size: 11px; }
+.context-menu-item { min-height: 44px; padding: 0 10px; text-align: left; color: var(--text-main); background: transparent; border: 0; border-radius: 0; cursor: pointer; transition: background-color 0.12s ease-out; }
+.context-menu-item:hover { background: var(--bg-card-hover); }
+.context-menu-item.danger { color: var(--status-danger); }
+.context-menu-empty { padding: 6px 8px; color: var(--text-muted); font-size: 12px; }
 
 .active-connecting-line {
   fill: none;
@@ -814,42 +953,41 @@ const computedEdges = computed(() => {
   stroke-dasharray: 5 4;
 }
 
-/* Node Styling matching NarrativeFlow & Image #1 */
+/* Node cards (DESIGN.md): solid fill, 1px structural border, zero radius, 2px type strip */
 .graph-node {
   position: absolute;
-  background: #1c1c1e;
-  border: 1.5px solid #38383a;
-  border-radius: 10px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-top: 2px solid var(--text-dim);
+  border-radius: 0;
   pointer-events: auto;
   user-select: none;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  transition: border-color 0.12s ease-out;
 }
 
 .graph-node.selected {
-  border-color: #0a84ff;
-  box-shadow: 0 0 16px rgba(10, 132, 255, 0.4);
+  border-color: var(--accent);
+  border-top-color: var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
 }
 
+.graph-node.start { border-top-color: var(--status-success); }
+.graph-node.dialog { border-top-color: var(--secondary); }
+.graph-node.choice { border-top-color: var(--tertiary); }
+.graph-node.condition, .graph-node.and, .graph-node.or, .graph-node.compare, .graph-node.has_entity_tag { border-top-color: var(--status-success); }
+.graph-node.end { border-top-color: var(--status-danger); }
+
 .node-header {
-  padding: 6px 10px;
-  border-top-left-radius: 8px;
-  border-top-right-radius: 8px;
-  background: #5e17eb; /* Purple header */
-  color: #ffffff;
+  padding: 0 10px;
+  min-height: 28px;
+  background: var(--surface-container-high, #212735);
+  color: var(--text-main);
   display: flex;
   justify-content: space-between;
   align-items: center;
   cursor: grab;
 }
-
-.graph-node.start .node-header { background: #10b981; }
-.graph-node.dialog .node-header { background: #8b5cf6; }
-.graph-node.choice .node-header { background: #a855f7; }
-.graph-node.image .node-header { background: #ec4899; }
-.graph-node.end .node-header { background: #f43f5e; }
-.graph-node.graph_transform .node-header { background: #2563eb; }
-.graph-node.passion_mutation .node-header { background: #db2777; }
 
 .node-header-title {
   display: flex;
@@ -861,7 +999,7 @@ const computedEdges = computed(() => {
 .node-title-input {
   background: transparent;
   border: none;
-  color: #ffffff;
+  color: var(--text-main);
   font-weight: 700;
   font-size: 12px;
   outline: none;
@@ -869,28 +1007,32 @@ const computedEdges = computed(() => {
 }
 
 .node-close-btn {
+  position: relative;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
+  padding: 6px 8px;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-
-.node-close-btn:hover {
-  color: #ffffff;
-}
+.node-close-btn::after { content: ""; position: absolute; inset: 0; }
+.node-close-btn:hover { color: var(--status-danger); }
 
 .node-body {
   padding: 10px 12px;
-  color: #f2f2f7;
+  color: var(--text-main);
   font-size: 11px;
 }
 
 .field-label {
   font-size: 10px;
   font-weight: 700;
-  color: #aeaeb2;
-  text-transform: uppercase;
+  color: var(--text-muted);
   margin-bottom: 3px;
   display: block;
 }
@@ -905,15 +1047,16 @@ const computedEdges = computed(() => {
 /* Sockets */
 .socket {
   position: absolute;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #ffd60a;
-  border: 2px solid #1c1c1e;
-  box-shadow: 0 0 6px rgba(255, 214, 10, 0.6);
+  width: 12px;
+  height: 12px;
+  border-radius: 0;
+  background: var(--text-dim);
+  border: 1px solid var(--bg-card);
   cursor: crosshair;
   z-index: 20;
 }
+.socket::after { content: ""; position: absolute; inset: -16px; }
+.socket:hover { background: var(--accent); }
 
 .input-socket {
   left: -8px;

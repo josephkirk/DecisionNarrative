@@ -1,4 +1,4 @@
-import type { StoryletRecord, StoryletChoiceRecord, LocalVariableDefinition } from "./contracts.ts";
+import type { StoryletRecord, StoryletChoiceRecord } from "./contracts.ts";
 
 
 export function isSafeImageUrl(value: string | undefined): boolean {
@@ -14,14 +14,17 @@ export type NodeType =
   | "start"
   | "dialog"
   | "choice"
-  | "variable"
-  | "conditional"
+  | "condition"
+  | "compare"
+  | "get_entity"
+  | "get_entity_property"
+  | "apply_command"
   | "qbn_storylet_hub"
   | "salience_selector"
   | "waypoint_conversation"
   | "waiter"
-  | "logic_all"
-  | "logic_any"
+  | "and"
+  | "or"
   | "scene_section"
   | "mission_sub_graph"
   | "poi"
@@ -30,6 +33,9 @@ export type NodeType =
   | "go_to_location"
   | "graph_transform"
   | "passion_mutation"
+  | "add_entity_tag"
+  | "remove_entity_tag"
+  | "has_entity_tag"
   | "end";
 
 export interface DialogueLineItem {
@@ -71,25 +77,29 @@ export interface ChoiceOption {
   effects?: Record<string, unknown>;
 }
 
-export interface VariableAssignment {
-  scope: "global" | "local";
-  quality: string;
-  op: "set" | "add";
-  value: string | number | boolean;
-}
-
-export interface ConditionRule {
-  scope: "global" | "local";
-  variable: string;
-  op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
-  value: string | number | boolean;
-}
-
 export type GraphLayer = "location" | "character" | "item" | "fact";
-
 export type AttributeOp = "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
-
 export type AttributeValueType = "int" | "float" | "bool" | "string" | "tag";
+
+export type GraphValueType = "entity_ref" | "bool" | "int" | "float" | "string" | "asset" | "any";
+export const GRAPH_PIN_COLORS: Record<GraphValueType | "flow", string> = {
+  flow: "#ffffff",
+  entity_ref: "#ff9f0a",
+  bool: "#30d158",
+  int: "#0a84ff",
+  float: "#64d2ff",
+  string: "#bf5af2",
+  asset: "#ff375f",
+  any: "#8e8e93",
+};
+export type ApplyCommandOperation = "set" | "add" | "subtract" | "toggle";
+export function applyCommandOperationsForType(valueType: string | undefined): Array<{ value: ApplyCommandOperation; label: string }> {
+  if (valueType === "bool") return [{ value: "set", label: "Set" }, { value: "toggle", label: "Toggle" }];
+  if (valueType === "int" || valueType === "float") {
+    return [{ value: "set", label: "Set" }, { value: "add", label: "Add" }, { value: "subtract", label: "Subtract" }];
+  }
+  return [{ value: "set", label: "Set" }];
+}
 
 export type AttributeValue =
   | { type: "int"; value: number }
@@ -97,6 +107,7 @@ export type AttributeValue =
   | { type: "bool"; value: boolean }
   | { type: "string"; value: string }
   | { type: "tag"; value: number };
+
 
 export type GraphBinding =
   | { type: "literal"; id: string }
@@ -190,8 +201,6 @@ export interface NarrativeNode {
   quip?: string;
   sections?: DialogueSection[];
   choices?: ChoiceOption[];
-  assignments?: VariableAssignment[];
-  conditions?: ConditionRule[];
   rule?: GraphTransformRule;
   op?: PassionMutation;
   image_url?: string;
@@ -199,6 +208,7 @@ export interface NarrativeNode {
   location_id?: string;
   is_terminal?: boolean;
   jump_to_storylet?: string;
+  precondition_result?: boolean;
   deck_storylet_ids?: string[];
   hub_exit_storylet_id?: string;
   candidate_pool_ids?: string[];
@@ -212,10 +222,38 @@ export interface NarrativeNode {
   timeline_events?: Array<Record<string, unknown>>;
   sub_graph_asset_id?: string;
   entity_path?: string;
+  target_entity_id?: "self" | "world" | string;
+  tag?: string;
+  match_mode?: "all" | "any";
+  property_key?: string;
+  value_type?: "bool" | "int" | "float" | "string" | "asset" | "entity";
+  operation?: "set" | "add" | "subtract" | "toggle";
+  operator?: AttributeOp;
+  value?: unknown;
+  // Entity membership predicates use Has Entity Tag dot-notation.
 }
+
+export function graphNodeValueType(node: NarrativeNode): GraphValueType | undefined {
+  return node.value_type === "entity" ? "entity_ref" : node.value_type;
+}
+
+export function graphTargetPinType(node: NarrativeNode, port: string): GraphValueType | "flow" | undefined {
+  if (port === "entity" || port === "target") return "entity_ref";
+  if (port === "input" && (node.type === "condition" || node.type === "and" || node.type === "or")) return "bool";
+  if (port === "input" && node.type === "compare") return graphNodeValueType(node) ?? "any";
+  return port === "input" ? "flow" : undefined;
+}
+
+export function graphConnectionIsCompatible(source: GraphValueType | "flow", targetNode: NarrativeNode, port: string): boolean {
+  if (targetNode.type === "condition" && port === "input") return source === "flow" || source === "bool";
+  const target = graphTargetPinType(targetNode, port);
+  return source === "flow" ? target === "flow" : target === "any" || source === target;
+}
+
 
 export interface NarrativeEdge {
   id: string;
+  kind: "flow" | "data";
   from_node: string;
   from_port: string;
   to_node: string;
@@ -223,19 +261,16 @@ export interface NarrativeEdge {
 }
 
 export interface NarrativeGraph {
-  local_variables?: LocalVariableDefinition[];
   nodes: NarrativeNode[];
   edges: NarrativeEdge[];
 }
 
 type StoryletGraphSource = Pick<StoryletRecord, "graph" | "content" | "parameters" | "choices"> & {
   ending?: boolean;
-  local_variables?: LocalVariableDefinition[];
 };
-
 export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph {
-  // If storylet already has a saved graph, reuse it!
-  if (st.graph && typeof st.graph === "object" && Array.isArray((st.graph as NarrativeGraph).nodes)) {
+  // A new draft begins with an empty placeholder; initialize the usable graph.
+  if (st.graph && typeof st.graph === "object" && Array.isArray((st.graph as NarrativeGraph).nodes) && (st.graph as NarrativeGraph).nodes.length > 0) {
     return JSON.parse(JSON.stringify(st.graph));
   }
 
@@ -256,7 +291,7 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
 
   // Dialog node
   const prose = st.content.sceneOpening || st.content.text_template || "Scene opening text...";
-  const speaker = st.content.speaker_id || (st.parameters[0]?.param_name ?? "Narrator");
+  const speaker = st.content.speaker_id || (st.parameters[0]?.param_name ?? "player");
 
   const initialLine: DialogueLineItem = {
     kind: "line",
@@ -264,7 +299,6 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
     speaker_role: speaker,
     target_role: "player",
     content: prose,
-    emotion_tag: "neutral",
   };
 
   const initialSection: DialogueSection = {
@@ -286,12 +320,13 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
     sections: [initialSection],
   });
 
-  edges.push({
-    id: "edge_start_dialog",
-    from_node: "node_start",
-    from_port: "output",
-    to_node: "node_dialog_1",
-    to_port: "input",
+    edges.push({
+      id: "edge_start_dialog",
+      kind: "flow",
+      from_node: "node_start",
+      from_port: "output",
+      to_node: "node_dialog_1",
+      to_port: "input",
   });
 
   // Choice node
@@ -316,6 +351,7 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
 
     edges.push({
       id: "edge_dialog_choice",
+      kind: "flow",
       from_node: "node_dialog_1",
       from_port: "output",
       to_node: "node_choice_1",
@@ -327,7 +363,7 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
       if (typeof c.effects?.["$move_player"] === "string") {
         const locationNodeId = `node_location_${idx + 1}`;
         nodes.push({ id: locationNodeId, type: "go_to_location", title: "Go To Location", x: 990, y: idx * 130 + 80, width: 220, height: 90, location_id: c.effects["$move_player"] as string });
-        edges.push({ id: `edge_choice_${idx}_${locationNodeId}`, from_node: "node_choice_1", from_port: `choice_${idx}`, to_node: locationNodeId, to_port: "input" });
+        edges.push({ id: `edge_choice_${idx}_${locationNodeId}`, kind: "flow", from_node: "node_choice_1", from_port: `choice_${idx}`, to_node: locationNodeId, to_port: "input" });
       } else if (c.divert_target) {
         const teleId = `node_teleport_${idx + 1}`;
         nodes.push({
@@ -343,6 +379,7 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
 
         edges.push({
           id: `edge_choice_${idx}_${teleId}`,
+          kind: "flow",
           from_node: "node_choice_1",
           from_port: `choice_${idx}`,
           to_node: teleId,
@@ -354,21 +391,20 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
 
   nodes.push({ id: "node_end", type: "end", title: "End", x: 560, y: 120, width: 170, height: 90, is_terminal: st.ending === true });
   if (st.choices.length === 0) {
-    edges.push({ id: "edge_dialog_end", from_node: "node_dialog_1", from_port: "output", to_node: "node_end", to_port: "input" });
+    edges.push({ id: "edge_dialog_end", kind: "flow", from_node: "node_dialog_1", from_port: "output", to_node: "node_end", to_port: "input" });
   } else {
     st.choices.forEach((choice, idx) => {
       if (typeof choice.effects?.["$move_player"] === "string") {
-        edges.push({ id: `edge_location_${idx + 1}_end`, from_node: `node_location_${idx + 1}`, from_port: "output", to_node: "node_end", to_port: "input" });
+        edges.push({ id: `edge_location_${idx + 1}_end`, kind: "flow", from_node: `node_location_${idx + 1}`, from_port: "output", to_node: "node_end", to_port: "input" });
       } else if (choice.divert_target) {
-        edges.push({ id: `edge_teleport_${idx + 1}_end`, from_node: `node_teleport_${idx + 1}`, from_port: "output", to_node: "node_end", to_port: "input" });
+        edges.push({ id: `edge_teleport_${idx + 1}_end`, kind: "flow", from_node: `node_teleport_${idx + 1}`, from_port: "output", to_node: "node_end", to_port: "input" });
       } else {
-        edges.push({ id: `edge_choice_${idx}_end`, from_node: "node_choice_1", from_port: `choice_${idx}`, to_node: "node_end", to_port: "input" });
+        edges.push({ id: `edge_choice_${idx}_end`, kind: "flow", from_node: "node_choice_1", from_port: `choice_${idx}`, to_node: "node_end", to_port: "input" });
       }
     });
   }
 
   return {
-    local_variables: st.local_variables ? [...st.local_variables] : [],
     nodes,
     edges,
   };
@@ -378,16 +414,44 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
   const issues: string[] = [];
   if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return ["Graph must contain node and edge arrays."];
   const allowedTypes = new Set<NodeType>([
-    "start", "dialog", "choice", "variable", "conditional", "qbn_storylet_hub",
-    "salience_selector", "waypoint_conversation", "waiter", "logic_all", "logic_any",
-    "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "end",
+    "start", "dialog", "choice", "condition", "compare", "get_entity", "get_entity_property", "apply_command", "qbn_storylet_hub",
+    "salience_selector", "waypoint_conversation", "waiter", "and", "or",
+    "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation",
+    "add_entity_tag", "remove_entity_tag", "has_entity_tag", "end",
   ]);
   if (graph.nodes.some((node) => !node || typeof node !== "object" || typeof node.id !== "string" || !node.id.trim() || !allowedTypes.has(node.type))) {
     return ["Graph nodes must have nonempty IDs and recognized types."];
   }
   for (const node of graph.nodes) {
     if (node.type === "go_to_location" && !node.location_id?.trim()) issues.push("Go To Location nodes must select a location.");
+    if (node.type === "get_entity" && !node.entity_path?.trim()) issues.push(`Get Entity node ${node.title} must select an Entity.`);
+    if (node.type === "get_entity_property") {
+      if (!node.property_key?.trim()) issues.push(`Get Entity Property node ${node.title} must specify a property key.`);
+      if (!["bool", "int", "float", "string", "asset", "entity"].includes(node.value_type ?? "")) {
+        issues.push(`Get Entity Property node ${node.title} must specify a supported value type.`);
+      }
+    }
+    if (node.type === "apply_command") {
+      if (!node.property_key?.trim()) issues.push(`Apply Command node ${node.title} must specify a property key.`);
+      if (!["set", "add", "subtract", "toggle"].includes(node.operation ?? "")) {
+        issues.push(`Apply Command node ${node.title} must specify a supported operation.`);
+      }
+      const valueMatches = node.value_type === "bool" ? typeof node.value === "boolean" :
+        node.value_type === "int" ? typeof node.value === "number" && Number.isInteger(node.value) :
+          node.value_type === "float" ? typeof node.value === "number" && Number.isFinite(node.value) :
+            ["string", "asset", "entity"].includes(node.value_type ?? "") && typeof node.value === "string";
+      if (!valueMatches) issues.push(`Apply Command node ${node.title} must specify a literal matching its value type.`);
+      if (node.operation === "toggle" && node.value_type !== "bool") {
+        issues.push(`Apply Command node ${node.title} can only toggle boolean properties.`);
+      }
+      if (["add", "subtract"].includes(node.operation ?? "") && !["int", "float"].includes(node.value_type ?? "")) {
+        issues.push(`Apply Command node ${node.title} can only add or subtract numeric properties.`);
+      }
+    }
     if (node.type === "image" && !isSafeImageUrl(node.image_url)) issues.push(`Image node ${node.title} must have a safe HTTP(S) URL or project-relative path.`);
+    if ((node.type === "add_entity_tag" || node.type === "remove_entity_tag" || node.type === "has_entity_tag") && !node.tag?.trim()) {
+      issues.push(`Entity tag node ${node.title} must specify a tag.`);
+    }
     if (node.type === "qbn_storylet_hub") {
       if (!(node.deck_storylet_ids?.length)) issues.push(`QBN hub ${node.title} must have a nonempty storylet deck.`);
       if (!node.hub_exit_storylet_id?.trim() || !node.deck_storylet_ids?.includes(node.hub_exit_storylet_id)) {
@@ -484,8 +548,9 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
     }
   }
   if (graph.edges.some((edge) => !edge || typeof edge !== "object" || typeof edge.id !== "string" || !edge.id.trim() ||
-    typeof edge.from_node !== "string" || typeof edge.from_port !== "string" || typeof edge.to_node !== "string" || typeof edge.to_port !== "string")) {
-    return ["Graph edges must have nonempty IDs and valid endpoint fields."];
+    typeof edge.from_node !== "string" || typeof edge.from_port !== "string" || typeof edge.to_node !== "string" || typeof edge.to_port !== "string" ||
+    (edge.kind !== undefined && edge.kind !== "flow" && edge.kind !== "data"))) {
+    return ["Graph edges must have nonempty IDs, valid endpoint fields, and a valid kind."];
   }
   const starts = graph.nodes.filter((node) => node.type === "start");
   const ends = graph.nodes.filter((node) => node.type === "end");
@@ -496,45 +561,77 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
   if (starts.length !== 1 || !ends.length || ids.size !== graph.nodes.length) return issues;
   const outgoing = new Map<string, string[]>();
   const incoming = new Map<string, string[]>();
+  const dataIncoming = new Map<string, NarrativeEdge[]>();
+  const flowEdges = graph.edges.filter((edge) => (edge.kind ?? "flow") === "flow");
+  const dataEdges = graph.edges.filter((edge) => edge.kind === "data");
   const edgeIds = new Set<string>();
   for (const edge of graph.edges) {
     if (edgeIds.has(edge.id)) issues.push("Edge IDs must be unique.");
     edgeIds.add(edge.id);
     if (!ids.has(edge.from_node) || !ids.has(edge.to_node)) { issues.push(`Edge ${edge.id} references a missing node.`); continue; }
-    if (edge.to_port !== "input") issues.push(`Edge ${edge.id} must target an input port.`);
-    outgoing.set(edge.from_node, [...(outgoing.get(edge.from_node) ?? []), edge.to_node]);
-    incoming.set(edge.to_node, [...(incoming.get(edge.to_node) ?? []), edge.from_node]);
+    const source = graph.nodes.find((node) => node.id === edge.from_node)!;
+    const target = graph.nodes.find((node) => node.id === edge.to_node)!;
+    if ((edge.kind ?? "flow") === "flow") {
+      const pureDataSource = ["get_entity", "get_entity_property", "compare", "has_entity_tag", "and", "or"].includes(source.type);
+      if (pureDataSource || edge.to_port !== "input") issues.push(`Flow edge ${edge.id} uses an invalid source or target port.`);
+      outgoing.set(edge.from_node, [...(outgoing.get(edge.from_node) ?? []), edge.to_node]);
+      incoming.set(edge.to_node, [...(incoming.get(edge.to_node) ?? []), edge.from_node]);
+    } else {
+      dataIncoming.set(edge.to_node, [...(dataIncoming.get(edge.to_node) ?? []), edge]);
+      const sourceType = source.type === "get_entity" ? "entity_ref" :
+        source.type === "get_entity_property" ? graphNodeValueType(source) :
+          ["compare", "has_entity_tag", "and", "or"].includes(source.type) ? "bool" : undefined;
+      const targetType = graphTargetPinType(target, edge.to_port);
+      const sourcePort = ["get_entity", "get_entity_property", "compare", "has_entity_tag", "and", "or"].includes(source.type)
+        ? edge.from_port === "output" : false;
+      if (!sourcePort || !sourceType || !targetType || (targetType !== "any" && targetType !== sourceType)) {
+        issues.push(`Data edge ${edge.id} uses an invalid port or incompatible type.`);
+      }
+    }
   }
   const start = starts[0]!.id;
   if ((incoming.get(start)?.length ?? 0) || (outgoing.get(start)?.length ?? 0) !== 1) issues.push("Start must have no incoming edges and exactly one outgoing edge.");
   const walk = (seed: string, links: Map<string, string[]>): Set<string> => {
-    const seen = new Set<string>(); const stack = [seed];
+    const seen: Set<string> = new Set(); const stack = [seed];
     while (stack.length) { const id = stack.pop()!; if (seen.has(id)) continue; seen.add(id); stack.push(...(links.get(id) ?? [])); }
     return seen;
   };
-  const reachable = walk(start, outgoing);
+  const addDataDependencies = (seen: Set<string>): Set<string> => {
+    const stack = [...seen];
+    while (stack.length) {
+      const target = stack.pop()!;
+      for (const edge of dataIncoming.get(target) ?? []) {
+        if (!seen.has(edge.from_node)) { seen.add(edge.from_node); stack.push(edge.from_node); }
+      }
+    }
+    return seen;
+  };
+  const reachable = addDataDependencies(walk(start, outgoing));
   const reachesEnd = new Set<string>();
-  for (const end of ends) for (const id of walk(end.id, incoming)) reachesEnd.add(id);
+  for (const end of ends) for (const id of addDataDependencies(walk(end.id, incoming))) reachesEnd.add(id);
   if (graph.nodes.some((node) => !reachable.has(node.id))) issues.push("Every node must be reachable from Start.");
   if (graph.nodes.some((node) => !reachesEnd.has(node.id))) issues.push("Every node must have a path to an End node.");
   for (const node of graph.nodes) {
-    const edges = graph.edges.filter((edge) => edge.from_node === node.id);
+    const edges = flowEdges.filter((edge) => edge.from_node === node.id);
+    const valueEdges = dataEdges.filter((edge) => edge.from_node === node.id);
     if (node.type === "choice") {
       const expectedPorts = new Set((node.choices ?? []).map((_, index) => `choice_${index}`));
       for (let index = 0; index < (node.choices?.length ?? 0); index++) {
         if (edges.filter((edge) => edge.from_port === `choice_${index}`).length !== 1) issues.push(`Choice ${index + 1} on ${node.title} must have exactly one outgoing branch.`);
       }
       if (edges.some((edge) => !expectedPorts.has(edge.from_port))) issues.push(`Choice node ${node.title} has an edge from an unknown output port.`);
-    } else if (node.type === "conditional") {
-      if (!(node.conditions?.length)) issues.push(`Conditional node ${node.title} must have at least one condition.`);
+    } else if (node.type === "condition") {
       const expectedPorts = ["true", "false"];
       for (const port of expectedPorts) {
         if (edges.filter((edge) => edge.from_port === port).length !== 1) {
-          issues.push(`Conditional node ${node.title} must have exactly one '${port}' branch.`);
+          issues.push(`Condition Node ${node.title} must have exactly one '${port}' branch.`);
         }
       }
       if (edges.some((edge) => !expectedPorts.includes(edge.from_port))) {
-        issues.push(`Conditional node ${node.title} has an edge from an unknown branch.`);
+        issues.push(`Condition Node ${node.title} has an edge from an unknown branch.`);
+      }
+      if ((dataIncoming.get(node.id)?.length ?? 0) !== 1) {
+        issues.push(`Condition Node ${node.title} must have exactly one boolean data input.`);
       }
     } else if (node.type === "waypoint_conversation") {
       const expectedPorts = new Set((node.topic_nodes ?? []).filter((topic) => topic.triggers_scene_exit === true).map((topic) => topic.exit_output_pin));
@@ -544,19 +641,33 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
         }
       }
       if (edges.some((edge) => !expectedPorts.has(edge.from_port))) issues.push(`Waypoint ${node.title} has an edge from an unknown exit pin.`);
+    } else if (node.type === "has_entity_tag") {
+      if (valueEdges.length !== 1 || valueEdges[0]?.from_port !== "output") {
+        issues.push(`Has Entity Tag node ${node.title} must have exactly one boolean output connection.`);
+      }
     } else if (node.type === "go_to_location") {
-      const incomingEdges = graph.edges.filter((edge) => edge.to_node === node.id);
+      const incomingEdges = flowEdges.filter((edge) => edge.to_node === node.id);
       if (incomingEdges.some((edge) => graph.nodes.find((source) => source.id === edge.from_node)?.type !== "choice")) {
         issues.push(`Go To Location node ${node.title} may only be targeted directly by a Choice branch.`);
       }
       if (edges.length !== 1 || edges[0]?.from_port !== "output") issues.push(`Go To Location node ${node.title} must have exactly one outgoing edge from its output port.`);
     } else if (node.type === "end") {
       if (edges.length) issues.push("End cannot have outgoing edges.");
-    } else if (edges.length !== 1 || edges[0]?.from_port !== "output") {
+    } else if (!["get_entity", "get_entity_property", "compare", "and", "or"].includes(node.type) &&
+      (edges.length !== 1 || edges[0]?.from_port !== "output")) {
       issues.push(`${node.type} node ${node.title} must have exactly one outgoing edge from its output port.`);
     }
-    if ((node.type === "logic_all" || node.type === "logic_any") && (incoming.get(node.id)?.length ?? 0) < 2) {
-      issues.push(`${node.type} node ${node.title} must have at least two incoming branches.`);
+    if (node.type === "get_entity_property" && dataEdges.filter((edge) => edge.to_node === node.id && edge.to_port === "entity").length !== 1) {
+      issues.push(`Get Entity Property node ${node.title} must have exactly one Entity data input.`);
+    }
+    if (node.type === "apply_command" && dataEdges.filter((edge) => edge.to_node === node.id && edge.to_port === "entity").length !== 1) {
+      issues.push(`Apply Command node ${node.title} must have exactly one Entity data input.`);
+    }
+    if ((node.type === "and" || node.type === "or") && (dataIncoming.get(node.id)?.length ?? 0) < 2) {
+      issues.push(`${node.type.toUpperCase()} node ${node.title} must have at least two boolean inputs.`);
+    }
+    if (node.type === "compare" && (dataIncoming.get(node.id)?.length ?? 0) !== 1) {
+      issues.push(`Compare node ${node.title} must have exactly one value input.`);
     }
   }
   return issues;
@@ -569,10 +680,6 @@ export function compileGraphToStorylet(graph: NarrativeGraph, st: StoryletRecord
   let isEnding = endNodes.length > 0 && endNodes.every((node) => node.is_terminal === true && !node.jump_to_storylet);
   const effects = { ...st.effects };
 
-  // Sync local variables back to storylet
-  if (graph.local_variables) {
-    st.local_variables = [...graph.local_variables];
-  }
 
   for (const node of graph.nodes) {
     if (node.type === "dialog") {
@@ -631,14 +738,8 @@ export function compileGraphToStorylet(graph: NarrativeGraph, st: StoryletRecord
           divert_target: divertTarget,
         });
       });
-    } else if (node.type === "variable" && node.assignments) {
-      for (const a of node.assignments) {
-        if (a.scope === "global") {
-          effects[a.quality] = a.value;
-        }
-      }
-    }
   }
+    }
 
   if (proseParts.length > 0) {
     const fullProse = proseParts.join("\n\n");
@@ -654,44 +755,35 @@ export function compileGraphToStorylet(graph: NarrativeGraph, st: StoryletRecord
   st.graph = graph;
 }
 
-/**
- * Jump to a storylet: copy all preconditions of target storylet into source storylet's effects!
- */
-export function applyJumpPreconditions(targetStorylet: StoryletRecord, sourceStorylet: StoryletRecord): string[] {
-  const updatedKeys: string[] = [];
-  const preconditions = targetStorylet.preconditions?.all_of || [];
+export function validatePreconditionGraph(graph: NarrativeGraph): string[] {
+  const issues = validateNarrativeGraph(graph);
+  if (issues.length) return issues;
 
-  for (const cond of preconditions) {
-    if (!cond.variable) continue;
-    const expected = cond.value ?? true;
-    let effectValue: unknown;
-
-    switch (cond.op) {
-      case "eq":
-      case "gte":
-      case "lte":
-        effectValue = expected;
-        break;
-      case "gt":
-      case "lt":
-        if (typeof expected !== "number" || !Number.isFinite(expected)) continue;
-        effectValue = expected + (cond.op === "gt" ? 1 : -1);
-        break;
-      case "neq":
-        if (typeof expected === "number" && Number.isFinite(expected)) effectValue = expected + 1;
-        else if (typeof expected === "boolean") effectValue = !expected;
-        else if (typeof expected === "string") effectValue = expected + "_other";
-        else continue;
-        break;
-      default:
-        continue;
+  const pureTypes: Partial<Record<NodeType, true>> = {
+    start: true,
+    end: true,
+    condition: true,
+    compare: true,
+    get_entity: true,
+    get_entity_property: true,
+    has_entity_tag: true,
+    and: true,
+    or: true,
+  };
+  for (const node of graph.nodes) {
+    if (!pureTypes[node.type]) {
+      issues.push(`Precondition graph cannot contain ${node.type.replaceAll("_", " ")} nodes.`);
     }
-
-    sourceStorylet.effects[cond.variable] = effectValue;
-    updatedKeys.push(cond.variable + " = " + JSON.stringify(effectValue));
   }
-
-  return updatedKeys;
+  if (!graph.nodes.some((node) => node.type === "end" && node.precondition_result !== false)) {
+    issues.push("Precondition graph needs at least one valid-candidate End node.");
+  }
+  for (const node of graph.nodes) {
+    if (node.type === "end" && node.precondition_result !== undefined && typeof node.precondition_result !== "boolean") {
+      issues.push(`Precondition End ${node.title} must have a boolean candidate result.`);
+    }
+  }
+  return issues;
 }
 
-export type { LocalVariableDefinition } from "./contracts.ts";
+

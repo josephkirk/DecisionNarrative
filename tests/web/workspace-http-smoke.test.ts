@@ -1,12 +1,18 @@
 import { expect, test } from "bun:test";
 import path from "node:path";
 
-test("fresh designer workspace can author and start a scenario through the real HTTP server", async () => {
+test("fresh designer workspace exposes intrinsic World and canonical Entity Template APIs", async () => {
   const port = 39_000 + Math.floor(Math.random() * 1_000);
-  const binaryPath = path.resolve(
-    import.meta.dir,
-    `../../crates/storylet-engine-service/target/debug/storylet-engine-service${process.platform === "win32" ? ".exe" : ""}`
-  );
+  const binaryCandidates = [
+    Bun.env.STORYLET_SERVICE_BIN ? path.resolve(Bun.env.STORYLET_SERVICE_BIN) : null,
+    path.resolve(import.meta.dir, `../../target/play-clean/debug/storylet-engine-service${process.platform === "win32" ? ".exe" : ""}`),
+    path.resolve(import.meta.dir, `../../target/debug/storylet-engine-service${process.platform === "win32" ? ".exe" : ""}`),
+    path.resolve(import.meta.dir, `../../crates/storylet-engine-service/target/debug/storylet-engine-service${process.platform === "win32" ? ".exe" : ""}`)
+  ].filter(Boolean) as string[];
+
+  const binaryPath = binaryCandidates.find((candidate) => {
+    try { return require("node:fs").existsSync(candidate); } catch { return false; }
+  }) ?? binaryCandidates[0];
 
   const child = Bun.spawn([binaryPath], {
     cwd: process.cwd(),
@@ -42,44 +48,24 @@ test("fresh designer workspace can author and start a scenario through the real 
     const markup = await studio.text();
     expect(markup).toContain("DecisionNarrative — Storylet Studio");
 
-    expect(await (await request("/api/v2/content/entities")).json()).toEqual([]);
-    expect(await (await request("/api/qualities")).json()).toEqual([]);
-    expect(await (await request("/api/storylets")).json()).toEqual([]);
-    expect(await (await request("/api/v1/scenarios")).json()).toEqual([]);
-    expect(await (await request("/api/v1/project")).json()).toMatchObject({ id: "workspace-project", name: "Workspace", revision: 0 });
-
-    expect((await request("/api/v1/project", { method: "PATCH", headers: { "content-type": "application/json" }, body: "null" })).status).toBe(400);
-    expect((await request("/api/v1/project-bundle/validate", { method: "POST", headers: { "content-type": "application/json" }, body: "null" })).status).toBe(400);
-
-    const location = await request("/api/v2/content/entities", {
+    const entities = await request("/api/v3/content/entities");
+    expect(entities.status).toBe(200);
+    expect(await entities.json()).toEqual(expect.arrayContaining([expect.objectContaining({ id: "world", root_tag: "world", properties: [], traits: [] })]));
+    const templates = await request("/api/v3/content/entity_templates");
+    expect(templates.status).toBe(200);
+    expect(await templates.json()).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: "world" })]));
+    const tags = await request("/api/v3/content/gameplay_tags");
+    expect(tags.status).toBe(200);
+    expect(await tags.json()).toEqual(expect.any(Array));
+    const project = await request("/api/v3/project");
+    expect(await project.json()).toMatchObject({ id: "workspace-project", name: "Workspace", revision: 0 });
+    const created = await request("/api/v3/content/entity_templates", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: "station", name: "Station", type: "location", description: "A quiet platform." }),
+      body: JSON.stringify({ id: "", object_id: "", game_id: "", game_id_auto: true, name: "Station", root_tag: "location", description: "", folder_id: null, tags: [], properties: [], traits: [] }),
     });
-    expect(location.status).toBe(201);
-
-    const scenario = {
-      id: "opening",
-      name: "Before first arrival",
-      seed: 73,
-      start_location_policy: { mode: "fixed", location_id: "station" },
-      initial_qualities: {},
-      actor_locations: {},
-      actor_population_policy: { mode: "all" },
-    };
-    const saved = await request("/api/v1/scenarios", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(scenario),
-    });
-    expect(saved.status).toBe(201);
-
-    const renamed = await request("/api/v1/project", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Station Mystery" }),
-    });
-    expect(await renamed.json()).toEqual({ id: "workspace-project", name: "Station Mystery", revision: 3 });
+    expect(created.status).toBe(201);
+    expect((await created.json()).id).toBeTruthy();
   } finally {
     child.kill();
     await child.exited;

@@ -6,7 +6,7 @@ use std::{
 
 use serde_json::json;
 use storylet_engine::{
-    ActorState, ClusterType, DirectorState, Effect, NpcBehaviorRule, PredicateSet, Repeatability,
+    ActorState, StoryletClusterType, DirectorState, Effect, NpcBehaviorRule, PredicateSet, Repeatability,
     RoleRequirement, SceneContent, StoryletDefinition, WorldCommand, WorldState, advance_npcs,
     apply_command, evaluate_storylets,
 };
@@ -143,8 +143,8 @@ fn make_world(actors_count: usize, locations_count: usize) -> WorldState {
         actors,
         ..WorldState::default()
     };
-    world.qualities.insert("quality.pressure".into(), json!(2));
-    world.qualities.insert("quality.clock".into(), json!(0));
+    world.properties.insert("pressure".into(), json!(2));
+    world.properties.insert("clock".into(), json!(0));
     world
 }
 
@@ -159,13 +159,12 @@ fn make_definitions(count: usize, _locations_count: usize) -> Vec<StoryletDefini
             ending: false,
             location_tags: Default::default(),
             urgency_weight: 25.0 + (index % 75) as f64,
-            cluster_type: ClusterType::PlayerControlledPassage,
+            cluster_type: StoryletClusterType::PlayerPassage,
             repeatability: Repeatability::Always,
             required_roles: vec![RoleRequirement {
                 role: "witness".into(),
             }],
             trigger: PredicateSet::default(),
-            preconditions: Default::default(),
             content: SceneContent {
                 opening: "A person notices something worth discussing.".into(),
             },
@@ -182,8 +181,8 @@ fn make_npc_rules(count: usize) -> Vec<NpcBehaviorRule> {
             priority: 10,
             conditions: PredicateSet::default(),
             action: "advance a generic personal agenda".into(),
-            effects: vec![Effect::AddQuality {
-                key: "quality.clock".into(),
+            effects: vec![Effect::AddProperty {
+                key: "clock".into(),
                 amount: 1.0,
             }],
         })

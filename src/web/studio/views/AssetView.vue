@@ -242,11 +242,14 @@ onBeforeRouteUpdate(confirmDiscard);
 
 <template>
   <div style="display:flex; flex-direction:column; height:100%;">
-    <header class="view-header">
-      <h1 class="view-title">{{ draft?.name ?? "Asset" }}</h1>
+    <header class="view-header" style="display:flex; align-items:center; justify-content:space-between; gap:16px;">
+      <div style="display:flex; align-items:center; gap:12px; flex:1;">
+        <ThumbnailPicker :model-value="draft?.thumbnail ?? null" :label="draft?.name" :size="48" @update:model-value="patch({ thumbnail: $event })" />
+        <h1 class="view-title" style="margin:0;">{{ draft?.name ?? "Asset" }}</h1>
+      </div>
       <div style="display:flex; gap:8px;">
-        <button class="btn btn-secondary" :disabled="saving || !dirty" @click="save">Save</button>
-        <button class="btn btn-danger" :disabled="saving || !draft" @click="remove">Delete</button>
+        <button class="btn btn-primary" :disabled="saving || !dirty" @click="save">Save</button>
+        <button class="btn btn-secondary" :disabled="saving || !draft" @click="remove">Delete</button>
       </div>
     </header>
 
@@ -259,10 +262,6 @@ onBeforeRouteUpdate(confirmDiscard);
           <input class="form-input" :value="draft.name" @input="patch({ name: ($event.target as HTMLInputElement).value })" />
         </div>
         <div class="form-group">
-          <label class="form-label">Thumbnail</label>
-          <ThumbnailPicker :model-value="draft.thumbnail ?? null" :label="draft.name" @update:model-value="patch({ thumbnail: $event })" />
-        </div>
-        <div class="form-group">
           <label class="form-label">Tags</label>
           <TagEditor
             :model-value="draft.tags"
@@ -273,7 +272,10 @@ onBeforeRouteUpdate(confirmDiscard);
         </div>
 
         <h3 class="editor-heading">Versions</h3>
-        <div v-if="!draft.versions.length" class="form-hint">No versions yet.</div>
+        <div v-if="!draft.versions.length" class="form-hint" style="display:flex; flex-direction:column; align-items:flex-start; gap:8px;">
+          <span>No versions yet.</span>
+          <button class="btn btn-primary" type="button" @click="toggleVersionForm">+ Add version</button>
+        </div>
         <div v-for="(version, index) in versionsNewestFirst" :key="version.id" class="version-card">
           <div class="version-card__head">
             <strong>{{ version.file_path }}</strong>
@@ -407,7 +409,7 @@ onBeforeRouteUpdate(confirmDiscard);
         </div>
 
         <h3 class="editor-heading">Used by</h3>
-        <ReferenceList :references="references" :loading="referencesLoading" />
+        <ReferenceList :references="references" :loading="referencesLoading" :target-name="draft?.name" />
       </section>
     </div>
   </div>

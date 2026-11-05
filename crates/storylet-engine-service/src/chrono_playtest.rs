@@ -7,11 +7,9 @@
 //! from the current project compilation and reconstructs state by replaying the
 //! recorded history (REQ-CH-03).
 //!
-//! The pinned ID space is stored as session metadata, not as game state.
-//! `rebase_call_history` only checks that a recorded node or storylet still
 //! exists; it cannot detect that a surviving id was remapped onto a different
-//! storylet or metric. Without the pinned ID space, a replay after a service
-//! restart would silently reinterpret the persisted history.
+//! storylet. Without the pinned ID space, a replay after a service restart would
+//! silently reinterpret the persisted history.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -28,13 +26,17 @@ use storylet_engine::chrono_runtime::{
 use storylet_engine::chrono_state::WorldStateTable;
 
 use crate::chrono_adapter::{
-    CompiledChronoDispatch, compile_chrono_dispatch, initialize_chrono_world,
+    CompiledChronoDispatch, compile_chrono_dispatch_with_world, initialize_chrono_world,
 };
-use crate::chrono_graph_adapter::{bind_storylet_start_nodes, compile_narrative_graphs};
+use crate::chrono_graph_adapter::{
+    bind_precondition_graphs, bind_storylet_start_nodes, compile_narrative_graphs,
+    validate_entity_property_graph,
+};
 use crate::contracts::{
-    CharacterRecord, LocationRecord, QualityRecord, ScenarioRecord, StoryletRecord,
+    CharacterRecord, EntityRecord, EntityTemplateRecord, LocationRecord, ScenarioRecord, StoryletRecord,
     WorldObjectRecord,
 };
+use crate::entities::runtime_records_with_world;
 use crate::scenario::resolve_scenario_start;
 use crate::service::{StudioInner, StudioService, chrono_now_ms};
 use crate::store::{ChronoPlaytestRow, Store};
@@ -369,7 +371,6 @@ where
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledIdSpace {
     pub storylets: BTreeMap<String, u16>,
-    pub metrics: BTreeMap<String, u16>,
     pub passions: BTreeMap<String, u16>,
     pub entities: BTreeMap<String, u16>,
     pub tags: BTreeMap<String, u16>,
@@ -396,7 +397,6 @@ impl CompiledIdSpace {
                 .iter()
                 .map(|(index, key)| (key.to_owned(), index))
                 .collect(),
-            metrics: compiled.metric_indices.clone(),
             passions,
             entities: entity_indices.clone(),
             tags,
@@ -408,7 +408,6 @@ impl CompiledIdSpace {
 #[derive(Clone, Debug, Default)]
 struct ReverseIndex {
     storylets: BTreeMap<u16, String>,
-    metrics: BTreeMap<u16, String>,
     passions: BTreeMap<u16, String>,
     entities: BTreeMap<u16, String>,
     tags: BTreeMap<u16, String>,
@@ -423,7 +422,6 @@ impl ReverseIndex {
         }
         ReverseIndex {
             storylets: reverse(&space.storylets),
-            metrics: reverse(&space.metrics),
             passions: reverse(&space.passions),
             entities: reverse(&space.entities),
             tags: reverse(&space.tags),
@@ -497,27 +495,48 @@ fn from_json<T: DeserializeOwned>(text: &str) -> Result<T, ChronoPlaytestError> 
     serde_json::from_str(text).map_err(|error| ChronoPlaytestError::Persistence(format!("{error}")))
 }
 
-#[derive(Clone, Debug, Default)]
 struct WorkspaceContent {
-    qualities: Vec<QualityRecord>,
+    world: EntityRecord,
+    entities: Vec<EntityTemplateRecord>,
     locations: Vec<LocationRecord>,
     characters: Vec<CharacterRecord>,
     world_objects: Vec<WorldObjectRecord>,
+    world_tags: Vec<String>,
+    entity_tag_seeds: Vec<(String, Vec<String>)>,
     storylets: Vec<StoryletRecord>,
     scenarios: Vec<ScenarioRecord>,
+    entity_game_ids: BTreeMap<String, String>,
 }
 
 fn read_content(store: &Store) -> Result<WorkspaceContent, ChronoPlaytestError> {
-    let runtime = store.runtime_records().map_err(persistence_error)?;
+    let world = store.list_entities().map_err(persistence_error)?
+        .into_iter().find(|entity| entity.id == "world")
+        .ok_or_else(|| compile_error("missing intrinsic world entity".to_string()))?;
+    let entities = store.list_entity_templates().map_err(persistence_error)?;
+    let templates = store.list_trait_templates().map_err(persistence_error)?;
+    let runtime = runtime_records_with_world(&world, &entities, &templates);
+    let storylets = store.list_storylets().map_err(persistence_error)?;
+    for storylet in &storylets {
+        let graph = storylet.graph.clone().unwrap_or_else(|| crate::narrative_graph::NarrativeGraph::from_storylet(storylet));
+        validate_entity_property_graph(&graph, &entities).map_err(compile_error)?;
+        if let Some(precondition) = storylet.precondition_graph.as_ref() {
+            validate_entity_property_graph(precondition, &entities).map_err(compile_error)?;
+        }
+    }
     Ok(WorkspaceContent {
-        qualities: store.list_qualities().map_err(persistence_error)?,
+        entities,
+        world,
         locations: runtime.locations,
         characters: runtime.characters,
         world_objects: runtime.world_objects,
-        storylets: store.list_storylets().map_err(persistence_error)?,
+        world_tags: runtime.world_tags,
+        entity_tag_seeds: runtime.entity_tag_seeds,
+        storylets,
         scenarios: store.list_scenarios().map_err(persistence_error)?,
+        entity_game_ids: runtime.entity_game_ids,
     })
 }
+
 
 // --- Revision pin (REQ-CH-07) ---------------------------------------------
 
@@ -640,11 +659,14 @@ fn prepare(
         .store
         .get_project_metadata()
         .map_err(persistence_error)?;
-    let mut compiled = compile_chrono_dispatch(
+    let mut compiled = compile_chrono_dispatch_with_world(
         &content.storylets,
-        &content.qualities,
         &content.locations,
         &content.characters,
+        &content.world_objects,
+        &content.world_tags,
+        &content.entity_tag_seeds,
+        &content.entity_game_ids,
     )
     .map_err(compile_error)?;
     let scenario = content
@@ -653,10 +675,14 @@ fn prepare(
         .find(|scenario| scenario.id == session.scenario_id);
     let seed = initialize_chrono_world(
         &compiled,
-        &content.qualities,
+        &content.storylets,
+        &content.world,
+        &content.entities,
         &content.locations,
         &content.characters,
         &content.world_objects,
+        &content.world_tags,
+        &content.entity_tag_seeds,
         scenario,
         &session.start_location_id,
     )
@@ -669,6 +695,8 @@ fn prepare(
         &seed.entity_indices,
     )
     .map_err(compile_error)?;
+    bind_precondition_graphs(&mut compiled, &content.storylets, &seed.entity_indices)
+        .map_err(compile_error)?;
     bind_storylet_start_nodes(&mut compiled, &graphs).map_err(compile_error)?;
 
     let scoped = scoped_histories(session);
@@ -750,11 +778,14 @@ fn load_session(
         .store
         .get_project_metadata()
         .map_err(persistence_error)?;
-    let mut compiled = compile_chrono_dispatch(
+    let mut compiled = compile_chrono_dispatch_with_world(
         &content.storylets,
-        &content.qualities,
         &content.locations,
         &content.characters,
+        &content.world_objects,
+        &content.world_tags,
+        &content.entity_tag_seeds,
+        &content.entity_game_ids,
     )
     .map_err(compile_error)?;
     let scenario = content
@@ -763,10 +794,14 @@ fn load_session(
         .find(|scenario| scenario.id == row.scenario_id);
     let seed = initialize_chrono_world(
         &compiled,
-        &content.qualities,
+        &content.storylets,
+        &content.world,
+        &content.entities,
         &content.locations,
         &content.characters,
         &content.world_objects,
+        &content.world_tags,
+        &content.entity_tag_seeds,
         scenario,
         &row.start_location_id,
     )
@@ -779,6 +814,8 @@ fn load_session(
         &seed.entity_indices,
     )
     .map_err(compile_error)?;
+    bind_precondition_graphs(&mut compiled, &content.storylets, &seed.entity_indices)
+        .map_err(compile_error)?;
     bind_storylet_start_nodes(&mut compiled, &graphs).map_err(compile_error)?;
 
     let pinned_revision = row.pinned_project_revision as u64;
@@ -1012,6 +1049,14 @@ fn passion_transition_events(instance: &FlowGraphInstance, reverse: &ReverseInde
 fn context_view(session: &ChronoPlaytestSession, prepared: &Prepared) -> Value {
     let reverse = ReverseIndex::build(&session.id_space);
     let instance = &session.instance;
+    let mut precondition_errors = Vec::new();
+    let mut graph_world = session.world.clone();
+    let graph_ctx = RuntimeContext::with_registries(
+        &mut graph_world,
+        &prepared.compiled.dispatcher,
+        &prepared.compiled.registry,
+        &prepared.compiled.passion_registry,
+    );
 
     let nodes = instance
         .nodes
@@ -1094,6 +1139,25 @@ fn context_view(session: &ChronoPlaytestSession, prepared: &Prepared) -> Value {
                                         })
                                 })
                         })
+                        .filter(|storylet_id| {
+                            prepared
+                                .compiled
+                                .dispatcher
+                                .storylet(*storylet_id)
+                                .and_then(|storylet| storylet.precondition_graph.as_ref())
+                                .is_none_or(|graph| {
+                                    match FlowGraphInstance::evaluate_precondition_graph(
+                                        graph,
+                                        &graph_ctx,
+                                    ) {
+                                        Ok(value) => value,
+                                        Err(error) => {
+                                            precondition_errors.push(error.to_string());
+                                            false
+                                        }
+                                    }
+                                })
+                        })
                         .filter_map(|id| reverse.storylets.get(&id).cloned())
                         .filter_map(|id| {
                             let storylet = prepared.content.storylets.iter().find(|item| item.id == id)?;
@@ -1126,8 +1190,7 @@ fn context_view(session: &ChronoPlaytestSession, prepared: &Prepared) -> Value {
                                 "edgeId": edge.edge_id,
                                 "topicId": target.topic_id,
                                 "playerOnly": target.is_player_only_trigger,
-                                "triggersSceneExit": target.triggers_scene_exit,
-                                "revealedClueQualityId": target.revealed_clue_quality_id
+                                "triggersSceneExit": target.triggers_scene_exit
                             }))
                         })
                         .collect::<Vec<_>>();
@@ -1143,19 +1206,29 @@ fn context_view(session: &ChronoPlaytestSession, prepared: &Prepared) -> Value {
         })
         .collect::<Vec<_>>();
 
-    let metrics = (0..session.world.metrics.len() as u16)
-        .map(|index| {
-            (
-                reverse.metrics.get(&index).cloned().unwrap_or_default(),
-                session.world.metrics[index as usize],
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-
     let global_tags = (0..session.id_space.tags.len() as u16)
         .filter(|index| session.world.global_tags.bit(*index))
         .filter_map(|index| reverse.tags.get(&index).cloned())
         .collect::<Vec<_>>();
+
+    let mut properties = BTreeMap::new();
+    for vertex in &session.world.vertices {
+        let entity_name = vertex
+            .entity_index
+            .and_then(|index| reverse.entities.get(&index).cloned())
+            .unwrap_or_else(|| vertex.vertex_id.clone());
+        let values = vertex
+            .attributes
+            .iter()
+            .filter_map(|(key, value)| {
+                key.strip_prefix("prop.")
+                    .map(|key| (key.to_owned(), serde_json::to_value(value).unwrap_or(Value::Null)))
+            })
+            .collect::<serde_json::Map<String, Value>>();
+        if !values.is_empty() {
+            properties.insert(entity_name, Value::Object(values));
+        }
+    }
 
     let entities = (0..session.id_space.entities.len() as u16)
         .filter_map(|index| {
@@ -1234,7 +1307,7 @@ fn context_view(session: &ChronoPlaytestSession, prepared: &Prepared) -> Value {
                 .world
                 .current_location_entity
                 .and_then(|index| reverse.entities.get(&index).cloned()),
-            "metrics": metrics,
+            "properties": properties,
             "globalTags": global_tags,
             "entities": entities,
             "passions": {
@@ -1250,7 +1323,8 @@ fn context_view(session: &ChronoPlaytestSession, prepared: &Prepared) -> Value {
             .map(|(guid, entries)| (guid.to_string(), call_history_value(entries)))
             .collect::<serde_json::Map<String, Value>>(),
         "passionEvents": passion_events,
-        "passionThresholds": passion_thresholds
+        "passionThresholds": passion_thresholds,
+        "preconditionErrors": precondition_errors
     })
 }
 
@@ -1661,11 +1735,14 @@ impl StudioService {
                 "Missing storylets: the project has no storylets to compile".into(),
             ));
         }
-        let mut compiled = compile_chrono_dispatch(
+        let mut compiled = compile_chrono_dispatch_with_world(
             &content.storylets,
-            &content.qualities,
             &content.locations,
             &content.characters,
+            &content.world_objects,
+            &content.world_tags,
+            &content.entity_tag_seeds,
+            &content.entity_game_ids,
         )
         .map_err(compile_error)?;
 
@@ -1693,7 +1770,6 @@ impl StudioService {
 
         let resolved = resolve_scenario_start(
             &scenario,
-            &content.qualities,
             &content.locations,
             &content.characters,
         );
@@ -1730,10 +1806,14 @@ impl StudioService {
         let seed_value = request.seed.unwrap_or(resolved.seed);
         let seed = initialize_chrono_world(
             &compiled,
-            &content.qualities,
+            &content.storylets,
+            &content.world,
+            &content.entities,
             &content.locations,
             &content.characters,
             &content.world_objects,
+            &content.world_tags,
+            &content.entity_tag_seeds,
             Some(&scenario),
             &start_location,
         )
@@ -1746,6 +1826,8 @@ impl StudioService {
             &seed.entity_indices,
         )
         .map_err(compile_error)?;
+        bind_precondition_graphs(&mut compiled, &content.storylets, &seed.entity_indices)
+            .map_err(compile_error)?;
         bind_storylet_start_nodes(&mut compiled, &graphs).map_err(compile_error)?;
 
         // Deterministic starting storylet: explicit request, otherwise the
@@ -2318,7 +2400,7 @@ mod tests {
     use storylet_engine::chrono_runtime::{
         FlowNodeDef, FlowNodeInstance, NodeCallData, NodeCategory, PinDefinition, TOKEN_ACTIVE,
     };
-    use storylet_engine::chrono_state::{BijectiveDelta, PassionDelta, PassionThresholdEvent};
+    use storylet_engine::chrono_state::{AttributeValue, BijectiveDelta, GraphLayer, PassionDelta, PassionThresholdEvent, WorldVertex};
 
     #[test]
     fn threshold_transition_projection_emits_activate_and_cancel_asset_actions() {
@@ -2405,6 +2487,7 @@ mod tests {
                 ..FlowNodeDef::default()
             }],
             edges: Vec::new(),
+            data_edges: Vec::new(),
         }
     }
 
@@ -2438,36 +2521,195 @@ mod tests {
     }
 
     #[test]
-    fn ideal_state_weights_reach_the_dispatcher() {
-        let quality: QualityRecord = serde_json::from_value(json!({
-            "name": "pressure",
-            "type": "metric",
-            "value": 0.0
-        }))
-        .unwrap();
+    fn qbn_candidate_context_applies_bound_precondition_graph() {
         let storylet: StoryletRecord = serde_json::from_value(json!({
-            "id": "weighted",
-            "title": "Weighted",
-            "content": { "text_template": "" },
-            "created_at": 0,
-            "chrono": {
-                "ideal_state_vector": { "pressure": 10.0 },
-                "ideal_state_weights": { "pressure": 4.0 }
+            "id": "gated",
+            "title": "Gated",
+            "content": { "text_template": "A scene." },
+            "effects": {},
+            "created_at": 1,
+            "precondition_graph": {
+                "nodes": [
+                    { "id": "start", "title": "Start", "type": "start", "text": "Check Candidate", "x": 0, "y": 0, "width": 100, "height": 80 },
+                    { "id": "entity", "title": "Get World", "type": "get_entity", "entity_path": "world", "x": 100, "y": -100, "width": 140, "height": 80 },
+                    { "id": "property", "title": "Mood", "type": "get_entity_property", "property_key": "mood", "value_type": "string", "x": 260, "y": -100, "width": 140, "height": 80 },
+                    { "id": "compare", "title": "Mood Is Calm", "type": "compare", "operator": "eq", "value_type": "string", "value": "calm", "x": 420, "y": -100, "width": 140, "height": 80 },
+                    { "id": "tag", "title": "Has Tag", "type": "has_entity_tag", "target_entity_id": "world", "tag": "world.flag.ready", "match_mode": "all", "x": 100, "y": 100, "width": 140, "height": 80 },
+                    { "id": "and", "title": "Both", "type": "and", "x": 580, "y": 0, "width": 120, "height": 80 },
+                    { "id": "switch", "title": "Condition Node", "type": "condition", "x": 720, "y": 0, "width": 140, "height": 80 },
+                    { "id": "valid", "title": "Valid", "type": "end", "is_terminal": true, "precondition_result": true, "x": 920, "y": -80, "width": 120, "height": 80 },
+                    { "id": "reject", "title": "Reject", "type": "end", "is_terminal": true, "precondition_result": false, "x": 920, "y": 80, "width": 120, "height": 80 }
+                ],
+                "edges": [
+                    { "id": "start-switch", "from_node": "start", "from_port": "output", "to_node": "switch", "to_port": "input", "kind": "flow" },
+                    { "id": "entity-property", "from_node": "entity", "from_port": "output", "to_node": "property", "to_port": "entity", "kind": "data" },
+                    { "id": "property-compare", "from_node": "property", "from_port": "output", "to_node": "compare", "to_port": "input", "kind": "data" },
+                    { "id": "compare-and", "from_node": "compare", "from_port": "output", "to_node": "and", "to_port": "input", "kind": "data" },
+                    { "id": "tag-and", "from_node": "tag", "from_port": "output", "to_node": "and", "to_port": "input", "kind": "data" },
+                    { "id": "and-switch", "from_node": "and", "from_port": "output", "to_node": "switch", "to_port": "input", "kind": "data" },
+                    { "id": "switch-true", "from_node": "switch", "from_port": "true", "to_node": "valid", "to_port": "input", "kind": "flow" },
+                    { "id": "switch-false", "from_node": "switch", "from_port": "false", "to_node": "reject", "to_port": "input", "kind": "flow" }
+                ]
             }
         }))
-        .unwrap();
-
-        let compiled = crate::chrono_adapter::compile_chrono_dispatch(
-            &[storylet],
-            &[quality],
+        .expect("valid storylet fixture");
+        let entity_indices = BTreeMap::new();
+        let world_tags = vec!["world.flag.ready".to_owned()];
+        let square: LocationRecord = serde_json::from_value(json!({
+            "id": "square",
+            "name": "Square",
+            "description": "",
+            "tags": []
+        }))
+        .expect("valid location fixture");
+        let mut compiled = crate::chrono_adapter::compile_chrono_dispatch_with_world(
+            std::slice::from_ref(&storylet),
+            std::slice::from_ref(&square),
             &[],
             &[],
+            &world_tags,
+            &[],
+            &BTreeMap::new(),
         )
-        .unwrap();
+        .expect("dispatch compiles");
+        bind_precondition_graphs(
+            &mut compiled,
+            std::slice::from_ref(&storylet),
+            &entity_indices,
+        )
+        .expect("precondition graph binds");
+        let tag_bit = compiled
+            .registry
+            .id("world.flag.ready")
+            .expect("precondition tag is registered");
+        let seed = initialize_chrono_world(
+            &compiled,
+            std::slice::from_ref(&storylet),
+            &crate::entities::default_world_entity(),
+            &[],
+            std::slice::from_ref(&square),
+            &[],
+            &[],
+            &world_tags,
+            &[],
+            None,
+            "square",
+        )
+        .expect("initial world tags seed");
+        let id_space = CompiledIdSpace::fingerprint(&compiled, &entity_indices);
+        let storylet_index = id_space.storylets["gated"];
 
-        assert_eq!(compiled.dispatcher.storylets[0].ideal_vector.len(), 1);
-        assert_eq!(compiled.dispatcher.storylets[0].ideal_vector[0].weight, 4.0);
+        let asset = FlowGraphAsset {
+            asset_id: "candidate-pool".into(),
+            start_node_guid: 1,
+            nodes: vec![FlowNodeDef {
+                node_guid: 1,
+                node_type_id: "QbnHub".into(),
+                kind: NodeKind::QbnHub {
+                    deck: vec![storylet_index],
+                    exit_storylet_id: None,
+                },
+                ..FlowNodeDef::default()
+            }],
+            edges: Vec::new(),
+            data_edges: Vec::new(),
+        };
+        let instance = FlowGraphInstance {
+            asset,
+            nodes: vec![FlowNodeInstance {
+                node_guid: 1,
+                state: NodeExecutionState::ActiveLatent,
+                ..FlowNodeInstance::default()
+            }],
+            ..FlowGraphInstance::default()
+        };
+        let mut session = ChronoPlaytestSession {
+            session_id: "precondition-smoke".into(),
+            project_id: "project".into(),
+            pinned_project_revision: 1,
+            scenario_id: "scenario".into(),
+            start_location_id: String::new(),
+            start_storylet_id: "gated".into(),
+            start_node_guid: 1,
+            seed: 0,
+            id_space: id_space.clone(),
+            instance,
+            world: {
+                let mut world = seed.state;
+                let world_vertex = world
+                    .vertices
+                    .iter_mut()
+                    .find(|vertex| vertex.vertex_id == "world")
+                    .expect("world vertex");
+                world_vertex.attributes.insert(
+                    "prop.mood".into(),
+                    AttributeValue::String("calm".into()),
+                );
+                world
+            },
+            reconstructed: false,
+            last_idempotency_key: String::new(),
+            last_result_json: String::new(),
+            mutation_revision: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        let prepared = Prepared {
+            current_revision: 1,
+            content: WorkspaceContent {
+                world: crate::entities::default_world_entity(),
+                entities: Vec::new(),
+                locations: Vec::new(),
+                characters: Vec::new(),
+                world_objects: Vec::new(),
+                world_tags: Vec::new(),
+                entity_tag_seeds: Vec::new(),
+                storylets: vec![storylet],
+                scenarios: Vec::new(),
+                entity_game_ids: BTreeMap::new(),
+            },
+            compiled,
+            current_id_space: id_space,
+            rebased: false,
+        };
+
+        let view = context_view(&session, &prepared);
+        assert_eq!(
+            view["activeInteractions"][0]["eligibleStorylets"][0]["id"],
+            "gated"
+        );
+        assert_eq!(view["preconditionErrors"], json!([]));
+
+        session.world.global_tags.clear_bit(tag_bit).unwrap();
+        let view = context_view(&session, &prepared);
+        assert!(view["activeInteractions"][0]["eligibleStorylets"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(view["preconditionErrors"], json!([]));
+        session.world.global_tags.set_bit(tag_bit).unwrap();
+        let view = context_view(&session, &prepared);
+        assert_eq!(
+            view["activeInteractions"][0]["eligibleStorylets"][0]["id"],
+            "gated"
+        );
+        assert_eq!(view["preconditionErrors"], json!([]));
+        session.world
+            .vertices
+            .iter_mut()
+            .find(|vertex| vertex.vertex_id == "world")
+            .expect("world vertex")
+            .attributes
+            .insert("prop.mood".into(), AttributeValue::String("tense".into()));
+        let view = context_view(&session, &prepared);
+        assert!(view["activeInteractions"][0]["eligibleStorylets"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(view["preconditionErrors"], json!([]));
     }
+
+
 
     #[test]
     fn chrono_requests_reject_unknown_fields() {
@@ -2558,6 +2800,7 @@ mod tests {
                 ..FlowNodeDef::default()
             }],
             edges: vec![],
+            data_edges: vec![],
         };
         let mut instance = FlowGraphInstance::new(42, graph, 7).unwrap();
         let token = PersistedToken {
@@ -2651,6 +2894,7 @@ mod tests {
                 ..FlowNodeDef::default()
             }],
             edges: vec![],
+            data_edges: vec![],
         };
         let mut instance = FlowGraphInstance::new(1, graph, 1).unwrap();
         let pending = PendingState {

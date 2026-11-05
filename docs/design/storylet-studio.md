@@ -4,13 +4,13 @@
 
 ## Summary
 
-DecisionNarrative is a local, setting-neutral authoring and playtest platform for storylet-driven games. Designers author characters, locations, qualities, events, NPC behavior, scenarios, and storylet graphs. The deterministic Rust engine validates eligibility and applies world changes. The Vue studio exposes authoring, review, project interchange, and playtesting.
+DecisionNarrative is a local, setting-neutral authoring and playtest platform for storylet-driven games. Designers author characters, locations, typed entity properties, events, NPC behavior, scenarios, and storylet graphs. The deterministic Rust engine validates eligibility and applies world changes. The Vue studio exposes authoring, review, project interchange, and playtesting.
 
 The studio has no Strata integration, text or image generation API, embedding service, learned ranker, or model-training pipeline. Storylet content is authored directly in the editor or by an external MCP agent acting on a user's request. Designers retain control of content review and approval.
 
 ## Product boundaries
 
-- Projects own their cast, setting, qualities, locations, events, and storylets.
+- Projects own their cast, setting, typed entity properties, locations, events, and storylets.
 - Authoring data and runtime sessions are local and persistent; playtest actions use deterministic Rust rules.
 - AI providers are not part of the product runtime. No hidden remote or local model fallback exists.
 - External agents can work directly through MCP. The agent reads the current interaction context, then uses ordinary project or playtest operations; it does not need to automate the UI.
@@ -30,7 +30,7 @@ The Rust service provides the local HTTP and MCP surfaces and stores project/run
 
 ### Web studio
 
-The Vue 3 application provides a storylet library and graph editor, Codex, tag manager, starting scenarios, playtest, and project interchange. The graph editor validates before save and approval. Storylets use optional location tags and preconditions; Go To Location actions select existing project locations and are entered through a Choice branch. A storylet with no location tags is not location-gated.
+The Vue 3 application provides a storylet library, dual-tab graph editor, Codex, tag manager, starting scenarios, playtest, and project interchange. The Story Graph authors scene flow; boolean predicates feed `And`/`Or` or the Boolean input on `Condition Node`, whose `true`/`false` branches route flow. The separate Preconditions graph evaluates read-only candidate gates before storylets enter consideration pools. Use `Get Entity`, `Get Entity Property`, `Compare`, and `Has Entity Tag` for typed entity reads and predicates; `Apply Command` mutates a typed Entity property. Location and character membership use Has Entity Tag dot-notation. There is no Quality Check node or storylet-local variable node.
 
 ### Interaction context and MCP agents
 
@@ -46,19 +46,18 @@ The `workspace.context` MCP operation returns that snapshot together with a fres
 
 ## Authoring and validation
 
-Designers author text, tags, storylet graph rules, preconditions, choices, and effects directly. The platform does not generate drafts; review and approval remain explicit author decisions.
+Designers author text, tags, Story Graph flow, Preconditions graphs, choices, and effects directly. The platform does not generate drafts; review and approval remain explicit author decisions.
 
-A valid storylet graph has exactly one Start and one or more End nodes. Every node must be reachable from Start and able to reach an End. Each End is terminal (ends the run) or a jump to another storylet. A jump takes precedence over a leftover terminal flag; a storylet is a dedicated ending only when every End is terminal and has no jump. References and effects are project-validated. Each save validates graph structure; approval validates the exact saved revision. A Go To Location node must be targeted directly by a Choice and refer to an existing location.
 
-Tags are unique within their category, normalized for comparison, and shared through inline tag editing and the Tag Manager. Location tags determine where a storylet can be eligible; visited-location and met-character preconditions can refer to either IDs or tags/roles.
-
+A valid Story Graph has exactly one Start and one or more End nodes. Every node must be reachable from Start and able to reach an End. Each End is terminal (ends the run) or a jump to another storylet. A valid Preconditions graph uses read-only predicate/value nodes, typed property comparisons, And/Or combinators, an empty Condition Node boolean switch, and at least one valid-candidate End; a false-result End rejects the candidate. `Has Entity Tag` may be used in both graphs with mode-specific outputs. Both graphs and their references are project-validated on save and approval. Chrono operations appear as graph nodes only where supported by the runtime. A Go To Location node must be targeted directly by a Choice and refer to an existing location.
+Tags are unique within their category, normalized for comparison, and shared through inline tag editing and the Tag Manager. Location tags determine where a storylet can be eligible. Membership/state tags use dot notation such as `location.market.visited` and `character.guide.met`. Typed entity properties replace a separate quality model.
 ## World simulation and director
 
 A playtest begins from an authored scenario and deterministic seed. Player choices, movement, waiting, and NPC actions commit through the Rust runtime. Reading and inspecting do not advance time. The director evaluates approved storylets against deterministic eligibility and reports rejection reasons; it does not request model rankings.
 
 Commands carry an expected world revision and idempotency key. Invalid, stale, or duplicate operations cannot partially mutate state. Playtest sessions support snapshots, event history, replay, and branching.
 
-On restore, location tags, visited locations, and met characters are rebuilt from the embedded project and event history. This normalizes older snapshots without deleting sessions; mismatches in other replayed state still reject restoration.
+On restore, authored entity properties, tags, and event history are used to rebuild the supported world state. No legacy quality, visited-location, or met-character compatibility fields are retained.
 
 ## MCP operating rules
 

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::json;
 use storylet_engine::{
-    ActorState, CandidateRejection, ClusterType, DirectorState, Effect, LifecycleState,
+    ActorState, CandidateRejection, StoryletClusterType, DirectorState, Effect, LifecycleState,
     PredicateSet, Repeatability, RoleRequirement, SceneContent, StoryletChoice, StoryletDefinition,
     WorldState, evaluate_storylets, execute_storylet_choice, start_storylet,
 };
@@ -10,8 +10,8 @@ use storylet_engine::{
 fn world() -> WorldState {
     WorldState {
         current_location: Some("archive".into()),
-        location_tags: BTreeMap::from([("archive".into(), BTreeSet::from(["archive".into()]))]),
-        qualities: BTreeMap::from([
+        entity_tags: BTreeMap::from([("archive".into(), BTreeSet::from(["archive".into()]))]),
+        properties: BTreeMap::from([
             ("stock.depot".into(), json!(5)),
             ("stock.clinic".into(), json!(1)),
         ]),
@@ -37,13 +37,12 @@ fn definition(repeatability: Repeatability) -> StoryletDefinition {
         ending: false,
         location_tags: BTreeSet::from(["archive".into()]),
         urgency_weight: 60.0,
-        cluster_type: ClusterType::Linear,
+        cluster_type: StoryletClusterType::LinearProgression,
         repeatability,
         required_roles: vec![RoleRequirement {
             role: "clerk".into(),
         }],
         trigger: PredicateSet::default(),
-        preconditions: Default::default(),
         content: SceneContent {
             opening: "Nora turns the ledger around.".into(),
         },
@@ -51,7 +50,7 @@ fn definition(repeatability: Repeatability) -> StoryletDefinition {
             id: "send_supplies".into(),
             label: "Send supplies".into(),
             requirements: PredicateSet::default(),
-            effects: vec![Effect::TransferQuality {
+            effects: vec![Effect::TransferProperty {
                 from: "stock.depot".into(),
                 to: "stock.clinic".into(),
                 amount: 2.0,
@@ -105,8 +104,8 @@ fn start_reserves_bound_roles_and_choice_atomically_completes_once_storylet() {
     )
     .unwrap();
     assert_eq!(result.event.deltas.len(), 2);
-    assert_eq!(world.qualities.get("stock.depot"), Some(&json!(3.0)));
-    assert_eq!(world.qualities.get("stock.clinic"), Some(&json!(3.0)));
+    assert_eq!(world.properties.get("stock.depot"), Some(&json!(3.0)));
+    assert_eq!(world.properties.get("stock.clinic"), Some(&json!(3.0)));
     assert_eq!(
         director.lifecycle.get("clinic_record"),
         Some(&LifecycleState::Retired)
@@ -159,7 +158,7 @@ fn direct_choice_retry_reuses_the_original_causal_parents_after_completion() {
 #[test]
 fn choice_failure_keeps_scene_active_and_resource_balances_unchanged() {
     let mut definition = definition(Repeatability::Cooldown { turns: 2 });
-    definition.choices[0].effects = vec![Effect::TransferQuality {
+    definition.choices[0].effects = vec![Effect::TransferProperty {
         from: "stock.depot".into(),
         to: "stock.clinic".into(),
         amount: 10.0,

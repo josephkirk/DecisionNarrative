@@ -41,9 +41,9 @@ authored project JSON
 
 ### 3.1 Project and graph
 
-- `StoryletRecord` keeps authored data: prose, choices, effects, parameters, preconditions, graph, and metadata.
-- `NarrativeGraph` is canonical for storylet flow.
-- One Start is required.
+`StoryletRecord` keeps authored data: prose, choices, effects, Story Graph, optional Preconditions graph, and metadata.
+`NarrativeGraph` is canonical for storylet scene flow; a separate read-only graph gates candidate eligibility when present.
+The Preconditions graph is a dedicated graph tab beside Story Graph. Boolean predicate/value nodes feed `And`/`Or` expressions and then an empty `Condition Node`; the typed property path is `Get Entity -> Get Entity Property -> Compare -> Condition`. `Apply Command` writes through authored commands. Storylet-local variable definitions are not part of the model.
 - One or more End nodes are allowed.
 - Every node must be reachable from Start and able to reach an End.
 - A jump target takes precedence over a leftover terminal flag.
@@ -296,6 +296,17 @@ These are implementation limits, not hidden behavior.
 - No-choice ending storylets are accepted; the old project rule was removed.
 - Bundle import/validation now validates graphs and derives `ending`.
 - Content list/get preserve unknown fields and normalize only `ending`.
+
+## 5.8 Boolean precondition graphs
+
+The dedicated Preconditions graph tab is separate from Story Graph scene flow. Read-only predicate/value nodes produce booleans; `And` and `Or` combine boolean values, and an empty `Condition Node` consumes one boolean and controls the `true`/`false` flow branches. Typed property comparisons use `Get Entity -> Get Entity Property -> Compare -> Condition`. `Get Entity` resolves an entity, `Get Entity Property` reads a declared typed property, and `Apply Command` performs an authored mutation in the Story Graph. There is no Quality Check node, separate quality model, or storylet-local variable node.
+
+`Has Entity Tag` uses dot notation for membership/state tags (for example,
+`location.market.visited` or `character.guide.met`) and produces a boolean data
+value in either graph. Connect it to `Condition Node` for true/false flow;
+predicate nodes do not branch directly. Chrono operations are exposed as graph
+nodes only where the runtime supports them; this document does not imply
+additional Chrono nodes.
 
 ## 6. Validation
 

@@ -1,5 +1,5 @@
 import type { ComputedRef, InjectionKey } from "vue";
-import type { ChronoPlaytestSnapshot, PlaytestSnapshot, ProjectMetadata } from "./contracts.ts";
+import type { ProjectMetadata } from "./contracts.ts";
 
 export interface InteractionRoute {
   name: unknown;
@@ -34,12 +34,6 @@ export interface StudioInteractionContext {
   project: ProjectMetadata | null;
   entity?: InteractionEntity;
   selection?: InteractionSelection;
-  playtest?: {
-    sessionId: string;
-    revision: number;
-    turn: number;
-    locationId: string | null;
-  };
 }
 
 export interface InteractionContextSource {
@@ -54,15 +48,11 @@ const viewNames: Record<string, string> = {
   "new-storylet": "New Storylet",
   "edit-storylet": "Storylet Editor",
   browse: "Project Browser",
-  entity: "Entity Editor",
-  quality: "Quality Editor",
-  "new-quality": "New Quality",
+  "entity-template": "Entity Template Editor",
   "trait-template": "Trait Template Editor",
   asset: "Asset Editor",
   codex: "Rules & Events",
   tags: "Tag Manager",
-  scenarios: "Starting Scenarios",
-  playtest: "Playtest",
   project: "Project",
 };
 
@@ -75,9 +65,7 @@ function first(value: unknown): string | undefined {
 function routeEntity(route: InteractionRoute): InteractionEntity | undefined {
   const id = first(route.params.id);
   if (route.name === "edit-storylet" && id) return { type: "storylet", id };
-  if (route.name === "entity" && id) return { type: "entity", id };
-  const qualityName = first(route.params.name);
-  if (route.name === "quality" && qualityName) return { type: "quality", id: qualityName };
+  if (route.name === "entity-template" && id) return { type: "entity_template", id };
   if (route.name === "trait-template" && id) return { type: "trait_template", id };
   if (route.name === "asset" && id) return { type: "asset", id };
   if (route.name === "browse") {
@@ -88,13 +76,9 @@ function routeEntity(route: InteractionRoute): InteractionEntity | undefined {
     return undefined;
   }
   const queryId = first(route.query.id);
-  if (route.name === "codex" && queryId) {
-    const category = first(route.query.category);
-    const type = category === "npc_behaviors" ? "npc_behavior"
-      : category === "events" ? "event" : undefined;
-    if (type) return { type, id: queryId };
+  if (route.name === "codex" && queryId && first(route.query.category) === "events") {
+    return { type: "event", id: queryId };
   }
-  if (route.name === "scenarios" && queryId) return { type: "scenario", id: queryId };
   const tag = first(route.query.tag);
   if (route.name === "tags" && tag) return { type: "tag", id: tag, label: tag };
   return undefined;
@@ -104,13 +88,9 @@ function routeEntity(route: InteractionRoute): InteractionEntity | undefined {
 export function buildInteractionContext(input: {
   route: InteractionRoute;
   project: ProjectMetadata | null;
-  activePlaytestSessionId: string | null;
-  activePlaytestSnapshot: PlaytestSnapshot | null;
-  activeChronoPlaytestSessionId?: string | null;
-  activeChronoPlaytestSnapshot?: ChronoPlaytestSnapshot | null;
   focus?: InteractionFocus | null;
 }): StudioInteractionContext {
-  const { route, project, activePlaytestSessionId, activePlaytestSnapshot, activeChronoPlaytestSessionId, activeChronoPlaytestSnapshot, focus } = input;
+  const { route, project, focus } = input;
   const name = typeof route.name === "string" ? route.name : "unknown";
   const entity = focus?.entity === null ? undefined : focus?.entity ?? routeEntity(route);
   const nodeId = first(route.query.node);
@@ -118,23 +98,6 @@ export function buildInteractionContext(input: {
   const selection = focus?.selection === null ? undefined : focus?.selection
     ?? (nodeId ? { type: "graph_node" as const, id: nodeId }
       : itemId ? { type: "graph_item" as const, id: itemId } : undefined);
-  const chronoSnapshot = activeChronoPlaytestSessionId ? activeChronoPlaytestSnapshot : null;
-  const legacySnapshot = activePlaytestSessionId ? activePlaytestSnapshot : null;
-  const playtest = chronoSnapshot && activeChronoPlaytestSessionId
-    ? {
-      sessionId: activeChronoPlaytestSessionId,
-      revision: chronoSnapshot.session.pinnedProjectRevision,
-      turn: chronoSnapshot.context.turn,
-      locationId: chronoSnapshot.context.world.currentLocation,
-    }
-    : legacySnapshot && activePlaytestSessionId
-      ? {
-        sessionId: activePlaytestSessionId,
-        revision: legacySnapshot.world.revision,
-        turn: legacySnapshot.world.turn,
-        locationId: legacySnapshot.world.current_location ?? null,
-      }
-      : null;
 
   return {
     capturedAt: Date.now(),
@@ -142,6 +105,5 @@ export function buildInteractionContext(input: {
     project,
     ...(entity ? { entity } : {}),
     ...(selection ? { selection } : {}),
-    ...(playtest ? { playtest } : {}),
   };
 }

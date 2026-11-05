@@ -5,14 +5,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use storylet_engine::{
     CharacterDefinition, Effect, EventDefinition, EventType, FactRef, LocationDefinition,
-    MetCharacterRequirement, NpcBehaviorRule, PROJECT_SCHEMA_VERSION, Predicate, PredicateOp,
-    PredicateSet, ProjectBundle, QualityDefinition, QualityType, Repeatability, RoleRequirement,
-    ScenarioDefinition, SceneContent, StoryletChoice, StoryletDefinition, StoryletPreconditions,
-    VisitedLocationRequirement,
+    PROJECT_SCHEMA_VERSION, Predicate, PredicateOp, PredicateSet, ProjectBundle,
+    Repeatability, RoleRequirement, ScenarioDefinition, SceneContent, StoryletChoice,
+    StoryletDefinition,
 };
-
 use crate::contracts::{
-    CharacterRecord, EventRecord, LocationRecord, NpcBehaviorRecord, QualityRecord, ScenarioRecord,
+    CharacterRecord, EventRecord, LocationRecord, ScenarioRecord,
     StoryletRecord,
 };
 use crate::scenario::resolve_scenario_start;
@@ -27,42 +25,16 @@ pub fn project_workspace(
     project_id: &str,
     project_name: &str,
     revision: u64,
-    qualities: &[QualityRecord],
     locations: &[LocationRecord],
     characters: &[CharacterRecord],
     storylets: &[StoryletRecord],
-    npc_behaviors: &[NpcBehaviorRecord],
     events: &[EventRecord],
     scenario: Option<&ScenarioRecord>,
 ) -> ProjectResult {
     let mut issues = Vec::new();
-
-    let mut quality_defs = BTreeMap::new();
-    let quality_ids: BTreeSet<String> = qualities.iter().map(|q| q.name.clone()).collect();
-    for q in qualities {
-        let kind = match q.kind.as_str() {
-            "currency" => QualityType::Currency,
-            "metric" => QualityType::Metric,
-            "tool" => QualityType::Tool,
-            "progress" => QualityType::Progress,
-            "territory" => QualityType::Territory,
-            "menace" => QualityType::Menace,
-            _ => QualityType::Custom,
-        };
-        quality_defs.insert(
-            q.name.clone(),
-            QualityDefinition {
-                key: q.name.clone(),
-                kind,
-                default_value: Value::from(q.value),
-                description: q.description.clone().unwrap_or_default(),
-                min_value: q.min_value,
-                max_value: q.max_value,
-                is_hidden: q.is_hidden,
-                menace_crisis_storylet_id: q.menace_crisis_storylet_id.clone(),
-            },
-        );
-    }
+    // V1 has only a flat world-property map, not typed properties on Entities.
+    // The V1 playtest entry point rejects this data instead of dropping it.
+    let property_defs = BTreeMap::new();
 
     let mut location_defs = BTreeMap::new();
     let location_ids: BTreeSet<String> = locations.iter().map(|l| l.id.clone()).collect();
@@ -156,17 +128,9 @@ pub fn project_workspace(
             }
         }
 
-        let trigger = parse_predicate_set(
-            &st.preconditions,
-            &quality_ids,
-            &mut issues,
-            &format!("storylets.{}.preconditions", st.id),
-        );
-        let preconditions = parse_storylet_preconditions(
-            &st.preconditions,
-            &mut issues,
-            &format!("storylets.{}.preconditions", st.id),
-        );
+        // Preconditions are evaluated from the authored NarrativeGraph by the graph runtime.
+        // The legacy list representation is intentionally not projected here.
+        let trigger = PredicateSet::default();
 
         let choices = st
             .choices
@@ -176,7 +140,7 @@ pub fn project_workspace(
                 let reqs = if let Some(ref conds) = choice.conditions {
                     parse_predicates_array(
                         conds,
-                        &quality_ids,
+                        &property_defs.keys().cloned().collect(),
                         &mut issues,
                         &format!("storylets.{}.choices[{}].conditions", st.id, idx),
                     )
@@ -186,7 +150,7 @@ pub fn project_workspace(
 
                 let effects = parse_effects(
                     &choice.effects,
-                    &quality_ids,
+                    &property_defs.keys().cloned().collect(),
                     &location_ids,
                     &mut issues,
                     &format!("storylets.{}.choices[{}].effects", st.id, idx),
@@ -216,10 +180,17 @@ pub fn project_workspace(
         };
 
         let cluster_type = match st.cluster_type.as_str() {
-            "linear" | "linear_progression" => storylet_engine::ClusterType::Linear,
-            "wheel" | "wheel_deck" => storylet_engine::ClusterType::Wheel,
-            "aftermath" | "aftermath_accelerator" => storylet_engine::ClusterType::Aftermath,
-            _ => storylet_engine::ClusterType::PlayerControlledPassage,
+            "player_passage" => storylet_engine::StoryletClusterType::PlayerPassage,
+            "linear_progression" => storylet_engine::StoryletClusterType::LinearProgression,
+            "wheel_deck" => storylet_engine::StoryletClusterType::WheelDeck,
+            "aftermath_accelerator" => storylet_engine::StoryletClusterType::AftermathAccelerator,
+            unsupported => {
+                issues.push(format!(
+                    "storylets.{}.cluster_type: unsupported cluster type '{}'",
+                    st.id, unsupported
+                ));
+                continue;
+            }
         };
 
         let summary = st
@@ -255,7 +226,6 @@ pub fn project_workspace(
                 repeatability,
                 required_roles,
                 trigger,
-                preconditions,
                 content: SceneContent {
                     opening: st
                         .content
@@ -274,13 +244,13 @@ pub fn project_workspace(
         project_event_ids.push(ev.id.clone());
         let trigger = parse_predicate_set(
             &ev.trigger,
-            &quality_ids,
+            &property_defs.keys().cloned().collect(),
             &mut issues,
             &format!("events.{}.trigger", ev.id),
         );
         let effects = parse_effects(
             &ev.effects,
-            &quality_ids,
+            &property_defs.keys().cloned().collect(),
             &location_ids,
             &mut issues,
             &format!("events.{}.effects", ev.id),
@@ -306,50 +276,28 @@ pub fn project_workspace(
         );
     }
 
-    let mut npc_behavior_defs = BTreeMap::new();
-    for npc in npc_behaviors {
-        let conditions = parse_predicate_set(
-            &npc.conditions,
-            &quality_ids,
-            &mut issues,
-            &format!("npc_behaviors.{}.conditions", npc.id),
-        );
-        let mut effects = Vec::new();
-        for (idx, eff_val) in npc.effects.iter().enumerate() {
-            let eff_list = parse_effects(
-                eff_val,
-                &quality_ids,
-                &location_ids,
-                &mut issues,
-                &format!("npc_behaviors.{}.effects[{}]", npc.id, idx),
-            );
-            effects.extend(eff_list);
-        }
 
-        npc_behavior_defs.insert(
-            npc.id.clone(),
-            NpcBehaviorRule {
-                id: npc.id.clone(),
-                actor_id: npc.actor_id.clone(),
-                priority: npc.priority,
-                conditions,
-                action: npc.action.clone(),
-                effects,
-            },
-        );
-    }
-
-    // Resolve scenario
-    let default_scenario_id = "workspace-playtest".to_string();
+    let default_scenario_id = format!("{project_id}:default");
     let (scenario_id, scenario_def) = if let Some(scen) = scenario {
-        let resolved = resolve_scenario_start(scen, qualities, locations, characters);
+        let resolved = resolve_scenario_start(scen, locations, characters);
         issues.extend(resolved.issues);
+
+        // V1 exposes only one global property map. Entity-scoped scenario
+        // overrides have no faithful representation, including the
+        // single-entity case; retain no lossy projection and report it.
+        let initial_properties = BTreeMap::new();
+        if !resolved.effective_properties.is_empty() {
+            issues.push(format!(
+                "scenario '{}': entity-scoped initial properties cannot be represented by the runtime flat property map",
+                scen.id
+            ));
+        }
 
         let s_def = ScenarioDefinition {
             id: scen.id.clone(),
             name: scen.name.clone(),
             player_start_location: resolved.player_start_location,
-            initial_qualities: resolved.effective_qualities,
+            initial_properties,
             actor_locations: resolved.actor_locations,
             storylet_ids: approved_storylet_ids,
             seed: scen.seed,
@@ -363,7 +311,7 @@ pub fn project_workspace(
             id: default_scenario_id.clone(),
             name: "Default Playtest".into(),
             player_start_location: first_loc,
-            initial_qualities: BTreeMap::new(),
+            initial_properties: BTreeMap::new(),
             actor_locations: BTreeMap::new(),
             storylet_ids: approved_storylet_ids,
             seed: 1,
@@ -381,12 +329,12 @@ pub fn project_workspace(
         id: project_id.to_string(),
         name: project_name.to_string(),
         revision,
-        qualities: quality_defs,
+        properties: property_defs,
         locations: location_defs,
         characters: character_defs,
         events: event_defs,
         storylets: storylet_defs,
-        npc_behaviors: npc_behavior_defs,
+        npc_behaviors: BTreeMap::new(),
         scenarios,
     };
 
@@ -399,11 +347,7 @@ pub fn project_workspace(
 
 pub(crate) fn parse_role_query(query: &str) -> Option<String> {
     let trimmed = query.trim();
-    // Accept the canonical role predicate plus legacy predicates emitted by the tag editor.
-    let re = regex::Regex::new(
-        r#"(?i)^(?:(?:character\.)?role|character_role)\s*==\s*(?:'([^']*)'|"([^"]*)")$"#,
-    )
-    .ok()?;
+    let re = regex::Regex::new(r#"^role\s*==\s*(?:'([^']*)'|"([^"]*)")$"#).ok()?;
     let caps = re.captures(trimmed)?;
     Some(
         caps.get(1)
@@ -429,7 +373,7 @@ fn normalize_op(op_str: &str) -> Option<PredicateOp> {
 
 fn parse_predicate(
     val: &Value,
-    quality_ids: &BTreeSet<String>,
+    _property_ids: &BTreeSet<String>,
     issues: &mut Vec<String>,
     path: &str,
 ) -> Option<Predicate> {
@@ -448,13 +392,10 @@ fn parse_predicate(
 
     let fact = if var == "location" || var == "current_location" {
         FactRef::CurrentLocation
-    } else if quality_ids.contains(var) {
-        FactRef::Quality {
+    } else {
+        FactRef::Property {
             key: var.to_string(),
         }
-    } else {
-        issues.push(format!("{path}: unknown quality '{var}'"));
-        return None;
     };
 
     Some(Predicate {
@@ -466,19 +407,19 @@ fn parse_predicate(
 
 fn parse_predicates_array(
     arr: &[Value],
-    quality_ids: &BTreeSet<String>,
+    _property_ids: &BTreeSet<String>,
     issues: &mut Vec<String>,
     path: &str,
 ) -> Vec<Predicate> {
     arr.iter()
         .enumerate()
-        .filter_map(|(idx, v)| parse_predicate(v, quality_ids, issues, &format!("{path}[{idx}]")))
+        .filter_map(|(idx, v)| parse_predicate(v, _property_ids, issues, &format!("{path}[{idx}]")))
         .collect()
 }
 
 fn parse_predicate_set(
     val: &Value,
-    quality_ids: &BTreeSet<String>,
+    property_ids: &BTreeSet<String>,
     issues: &mut Vec<String>,
     path: &str,
 ) -> PredicateSet {
@@ -488,100 +429,21 @@ fn parse_predicate_set(
     if let Some(obj) = val.as_object() {
         if let Some(all_arr) = obj.get("all_of").and_then(|v| v.as_array()) {
             all_of =
-                parse_predicates_array(all_arr, quality_ids, issues, &format!("{path}.all_of"));
+                parse_predicates_array(all_arr, property_ids, issues, &format!("{path}.all_of"));
         }
         if let Some(any_arr) = obj.get("any_of").and_then(|v| v.as_array()) {
             any_of =
-                parse_predicates_array(any_arr, quality_ids, issues, &format!("{path}.any_of"));
+                parse_predicates_array(any_arr, property_ids, issues, &format!("{path}.any_of"));
         }
     }
 
     PredicateSet { all_of, any_of }
 }
 
-fn parse_storylet_preconditions(
-    val: &Value,
-    issues: &mut Vec<String>,
-    path: &str,
-) -> StoryletPreconditions {
-    let mut preconditions = StoryletPreconditions::default();
-    let Some(object) = val.as_object() else {
-        return preconditions;
-    };
-
-    for (field, target) in [
-        ("visited_locations_any_of", "visited location"),
-        ("met_characters_any_of", "met character"),
-    ] {
-        let Some(entries) = object.get(field).and_then(Value::as_array) else {
-            continue;
-        };
-        for (index, entry) in entries.iter().enumerate() {
-            let entry_path = format!("{path}.{field}[{index}]");
-            let Some(entry) = entry.as_object() else {
-                issues.push(format!(
-                    "{entry_path}: {target} requirement must be an object"
-                ));
-                continue;
-            };
-            let Some(kind) = entry.get("kind").and_then(Value::as_str) else {
-                issues.push(format!("{entry_path}.kind: requirement kind is required"));
-                continue;
-            };
-            let (value_key, value_kind) = match kind {
-                "location_id" if field == "visited_locations_any_of" => {
-                    ("location_id", "location id")
-                }
-                "location_tag" if field == "visited_locations_any_of" => ("tag", "location tag"),
-                "character_id" if field == "met_characters_any_of" => {
-                    ("character_id", "character id")
-                }
-                "role_tag" if field == "met_characters_any_of" => ("role", "character role"),
-                _ => {
-                    issues.push(format!(
-                        "{entry_path}.kind: unsupported {target} requirement kind '{kind}'"
-                    ));
-                    continue;
-                }
-            };
-            let Some(value) = entry
-                .get(value_key)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            else {
-                issues.push(format!(
-                    "{entry_path}.{value_key}: nonempty {value_kind} is required"
-                ));
-                continue;
-            };
-            if field == "visited_locations_any_of" {
-                preconditions.visited_locations_any_of.push(match kind {
-                    "location_id" => VisitedLocationRequirement::LocationId {
-                        location_id: value.to_string(),
-                    },
-                    _ => VisitedLocationRequirement::LocationTag {
-                        tag: value.to_string(),
-                    },
-                });
-            } else {
-                preconditions.met_characters_any_of.push(match kind {
-                    "character_id" => MetCharacterRequirement::CharacterId {
-                        character_id: value.to_string(),
-                    },
-                    _ => MetCharacterRequirement::RoleTag {
-                        role: value.to_string(),
-                    },
-                });
-            }
-        }
-    }
-    preconditions
-}
 
 fn parse_effects(
     val: &Value,
-    quality_ids: &BTreeSet<String>,
+    _property_ids: &BTreeSet<String>,
     location_ids: &BTreeSet<String>,
     issues: &mut Vec<String>,
     path: &str,
@@ -604,27 +466,16 @@ fn parse_effects(
                 }
                 continue;
             }
-            if !quality_ids.contains(key) {
-                issues.push(format!("{path}.{key}: unknown quality '{key}'"));
-                continue;
-            }
             if let Some(num) = v.as_f64() {
-                effects.push(Effect::AddQuality {
+                effects.push(Effect::AddProperty {
                     key: key.clone(),
                     amount: num,
                 });
-            } else if let Some(b) = v.as_bool() {
-                effects.push(Effect::SetQuality {
-                    key: key.clone(),
-                    value: Value::Bool(b),
-                });
-            } else if let Some(s) = v.as_str() {
-                effects.push(Effect::SetQuality {
-                    key: key.clone(),
-                    value: Value::String(s.to_string()),
-                });
             } else {
-                issues.push(format!("{path}.{key}: only numeric deltas, booleans, and strings supported as quality effects"));
+                effects.push(Effect::SetProperty {
+                    key: key.clone(),
+                    value: v.clone(),
+                });
             }
         }
     }
@@ -634,9 +485,7 @@ fn parse_effects(
 
 #[cfg(test)]
 mod parse_role_query_tests {
-    use super::{
-        parse_effects, parse_predicate_set, parse_role_query, parse_storylet_preconditions,
-    };
+    use super::{parse_effects, parse_predicate_set, parse_role_query};
 
     #[test]
     fn parses_player_movement_only_to_existing_locations() {
@@ -677,71 +526,14 @@ mod parse_role_query_tests {
     }
 
     #[test]
-    fn accepts_canonical_and_previously_emitted_role_predicates() {
+    fn accepts_only_the_canonical_role_predicate() {
         assert_eq!(
-            parse_role_query(r#"role == "Sentinel""#),
-            Some("Sentinel".to_string())
+            parse_role_query(r#"role == "character.witness""#),
+            Some("character.witness".to_string())
         );
-        assert_eq!(
-            parse_role_query("character.role == 'Guide'"),
-            Some("Guide".to_string())
-        );
-        assert_eq!(
-            parse_role_query("character_role == 'Guard'"),
-            Some("Guard".to_string())
-        );
+        assert_eq!(parse_role_query("character.role == 'Guide'"), None);
+        assert_eq!(parse_role_query("character_role == 'Guard'"), None);
         assert_eq!(parse_role_query("role matches 'Guard'"), None);
     }
 
-    #[test]
-    fn parses_quality_and_entity_preconditions_from_authored_json() {
-        use serde_json::json;
-        use std::collections::BTreeSet;
-        use storylet_engine::{MetCharacterRequirement, PredicateOp, VisitedLocationRequirement};
-
-        let quality_ids = BTreeSet::from(["trust".to_string()]);
-        let mut issues = Vec::new();
-        let value = json!({
-            "all_of": [{"variable": "trust", "op": "gte", "value": 2}],
-            "any_of": [{"variable": "trust", "op": "lt", "value": 0}],
-            "visited_locations_any_of": [
-                {"kind": "location_id", "location_id": "market"},
-                {"kind": "location_tag", "tag": "archive"}
-            ],
-            "met_characters_any_of": [
-                {"kind": "character_id", "character_id": "nora"},
-                {"kind": "role_tag", "role": "clerk"}
-            ]
-        });
-        let trigger = parse_predicate_set(&value, &quality_ids, &mut issues, "preconditions");
-        let typed = parse_storylet_preconditions(&value, &mut issues, "preconditions");
-
-        assert_eq!(trigger.all_of.len(), 1);
-        assert_eq!(trigger.all_of[0].op, PredicateOp::Gte);
-        assert_eq!(trigger.any_of.len(), 1);
-        assert_eq!(trigger.any_of[0].op, PredicateOp::Lt);
-        assert_eq!(
-            typed.visited_locations_any_of,
-            vec![
-                VisitedLocationRequirement::LocationId {
-                    location_id: "market".into()
-                },
-                VisitedLocationRequirement::LocationTag {
-                    tag: "archive".into()
-                },
-            ]
-        );
-        assert_eq!(
-            typed.met_characters_any_of,
-            vec![
-                MetCharacterRequirement::CharacterId {
-                    character_id: "nora".into()
-                },
-                MetCharacterRequirement::RoleTag {
-                    role: "clerk".into()
-                },
-            ]
-        );
-        assert!(issues.is_empty());
-    }
 }

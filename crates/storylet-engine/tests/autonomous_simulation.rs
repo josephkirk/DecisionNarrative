@@ -17,7 +17,7 @@ fn eligible_npc_rule_commits_a_causal_event_without_advancing_an_extra_turn() {
                 busy: false,
             },
         )]),
-        qualities: BTreeMap::from([("world.delivery_pending".into(), json!(true))]),
+        properties: BTreeMap::from([("world.delivery_pending".into(), json!(true))]),
         ..WorldState::default()
     };
     let player_event = storylet_engine::apply_command(
@@ -41,7 +41,7 @@ fn eligible_npc_rule_commits_a_causal_event_without_advancing_an_extra_turn() {
         priority: 10,
         conditions: PredicateSet {
             all_of: vec![Predicate {
-                fact: FactRef::Quality {
+                fact: FactRef::Property {
                     key: "world.delivery_pending".into(),
                 },
                 op: PredicateOp::Eq,
@@ -51,11 +51,11 @@ fn eligible_npc_rule_commits_a_causal_event_without_advancing_an_extra_turn() {
         },
         action: "deliver_supplies".into(),
         effects: vec![
-            Effect::SetQuality {
+            Effect::SetProperty {
                 key: "world.delivery_pending".into(),
                 value: json!(false),
             },
-            Effect::AddQuality {
+            Effect::AddProperty {
                 key: "stock.clinic".into(),
                 amount: 2.0,
             },
@@ -67,10 +67,10 @@ fn eligible_npc_rule_commits_a_causal_event_without_advancing_an_extra_turn() {
     assert_eq!(report.events.len(), 1);
     assert_eq!(world.turn, 1);
     assert_eq!(
-        world.qualities.get("world.delivery_pending"),
+        world.properties.get("world.delivery_pending"),
         Some(&json!(false))
     );
-    assert_eq!(world.qualities.get("stock.clinic"), Some(&json!(2.0)));
+    assert_eq!(world.properties.get("stock.clinic"), Some(&json!(2.0)));
     assert_eq!(report.events[0].caused_by, vec![player_event.id]);
     assert_eq!(report.events[0].actor_id, "mira");
     assert!(!report.events[0].advanced_turn);
@@ -95,7 +95,7 @@ fn one_npc_acts_at_most_once_per_turn_and_rule_order_is_stable() {
         priority: 1,
         conditions: PredicateSet::default(),
         action: id.into(),
-        effects: vec![Effect::AddQuality {
+        effects: vec![Effect::AddProperty {
             key: format!("actions.{id}"),
             amount: 1.0,
         }],
@@ -105,8 +105,8 @@ fn one_npc_acts_at_most_once_per_turn_and_rule_order_is_stable() {
 
     assert_eq!(report.events.len(), 1);
     assert_eq!(report.events[0].action, "a_rule");
-    assert_eq!(world.qualities.get("actions.a_rule"), Some(&json!(1.0)));
-    assert!(!world.qualities.contains_key("actions.z_rule"));
+    assert_eq!(world.properties.get("actions.a_rule"), Some(&json!(1.0)));
+    assert!(!world.properties.contains_key("actions.z_rule"));
 }
 
 #[test]

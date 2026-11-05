@@ -3,14 +3,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
-use storylet_engine::chrono_dispatch::{WaypointTopicEdge, WaypointTopicGraph, WaypointTopicNode};
+use storylet_engine::chrono_runtime::PredicateOperator;
 use storylet_engine::chrono_runtime::{
-    ComparisonOperator, Condition, ConditionOperator, ConditionRule, DEFAULT_INPUT_PIN,
-    DEFAULT_OUTPUT_PIN, EdgeConnection, FlowGraphAsset, FlowNodeDef, NodeCategory, NodeKind,
-    PinDefinition, TimelineActionType, TimelineTrackEvent,
-    VariableAssignment as RuntimeVariableAssignment, VariableOperator, VariableScope,
-    VariableValue,
+    DataEdgeConnection, DataPinDefinition, EdgeConnection, FlowGraphAsset, FlowNodeDef,
+    NodeCategory, NodeKind, PinDefinition, TimelineActionType, TimelineTrackEvent,
+    DEFAULT_INPUT_PIN, DEFAULT_OUTPUT_PIN, DataValue, PropertyOperation,
 };
+use storylet_engine::chrono_dispatch::WaypointTopicGraph;
 use storylet_engine::chrono_state::{
     AttributeAssignment as RuntimeAttributeAssignment, AttributeOp as RuntimeAttributeOp,
     AttributePredicate as RuntimeAttributePredicate, AttributeValue as RuntimeAttributeValue,
@@ -19,18 +18,18 @@ use storylet_engine::chrono_state::{
     GraphMutation as RuntimeGraphMutation, GraphPattern as RuntimeGraphPattern,
     GraphTransformRule as RuntimeGraphTransformRule, MutationOp,
     PassionMutation as RuntimePassionMutation, TagBitset, VertexPattern as RuntimeVertexPattern,
-    VertexTemplate as RuntimeVertexTemplate,
+    VertexTemplate as RuntimeVertexTemplate, EntityTagMutation,
 };
 
 use crate::chrono_adapter::CompiledChronoDispatch;
-use crate::contracts::StoryletRecord;
+use crate::contracts::{EntityTemplateRecord, PropertyType, StoryletRecord};
 use crate::narrative_graph::{
     AttributeAssignment as AuthoredAttributeAssignment, AttributeOp as AuthoredAttributeOp,
     AttributePredicate as AuthoredAttributePredicate, AttributeValue as AuthoredAttributeValue,
     EdgePattern as AuthoredEdgePattern, EdgeTemplate as AuthoredEdgeTemplate,
     GraphBinding as AuthoredGraphBinding, GraphLayer as AuthoredGraphLayer,
     GraphTransformRule as AuthoredGraphTransformRule, NarrativeGraph, NarrativeNode,
-    NarrativeNodeData, VariableAssignment as AuthoredVariableAssignment,
+    NarrativeNodeData,
     VertexTemplate as AuthoredVertexTemplate,
 };
 
@@ -60,9 +59,7 @@ pub fn compile_narrative_graphs(
     let mut storylet_start_nodes = BTreeMap::new();
     for storylet in &ordered {
         let graph: NarrativeGraph = match &storylet.graph {
-            Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
-                format!("storylet {} graph is invalid JSON: {error}", storylet.id)
-            })?,
+            Some(value) => value.clone(),
             None => NarrativeGraph::from_storylet(storylet),
         };
         graph.validate().map_err(|issues| {
@@ -72,6 +69,15 @@ pub fn compile_narrative_graphs(
                 issues.join("; ")
             )
         })?;
+        if let Some(precondition_graph) = &storylet.precondition_graph {
+            precondition_graph.validate_precondition().map_err(|issues| {
+                format!(
+                    "storylet {} precondition graph is invalid: {}",
+                    storylet.id,
+                    issues.join("; ")
+                )
+            })?;
+        }
         let mut node_guids = BTreeMap::new();
         for node in &graph.nodes {
             let guid = stable_node_guid(&storylet.id, &node.id);
@@ -97,6 +103,7 @@ pub fn compile_narrative_graphs(
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut mission_assets = BTreeMap::new();
+    let mut data_edges = Vec::new();
     for (storylet, graph, node_guids) in &sources {
         let storylet_index = compiled
             .storylet_index(&storylet.id)
@@ -112,6 +119,7 @@ pub fn compile_narrative_graphs(
         )?;
         nodes.extend(asset.nodes.iter().cloned());
         edges.extend(asset.edges.iter().cloned());
+        data_edges.extend(asset.data_edges.iter().cloned());
         mission_assets.insert(asset.asset_id.clone(), asset);
     }
     for node in &nodes {
@@ -137,6 +145,7 @@ pub fn compile_narrative_graphs(
         start_node_guid,
         nodes,
         edges,
+        data_edges,
     };
     asset
         .validate()
@@ -169,12 +178,14 @@ fn compile_storylet_asset(
         )?;
         nodes.push(FlowNodeDef {
             node_guid: guid,
-            node_type_id: format!("{}:{}", storylet.id, node_type_name(&node.data)),
-            category,
+            node_type_id: node_type_name(&node.data).to_owned(),
             kind,
-            entity_path: node_entity_path(&node.data),
+            category,
+            entity_path: node_entity_path(&storylet.id, &node.data),
             input_pins: compile_input_pins(node, graph),
             output_pins: compile_output_pins(node),
+            data_input_pins: compile_data_input_pins(node),
+            data_output_pins: compile_data_output_pins(node),
             cost_ms: 0,
             mission_scope: None,
             payload: json!({
@@ -188,27 +199,34 @@ fn compile_storylet_asset(
         });
     }
     let mut edges = Vec::with_capacity(graph.edges.len());
+    let mut data_edges = Vec::new();
     for edge in &graph.edges {
         let source = *node_guids.get(&edge.from_node).ok_or_else(|| {
-            format!(
-                "edge {} has unknown source node {}",
-                edge.id, edge.from_node
-            )
+            format!("edge {} has unknown source node {}", edge.id, edge.from_node)
         })?;
-        let target = *node_guids
-            .get(&edge.to_node)
-            .ok_or_else(|| format!("edge {} has unknown target node {}", edge.id, edge.to_node))?;
-        edges.push(EdgeConnection {
-            source_node_guid: source,
-            source_pin_name: map_output_port(&edge.from_port),
-            target_node_guid: target,
-            target_pin_name: incoming_input_pin(graph, &edge.to_node, &edge.id),
-        });
+        let target = *node_guids.get(&edge.to_node).ok_or_else(|| {
+            format!("edge {} has unknown target node {}", edge.id, edge.to_node)
+        })?;
+        let (source_pin, target_pin) = if edge.kind == crate::narrative_graph::NarrativeEdgeKind::Data {
+            (edge.from_port.clone(), edge.to_port.clone())
+        } else {
+            (map_output_port(&edge.from_port), incoming_input_pin(graph, &edge.to_node, &edge.id))
+        };
+        if edge.kind == crate::narrative_graph::NarrativeEdgeKind::Data {
+            data_edges.push(DataEdgeConnection { source_node_guid: source, source_pin_name: source_pin, target_node_guid: target, target_pin_name: target_pin });
+        } else {
+            edges.push(EdgeConnection { source_node_guid: source, source_pin_name: source_pin, target_node_guid: target, target_pin_name: target_pin });
+        }
     }
     nodes.sort_by_key(|node| node.node_guid);
     edges.sort_by(|a, b| {
-        a.source_node_guid
-            .cmp(&b.source_node_guid)
+        a.source_node_guid.cmp(&b.source_node_guid)
+            .then_with(|| a.source_pin_name.cmp(&b.source_pin_name))
+            .then_with(|| a.target_node_guid.cmp(&b.target_node_guid))
+            .then_with(|| a.target_pin_name.cmp(&b.target_pin_name))
+    });
+    data_edges.sort_by(|a, b| {
+        a.source_node_guid.cmp(&b.source_node_guid)
             .then_with(|| a.source_pin_name.cmp(&b.source_pin_name))
             .then_with(|| a.target_node_guid.cmp(&b.target_node_guid))
             .then_with(|| a.target_pin_name.cmp(&b.target_pin_name))
@@ -219,6 +237,7 @@ fn compile_storylet_asset(
         start_node_guid,
         nodes,
         edges,
+        data_edges,
     };
     asset.validate().map_err(|error| {
         format!(
@@ -228,6 +247,64 @@ fn compile_storylet_asset(
     })?;
     Ok(asset)
 }
+/// Compile an authored pure precondition graph into the runtime asset used by
+/// candidate evaluation. It intentionally reuses the normal node/edge compiler
+/// so graph errors stay explicit and precondition graphs remain the sole eligibility contract.
+pub fn compile_precondition_graph(
+    storylet: &StoryletRecord,
+    graph: &NarrativeGraph,
+    compiled: &CompiledChronoDispatch,
+    entity_indices: &BTreeMap<String, u16>,
+) -> Result<FlowGraphAsset, String> {
+    graph.validate_precondition().map_err(|issues| {
+        format!(
+            "storylet {} precondition graph is invalid: {}",
+            storylet.id,
+            issues.join("; ")
+        )
+    })?;
+    let mut node_guids = BTreeMap::new();
+    for node in &graph.nodes {
+        node_guids.insert(node.id.clone(), stable_node_guid(&storylet.id, &node.id));
+    }
+    let start = graph
+        .nodes
+        .iter()
+        .find(|node| matches!(node.data, NarrativeNodeData::Start { .. }))
+        .ok_or_else(|| format!("storylet {} precondition graph has no Start node", storylet.id))?;
+    let mut starts = BTreeMap::new();
+    starts.insert(storylet.id.clone(), node_guids[&start.id]);
+    compile_storylet_asset(
+        storylet,
+        graph,
+        &node_guids,
+        compiled.storylet_index(&storylet.id)
+            .ok_or_else(|| format!("storylet {} was not compiled into dispatch", storylet.id))?,
+        compiled,
+        entity_indices,
+        &starts,
+    )
+    .map_err(|error| format!("storylet {} precondition graph compile failed: {error}", storylet.id))
+}
+/// Attach compiled authored precondition assets after world/entity indices exist.
+pub fn bind_precondition_graphs(
+    compiled: &mut CompiledChronoDispatch,
+    storylets: &[StoryletRecord],
+    entity_indices: &BTreeMap<String, u16>,
+) -> Result<(), String> {
+    for storylet in storylets {
+        let Some(graph) = &storylet.precondition_graph else {
+            continue;
+        };
+        let asset = compile_precondition_graph(storylet, graph, compiled, entity_indices)?;
+        let index = compiled
+            .storylet_index(&storylet.id)
+            .ok_or_else(|| format!("storylet {} was not compiled into dispatch", storylet.id))?;
+        compiled.dispatcher.storylets[index as usize].precondition_graph = Some(asset);
+    }
+    Ok(())
+}
+
 
 /// Binds QBN/Teleport dispatch results to the stable Start GUIDs compiled above.
 pub fn bind_storylet_start_nodes(
@@ -251,236 +328,200 @@ pub fn bind_storylet_start_nodes(
     }
     Ok(())
 }
+pub fn resolve_entity_tag(
+    _target: &str,
+    tag: &str,
+    _entity_game_ids: Option<&BTreeMap<String, String>>,
+) -> String {
+    // Gameplay tags are catalog-canonical names. Entity identity selects the
+    // graph target; it must never become part of the tag namespace.
+    tag.trim().to_owned()
+}
+
+
+fn convert_typed_value(value_type: &str, value: &Value) -> Result<DataValue, String> {
+    match value_type.trim().to_ascii_lowercase().as_str() {
+        "bool" | "boolean" => value.as_bool().map(DataValue::Bool),
+        "int" | "integer" => value.as_i64().map(DataValue::Int),
+        "float" | "number" => value.as_f64().map(DataValue::Float),
+        "string" => value.as_str().map(|v| DataValue::String(v.to_owned())),
+        "asset" => value.as_str().map(|v| DataValue::Asset(v.to_owned())),
+        "entity" | "entity_ref" => value.as_str().map(|v| DataValue::EntityRef(v.to_owned())),
+        other => return Err(format!("unsupported typed value type {other}")),
+    }
+    .ok_or_else(|| format!("typed literal does not match value type {value_type}"))
+}
 
 fn compile_node_kind(
     node: &NarrativeNode,
-    storylet_index: u16,
+    _storylet_index: u16,
     compiled: &CompiledChronoDispatch,
     entity_indices: &BTreeMap<String, u16>,
     storylet_start_nodes: &BTreeMap<String, u32>,
 ) -> Result<(NodeKind, NodeCategory), String> {
     let mapped = match &node.data {
-        NarrativeNodeData::Start { .. }
-        | NarrativeNodeData::Dialog { .. }
-        | NarrativeNodeData::Image { .. } => (
-            NodeKind::LogicAny {
-                default_output_pin: String::new(),
-            },
-            NodeCategory::LogicGate,
-        ),
-        NarrativeNodeData::Choice { .. } => (
-            NodeKind::Choice {
-                default_output_pin: String::new(),
-            },
-            NodeCategory::LogicGate,
-        ),
-        NarrativeNodeData::Variable { assignments } => (
-            NodeKind::VariableBatch {
-                assignments: assignments
-                    .iter()
-                    .map(|assignment| convert_variable_assignment(assignment, storylet_index))
-                    .collect::<Result<Vec<_>, _>>()?,
+        NarrativeNodeData::GetEntity { entity_path } => {
+            if entity_path.trim().is_empty() {
+                return Err("Get Entity node must select an entity.".into());
+            }
+            let entity_id = resolve_entity_path(entity_path, entity_indices)?;
+            (NodeKind::GetEntity { entity_id }, NodeCategory::LogicGate)
+        }
+        NarrativeNodeData::GetEntityProperty { property_key, value_type, .. } => (NodeKind::GetEntityProperty { property_key: property_key.clone(), value_type: value_type.clone() }, NodeCategory::LogicGate),
+        NarrativeNodeData::ApplyCommand { property_key, operation, value_type, value } => (
+            NodeKind::ApplyCommand {
+                property_key: property_key.clone(),
+                operation: match operation.as_str() {
+                    "add" => PropertyOperation::Add,
+                    "subtract" => PropertyOperation::Subtract,
+                    "toggle" => PropertyOperation::Toggle,
+                    _ => PropertyOperation::Set,
+                },
+                value: convert_typed_value(value_type, value)?,
             },
             NodeCategory::Mutator,
         ),
-        NarrativeNodeData::QbnStoryletHub {
-            deck_storylet_ids,
-            hub_exit_storylet_id,
-        } => (
+        NarrativeNodeData::And {} => (NodeKind::And, NodeCategory::LogicGate),
+        NarrativeNodeData::Or {} => (NodeKind::Or, NodeCategory::LogicGate),
+        NarrativeNodeData::Condition {} => (NodeKind::Condition { operator: PredicateOperator::Eq, literal: None }, NodeCategory::LogicGate),
+        NarrativeNodeData::QbnStoryletHub { deck_storylet_ids, hub_exit_storylet_id } => (
             NodeKind::QbnHub {
-                deck: deck_storylet_ids
-                    .iter()
-                    .map(|id| storylet_index_for(compiled, id))
-                    .collect::<Result<Vec<_>, _>>()?,
-                exit_storylet_id: if hub_exit_storylet_id.is_empty() {
-                    None
-                } else {
-                    Some(storylet_index_for(compiled, hub_exit_storylet_id)?)
-                },
-            },
-            NodeCategory::DynamicDispatcher,
-        ),
-        NarrativeNodeData::SalienceSelector {
-            candidate_pool_ids,
-            fallback_storylet_id,
-        } => {
-            let mut pool = Vec::with_capacity(candidate_pool_ids.len());
-            for id in candidate_pool_ids {
-                let index = storylet_index_for(compiled, id)?;
-                let def = compiled.dispatcher.storylet(index).ok_or_else(|| {
-                    format!(
-                        "salience node {} references storylet {id} that is not in the dispatcher",
-                        node.id
-                    )
-                })?;
-                if def.required_arc_phases.is_empty() {
-                    return Err(format!(
-                        "salience node {} candidate {id} has no required_arc_phases (REQ-BB-05)",
-                        node.id
-                    ));
-                }
-                pool.push(index);
-            }
-            (
-                NodeKind::SalienceSelector {
-                    pool,
-                    fallback_storylet_id: if fallback_storylet_id.trim().is_empty() {
-                        None
-                    } else {
-                        Some(storylet_index_for(compiled, fallback_storylet_id)?)
-                    },
-                    fallback_output_pin: String::new(),
-                },
-                NodeCategory::DynamicDispatcher,
-            )
-        }
-        NarrativeNodeData::WaypointConversation {
-            topic_nodes,
-            topic_edges,
-            initial_topic_id,
-            npc_goal_topic_id,
-        } => {
-            let nodes =
-                serde_json::from_value::<Vec<WaypointTopicNode>>(Value::Array(topic_nodes.clone()))
-                    .map_err(|error| {
-                        format!("waypoint node data on {} is invalid: {error}", node.id)
-                    })?;
-            let edges =
-                serde_json::from_value::<Vec<WaypointTopicEdge>>(Value::Array(topic_edges.clone()))
-                    .map_err(|error| {
-                        format!("waypoint edge data on {} is invalid: {error}", node.id)
-                    })?;
-            (
-                NodeKind::WaypointConversation {
-                    graph: WaypointTopicGraph { nodes, edges },
-                    initial_topic_id: initial_topic_id.clone(),
-                    npc_goal_topic_id: npc_goal_topic_id.clone(),
-                },
-                NodeCategory::DynamicDispatcher,
-            )
-        }
-        NarrativeNodeData::Waiter { wait_event } => (
-            NodeKind::Waiter {
-                duration_ms: i64::MAX,
-                required_tags: TagBitset::new(),
-                wait_event: wait_event.clone(),
-            },
-            NodeCategory::Waiter,
-        ),
-        NarrativeNodeData::LogicAll { .. } => (NodeKind::LogicAll, NodeCategory::LogicGate),
-        NarrativeNodeData::LogicAny { .. } => (
-            NodeKind::LogicAny {
-                default_output_pin: String::new(),
+                deck: deck_storylet_ids.iter().map(|id| storylet_index_for(compiled, id)).collect::<Result<Vec<_>, _>>()?,
+                exit_storylet_id: if hub_exit_storylet_id.trim().is_empty() { None } else { Some(storylet_index_for(compiled, hub_exit_storylet_id)?) },
             },
             NodeCategory::LogicGate,
         ),
-        NarrativeNodeData::Conditional { conditions } => (
-            NodeKind::Conditional {
-                condition: Condition {
-                    rules: conditions
-                        .iter()
-                        .map(|condition| convert_condition(condition, storylet_index))
-                        .collect::<Result<Vec<_>, _>>()?,
-                    true_pin: "true".into(),
-                    false_pin: "false".into(),
-                },
+        NarrativeNodeData::SalienceSelector { candidate_pool_ids, fallback_storylet_id } => (
+            NodeKind::SalienceSelector {
+                pool: candidate_pool_ids.iter().map(|id| storylet_index_for(compiled, id)).collect::<Result<Vec<_>, _>>()?,
+                fallback_storylet_id: if fallback_storylet_id.trim().is_empty() { None } else { Some(storylet_index_for(compiled, fallback_storylet_id)?) },
+                fallback_output_pin: DEFAULT_OUTPUT_PIN.into(),
             },
             NodeCategory::LogicGate,
         ),
-        NarrativeNodeData::SceneSection {
-            duration_ms,
-            events,
-        } => (
-            NodeKind::SceneSection {
-                section_duration_ms: i64::try_from(*duration_ms)
-                    .map_err(|_| format!("scene section {} duration is out of range", node.id))?,
-                events: events
-                    .iter()
-                    .enumerate()
-                    .map(|(index, event)| convert_timeline_event(event, index))
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
-            NodeCategory::ScopedContainer,
-        ),
-        NarrativeNodeData::MissionSubGraph { sub_graph_asset_id } => (
-            NodeKind::MissionSubGraph {
-                sub_graph_asset_id: sub_graph_asset_id.clone(),
-            },
-            NodeCategory::ScopedContainer,
-        ),
-        NarrativeNodeData::Poi { entity_path } => (
-            NodeKind::Poi {
-                poi_id: entity_path.clone(),
-            },
-            NodeCategory::LogicGate,
-        ),
-        NarrativeNodeData::Teleport {
-            destination_storylet,
-        } => {
-            let destination_storylet_id = storylet_index_for(compiled, destination_storylet)?;
-            let destination_node_guid = *storylet_start_nodes
-                .get(destination_storylet)
-                .ok_or_else(|| {
-                    format!(
-                        "teleport node {} targets missing storylet {}",
-                        node.id, destination_storylet
-                    )
-                })?;
-            (
-                NodeKind::Teleport {
-                    destination_storylet: Some(destination_storylet_id),
-                    destination_node_guid: Some(destination_node_guid),
-                },
-                NodeCategory::Mutator,
-            )
+        NarrativeNodeData::WaypointConversation { topic_nodes, topic_edges, initial_topic_id, npc_goal_topic_id } => {
+            let graph: WaypointTopicGraph = serde_json::from_value(json!({"nodes": topic_nodes, "edges": topic_edges}))
+                .map_err(|error| format!("invalid Waypoint Conversation topic graph: {error}"))?;
+            (NodeKind::WaypointConversation { graph, initial_topic_id: initial_topic_id.clone(), npc_goal_topic_id: npc_goal_topic_id.clone() }, NodeCategory::ScopedContainer)
         }
+        NarrativeNodeData::HasEntityTag { target_entity_id, tag, match_mode } => (NodeKind::HasEntityTag { entity_id: resolve_entity_path(target_entity_id, entity_indices)?, tag: resolve_entity_tag(target_entity_id, tag, Some(&compiled.entity_game_ids)), match_mode: match_mode.clone() }, NodeCategory::LogicGate),
+        NarrativeNodeData::Start { .. } | NarrativeNodeData::Dialog { .. } | NarrativeNodeData::Image { .. } => (NodeKind::LogicAny { default_output_pin:String::new() }, NodeCategory::LogicGate),
+        NarrativeNodeData::Choice { .. } => (NodeKind::Choice { default_output_pin:String::new() }, NodeCategory::LogicGate),
+        NarrativeNodeData::Waiter { wait_event } => (NodeKind::Waiter { duration_ms:i64::MAX, required_tags:TagBitset::new(), wait_event:wait_event.clone() }, NodeCategory::Waiter),
+        NarrativeNodeData::Compare { operator, value_type, value } => (NodeKind::Compare { operator: predicate_operator(operator)?, literal: convert_typed_value(value_type, value)? }, NodeCategory::LogicGate),
+        NarrativeNodeData::End { jump_to_storylet, precondition_result, .. } => (NodeKind::End { jump_to_storylet:jump_to_storylet.as_deref().map(|id|storylet_index_for(compiled,id)).transpose()?, precondition_result:precondition_result.unwrap_or(true) }, NodeCategory::LogicGate),
+        NarrativeNodeData::Teleport { destination_storylet } => (NodeKind::Teleport { destination_storylet:Some(storylet_index_for(compiled,destination_storylet)?), destination_node_guid:storylet_start_nodes.get(destination_storylet).copied() }, NodeCategory::Mutator),
         NarrativeNodeData::GoToLocation { location_id } => {
-            let entity_index = *entity_indices
-                .get(&format!("location:{location_id}"))
-                .ok_or_else(|| {
-                    format!(
-                        "Go To Location node {} targets unknown location {location_id}",
-                        node.id
-                    )
-                })?;
-            let mut op = MutationOp::default();
-            op.move_player = Some(entity_index);
+            let index = *entity_indices.get(location_id).ok_or_else(|| format!("unknown location {location_id}"))?;
+            let mut op = MutationOp::default(); op.move_player = Some(index);
             (NodeKind::Mutation { op }, NodeCategory::Mutator)
         }
-        NarrativeNodeData::GraphTransform { rule } => (
-            NodeKind::GraphTransform {
-                rule: convert_graph_transform_rule(rule),
-            },
-            NodeCategory::Mutator,
-        ),
-        NarrativeNodeData::PassionMutation { op } => (
-            NodeKind::PassionMutation {
-                op: RuntimePassionMutation {
-                    micro_deltas: op.micro_deltas.clone(),
-                    active_ops: op.active_ops.clone(),
-                },
-            },
-            NodeCategory::Mutator,
-        ),
-        NarrativeNodeData::End {
-            jump_to_storylet, ..
-        } => {
-            // A jump is a transition. If an author leaves the default terminal
-            // flag set while choosing a destination, the jump wins.
-            let destination = jump_to_storylet
-                .as_deref()
-                .map(|id| storylet_index_for(compiled, id))
-                .transpose()?;
-            (
-                NodeKind::End {
-                    jump_to_storylet: destination,
-                },
-                NodeCategory::LogicGate,
-            )
+        NarrativeNodeData::GraphTransform { rule } => (NodeKind::GraphTransform { rule: convert_graph_transform_rule(rule) }, NodeCategory::Mutator),
+        NarrativeNodeData::PassionMutation { op } => (NodeKind::PassionMutation { op: RuntimePassionMutation { micro_deltas: op.micro_deltas.clone(), active_ops: op.active_ops.clone() } }, NodeCategory::Mutator),
+        NarrativeNodeData::AddEntityTag { target_entity_id, tag } => {
+            let resolved = resolve_entity_tag(target_entity_id, tag, Some(&compiled.entity_game_ids));
+            let id = compiled.registry.id(&resolved).ok_or_else(|| format!("tag '{resolved}' is not registered"))?;
+            let mut mask = TagBitset::new(); if let Some(m)=compiled.registry.ancestors_mask(id){mask=*m;} else {let _=mask.set_bit(id);}
+            let mut op = MutationOp::default();
+            if target_entity_id.trim().is_empty() || target_entity_id.eq_ignore_ascii_case("world") { op.add_global_tags.merge(&mask); }
+            else { op.entity_tag_ops.push(EntityTagMutation { entity_id: resolve_entity_index(target_entity_id, entity_indices)?, add_tags: mask, remove_tags: TagBitset::new() }); }
+            (NodeKind::TagMutation { op, adding: true }, NodeCategory::Mutator)
         }
+        NarrativeNodeData::RemoveEntityTag { target_entity_id, tag } => {
+            let resolved = resolve_entity_tag(target_entity_id, tag, Some(&compiled.entity_game_ids));
+            let id = compiled.registry.id(&resolved).ok_or_else(|| format!("tag '{resolved}' is not registered"))?;
+            let mut mask = TagBitset::new(); if let Some(m)=compiled.registry.descendants_mask(id){mask=*m;} else {let _=mask.set_bit(id);}
+            let mut op = MutationOp::default();
+            if target_entity_id.trim().is_empty() || target_entity_id.eq_ignore_ascii_case("world") { op.remove_global_tags.merge(&mask); }
+            else { op.entity_tag_ops.push(EntityTagMutation { entity_id: resolve_entity_index(target_entity_id, entity_indices)?, add_tags: TagBitset::new(), remove_tags: mask }); }
+            (NodeKind::TagMutation { op, adding: false }, NodeCategory::Mutator)
+        }
+        NarrativeNodeData::MissionSubGraph { sub_graph_asset_id } => (NodeKind::MissionSubGraph { sub_graph_asset_id: sub_graph_asset_id.clone() }, NodeCategory::ScopedContainer),
+        NarrativeNodeData::SceneSection { duration_ms, events } => (NodeKind::SceneSection { section_duration_ms:i64::try_from(*duration_ms).map_err(|_|"duration out of range".to_string())?, events:events.iter().enumerate().map(|(i,e)|convert_timeline_event(e,i)).collect::<Result<Vec<_>,_>>()? }, NodeCategory::ScopedContainer),
+        NarrativeNodeData::Poi { entity_path } => (NodeKind::Poi { poi_id:entity_path.clone() }, NodeCategory::LogicGate),
     };
     Ok(mapped)
 }
+/// Validate authored property nodes against the entity selected by their data input.
+pub fn validate_entity_property_graph(graph: &NarrativeGraph, entities: &[EntityTemplateRecord]) -> Result<(), String> {
+    let node_by_id: BTreeMap<&str, &NarrativeNode> =
+        graph.nodes.iter().map(|node| (node.id.as_str(), node)).collect();
+    for node in &graph.nodes {
+        let (key, value_type, operation, command_value) = match &node.data {
+            NarrativeNodeData::GetEntityProperty { property_key, value_type } =>
+                (property_key.as_str(), value_type.as_str(), None, None),
+            NarrativeNodeData::ApplyCommand { property_key, operation, value_type, value } =>
+                (property_key.as_str(), value_type.as_str(), Some(operation.as_str()), Some(value)),
+            _ => continue,
+        };
+        let source = graph.edges.iter()
+            .find(|edge| edge.kind == crate::narrative_graph::NarrativeEdgeKind::Data
+                && edge.to_node == node.id && edge.to_port == "entity")
+            .and_then(|edge| node_by_id.get(edge.from_node.as_str()).copied())
+            .ok_or_else(|| format!("node {} has no resolvable entity data source", node.id))?;
+        let candidates: Vec<&EntityTemplateRecord> = match &source.data {
+            NarrativeNodeData::GetEntity { entity_path } => {
+                let target = entity_path.trim();
+                let found = entities.iter().find(|entity| entity.id == target);
+                vec![found.ok_or_else(|| format!("node {} references unresolved entity '{}'", node.id, entity_path))?]
+            }
+            NarrativeNodeData::GetEntityProperty { value_type: source_type, .. }
+                if matches!(source_type.to_ascii_lowercase().as_str(), "entity" | "entity_ref") =>
+                entities.iter().collect(),
+            _ => return Err(format!("node {} has invalid entity data source", node.id)),
+        };
+        if candidates.is_empty() {
+            return Err(format!("node {} has no project entity schemas to validate against", node.id));
+        }
+        let expected = match value_type.to_ascii_lowercase().as_str() {
+            "bool" | "boolean" => PropertyType::Bool, "string" => PropertyType::String,
+            "int" | "integer" => PropertyType::Int, "float" | "number" => PropertyType::Float,
+            "asset" => PropertyType::Asset, "entity" | "entity_ref" => PropertyType::Entity,
+            other => return Err(format!("node {} uses unsupported property type '{}'", node.id, other)),
+        };
+        if let Some(value) = command_value {
+            convert_typed_value(value_type, value)
+                .map_err(|error| format!("node {} has invalid ApplyCommand value: {}", node.id, error))?;
+        }
+        for entity in candidates {
+            let property = entity.properties.iter().find(|property| property.key == key)
+                .ok_or_else(|| format!("node {} references undeclared entity property '{}' on '{}'", node.id, key, entity.id))?;
+            if property.is_array {
+                return Err(format!("node {} references array property '{}' unsupported by scalar graph nodes", node.id, key));
+            }
+            if property.property_type != expected {
+                return Err(format!("node {} property '{}' type mismatch on '{}'", node.id, key, entity.id));
+            }
+            if let Some(operation) = operation {
+                let valid = match operation.to_ascii_lowercase().as_str() {
+                    "set" => true,
+                    "toggle" => expected == PropertyType::Bool,
+                    "add" | "subtract" => matches!(expected, PropertyType::Int | PropertyType::Float),
+                    _ => false,
+                };
+                if !valid {
+                    return Err(format!("node {} operation '{}' is invalid for property '{}'", node.id, operation, key));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+fn resolve_entity_index(target: &str, indices: &BTreeMap<String, u16>) -> Result<u16, String> {
+    resolve_entity_path(target, indices)
+        .and_then(|path| indices.get(&path).copied().ok_or_else(|| format!("unknown entity target {target}")))
+}
+fn resolve_entity_path(target: &str, indices: &BTreeMap<String, u16>) -> Result<String, String> {
+    let target = target.trim();
+    if target.is_empty() || target.eq_ignore_ascii_case("world") {
+        return Ok("world".into());
+    }
+    if indices.contains_key(target) {
+        return Ok(target.to_owned());
+    }
+    Err(format!("unknown entity target {target}"))
+}
+fn predicate_operator(op:&str)->Result<PredicateOperator,String>{match op.trim().to_ascii_lowercase().as_str(){"eq"|"=="=>Ok(PredicateOperator::Eq),"neq"|"!="=>Ok(PredicateOperator::Neq),"gt"|">"=>Ok(PredicateOperator::Gt),"gte"|">="=>Ok(PredicateOperator::Gte),"lt"|"<"=>Ok(PredicateOperator::Lt),"lte"|"<="=>Ok(PredicateOperator::Lte),other=>Err(format!("unknown condition operator {other}"))}}
 fn convert_graph_transform_rule(rule: &AuthoredGraphTransformRule) -> RuntimeGraphTransformRule {
     RuntimeGraphTransformRule {
         lhs: RuntimeGraphPattern {
@@ -623,27 +664,49 @@ fn convert_attribute_assignment(
     }
 }
 
-fn compile_input_pins(node: &NarrativeNode, graph: &NarrativeGraph) -> Vec<PinDefinition> {
-    let mut edges: Vec<&crate::narrative_graph::NarrativeEdge> = graph
-        .edges
-        .iter()
-        .filter(|edge| edge.to_node == node.id)
-        .collect();
-    edges.sort_by(|a, b| a.id.cmp(&b.id));
-    if edges.len() > 1 {
-        return edges
-            .iter()
-            .enumerate()
-            .map(|(index, _)| PinDefinition {
-                pin_name: format!("In_{index}"),
-                is_input: true,
-            })
-            .collect();
+fn compile_data_input_pins(node: &NarrativeNode) -> Vec<DataPinDefinition> {
+    match &node.data {
+        NarrativeNodeData::GetEntityProperty { .. } => vec![DataPinDefinition { pin_name: "entity".into(), value_type: "entity_ref".into(), is_input: true }],
+        NarrativeNodeData::ApplyCommand { .. } => vec![
+            DataPinDefinition { pin_name: "entity".into(), value_type: "entity_ref".into(), is_input: true },
+        ],
+        NarrativeNodeData::AddEntityTag { .. } | NarrativeNodeData::RemoveEntityTag { .. } | NarrativeNodeData::HasEntityTag { .. } =>
+            vec![DataPinDefinition { pin_name: "target".into(), value_type: "entity_ref".into(), is_input: true }],
+        NarrativeNodeData::Condition {} | NarrativeNodeData::And {} | NarrativeNodeData::Or {} =>
+            vec![DataPinDefinition { pin_name: "input".into(), value_type: "bool".into(), is_input: true }],
+        NarrativeNodeData::Compare { .. } => vec![DataPinDefinition { pin_name: "input".into(), value_type: "any".into(), is_input: true }],
+        _ => Vec::new(),
     }
-    vec![PinDefinition {
-        pin_name: DEFAULT_INPUT_PIN.into(),
-        is_input: true,
-    }]
+}
+
+fn compile_data_output_pins(node: &NarrativeNode) -> Vec<DataPinDefinition> {
+    match &node.data {
+        NarrativeNodeData::GetEntity { .. } => vec![DataPinDefinition { pin_name: "output".into(), value_type: "entity_ref".into(), is_input: false }],
+        NarrativeNodeData::GetEntityProperty { value_type, .. } => vec![DataPinDefinition {
+            pin_name: "output".into(),
+            value_type: if value_type == "entity" { "entity_ref".into() } else { value_type.clone() },
+            is_input: false,
+        }],
+        NarrativeNodeData::HasEntityTag { .. } =>
+            vec![DataPinDefinition { pin_name: "output".into(), value_type: "bool".into(), is_input: false }],
+        NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. } =>
+            vec![DataPinDefinition { pin_name: "output".into(), value_type: "bool".into(), is_input: false }],
+        _ => Vec::new(),
+    }
+}
+
+fn compile_input_pins(node: &NarrativeNode, graph: &NarrativeGraph) -> Vec<PinDefinition> {
+    if matches!(node.data, NarrativeNodeData::GetEntity { .. } | NarrativeNodeData::GetEntityProperty { .. } | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. }) {
+        return Vec::new();
+    }
+    let mut edges: Vec<&crate::narrative_graph::NarrativeEdge> = graph.edges.iter()
+        .filter(|edge| edge.to_node == node.id && edge.kind == crate::narrative_graph::NarrativeEdgeKind::Flow)
+        .collect();
+    edges.sort_by(|a,b| a.id.cmp(&b.id));
+    if edges.len() > 1 {
+        return edges.iter().enumerate().map(|(index,_)| PinDefinition { pin_name: format!("In_{index}"), is_input: true }).collect();
+    }
+    vec![PinDefinition { pin_name: DEFAULT_INPUT_PIN.into(), is_input: true }]
 }
 
 fn compile_output_pins(node: &NarrativeNode) -> Vec<PinDefinition> {
@@ -651,7 +714,8 @@ fn compile_output_pins(node: &NarrativeNode) -> Vec<PinDefinition> {
         NarrativeNodeData::Choice { choices } => (0..choices.len())
             .map(|index| format!("choice_{index}"))
             .collect(),
-        NarrativeNodeData::Conditional { .. } => vec!["true".into(), "false".into()],
+        NarrativeNodeData::Condition {} => vec!["true".into(), "false".into()],
+        NarrativeNodeData::GetEntity { .. } | NarrativeNodeData::GetEntityProperty { .. } | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. } => Vec::new(),
         NarrativeNodeData::WaypointConversation { topic_nodes, .. } => {
             let mut pins = BTreeSet::new();
             for topic in topic_nodes {
@@ -684,7 +748,7 @@ fn incoming_input_pin(graph: &NarrativeGraph, target_node_id: &str, edge_id: &st
     let mut edges: Vec<&crate::narrative_graph::NarrativeEdge> = graph
         .edges
         .iter()
-        .filter(|edge| edge.to_node == target_node_id)
+        .filter(|edge| edge.to_node == target_node_id && edge.kind == crate::narrative_graph::NarrativeEdgeKind::Flow)
         .collect();
     if edges.len() <= 1 {
         return DEFAULT_INPUT_PIN.to_owned();
@@ -711,76 +775,6 @@ fn storylet_index_for(compiled: &CompiledChronoDispatch, id: &str) -> Result<u16
         .ok_or_else(|| format!("graph references unknown storylet {id}"))
 }
 
-fn convert_variable_assignment(
-    assignment: &AuthoredVariableAssignment,
-    storylet_id: u16,
-) -> Result<RuntimeVariableAssignment, String> {
-    let scope = match assignment.scope.trim().to_ascii_lowercase().as_str() {
-        "global" => VariableScope::Global,
-        "local" => VariableScope::Storylet(storylet_id),
-        other => return Err(format!("unknown variable scope {other}")),
-    };
-    let operator = match assignment.op.trim().to_ascii_lowercase().as_str() {
-        "set" => VariableOperator::Set,
-        "add" => VariableOperator::Add,
-        "subtract" | "sub" => VariableOperator::Subtract,
-        "toggle" => VariableOperator::Toggle,
-        other => return Err(format!("unknown variable operator {other}")),
-    };
-    let value = convert_variable_value(&assignment.value)?;
-    Ok(RuntimeVariableAssignment {
-        scope,
-        name: assignment.quality.clone(),
-        operator,
-        value,
-    })
-}
-
-fn convert_condition(
-    condition: &crate::narrative_graph::ConditionRule,
-    storylet_id: u16,
-) -> Result<ConditionRule, String> {
-    let scope = match condition.scope.trim().to_ascii_lowercase().as_str() {
-        "global" => VariableScope::Global,
-        "local" => VariableScope::Storylet(storylet_id),
-        other => return Err(format!("unknown conditional variable scope {other}")),
-    };
-    let comparison = match condition.op.trim().to_ascii_lowercase().as_str() {
-        "eq" | "==" => ComparisonOperator::Equal,
-        "neq" | "!=" => ComparisonOperator::NotEqual,
-        "gt" | ">" => ComparisonOperator::Greater,
-        "gte" | ">=" => ComparisonOperator::GreaterOrEqual,
-        "lt" | "<" => ComparisonOperator::Less,
-        "lte" | "<=" => ComparisonOperator::LessOrEqual,
-        other => return Err(format!("unknown condition operator {other}")),
-    };
-    Ok(ConditionRule {
-        operator: ConditionOperator::Variable,
-        comparison,
-        value: convert_variable_value(&condition.value)?,
-        variable_scope: scope,
-        variable_name: condition.variable.clone(),
-        ..ConditionRule::default()
-    })
-}
-
-fn convert_variable_value(value: &Value) -> Result<VariableValue, String> {
-    match value {
-        Value::Bool(value) => Ok(VariableValue::Flag(*value)),
-        Value::Number(value) => {
-            let value = value
-                .as_f64()
-                .ok_or_else(|| "invalid number variable value".to_string())?
-                as f32;
-            if !value.is_finite() {
-                return Err("numeric variable value exceeds f32 range".into());
-            }
-            Ok(VariableValue::Number(value))
-        }
-        Value::String(value) => Ok(VariableValue::Text(value.clone())),
-        _ => Err("variables support only number, boolean, or string values".into()),
-    }
-}
 
 fn convert_timeline_event(event: &Value, index: usize) -> Result<TimelineTrackEvent, String> {
     let get = |snake: &str, camel: &str| event.get(snake).or_else(|| event.get(camel));
@@ -841,7 +835,7 @@ fn convert_timeline_event(event: &Value, index: usize) -> Result<TimelineTrackEv
     })
 }
 
-fn node_entity_path(data: &NarrativeNodeData) -> String {
+fn node_entity_path(_storylet_id: &str, data: &NarrativeNodeData) -> String {
     match data {
         NarrativeNodeData::Poi { entity_path } => entity_path.clone(),
         _ => String::new(),
@@ -853,14 +847,17 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::Start { .. } => "Start",
         NarrativeNodeData::Dialog { .. } => "Dialog",
         NarrativeNodeData::Choice { .. } => "Choice",
-        NarrativeNodeData::Variable { .. } => "Variable",
+        NarrativeNodeData::GetEntity { .. } => "GetEntity",
+        NarrativeNodeData::GetEntityProperty { .. } => "GetEntityProperty",
+        NarrativeNodeData::ApplyCommand { .. } => "ApplyCommand",
         NarrativeNodeData::QbnStoryletHub { .. } => "QbnStoryletHub",
         NarrativeNodeData::SalienceSelector { .. } => "SalienceSelector",
         NarrativeNodeData::WaypointConversation { .. } => "WaypointConversation",
         NarrativeNodeData::Waiter { .. } => "Waiter",
-        NarrativeNodeData::LogicAll { .. } => "LogicAll",
-        NarrativeNodeData::LogicAny { .. } => "LogicAny",
-        NarrativeNodeData::Conditional { .. } => "Conditional",
+        NarrativeNodeData::Compare { .. } => "Compare",
+        NarrativeNodeData::And {} => "AND",
+        NarrativeNodeData::Or {} => "OR",
+        NarrativeNodeData::Condition {} => "Condition",
         NarrativeNodeData::SceneSection { .. } => "SceneSection",
         NarrativeNodeData::MissionSubGraph { .. } => "MissionSubGraph",
         NarrativeNodeData::Poi { .. } => "Poi",
@@ -869,10 +866,12 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::GoToLocation { .. } => "GoToLocation",
         NarrativeNodeData::GraphTransform { .. } => "GraphTransform",
         NarrativeNodeData::PassionMutation { .. } => "PassionMutation",
+        NarrativeNodeData::AddEntityTag { .. } => "AddEntityTag",
+        NarrativeNodeData::RemoveEntityTag { .. } => "RemoveEntityTag",
+        NarrativeNodeData::HasEntityTag { .. } => "HasEntityTag",
         NarrativeNodeData::End { .. } => "End",
     }
 }
-
 fn stable_node_guid(storylet_id: &str, node_id: &str) -> u32 {
     let mut hash = 2_166_136_261u32;
     for byte in storylet_id.bytes().chain([0]).chain(node_id.bytes()) {
@@ -883,11 +882,277 @@ fn stable_node_guid(storylet_id: &str, node_id: &str) -> u32 {
 }
 #[cfg(test)]
 mod tests {
-    use super::{bind_storylet_start_nodes, compile_narrative_graphs};
+    use super::{
+        bind_precondition_graphs, bind_storylet_start_nodes, compile_narrative_graphs,
+        compile_node_kind, compile_output_pins, validate_entity_property_graph,
+    };
     use crate::chrono_adapter::compile_chrono_dispatch;
     use crate::contracts::StoryletRecord;
-    use storylet_engine::chrono_runtime::{FlowGraphInstance, RuntimeContext};
-    use storylet_engine::chrono_state::WorldStateTable;
+    use crate::narrative_graph::{NarrativeGraph, NarrativeNode, NarrativeNodeData};
+    use serde_json::{json, Value};
+    use storylet_engine::chrono_runtime::{FlowGraphInstance, NodeKind, RuntimeContext};
+    use storylet_engine::chrono_state::{AttributeValue, GraphLayer, WorldStateTable, WorldVertex};
+
+    fn entity(key: &str, property_type: &str) -> crate::contracts::EntityTemplateRecord {
+        serde_json::from_value(json!({
+            "id": "world", "name": "World", "root_tag": "world",
+            "properties": [{ "key": key, "name": key, "type": property_type, "value": null }]
+        })).expect("entity fixture")
+    }
+
+    fn property_graph(source: NarrativeNodeData, property: NarrativeNodeData) -> NarrativeGraph {
+        NarrativeGraph {
+            nodes: vec![
+                NarrativeNode { id: "source".into(), title: "Source".into(), x: 0, y: 0, width: 100, height: 80, data: source },
+                NarrativeNode { id: "property".into(), title: "Property".into(), x: 120, y: 0, width: 100, height: 80, data: property },
+            ],
+            edges: vec![crate::narrative_graph::NarrativeEdge {
+                id: "source-property".into(), from_node: "source".into(), from_port: "output".into(),
+                to_node: "property".into(), to_port: "entity".into(),
+                kind: crate::narrative_graph::NarrativeEdgeKind::Data,
+            }],
+        }
+    }
+    fn dynamic_property_graph(property: NarrativeNodeData) -> NarrativeGraph {
+        let mut graph = property_graph(
+            NarrativeNodeData::GetEntity { entity_path: "world".into() },
+            NarrativeNodeData::GetEntityProperty { property_key: "ref".into(), value_type: "entity".into() },
+        );
+        graph.nodes[1].id = "reference".into();
+        graph.nodes[1].title = "Reference".into();
+        graph.edges[0].to_node = "reference".into();
+        graph.nodes.push(NarrativeNode {
+            id: "property".into(), title: "Property".into(), x: 240, y: 0,
+            width: 100, height: 80, data: property,
+        });
+        graph.edges.push(crate::narrative_graph::NarrativeEdge {
+            id: "reference-property".into(), from_node: "reference".into(), from_port: "output".into(),
+            to_node: "property".into(), to_port: "entity".into(),
+            kind: crate::narrative_graph::NarrativeEdgeKind::Data,
+        });
+        graph
+    }
+
+    #[test]
+    fn entity_property_validation_is_source_aware_and_rejects_invalid_commands() {
+        let direct = NarrativeNodeData::GetEntity { entity_path: "world".into() };
+        let get = || NarrativeNodeData::GetEntityProperty { property_key: "mood".into(), value_type: "string".into() };
+        assert!(validate_entity_property_graph(&property_graph(direct.clone(), get()), &[entity("mood", "string")]).is_ok());
+        assert!(validate_entity_property_graph(&property_graph(direct.clone(), NarrativeNodeData::GetEntityProperty { property_key: "missing".into(), value_type: "string".into() }), &[entity("mood", "string")]).is_err());
+        assert!(validate_entity_property_graph(&property_graph(direct.clone(), NarrativeNodeData::GetEntityProperty { property_key: "mood".into(), value_type: "int".into() }), &[entity("mood", "string")]).is_err());
+        let array_entity: crate::contracts::EntityTemplateRecord = serde_json::from_value(json!({
+            "id": "world", "name": "World", "root_tag": "world",
+            "properties": [{ "key": "mood", "name": "Mood", "type": "string", "is_array": true, "value": [] }]
+        })).expect("array entity fixture");
+        assert!(validate_entity_property_graph(&property_graph(direct.clone(), get()), &[array_entity]).is_err());
+        let world: crate::contracts::EntityTemplateRecord = serde_json::from_value(json!({
+            "id": "world", "name": "World", "root_tag": "world",
+            "properties": [
+                { "key": "ref", "name": "ref", "type": "entity", "value": null },
+                { "key": "mood", "name": "Mood", "type": "string", "value": null }
+            ]
+        })).expect("world fixture");
+        let get_mood = NarrativeNodeData::GetEntityProperty { property_key: "mood".into(), value_type: "string".into() };
+        let complete = |property_type: &str| serde_json::from_value(json!({
+            "id": "target", "name": "Target", "root_tag": "fact",
+            "properties": [
+                { "key": "ref", "name": "ref", "type": "entity", "value": null },
+                { "key": "mood", "name": "mood", "type": property_type, "value": null }
+            ]
+        })).expect("dynamic entity fixture");
+        assert!(validate_entity_property_graph(&dynamic_property_graph(get_mood.clone()), &[world.clone(), complete("string")]).is_ok());
+        assert!(validate_entity_property_graph(&dynamic_property_graph(get_mood.clone()), &[world.clone(), entity("ref", "entity")]).is_err());
+        assert!(validate_entity_property_graph(&dynamic_property_graph(get_mood), &[world.clone(), complete("string"), complete("int")]).is_err());
+        let command = NarrativeNodeData::ApplyCommand { property_key: "mood".into(), operation: "explode".into(), value_type: "string".into(), value: json!("x") };
+        assert!(validate_entity_property_graph(&property_graph(direct, command), &[entity("mood", "string")]).is_err());
+        let int_command = |value| NarrativeNodeData::ApplyCommand {
+            property_key: "count".into(), operation: "set".into(), value_type: "int".into(), value,
+        };
+        assert!(validate_entity_property_graph(
+            &property_graph(NarrativeNodeData::GetEntity { entity_path: "world".into() }, int_command(json!(3))),
+            &[entity("count", "int")],
+        ).is_ok());
+        assert!(validate_entity_property_graph(
+            &property_graph(NarrativeNodeData::GetEntity { entity_path: "world".into() }, int_command(json!("3"))),
+            &[entity("count", "int")],
+        ).is_err());
+        assert!(validate_entity_property_graph(
+            &property_graph(NarrativeNodeData::GetEntity { entity_path: "world".into() }, int_command(Value::Null)),
+            &[entity("count", "int")],
+        ).is_err());
+    }
+
+    #[test]
+    fn chrono_special_nodes_preserve_runtime_kind_selection_and_output_pins() {
+        let storylet: StoryletRecord = serde_json::from_value(json!({
+            "id": "hub", "title": "Hub", "content": {"text_template": "x"}, "effects": {}, "created_at": 1
+        })).expect("storylet fixture");
+        let dispatch = compile_chrono_dispatch(&[storylet], &[], &[]).expect("dispatch");
+        let node = |id: &str, data: NarrativeNodeData| NarrativeNode {
+            id: id.into(), title: id.into(), x: 0, y: 0, width: 100, height: 80, data
+        };
+        let hub = node("hub", NarrativeNodeData::QbnStoryletHub { deck_storylet_ids: vec!["hub".into()], hub_exit_storylet_id: "hub".into() });
+        let (kind, _) = compile_node_kind(&hub, 0, &dispatch, &std::collections::BTreeMap::new(), &std::collections::BTreeMap::new()).expect("hub");
+        assert!(matches!(kind, NodeKind::QbnHub { deck, exit_storylet_id: Some(0) } if deck == vec![0]));
+        assert_eq!(super::node_type_name(&hub.data), "QbnStoryletHub");
+        let salience = node("salience", NarrativeNodeData::SalienceSelector { candidate_pool_ids: vec!["hub".into()], fallback_storylet_id: "hub".into() });
+        let (kind, _) = compile_node_kind(&salience, 0, &dispatch, &std::collections::BTreeMap::new(), &std::collections::BTreeMap::new()).expect("salience");
+        assert_eq!(super::node_type_name(&salience.data), "SalienceSelector");
+        assert!(matches!(kind, NodeKind::SalienceSelector { pool, fallback_storylet_id: Some(0), fallback_output_pin } if pool == vec![0] && fallback_output_pin == "Out"));
+        assert_eq!(compile_output_pins(&salience)[0].pin_name, "Out");
+        let waypoint = node("waypoint", NarrativeNodeData::WaypointConversation {
+            topic_nodes: vec![json!({"topic_id":"start","exit_output_pin":"leave"})],
+            topic_edges: vec![], initial_topic_id: "start".into(), npc_goal_topic_id: "start".into(),
+        });
+        let (kind, _) = compile_node_kind(&waypoint, 0, &dispatch, &std::collections::BTreeMap::new(), &std::collections::BTreeMap::new()).expect("waypoint");
+        assert!(matches!(kind, NodeKind::WaypointConversation { initial_topic_id, npc_goal_topic_id, .. } if initial_topic_id == "start" && npc_goal_topic_id == "start"));
+        assert_eq!(super::node_type_name(&waypoint.data), "WaypointConversation");
+        assert_eq!(super::node_type_name(&NarrativeNodeData::GetEntity { entity_path: "world".into() }), "GetEntity");
+        assert_eq!(super::node_type_name(&NarrativeNodeData::GetEntityProperty { property_key: "awake".into(), value_type: "bool".into() }), "GetEntityProperty");
+        assert_eq!(super::node_type_name(&NarrativeNodeData::ApplyCommand { property_key: "awake".into(), operation: "toggle".into(), value_type: "bool".into(), value: json!(false) }), "ApplyCommand");
+        assert_eq!(compile_output_pins(&waypoint).iter().map(|pin| pin.pin_name.as_str()).collect::<Vec<_>>(), vec!["leave"]);
+    }
+
+    #[test]
+    fn authored_precondition_graph_is_bound_to_dispatch_storylet() {
+        let storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
+            "id": "gated",
+            "title": "Gated",
+            "content": { "text_template": "A scene." },
+            "effects": {},
+            "created_at": 1,
+            "precondition_graph": {
+                "nodes": [
+                    { "id": "start", "title": "Start", "type": "start", "text": "Check", "x": 0, "y": 0, "width": 100, "height": 80 },
+                    { "id": "reject", "title": "Reject", "type": "end", "precondition_result": false, "x": 200, "y": 0, "width": 120, "height": 80 }
+                ],
+                "edges": [
+                    { "id": "start-reject", "from_node": "start", "from_port": "output", "to_node": "reject", "to_port": "input" }
+                ]
+            }
+        }))
+        .expect("valid storylet");
+        let mut dispatch =
+            compile_chrono_dispatch(std::slice::from_ref(&storylet), &[], &[]).expect("dispatch compiles");
+        let _graphs = compile_narrative_graphs(
+            "project-a",
+            std::slice::from_ref(&storylet),
+            &dispatch,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("graphs validate");
+        bind_precondition_graphs(
+            &mut dispatch,
+            std::slice::from_ref(&storylet),
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("precondition graph binds");
+
+        let storylet = dispatch.dispatcher.storylet(0).expect("storylet in dispatch");
+        let graph = storylet.precondition_graph.as_ref().expect("authored graph bound");
+        assert!(graph.nodes.iter().any(|node| matches!(
+            &node.kind,
+            NodeKind::End {
+                precondition_result,
+                ..
+            } if !precondition_result
+        )));
+    }
+
+    #[test]
+    fn connected_entity_ref_targets_drive_precondition_tag_checks_for_entities_and_world() {
+        use crate::narrative_graph::{NarrativeEdge, NarrativeEdgeKind};
+
+        let entity_indices = std::collections::BTreeMap::from([
+            ("world".to_string(), 0_u16),
+            ("actor".to_string(), 1_u16),
+        ]);
+        let node = |id: &str, data: NarrativeNodeData| NarrativeNode {
+            id: id.into(), title: id.into(), x: 0, y: 0, width: 160, height: 80, data
+        };
+
+        for (storylet_id, dynamic_target) in [
+            ("precondition-actor", "actor"),
+            ("precondition-world", "world"),
+        ] {
+            let gameplay_tag = if dynamic_target == "world" {
+                "world.garden.precondition"
+            } else {
+                "character.garden.precondition"
+            };
+            let mut storylet: StoryletRecord = serde_json::from_value(json!({
+                "id": storylet_id,
+                "title": storylet_id,
+                "content": { "text_template": "Eligible." },
+                "created_at": 0
+            })).unwrap();
+            storylet.precondition_graph = Some(NarrativeGraph {
+                nodes: vec![
+                    node("start", NarrativeNodeData::Start { label: "Check".into() }),
+                    node("target", NarrativeNodeData::GetEntity { entity_path: dynamic_target.into() }),
+                    node("has", NarrativeNodeData::HasEntityTag {
+                        target_entity_id: "world".into(),
+                        tag: gameplay_tag.into(),
+                        match_mode: "all".into(),
+                    }),
+                    node("condition", NarrativeNodeData::Condition {}),
+                    node("eligible", NarrativeNodeData::End {
+                        is_terminal: true,
+                        jump_to_storylet: None,
+                        precondition_result: Some(true),
+                    }),
+                    node("ineligible", NarrativeNodeData::End {
+                        is_terminal: true,
+                        jump_to_storylet: None,
+                        precondition_result: Some(false),
+                    }),
+                ],
+                edges: vec![
+                    NarrativeEdge { id: "start-condition".into(), from_node: "start".into(), from_port: "output".into(), to_node: "condition".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                    NarrativeEdge { id: "has-condition".into(), from_node: "has".into(), from_port: "output".into(), to_node: "condition".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Data },
+                    NarrativeEdge { id: "target-has".into(), from_node: "target".into(), from_port: "output".into(), to_node: "has".into(), to_port: "target".into(), kind: NarrativeEdgeKind::Data },
+                    NarrativeEdge { id: "condition-eligible".into(), from_node: "condition".into(), from_port: "true".into(), to_node: "eligible".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                    NarrativeEdge { id: "condition-ineligible".into(), from_node: "condition".into(), from_port: "false".into(), to_node: "ineligible".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                ],
+            });
+            let mut dispatch = compile_chrono_dispatch(std::slice::from_ref(&storylet), &[], &[])
+                .expect("dispatch compiles");
+            bind_precondition_graphs(
+                &mut dispatch,
+                std::slice::from_ref(&storylet),
+                &entity_indices,
+            )
+            .expect("precondition graph compiles");
+
+            let tag_id = dispatch.registry.id(gameplay_tag)
+                .expect("precondition tag registered");
+            let mut state = WorldStateTable::with_capacity(2);
+            state.vertices.push(WorldVertex {
+                vertex_id: "actor".into(),
+                layer: GraphLayer::Character,
+                entity_index: Some(1),
+                attributes: std::collections::BTreeMap::new(),
+            });
+            if dynamic_target == "world" {
+                state.global_tags.set_bit(tag_id).unwrap();
+            } else {
+                state.entity_tags[1].set_bit(tag_id).unwrap();
+            }
+
+            let graph = dispatch.dispatcher.storylet(0).unwrap()
+                .precondition_graph.as_ref().expect("precondition graph bound");
+            let context = RuntimeContext::with_registry(
+                &mut state,
+                &dispatch.dispatcher,
+                &dispatch.registry,
+            );
+            assert!(
+                FlowGraphInstance::evaluate_precondition_graph(graph, &context).unwrap(),
+                "{storylet_id}: Has Entity Tag must use the connected target, not its static fallback"
+            );
+        }
+    }
+
 
     #[test]
     fn compiled_authored_graph_executes_from_storylet_start_to_end() {
@@ -900,7 +1165,7 @@ mod tests {
         }))
         .expect("valid storylet");
         let mut dispatch =
-            compile_chrono_dispatch(&[storylet.clone()], &[], &[], &[]).expect("dispatch compiles");
+            compile_chrono_dispatch(&[storylet.clone()], &[], &[]).expect("dispatch compiles");
         let graphs = compile_narrative_graphs(
             "project-a",
             &[storylet],
@@ -936,6 +1201,62 @@ mod tests {
             })
         }));
     }
+
+    #[test]
+    fn authored_apply_command_mutates_typed_entity_property() {
+        let storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
+            "id": "mutation",
+            "title": "Mutation",
+            "content": { "text_template": "A scene." },
+            "effects": {},
+            "created_at": 1,
+            "graph": {
+                "nodes": [
+                    { "id": "start", "type": "start", "title": "Start", "text": "Begin mutation test", "x": 0, "y": 0, "width": 100, "height": 80 },
+                    { "id": "world", "type": "get_entity", "title": "World", "entity_path": "world", "x": 100, "y": 100, "width": 140, "height": 80 },
+                    { "id": "owner", "type": "get_entity_property", "title": "Owner", "property_key": "owner", "value_type": "entity", "x": 220, "y": 100, "width": 160, "height": 80 },
+                    { "id": "command", "type": "apply_command", "title": "Add Score", "property_key": "score", "operation": "add", "value_type": "int", "value": 4, "x": 420, "y": 0, "width": 160, "height": 100 },
+                    { "id": "end", "type": "end", "title": "End", "is_terminal": true, "x": 620, "y": 0, "width": 120, "height": 80 }
+                ],
+                "edges": [
+                    { "id": "start-command", "from_node": "start", "from_port": "output", "to_node": "command", "to_port": "input", "kind": "flow" },
+                    { "id": "command-end", "from_node": "command", "from_port": "output", "to_node": "end", "to_port": "input", "kind": "flow" },
+                    { "id": "world-owner", "from_node": "world", "from_port": "output", "to_node": "owner", "to_port": "entity", "kind": "data" },
+                    { "id": "owner-command", "from_node": "owner", "from_port": "output", "to_node": "command", "to_port": "entity", "kind": "data" }
+                ]
+            }
+        })).expect("valid storylet");
+        let mut dispatch =
+            compile_chrono_dispatch(std::slice::from_ref(&storylet), &[], &[]).expect("dispatch compiles");
+        let graphs = compile_narrative_graphs(
+            "project-a",
+            std::slice::from_ref(&storylet),
+            &dispatch,
+            &std::collections::BTreeMap::new(),
+        ).expect("graph compiles");
+        bind_storylet_start_nodes(&mut dispatch, &graphs).expect("start node binds");
+
+        let mut state = WorldStateTable::new();
+        state.vertices.push(WorldVertex {
+            vertex_id: "world".into(),
+            layer: GraphLayer::Fact,
+            entity_index: None,
+            attributes: std::collections::BTreeMap::from([
+                ("prop.owner".into(), AttributeValue::EntityRef("world".into())),
+                ("prop.score".into(), AttributeValue::Int(3)),
+            ]),
+        });
+        let mut instance = FlowGraphInstance::new(1, graphs.asset, 7).expect("runtime instance");
+        let mut context =
+            RuntimeContext::with_registry(&mut state, &dispatch.dispatcher, &dispatch.registry);
+        instance.start().expect("start token");
+        instance.tick(&mut context, 100).expect("execute mutation graph");
+
+        let score = state.vertices.iter()
+            .find(|vertex| vertex.vertex_id == "world")
+            .and_then(|vertex| vertex.attributes.get("prop.score"));
+        assert_eq!(score, Some(&AttributeValue::Int(7)));
+    }
     #[test]
     fn choice_branches_converge_on_dialog_in_play_and_story_invoke() {
         use crate::narrative_graph::{
@@ -954,7 +1275,6 @@ mod tests {
             data,
         };
         let authored = NarrativeGraph {
-            local_variables: Vec::new(),
             nodes: vec![
                 node(
                     "start",
@@ -1026,6 +1346,7 @@ mod tests {
                     NarrativeNodeData::End {
                         is_terminal: true,
                         jump_to_storylet: None,
+                        precondition_result: None,
                     },
                 ),
             ],
@@ -1046,6 +1367,7 @@ mod tests {
                 from_port: from_port.into(),
                 to_node: to.into(),
                 to_port: to_port.into(),
+                kind: crate::narrative_graph::NarrativeEdgeKind::Flow,
             }
         }
         let mut storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
@@ -1053,10 +1375,10 @@ mod tests {
             "effects": {}, "created_at": 1
         }))
         .unwrap();
-        storylet.graph = Some(serde_json::to_value(authored).unwrap());
+        storylet.graph = Some(authored);
 
         let mut dispatch =
-            compile_chrono_dispatch(std::slice::from_ref(&storylet), &[], &[], &[]).unwrap();
+            compile_chrono_dispatch(std::slice::from_ref(&storylet), &[], &[]).unwrap();
         let graphs = compile_narrative_graphs(
             "project-merge",
             std::slice::from_ref(&storylet),
@@ -1065,22 +1387,19 @@ mod tests {
         )
         .unwrap();
         bind_storylet_start_nodes(&mut dispatch, &graphs).unwrap();
-        let find_node = |kind: &str| {
-            graphs
-                .asset
-                .nodes
-                .iter()
-                .find(|node| node.node_type_id.ends_with(kind))
-                .map(|node| node.node_guid)
-                .unwrap()
-        };
-        let choice_guid = find_node(":Choice");
+        let choice_guid = graphs
+            .asset
+            .nodes
+            .iter()
+            .find(|node| node.payload["nodeId"] == "choice")
+            .map(|node| node.node_guid)
+            .expect("compiled Choice node preserves its authored id");
         let shared_guid = graphs
             .asset
             .nodes
             .iter()
             .find(|node| {
-                node.node_type_id.ends_with(":Dialog") && node.payload["nodeId"] == "shared"
+                node.node_type_id == "Dialog" && node.payload["nodeId"] == "shared"
             })
             .unwrap()
             .node_guid;
@@ -1098,7 +1417,13 @@ mod tests {
             .find(|node| node.payload["nodeId"] == "branch_b")
             .unwrap()
             .node_guid;
-        let poi_guid = find_node(":Poi");
+        let poi_guid = graphs
+            .asset
+            .nodes
+            .iter()
+            .find(|node| node.payload["nodeId"] == "poi")
+            .map(|node| node.node_guid)
+            .expect("compiled Poi node preserves its authored id");
 
         let mut state = WorldStateTable::default();
         let mut context =
@@ -1173,7 +1498,6 @@ mod tests {
         }))
         .unwrap();
         let graph = NarrativeGraph {
-            local_variables: Vec::new(),
             nodes: vec![
                 NarrativeNode {
                     id: "start".into(), title: "Start".into(), x: 0, y: 0, width: 100, height: 80,
@@ -1184,21 +1508,22 @@ mod tests {
                     data: NarrativeNodeData::End {
                         is_terminal: true,
                         jump_to_storylet: Some("terminal-jump".into()),
+                        precondition_result: None,
                     },
                 },
             ],
             edges: vec![crate::narrative_graph::NarrativeEdge {
                 id: "start-end".into(), from_node: "start".into(), from_port: "output".into(),
-                to_node: "end".into(), to_port: "input".into(),
+                to_node: "end".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow,
             }],
         };
-        storylet.graph = Some(serde_json::to_value(graph).unwrap());
-        let compiled = compile_chrono_dispatch(std::slice::from_ref(&storylet), &[], &[], &[]).unwrap();
+        storylet.graph = Some(graph);
+        let compiled = compile_chrono_dispatch(std::slice::from_ref(&storylet), &[], &[]).unwrap();
         let graphs = compile_narrative_graphs(
             "terminal-jump", std::slice::from_ref(&storylet), &compiled, &std::collections::BTreeMap::new()
         ).unwrap();
         let end = graphs.asset.nodes.iter().find(|node| node.payload["nodeId"] == "end").unwrap();
-        assert!(matches!(end.kind, NodeKind::End { jump_to_storylet: Some(_) }));
+        assert!(matches!(end.kind, NodeKind::End { jump_to_storylet: Some(_), .. }));
     }
 
     #[test]
@@ -1222,83 +1547,29 @@ mod tests {
             "effects": {}, "created_at": 1
         }))
         .unwrap();
-        first.graph = Some(
-            serde_json::to_value(NarrativeGraph {
-                local_variables: Vec::new(),
-                nodes: vec![
-                    node(
-                        "start",
-                        NarrativeNodeData::Start {
-                            label: "Begin".into(),
-                        },
-                    ),
-                    node(
-                        "choice",
-                        NarrativeNodeData::Choice {
-                            choices: vec![
-                                ChoiceOption {
-                                    id: "stay".into(),
-                                    text: "Stay".into(),
-                                    system_verb: None,
-                                    effects: None,
-                                },
-                                ChoiceOption {
-                                    id: "go".into(),
-                                    text: "Go".into(),
-                                    system_verb: None,
-                                    effects: None,
-                                },
-                            ],
-                        },
-                    ),
-                    node(
-                        "end-terminal",
-                        NarrativeNodeData::End {
-                            is_terminal: true,
-                            jump_to_storylet: None,
-                        },
-                    ),
-                    node(
-                        "end-jump",
-                        NarrativeNodeData::End {
-                            is_terminal: false,
-                            jump_to_storylet: Some("b-next".into()),
-                        },
-                    ),
-                ],
-                edges: vec![
-                    NarrativeEdge {
-                        id: "start-choice".into(),
-                        from_node: "start".into(),
-                        from_port: "output".into(),
-                        to_node: "choice".into(),
-                        to_port: "input".into(),
-                    },
-                    NarrativeEdge {
-                        id: "choice-stay".into(),
-                        from_node: "choice".into(),
-                        from_port: "choice_0".into(),
-                        to_node: "end-terminal".into(),
-                        to_port: "input".into(),
-                    },
-                    NarrativeEdge {
-                        id: "choice-go".into(),
-                        from_node: "choice".into(),
-                        from_port: "choice_1".into(),
-                        to_node: "end-jump".into(),
-                        to_port: "input".into(),
-                    },
-                ],
-            })
-            .unwrap(),
-        );
+        first.graph = Some(NarrativeGraph {
+            nodes: vec![
+                node("start", NarrativeNodeData::Start { label: "Begin".into() }),
+                node("choice", NarrativeNodeData::Choice { choices: vec![
+                    ChoiceOption { id: "stay".into(), text: "Stay".into(), system_verb: None, effects: None },
+                    ChoiceOption { id: "go".into(), text: "Go".into(), system_verb: None, effects: None },
+                ]}),
+                node("end-terminal", NarrativeNodeData::End { is_terminal: true, jump_to_storylet: None, precondition_result: None }),
+                node("end-jump", NarrativeNodeData::End { is_terminal: false, jump_to_storylet: Some("b-next".into()), precondition_result: None }),
+            ],
+            edges: vec![
+                NarrativeEdge { id: "start-choice".into(), from_node: "start".into(), from_port: "output".into(), to_node: "choice".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+                NarrativeEdge { id: "choice-stay".into(), from_node: "choice".into(), from_port: "choice_0".into(), to_node: "end-terminal".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+                NarrativeEdge { id: "choice-go".into(), from_node: "choice".into(), from_port: "choice_1".into(), to_node: "end-jump".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+            ],
+        });
         let next: StoryletRecord = serde_json::from_value(serde_json::json!({
             "id": "b-next", "title": "Next", "content": { "text_template": "Next." },
             "effects": {}, "created_at": 1
         }))
         .unwrap();
         let storylets = [first, next];
-        let mut dispatch = compile_chrono_dispatch(&storylets, &[], &[], &[]).unwrap();
+        let mut dispatch = compile_chrono_dispatch(&storylets, &[], &[]).unwrap();
         let graphs = compile_narrative_graphs(
             "multi-end-project",
             &storylets,
@@ -1434,11 +1705,12 @@ mod tests {
             from_port: "output".into(),
             to_node: "mission".into(),
             to_port: "input".into(),
+            kind: crate::narrative_graph::NarrativeEdgeKind::Flow,
         });
-        parent.graph = Some(serde_json::to_value(graph).unwrap());
+        parent.graph = Some(graph);
 
         let storylets = [parent, child];
-        let mut dispatch = compile_chrono_dispatch(&storylets, &[], &[], &[]).unwrap();
+        let mut dispatch = compile_chrono_dispatch(&storylets, &[], &[]).unwrap();
         let graphs = compile_narrative_graphs(
             "mission-project",
             &storylets,
@@ -1493,5 +1765,156 @@ mod tests {
             .unwrap();
         assert!(instance.mission_call_history(mission_guid).is_empty());
         assert_eq!(instance.global_call_history, global_history);
+    }
+
+    #[test]
+    fn entity_tag_nodes_execute_add_remove_and_conditional_branch() {
+        use crate::narrative_graph::{NarrativeEdge, NarrativeGraph, NarrativeNode, NarrativeNodeData};
+        let node = |id: &str, data: NarrativeNodeData| NarrativeNode {
+            id: id.into(), title: id.into(), x: 0, y: 0, width: 160, height: 80, data
+        };
+        let authored = NarrativeGraph {
+            nodes: vec![
+                node("start", NarrativeNodeData::Start { label: "Begin".into() }),
+                node("add", NarrativeNodeData::AddEntityTag { target_entity_id: "world".into(), tag: "world.garden.visited".into() }),
+                node("has", NarrativeNodeData::HasEntityTag { target_entity_id: "world".into(), tag: "world.garden.visited".into(), match_mode: "all".into() }),
+                node("check", NarrativeNodeData::Condition {}),
+                node("remove", NarrativeNodeData::RemoveEntityTag { target_entity_id: "world".into(), tag: "world.garden.visited".into() }),
+                node("has_after_remove", NarrativeNodeData::HasEntityTag { target_entity_id: "world".into(), tag: "world.garden.visited".into(), match_mode: "all".into() }),
+                node("check_after_remove", NarrativeNodeData::Condition {}),
+                node("reject", NarrativeNodeData::Dialog { speaker_role: None, text: Some("Unexpected tag result".into()), quip: None, sections: vec![] }),
+                node("valid", NarrativeNodeData::Dialog { speaker_role: None, text: Some("Tag removed".into()), quip: None, sections: vec![] }),
+                node("end", NarrativeNodeData::End { is_terminal: true, jump_to_storylet: None, precondition_result: None }),
+            ],
+            edges: vec![
+                NarrativeEdge { id: "e1".into(), from_node: "start".into(), from_port: "output".into(), to_node: "add".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+                NarrativeEdge { id: "e2".into(), from_node: "add".into(), from_port: "output".into(), to_node: "check".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+                NarrativeEdge { id: "e3".into(), from_node: "has".into(), from_port: "output".into(), to_node: "check".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Data },
+                NarrativeEdge { id: "e4".into(), from_node: "check".into(), from_port: "true".into(), to_node: "remove".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+                NarrativeEdge { id: "e5".into(), from_node: "check".into(), from_port: "false".into(), to_node: "reject".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+                NarrativeEdge { id: "e6".into(), from_node: "remove".into(), from_port: "output".into(), to_node: "check_after_remove".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+                NarrativeEdge { id: "e7".into(), from_node: "has_after_remove".into(), from_port: "output".into(), to_node: "check_after_remove".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Data },
+                NarrativeEdge { id: "e8".into(), from_node: "check_after_remove".into(), from_port: "true".into(), to_node: "reject".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+                NarrativeEdge { id: "e9".into(), from_node: "check_after_remove".into(), from_port: "false".into(), to_node: "valid".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+                NarrativeEdge { id: "e10".into(), from_node: "reject".into(), from_port: "output".into(), to_node: "end".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+                NarrativeEdge { id: "e11".into(), from_node: "valid".into(), from_port: "output".into(), to_node: "end".into(), to_port: "input".into(), kind: crate::narrative_graph::NarrativeEdgeKind::Flow },
+            ],
+        };
+        let mut storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
+            "id": "tag-test", "title": "Tag Test", "content": { "text_template": "Begin." }, "created_at": 0
+        })).unwrap();
+        storylet.graph = Some(authored);
+        let mut dispatch = compile_chrono_dispatch(std::slice::from_ref(&storylet), &[], &[]).unwrap();
+        let graphs = compile_narrative_graphs("project-tag", std::slice::from_ref(&storylet), &dispatch, &std::collections::BTreeMap::new()).unwrap();
+        bind_storylet_start_nodes(&mut dispatch, &graphs).unwrap();
+        let mut instance = FlowGraphInstance::new(1, graphs.asset, 7).unwrap();
+        let mut state = WorldStateTable::default();
+        let mut context = RuntimeContext::with_registry(&mut state, &dispatch.dispatcher, &dispatch.registry);
+        instance.start_at_node(graphs.storylet_start_nodes["tag-test"]).unwrap();
+        instance.tick(&mut context, 100).unwrap();
+        let tag_id = dispatch.registry.id("world.garden.visited").expect("tag was registered");
+        assert!(!state.global_tags.bit(tag_id), "Remove Entity Tag clears the tag after the true branch");
+        let executed: Vec<_> = instance.call_history().iter()
+            .filter_map(|entry| instance.asset.node(entry.node_guid).map(|node| node.payload["nodeId"].as_str().unwrap_or_default()))
+            .collect();
+        assert!(executed.contains(&"valid"), "Has Entity Tag false result must reach the false branch");
+        assert!(!executed.contains(&"reject"), "neither unexpected tag branch should run");
+    }
+    #[test]
+    fn connected_entity_ref_targets_add_remove_and_query_entity_or_world_tags() {
+        use crate::narrative_graph::{NarrativeEdge, NarrativeEdgeKind};
+
+        let entity_indices = std::collections::BTreeMap::from([
+            ("world".to_string(), 0_u16),
+            ("actor".to_string(), 1_u16),
+        ]);
+        let node = |id: &str, data: NarrativeNodeData| NarrativeNode {
+            id: id.into(), title: id.into(), x: 0, y: 0, width: 160, height: 80, data
+        };
+
+        for (storylet_id, entity_path) in [("dynamic-world", "world"), ("dynamic-actor", "actor")] {
+            let gameplay_tag = if entity_path == "world" {
+                "world.garden.dynamic"
+            } else {
+                "character.garden.dynamic"
+            };
+            let authored = NarrativeGraph {
+                nodes: vec![
+                    node("start", NarrativeNodeData::Start { label: "Begin".into() }),
+                    node("target", NarrativeNodeData::GetEntity { entity_path: entity_path.into() }),
+                    node("add", NarrativeNodeData::AddEntityTag { target_entity_id: "world".into(), tag: gameplay_tag.into() }),
+                    node("has", NarrativeNodeData::HasEntityTag { target_entity_id: "world".into(), tag: gameplay_tag.into(), match_mode: "all".into() }),
+                    node("check", NarrativeNodeData::Condition {}),
+                    node("remove", NarrativeNodeData::RemoveEntityTag { target_entity_id: "world".into(), tag: gameplay_tag.into() }),
+                    node("has_after_remove", NarrativeNodeData::HasEntityTag { target_entity_id: "world".into(), tag: gameplay_tag.into(), match_mode: "all".into() }),
+                    node("check_after_remove", NarrativeNodeData::Condition {}),
+                    node("reject", NarrativeNodeData::Dialog { speaker_role: None, text: Some("Unexpected tag result".into()), quip: None, sections: vec![] }),
+                    node("valid", NarrativeNodeData::Dialog { speaker_role: None, text: Some("Tag removed".into()), quip: None, sections: vec![] }),
+                    node("end", NarrativeNodeData::End { is_terminal: true, jump_to_storylet: None, precondition_result: None }),
+                ],
+                edges: vec![
+                    NarrativeEdge { id: "e1".into(), from_node: "start".into(), from_port: "output".into(), to_node: "add".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                    NarrativeEdge { id: "e2".into(), from_node: "add".into(), from_port: "output".into(), to_node: "check".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                    NarrativeEdge { id: "e3".into(), from_node: "has".into(), from_port: "output".into(), to_node: "check".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Data },
+                    NarrativeEdge { id: "e4".into(), from_node: "check".into(), from_port: "true".into(), to_node: "remove".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                    NarrativeEdge { id: "e5".into(), from_node: "check".into(), from_port: "false".into(), to_node: "reject".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                    NarrativeEdge { id: "e6".into(), from_node: "remove".into(), from_port: "output".into(), to_node: "check_after_remove".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                    NarrativeEdge { id: "e7".into(), from_node: "has_after_remove".into(), from_port: "output".into(), to_node: "check_after_remove".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Data },
+                    NarrativeEdge { id: "e8".into(), from_node: "check_after_remove".into(), from_port: "true".into(), to_node: "reject".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                    NarrativeEdge { id: "e9".into(), from_node: "check_after_remove".into(), from_port: "false".into(), to_node: "valid".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                    NarrativeEdge { id: "e10".into(), from_node: "reject".into(), from_port: "output".into(), to_node: "end".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                    NarrativeEdge { id: "e11".into(), from_node: "valid".into(), from_port: "output".into(), to_node: "end".into(), to_port: "input".into(), kind: NarrativeEdgeKind::Flow },
+                    NarrativeEdge { id: "e12".into(), from_node: "target".into(), from_port: "output".into(), to_node: "add".into(), to_port: "target".into(), kind: NarrativeEdgeKind::Data },
+                    NarrativeEdge { id: "e13".into(), from_node: "target".into(), from_port: "output".into(), to_node: "has".into(), to_port: "target".into(), kind: NarrativeEdgeKind::Data },
+                    NarrativeEdge { id: "e14".into(), from_node: "target".into(), from_port: "output".into(), to_node: "remove".into(), to_port: "target".into(), kind: NarrativeEdgeKind::Data },
+                    NarrativeEdge { id: "e15".into(), from_node: "target".into(), from_port: "output".into(), to_node: "has_after_remove".into(), to_port: "target".into(), kind: NarrativeEdgeKind::Data },
+                ],
+            };
+            let mut storylet: StoryletRecord = serde_json::from_value(json!({
+                "id": storylet_id, "title": storylet_id, "content": { "text_template": "Begin." }, "created_at": 0
+            })).unwrap();
+            storylet.graph = Some(authored);
+            let mut dispatch = compile_chrono_dispatch(std::slice::from_ref(&storylet), &[], &[]).unwrap();
+            let graphs = compile_narrative_graphs(
+                &format!("project-{storylet_id}"),
+                std::slice::from_ref(&storylet),
+                &dispatch,
+                &entity_indices,
+            ).unwrap();
+            bind_storylet_start_nodes(&mut dispatch, &graphs).unwrap();
+            let tag_id = dispatch.registry.id(gameplay_tag).expect("tag was registered");
+            let mut instance = FlowGraphInstance::new(1, graphs.asset, 7).unwrap();
+            let mut state = WorldStateTable::with_capacity(2);
+            state.vertices.push(WorldVertex {
+                vertex_id: "actor".into(),
+                layer: GraphLayer::Character,
+                entity_index: Some(1),
+                attributes: std::collections::BTreeMap::new(),
+            });
+            {
+                let mut context = RuntimeContext::with_registry(&mut state, &dispatch.dispatcher, &dispatch.registry);
+                instance.start_at_node(graphs.storylet_start_nodes[storylet_id]).unwrap();
+                instance.tick(&mut context, 100).unwrap();
+            }
+            let executed: Vec<_> = instance.call_history().iter()
+                .filter_map(|entry| instance.asset.node(entry.node_guid).map(|node| node.payload["nodeId"].as_str().unwrap_or_default()))
+                .collect();
+            assert!(executed.contains(&"valid"), "{storylet_id}: Add/Has/Remove/Has must observe the connected target");
+            assert!(!executed.contains(&"reject"), "{storylet_id}: unexpected tag branch ran");
+            assert!(!state.global_tags.bit(tag_id), "{storylet_id}: tag remains absent from world after removal");
+            assert!(!state.entity_tags[1].bit(tag_id), "{storylet_id}: tag remains absent from actor after removal");
+        }
+    }
+    #[test]
+    fn typed_boolean_data_nodes_validate() {
+        use crate::narrative_graph::NarrativeNodeData;
+        for value in [
+            serde_json::json!({"type":"has_entity_tag","target_entity_id":"world","tag":"harbor"}),
+            serde_json::json!({"type":"and"}),
+            serde_json::json!({"type":"or"}),
+        ] {
+            let data: NarrativeNodeData = serde_json::from_value(value).unwrap();
+            assert!(matches!(data, NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {}));
+        }
     }
 }

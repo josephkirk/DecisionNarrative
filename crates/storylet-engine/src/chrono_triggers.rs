@@ -31,7 +31,7 @@ impl std::error::Error for TriggerError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum EventKind {
-    Quality = 0,
+    Property = 0,
     Tag = 1,
     Item = 2,
     StoryletCompleted = 3,

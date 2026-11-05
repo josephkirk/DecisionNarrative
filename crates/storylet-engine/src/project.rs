@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::storylets::{ActorState, FactRef, MetCharacterRequirement, VisitedLocationRequirement};
+use crate::storylets::{ActorState, FactRef};
 use crate::{Effect, NpcBehaviorRule, PredicateSet, StoryletDefinition, WorldState};
 
 pub const PROJECT_SCHEMA_VERSION: u32 = 1;
@@ -15,7 +15,7 @@ pub struct ProjectBundle {
     pub name: String,
     pub revision: u64,
     #[serde(default)]
-    pub qualities: BTreeMap<String, QualityDefinition>,
+    pub properties: BTreeMap<String, PropertyDefinition>,
     #[serde(default)]
     pub locations: BTreeMap<String, LocationDefinition>,
     #[serde(default)]
@@ -37,7 +37,7 @@ impl ProjectBundle {
             id: id.into(),
             name: name.into(),
             revision: 0,
-            qualities: BTreeMap::new(),
+            properties: BTreeMap::new(),
             locations: BTreeMap::new(),
             characters: BTreeMap::new(),
             events: BTreeMap::new(),
@@ -50,7 +50,7 @@ impl ProjectBundle {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum QualityType {
+pub enum PropertyType {
     Currency,
     Metric,
     Tool,
@@ -61,22 +61,20 @@ pub enum QualityType {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct QualityDefinition {
+pub struct PropertyDefinition {
     pub key: String,
-    pub kind: QualityType,
+    pub kind: PropertyType,
     pub default_value: Value,
     pub description: String,
     #[serde(default)]
     pub min_value: f64,
-    #[serde(default = "default_quality_max")]
+    #[serde(default = "default_property_max")]
     pub max_value: f64,
     #[serde(default)]
     pub is_hidden: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub menace_crisis_storylet_id: Option<String>,
 }
 
-fn default_quality_max() -> f64 {
+fn default_property_max() -> f64 {
     100.0
 }
 
@@ -139,8 +137,7 @@ pub struct ScenarioDefinition {
     pub name: String,
     pub player_start_location: String,
     #[serde(default)]
-    pub initial_qualities: BTreeMap<String, Value>,
-    #[serde(default)]
+    pub initial_properties: BTreeMap<String, Value>,
     pub actor_locations: BTreeMap<String, String>,
     #[serde(default)]
     pub storylet_ids: Vec<String>,
@@ -182,37 +179,19 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
     }
     register_id(&mut issues, &mut global_ids, "project", &project.id);
 
-    for (key, quality) in &project.qualities {
-        let path = format!("qualities.{key}");
-        register_record(&mut issues, &mut global_ids, &path, key, &quality.key);
-        if quality.default_value.is_null() {
-            issue(
-                &mut issues,
-                format!("{path}.default_value"),
-                "null_default",
-                "quality default must be a JSON value",
-            );
+    for (key, property) in &project.properties {
+        let path = format!("properties.{key}");
+        register_record(&mut issues, &mut global_ids, &path, key, &property.key);
+        if property.default_value.is_null() {
+            issue(&mut issues, format!("{path}.default_value"), "null_default", "property default must be a JSON value");
         }
-        if let Some(number) = quality.default_value.as_f64() {
+        if let Some(number) = property.default_value.as_f64() {
             if !number.is_finite() {
-                issue(
-                    &mut issues,
-                    format!("{path}.default_value"),
-                    "non_finite_default",
-                    "quality default must be finite",
-                );
+                issue(&mut issues, format!("{path}.default_value"), "non_finite_default", "property default must be finite");
             }
         }
-        if !quality.min_value.is_finite()
-            || !quality.max_value.is_finite()
-            || quality.min_value > quality.max_value
-        {
-            issue(
-                &mut issues,
-                format!("{path}.min_value"),
-                "invalid_bounds",
-                "quality bounds must be finite and minimum must not exceed maximum",
-            );
+        if !property.min_value.is_finite() || !property.max_value.is_finite() || property.min_value > property.max_value {
+            issue(&mut issues, format!("{path}.min_value"), "invalid_bounds", "property bounds must be finite and minimum must not exceed maximum");
         }
     }
 
@@ -339,70 +318,6 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
                 );
             }
         }
-        for (index, requirement) in storylet
-            .preconditions
-            .visited_locations_any_of
-            .iter()
-            .enumerate()
-        {
-            let (field, value, missing) = match requirement {
-                VisitedLocationRequirement::LocationId { location_id } => (
-                    "location_id",
-                    location_id,
-                    !project.locations.contains_key(location_id),
-                ),
-                VisitedLocationRequirement::LocationTag { tag } => ("tag", tag, false),
-            };
-            let requirement_path =
-                format!("{path}.preconditions.visited_locations_any_of[{index}].{field}");
-            if value.trim().is_empty() {
-                issue(
-                    &mut issues,
-                    requirement_path,
-                    "empty_precondition",
-                    "visited-location requirements must be nonempty",
-                );
-            } else if missing {
-                issue(
-                    &mut issues,
-                    requirement_path,
-                    "missing_location",
-                    format!("location '{value}' does not exist"),
-                );
-            }
-        }
-        for (index, requirement) in storylet
-            .preconditions
-            .met_characters_any_of
-            .iter()
-            .enumerate()
-        {
-            let (field, value, missing) = match requirement {
-                MetCharacterRequirement::CharacterId { character_id } => (
-                    "character_id",
-                    character_id,
-                    !project.characters.contains_key(character_id),
-                ),
-                MetCharacterRequirement::RoleTag { role } => ("role", role, false),
-            };
-            let requirement_path =
-                format!("{path}.preconditions.met_characters_any_of[{index}].{field}");
-            if value.trim().is_empty() {
-                issue(
-                    &mut issues,
-                    requirement_path,
-                    "empty_precondition",
-                    "met-character requirements must be nonempty",
-                );
-            } else if missing {
-                issue(
-                    &mut issues,
-                    requirement_path,
-                    "missing_character",
-                    format!("character '{value}' does not exist"),
-                );
-            }
-        }
         for (index, role) in storylet.required_roles.iter().enumerate() {
             if role.role.trim().is_empty() {
                 issue(
@@ -468,22 +383,12 @@ pub fn validate_project(project: &ProjectBundle) -> Vec<ProjectIssue> {
             format!("{path}.player_start_location"),
             &scenario.player_start_location,
         );
-        for (quality, value) in &scenario.initial_qualities {
-            if !project.qualities.contains_key(quality) {
-                issue(
-                    &mut issues,
-                    format!("{path}.initial_qualities.{quality}"),
-                    "missing_quality",
-                    "scenario quality is not defined by the project",
-                );
+        for (property, value) in &scenario.initial_properties {
+            if !project.properties.contains_key(property) {
+                issue(&mut issues, format!("{path}.initial_properties.{property}"), "missing_property", "scenario property is not defined by the project");
             }
             if value.is_null() {
-                issue(
-                    &mut issues,
-                    format!("{path}.initial_qualities.{quality}"),
-                    "null_value",
-                    "scenario quality values must not be null",
-                );
+                issue(&mut issues, format!("{path}.initial_properties.{property}"), "null_value", "scenario property values must not be null");
             }
         }
         for (actor_id, location) in &scenario.actor_locations {
@@ -567,22 +472,22 @@ pub fn build_world(
         scenario_id: Some(scenario.id.clone()),
         random_seed: scenario.seed,
         current_location: Some(scenario.player_start_location.clone()),
-        location_tags: project
+        entity_tags: project
             .locations
             .iter()
             .map(|(id, location)| (id.clone(), location.tags.iter().cloned().collect()))
             .collect(),
-        visited_locations: std::collections::BTreeSet::from([scenario
-            .player_start_location
-            .clone()]),
         ..WorldState::default()
     };
-    for (key, definition) in &project.qualities {
-        world
-            .qualities
-            .insert(key.clone(), definition.default_value.clone());
+    world
+        .entity_tags
+        .entry(scenario.player_start_location.clone())
+        .or_default()
+        .insert("visited".into());
+    for (key, definition) in &project.properties {
+        world.properties.insert(key.clone(), definition.default_value.clone());
     }
-    world.qualities.extend(scenario.initial_qualities.clone());
+    world.properties.extend(scenario.initial_properties.clone());
     for (id, character) in &project.characters {
         if let Some(ref active) = scenario.active_actor_ids {
             if !active.contains(id) {
@@ -603,12 +508,11 @@ pub fn build_world(
         );
     }
     if let Some(location_id) = &world.current_location {
-        world.met_characters = world
-            .actors
-            .iter()
-            .filter(|(_, actor)| actor.current_location == *location_id)
-            .map(|(actor_id, _)| actor_id.clone())
-            .collect();
+        for (actor_id, actor) in &world.actors {
+            if actor.current_location == *location_id {
+                world.entity_tags.entry(actor_id.clone()).or_default().insert("met".into());
+            }
+        }
     }
     Ok(world)
 }
@@ -621,8 +525,8 @@ fn validate_rules(
 ) {
     for (index, predicate) in rules.all_of.iter().chain(rules.any_of.iter()).enumerate() {
         let fact = match &predicate.fact {
-            FactRef::Quality { key } if !project.qualities.contains_key(key) => {
-                Some(("missing_quality", format!("quality '{key}' is not defined")))
+            FactRef::Property { key } if !project.properties.contains_key(key) => {
+                Some(("missing_property", format!("property '{key}' is not defined")))
             }
             FactRef::ActorAt { actor_id, .. }
             | FactRef::ActorHasRole { actor_id, .. }
@@ -661,12 +565,12 @@ fn validate_effects(
 ) {
     for (index, effect) in effects.iter().enumerate() {
         match effect {
-            Effect::SetQuality { key, .. } | Effect::AddQuality { key, .. } => {
-                validate_quality_ref(issues, project, path, index, key)
+            Effect::SetProperty { key, .. } | Effect::AddProperty { key, .. } => {
+                validate_property_ref(issues, project, path, index, key)
             }
-            Effect::TransferQuality { from, to, .. } => {
-                validate_quality_ref(issues, project, path, index, from);
-                validate_quality_ref(issues, project, path, index, to);
+            Effect::TransferProperty { from, to, .. } => {
+                validate_property_ref(issues, project, path, index, from);
+                validate_property_ref(issues, project, path, index, to);
             }
             Effect::MovePlayer { location_id } => validate_location_ref(
                 issues,
@@ -697,20 +601,15 @@ fn validate_effects(
     }
 }
 
-fn validate_quality_ref(
+fn validate_property_ref(
     issues: &mut Vec<ProjectIssue>,
     project: &ProjectBundle,
     path: &str,
     index: usize,
     key: &str,
 ) {
-    if !project.qualities.contains_key(key) {
-        issue(
-            issues,
-            format!("{path}[{index}]"),
-            "missing_quality",
-            format!("quality '{key}' is not defined"),
-        );
+    if !project.properties.contains_key(key) {
+        issue(issues, format!("{path}[{index}]"), "missing_property", format!("property '{key}' is not defined"));
     }
 }
 

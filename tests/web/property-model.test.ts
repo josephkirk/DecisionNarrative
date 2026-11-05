@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   defaultPropertyValue,
   propertyListProblem,
-  effectiveTraitValue,
   isValidPropertyKey,
   isValidPropertyValue,
   newEntityProperty,
@@ -19,17 +18,23 @@ describe("property model", () => {
     expect(defaultPropertyValue("int", false)).toBe(0);
     expect(defaultPropertyValue("asset", false)).toBeNull();
     expect(defaultPropertyValue("entity", false)).toBeNull();
-    expect(defaultPropertyValue("int", true)).toEqual([]);
+    expect(defaultPropertyValue("storylet", false)).toBeNull();
+    expect(defaultPropertyValue("tag", false)).toBe("");
   });
 
   test("value shapes are validated per type", () => {
     expect(isValidPropertyValue("int", false, 3)).toBe(true);
     expect(isValidPropertyValue("int", false, 3.5)).toBe(false);
     expect(isValidPropertyValue("float", false, 3.5)).toBe(true);
+    expect(isValidPropertyValue("asset", false, { asset_id: "a" })).toBe(true);
     expect(isValidPropertyValue("asset", false, { asset_id: "a", version: "latest" })).toBe(true);
-    expect(isValidPropertyValue("asset", false, { asset_id: "a" })).toBe(false);
+    expect(isValidPropertyValue("asset", false, {})).toBe(false);
     expect(isValidPropertyValue("entity", true, ["guard", "boss"])).toBe(true);
     expect(isValidPropertyValue("entity", true, ["guard", null])).toBe(false);
+    expect(isValidPropertyValue("storylet", false, "opening")).toBe(true);
+    expect(isValidPropertyValue("storylet", false, null)).toBe(true);
+    expect(isValidPropertyValue("tag", false, "character.hero")).toBe(true);
+    expect(isValidPropertyValue("tag", false, null)).toBe(false);
     expect(isValidPropertyValue("string", false, ["a"])).toBe(false);
   });
 
@@ -73,16 +78,4 @@ describe("property model", () => {
     expect(property.id.length).toBeGreaterThan(0);
   });
 
-  test("trait values prefer a valid override and fall back to the default", () => {
-    const definition: PropertyDefinition = {
-      id: "bravery",
-      key: "Bravery",
-      name: "Bravery",
-      type: "int",
-      default: 1,
-    };
-    expect(effectiveTraitValue(definition, { template_id: "t", values: { bravery: 5 } })).toBe(5);
-    expect(effectiveTraitValue(definition, { template_id: "t", values: { bravery: "high" } })).toBe(1);
-    expect(effectiveTraitValue(definition, undefined)).toBe(1);
-  });
 });

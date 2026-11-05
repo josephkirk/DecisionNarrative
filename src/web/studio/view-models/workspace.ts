@@ -1,44 +1,43 @@
 import { StudioApi } from "../api.ts";
-import { notify, setEntities, studioState } from "../state.ts";
+import { notify, setEntities, setEntityTemplates, studioState } from "../state.ts";
 import type {
   AssetRecord,
   EntityRecord,
+  EntityTemplateRecord,
   EventRecord,
   FolderRecord,
-  NpcBehaviorRecord,
-  QualityRecord,
   StoryletRecord,
   TraitTemplateRecord,
+  GameplayTagRecord,
 } from "../contracts.ts";
 
 export type WorkspaceKind =
-  | "qualities"
+  | "entity_templates"
   | "entities"
-  | "folders"
+  | "gameplay_tags"
   | "trait_templates"
   | "assets"
   | "storylets"
-  | "npc_behaviors"
-  | "events";
+  | "events"
+  | "folders";
 
 export const ALL_WORKSPACE_KINDS: readonly WorkspaceKind[] = [
-  "qualities",
+  "entity_templates",
   "entities",
-  "folders",
+  "gameplay_tags",
   "trait_templates",
   "assets",
   "storylets",
-  "npc_behaviors",
   "events",
+  "folders",
 ];
 
 function assign(kind: WorkspaceKind, rows: unknown[]) {
   switch (kind) {
-    case "qualities":
-      studioState.qualities = rows as QualityRecord[];
-      break;
-    case "entities":
-      setEntities(rows as EntityRecord[]);
+    case "entity_templates": setEntityTemplates(rows as EntityTemplateRecord[]); break;
+    case "entities": setEntities(rows as EntityRecord[]); break;
+    case "gameplay_tags":
+      studioState.gameplayTags = rows as GameplayTagRecord[];
       break;
     case "folders":
       studioState.folders = rows as FolderRecord[];
@@ -51,9 +50,6 @@ function assign(kind: WorkspaceKind, rows: unknown[]) {
       break;
     case "storylets":
       studioState.storylets = rows as StoryletRecord[];
-      break;
-    case "npc_behaviors":
-      studioState.npcBehaviors = rows as NpcBehaviorRecord[];
       break;
     case "events":
       studioState.events = rows as EventRecord[];
@@ -71,8 +67,8 @@ export function currentFolderId(kind: WorkspaceKind, key: string): string | null
       const row = studioState.entities.find((entity) => entity.id === key);
       return row ? row.folder_id ?? null : undefined;
     }
-    case "qualities": {
-      const row = studioState.qualities.find((quality) => quality.name === key);
+    case "entity_templates": {
+      const row = studioState.entityTemplates.find((entity) => entity.id === key);
       return row ? row.folder_id ?? null : undefined;
     }
     case "storylets": {

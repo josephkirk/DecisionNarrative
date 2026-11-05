@@ -10,8 +10,8 @@ use tokio::sync::{Mutex, broadcast};
 
 use crate::chrono_playtest::ChronoPlaytestSession;
 use storylet_engine::{
-    EngineError, ProjectBundle as EngineProjectBundle, RUNTIME_SESSION_FORMAT_VERSION, RuntimeError,
-    RuntimeSessionState, StoryletRuntime, WorldCommand, WorldEvent,
+    EngineError, ProjectBundle as EngineProjectBundle, RuntimeError, RuntimeSessionState,
+    StoryletRuntime, WorldCommand, WorldEvent,
 };
 
 #[derive(Debug)]
@@ -55,9 +55,10 @@ impl std::fmt::Display for ContentDeleteError {
 
 use crate::chrono_adapter::compile_chrono_dispatch_for_storylet_validation;
 use crate::contracts::{
-    AssetRecord, AuthoringOptions, CharacterRecord, ContentReference, EntityRecord, FolderRecord,
-    LibraryPageResult, LibraryQuery, ProjectBundle, ProjectBundleContent, ProjectMetadata,
-    ScenarioRecord, StoryletRecord, TraitTemplateRecord, CONTENT_KINDS, FOLDER_ROOTS,
+    AssetRecord, AuthoringOptions, CharacterRecord, ContentReference, EntityRecord,
+    EntityTemplateRecord, FolderRecord, GameplayTagRecord, LibraryPageResult, LibraryQuery,
+    ProjectBundle, ProjectBundleContent, ProjectMetadata, ScenarioRecord, StoryletRecord,
+    TraitTemplateRecord, CONTENT_KINDS, FOLDER_ROOTS, PROJECT_BUNDLE_SCHEMA_VERSION,
 };
 use crate::entities::{self, WorkspaceIndex};
 use crate::narrative_graph::NarrativeGraph;
@@ -65,6 +66,19 @@ use crate::projection::project_workspace;
 use crate::references::{self, ReferenceContext};
 use crate::scenario::resolve_scenario_start;
 use crate::store::Store;
+
+fn persisted_runtime(store: &Store, templates: &[TraitTemplateRecord], entity_templates: &[EntityTemplateRecord]) -> Result<entities::RuntimeRecords, String> {
+    let world = store.list_entities().map_err(|e| e.to_string())?
+        .into_iter().find(|entity| entity.id == entities::WORLD_ENTITY_ID)
+        .ok_or_else(|| "Intrinsic World entity is missing from persisted entities".to_string())?;
+    if world.root_tag != entities::WORLD_ENTITY_ID {
+        return Err(format!(
+            "Intrinsic World entity must retain the '{}' root gameplay tag",
+            entities::WORLD_ENTITY_ID
+        ));
+    }
+    Ok(entities::runtime_records_with_world(&world, entity_templates, templates))
+}
 
 #[derive(Clone)]
 pub struct StudioService {
@@ -92,13 +106,7 @@ fn validate_and_normalize_bundle(bundle: &mut ProjectBundle) -> Vec<String> {
     let mut issues = Vec::new();
     for storylet in &mut bundle.content.storylets {
         let graph = match storylet.graph.clone() {
-            Some(value) => match serde_json::from_value::<NarrativeGraph>(value) {
-                Ok(graph) => graph,
-                Err(error) => {
-                    issues.push(format!("storylet {} graph is invalid: {error}", storylet.id));
-                    continue;
-                }
-            },
+            Some(graph) => graph,
             None => NarrativeGraph::from_storylet(storylet),
         };
         match graph.validate() {
@@ -144,72 +152,16 @@ impl StudioService {
         Self::build(store, ".")
     }
 
-    fn build(mut store: Store, resource_root: impl Into<PathBuf>) -> Result<Self, String> {
+    fn build(store: Store, resource_root: impl Into<PathBuf>) -> Result<Self, String> {
         let mut runtime = StoryletRuntime::default();
-        let saved_sessions = {
-            let mut stmt = store
-                .conn
-                .prepare("SELECT session_id, state_json FROM runtime_sessions ORDER BY session_id")
-                .map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-                .map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?
-        };
-
-        let mut migrations = Vec::new();
-        for (row_id, enc) in saved_sessions {
-            let state: RuntimeSessionState = serde_json::from_str(&enc)
-                .map_err(|e| format!("saved session '{row_id}' JSON is invalid: {e}"))?;
-            if state.session_id != row_id {
-                return Err(format!(
-                    "saved session row '{row_id}' contains state for '{}'",
-                    state.session_id
-                ));
-            }
+        let saved_sessions = store.list_runtime_sessions().map_err(|e| e.to_string())?;
+        for state in saved_sessions {
+            let session_id = state.session_id.clone();
             validate_event_history(&store.conn, &state)
-                .map_err(|e| format!("saved session '{row_id}' event history is invalid: {e}"))?;
-            let needs_migration = state.format_version < RUNTIME_SESSION_FORMAT_VERSION;
+                .map_err(|error| format!("saved session '{session_id}' event history is invalid: {error}"))?;
             runtime
                 .restore_session(state)
-                .map_err(|e| format!("saved session '{row_id}' cannot be restored: {e}"))?;
-            if needs_migration {
-                migrations.push((
-                    enc,
-                    runtime.export_session(&row_id).map_err(|e| {
-                        format!("failed to export migrated session '{row_id}': {e}")
-                    })?,
-                ));
-            }
-        }
-
-        if !migrations.is_empty() {
-            let tx = store.conn.transaction().map_err(|e| e.to_string())?;
-            for (old_state_json, state) in migrations {
-                let new_state_json = serde_json::to_string(&state).map_err(|e| e.to_string())?;
-                let updated = tx.execute(
-                    "UPDATE runtime_sessions SET revision = ?1, turn = ?2, state_json = ?3, updated_at = ?4
-                     WHERE session_id = ?5 AND state_json = ?6",
-                    rusqlite::params![
-                        state.world.revision.to_string(),
-                        state.world.turn.to_string(),
-                        new_state_json,
-                        chrono_now_ms().to_string(),
-                        &state.session_id,
-                        old_state_json
-                    ],
-                ).map_err(|e| e.to_string())?;
-                if updated != 1 {
-                    return Err(format!(
-                        "saved session '{}' changed during migration",
-                        state.session_id
-                    ));
-                }
-            }
-            tx.commit().map_err(|e| e.to_string())?;
+                .map_err(|error| format!("saved session '{session_id}' cannot be restored: {error}"))?;
         }
 
         let (updates, _) = broadcast::channel(256);
@@ -295,8 +247,10 @@ impl StudioService {
             .get_project_metadata()
             .map_err(|e| e.to_string())?;
 
-        let qualities = inner.store.list_qualities().map_err(|e| e.to_string())?;
-        let entities = inner.store.list_entities().map_err(|e| e.to_string())?;
+        let entities = inner.store.list_content_json("entities").map_err(|e| e.to_string())?
+            .into_iter().filter_map(|s| serde_json::from_str::<EntityRecord>(&s).ok()).collect();
+        let entity_templates = inner.store.list_entity_templates().map_err(|e| e.to_string())?;
+        let gameplay_tags = inner.store.list_gameplay_tags().map_err(|e| e.to_string())?;
         let folders = inner.store.list_folders().map_err(|e| e.to_string())?;
         let trait_templates = inner
             .store
@@ -304,24 +258,20 @@ impl StudioService {
             .map_err(|e| e.to_string())?;
         let assets = inner.store.list_assets().map_err(|e| e.to_string())?;
         let storylets = inner.store.list_storylets().map_err(|e| e.to_string())?;
-        let npc_behaviors = inner
-            .store
-            .list_npc_behaviors()
-            .map_err(|e| e.to_string())?;
         let events = inner.store.list_events().map_err(|e| e.to_string())?;
         let scenarios = inner.store.list_scenarios().map_err(|e| e.to_string())?;
         Ok(ProjectBundle {
             format: "decision-narrative-project".into(),
-            schema_version: 3,
+            schema_version: PROJECT_BUNDLE_SCHEMA_VERSION,
             project,
             content: ProjectBundleContent {
-                qualities,
                 entities,
+                entity_templates,
+                gameplay_tags,
                 folders,
                 trait_templates,
                 assets,
                 storylets,
-                npc_behaviors,
                 events,
                 scenarios,
             },
@@ -345,20 +295,23 @@ impl StudioService {
         }
         issues.extend(entities::validate_bundle_content(&bundle.content));
 
-        // Validate content through projection
-        let runtime = entities::runtime_records(
-            &bundle.content.entities,
+        let Some(world) = bundle.content.entities.iter().find(|entity| entity.id == "world") else {
+            issues.sort();
+            issues.dedup();
+            return Ok(issues);
+        };
+        let runtime = entities::runtime_records_with_world(
+            world,
+            &bundle.content.entity_templates,
             &bundle.content.trait_templates,
         );
         let res = project_workspace(
             &bundle.project.id,
             &bundle.project.name,
             bundle.project.revision,
-            &bundle.content.qualities,
             &runtime.locations,
             &runtime.characters,
             &bundle.content.storylets,
-            &bundle.content.npc_behaviors,
             &bundle.content.events,
             bundle.content.scenarios.first(),
         );
@@ -390,6 +343,10 @@ impl StudioService {
     pub async fn list_content(&self, entity: &str) -> Result<Value, String> {
         ensure_content_kind(entity)?;
         let inner = self.inner.lock().await;
+        if entity == "entities" {
+            return serde_json::to_value(inner.store.list_entities().map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string());
+        }
         let list = inner
             .store
             .list_content_json(entity)
@@ -409,6 +366,12 @@ impl StudioService {
     pub async fn get_content_item(&self, entity: &str, id: &str) -> Result<Value, String> {
         ensure_content_kind(entity)?;
         let inner = self.inner.lock().await;
+        if entity == "entities" {
+            let record = inner.store.list_entities().map_err(|error| error.to_string())?
+                .into_iter().find(|record| record.id == id)
+                .ok_or_else(|| format!("entities item '{id}' not found"))?;
+            return serde_json::to_value(record).map_err(|error| error.to_string());
+        }
         let opt = inner
             .store
             .get_content_json(entity, id)
@@ -435,43 +398,53 @@ impl StudioService {
             "entities" => {
                 let stored: Option<EntityRecord> =
                     load_stored_record(&inner.store, "entities", stored_id)?;
+                let prepared = entities::prepare_entity_record(payload, stored.as_ref(), &index)?;
+                serde_json::to_value(prepared).map_err(|e| e.to_string())?
+            }
+            "entity_templates" => {
+                let stored: Option<EntityTemplateRecord> =
+                    load_stored_record(&inner.store, "entity_templates", stored_id)?;
                 let prepared = entities::prepare_entity(payload, stored.as_ref(), &index)?;
-                serde_json::to_value(&prepared).map_err(|e| e.to_string())?
+                serde_json::to_value(prepared).map_err(|e| e.to_string())?
             }
             "trait_templates" => {
                 let stored: Option<TraitTemplateRecord> =
                     load_stored_record(&inner.store, "trait_templates", stored_id)?;
+                if stored.as_ref().is_some_and(|template| template.system) {
+                    return Err("System trait templates cannot be modified".into());
+                }
                 let prepared =
                     entities::prepare_trait_template(payload, stored.as_ref(), &index)?;
-                serde_json::to_value(&prepared).map_err(|e| e.to_string())?
+                serde_json::to_value(prepared).map_err(|e| e.to_string())?
+            }
+            "gameplay_tags" => {
+                let tag: GameplayTagRecord = serde_json::from_value(payload.clone())
+                    .map_err(|error| format!("Gameplay tag validation failed: {error}"))?;
+                let stored: Option<GameplayTagRecord> =
+                    load_stored_record(&inner.store, "gameplay_tags", stored_id)?;
+                let prepared = prepare_gameplay_tag(&inner.store, tag, stored.as_ref())?;
+                serde_json::to_value(prepared).map_err(|e| e.to_string())?
             }
             "assets" => {
                 let stored: Option<AssetRecord> =
                     load_stored_record(&inner.store, "assets", stored_id)?;
                 let prepared = entities::prepare_asset(payload, stored.as_ref(), &index)?;
-                serde_json::to_value(&prepared).map_err(|e| e.to_string())?
+                serde_json::to_value(prepared).map_err(|e| e.to_string())?
             }
             "folders" => {
                 let stored: Option<FolderRecord> =
                     load_stored_record(&inner.store, "folders", stored_id)?;
                 let prepared = entities::prepare_folder(payload, stored.as_ref(), &index)?;
-                serde_json::to_value(&prepared).map_err(|e| e.to_string())?
+                serde_json::to_value(prepared).map_err(|e| e.to_string())?
             }
             _ => payload.clone(),
         };
 
-        let id = match entity {
-            "qualities" => final_payload
-                .get("name")
-                .and_then(|v| v.as_str())
-                .ok_or("Quality must have a 'name' field")?
-                .to_string(),
-            _ => final_payload
-                .get("id")
-                .and_then(|v| v.as_str())
-                .ok_or("Item must have an 'id' field")?
-                .to_string(),
-        };
+        let id = final_payload
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("Item must have an 'id' field")?
+            .to_string();
 
         if entity == "storylets" {
             let settings = match final_payload.get("chrono") {
@@ -488,85 +461,46 @@ impl StudioService {
                     serde_json::to_value(settings).map_err(|error| error.to_string())?,
                 );
         }
+
         let (revision, approved_rev) = if entity == "storylets" {
-            let existing_opt = inner.store.get_storylet(&id).map_err(|e| e.to_string())?;
-            let next_rev = match existing_opt {
-                Some(prev) => prev.revision + 1,
+            let next_rev = match inner.store.get_storylet(&id).map_err(|e| e.to_string())? {
+                Some(previous) => previous.revision + 1,
                 None => payload
                     .get("revision")
-                    .and_then(|v| v.as_u64())
+                    .and_then(Value::as_u64)
                     .unwrap_or(1),
             };
-            if let Some(obj) = final_payload.as_object_mut() {
-                obj.insert("revision".into(), Value::from(next_rev));
-                obj.insert("approved_revision".into(), Value::Null);
+            if let Some(object) = final_payload.as_object_mut() {
+                object.insert("revision".into(), Value::from(next_rev));
+                object.insert("approved_revision".into(), Value::Null);
             }
             (next_rev, None)
         } else {
-            let rev = payload
-                .get("revision")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(1);
-            let app_rev = payload.get("approved_revision").and_then(|v| v.as_u64());
-            (rev, app_rev)
+            (
+                payload
+                    .get("revision")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1),
+                payload.get("approved_revision").and_then(Value::as_u64),
+            )
         };
-        if entity == "qualities" {
-            let mut quality: crate::contracts::QualityRecord =
-                serde_json::from_value(final_payload.clone())
-                    .map_err(|error| format!("Quality validation failed: {error}"))?;
-            if quality.name.trim().is_empty()
-                || !matches!(
-                    quality.kind.as_str(),
-                    "currency" | "metric" | "tool" | "progress" | "menace" | "territory"
-                )
-            {
-                return Err(
-                    "Quality validation failed: name and supported category are required".into(),
-                );
-            }
-            if !quality.value.is_finite()
-                || !quality.min_value.is_finite()
-                || !quality.max_value.is_finite()
-                || quality.min_value > quality.max_value
-            {
-                return Err("Quality validation failed: value bounds must be finite and minimum must not exceed maximum".into());
-            }
-            if let Some(storylet_id) = &quality.menace_crisis_storylet_id {
-                if quality.kind != "menace" {
-                    return Err("Quality validation failed: only menace qualities can reference a crisis storylet".into());
-                }
-                if inner
-                    .store
-                    .get_content_json("storylets", storylet_id)
-                    .map_err(|error| error.to_string())?
-                    .is_none()
-                {
-                    return Err(format!(
-                        "Quality validation failed: crisis storylet '{storylet_id}' does not exist"
-                    ));
-                }
-            }
-            storylet_engine::chrono_state::MetricRegistry::compile([quality.name.clone()])
-                .map_err(|error| format!("Quality validation failed: {error}"))?;
-            entities::normalize_optional_id(&mut quality.folder_id);
-            entities::validate_folder_ref("qualities", quality.folder_id.as_deref(), &index)
-                .map_err(|error| format!("Quality validation failed: {error}"))?;
-            final_payload = serde_json::to_value(quality).map_err(|error| error.to_string())?;
-        }
-        if entity == "entities" {
-            let entity_record: EntityRecord = serde_json::from_value(final_payload.clone())
-                .map_err(|error| format!("Entity validation failed: {error}"))?;
-            if entity_record.entity_type == crate::contracts::EntityType::Character {
-                let character = entities::character_record(&entity_record, Value::Null)
-                    .ok_or("Entity validation failed: character settings are missing")?;
-                let mut characters = inner
-                    .store
-                    .runtime_records()
-                    .map_err(|error| error.to_string())?
-                    .characters;
-                characters.retain(|existing| existing.id != character.id);
-                characters.push(character.clone());
-                validate_character(&character, &characters, |storylet_id| {
+
+        if entity == "entity_templates" {
+            let mut templates = inner
+                .store
+                .list_entity_templates()
+                .map_err(|error| error.to_string())?;
+            let candidate: EntityTemplateRecord = serde_json::from_value(final_payload.clone())
+                .map_err(|error| format!("Entity template validation failed: {error}"))?;
+            templates.retain(|item| item.id != candidate.id);
+            templates.push(candidate);
+            let trait_templates = inner
+                .store
+                .list_trait_templates()
+                .map_err(|error| error.to_string())?;
+                let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)?;
+            for character in &runtime.characters {
+                validate_character(character, &runtime.characters, |storylet_id| {
                     Ok(inner
                         .store
                         .get_content_json("storylets", storylet_id)
@@ -575,12 +509,15 @@ impl StudioService {
                 })?;
             }
         }
+
         if entity == "storylets" {
             let mut storylet: StoryletRecord = serde_json::from_value(final_payload.clone())
                 .map_err(|error| format!("Storylet validation failed: {error}"))?;
+            if !crate::contracts::STORYLET_CLUSTER_TYPES.contains(&storylet.cluster_type.as_str()) {
+                return Err(format!("Storylet validation failed: unsupported cluster_type '{}'", storylet.cluster_type));
+            }
             let graph = match storylet.graph.clone() {
-                Some(value) => serde_json::from_value::<NarrativeGraph>(value)
-                    .map_err(|error| format!("Storylet graph validation failed: {error}"))?,
+                Some(graph) => graph,
                 None => NarrativeGraph::from_storylet(&storylet),
             };
             graph.validate().map_err(|issues| {
@@ -590,6 +527,7 @@ impl StudioService {
             entities::normalize_optional_id(&mut storylet.folder_id);
             entities::validate_folder_ref("storylets", storylet.folder_id.as_deref(), &index)
                 .map_err(|error| format!("Storylet validation failed: {error}"))?;
+            validate_storylet_gameplay_tags(&inner.store, &storylet, &graph)?;
             let payload_object = final_payload
                 .as_object_mut()
                 .ok_or("Storylet payload must be a JSON object")?;
@@ -602,17 +540,17 @@ impl StudioService {
                     .map(Value::String)
                     .unwrap_or(Value::Null),
             );
-            let qualities = inner
+            let templates = inner
                 .store
-                .list_qualities()
+                .list_entity_templates()
                 .map_err(|error| error.to_string())?;
-            let runtime = inner
+            let trait_templates = inner
                 .store
-                .runtime_records()
+                .list_trait_templates()
                 .map_err(|error| error.to_string())?;
+            let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)?;
             compile_chrono_dispatch_for_storylet_validation(
                 &[storylet],
-                &qualities,
                 &runtime.locations,
                 &runtime.characters,
             )
@@ -633,19 +571,32 @@ impl StudioService {
         id: &str,
     ) -> Result<bool, ContentDeleteError> {
         ensure_content_kind(entity).map_err(ContentDeleteError::Conflict)?;
+        if entity == "entities" && id == "world" {
+            return Err(ContentDeleteError::Conflict(
+                "Intrinsic World entity is system-owned and cannot be deleted".into(),
+            ));
+        }
         let inner = self.inner.lock().await;
         if entity == "storylets" {
-            let qualities = inner
+            let templates = inner
                 .store
-                .list_qualities()
+                .list_entity_templates()
                 .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
-            if let Some(quality) = qualities
-                .iter()
-                .find(|quality| quality.menace_crisis_storylet_id.as_deref() == Some(id))
-            {
+            let trait_templates = inner
+                .store
+                .list_trait_templates()
+                .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
+            let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)
+                .map_err(ContentDeleteError::Persistence)?;
+            if let Some(character) = runtime.characters.iter().find(|character| {
+                character
+                    .thresholds
+                    .iter()
+                    .any(|threshold| threshold.linked_graph_asset_id == id)
+            }) {
                 return Err(ContentDeleteError::Conflict(format!(
-                    "Cannot delete storylet '{id}': menace quality '{}' references it as its crisis storylet",
-                    quality.name
+                    "Cannot delete storylet '{id}': character '{}' has a passion threshold linked to it",
+                    character.name
                 )));
             }
         }
@@ -674,7 +625,10 @@ impl StudioService {
                 .delete_content(entity, id)
                 .map_err(|error| ContentDeleteError::Persistence(error.to_string()));
         }
-        if matches!(entity, "entities" | "assets" | "trait_templates") {
+        if matches!(
+            entity,
+            "entity_templates" | "gameplay_tags" | "assets" | "trait_templates"
+        ) {
             if inner
                 .store
                 .get_content_json(entity, id)
@@ -683,18 +637,58 @@ impl StudioService {
             {
                 return Ok(false);
             }
+            if entity == "trait_templates" {
+                let template: Option<TraitTemplateRecord> =
+                    load_stored_record(&inner.store, entity, Some(id))
+                        .map_err(ContentDeleteError::Persistence)?;
+                if template.is_some_and(|template| template.system) {
+                    return Err(ContentDeleteError::Conflict(
+                        "System trait templates cannot be deleted".into(),
+                    ));
+                }
+            }
+            if entity == "gameplay_tags" {
+                let tags = inner
+                    .store
+                    .list_gameplay_tags()
+                    .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
+                let tag = tags
+                    .iter()
+                    .find(|tag| tag.id == id)
+                    .ok_or_else(|| ContentDeleteError::Conflict(format!("Gameplay tag '{id}' not found")))?;
+                if tag.protected {
+                    return Err(ContentDeleteError::Conflict(format!(
+                        "Cannot delete protected root gameplay tag '{}'",
+                        tag.name
+                    )));
+                }
+                if tags.iter().any(|child| {
+                    child
+                        .name
+                        .get(..tag.name.len() + 1)
+                        .is_some_and(|prefix| {
+                            prefix.eq_ignore_ascii_case(&format!("{}.", tag.name))
+                        })
+                }) {
+                    return Err(ContentDeleteError::Conflict(format!(
+                        "Cannot delete gameplay tag '{}': child tags still exist",
+                        tag.name
+                    )));
+                }
+            }
             let references = collect_references(&inner, entity, id)
                 .map_err(ContentDeleteError::Persistence)?;
             let direct: Vec<&ContentReference> = references
                 .iter()
-                .filter(|reference| reference.via == crate::contracts::ReferenceVia::Id)
+                .filter(|reference| {
+                    entity == "gameplay_tags"
+                        || reference.via == crate::contracts::ReferenceVia::Id
+                })
                 .collect();
             if !direct.is_empty() {
                 let label = record_label(&inner.store, entity, id)
                     .map_err(ContentDeleteError::Persistence)?
                     .unwrap_or_else(|| id.to_string());
-                // One storylet can reference the same record from several nodes;
-                // count and name it once, listing the fields it references.
                 let mut grouped: Vec<(String, String, Vec<String>)> = Vec::new();
                 for reference in &direct {
                     match grouped
@@ -716,7 +710,9 @@ impl StudioService {
                 let summary = grouped
                     .iter()
                     .take(5)
-                    .map(|(_, source_label, fields)| format!("{source_label} ({})", fields.join(", ")))
+                    .map(|(_, source_label, fields)| {
+                        format!("{source_label} ({})", fields.join(", "))
+                    })
                     .collect::<Vec<_>>()
                     .join("; ");
                 return Err(ContentDeleteError::Conflict(format!(
@@ -791,16 +787,17 @@ impl StudioService {
         Ok(value)
     }
 
-    /// Where an entity, asset, or trait template is used.
+    /// Where an entity template, gameplay tag, asset, or trait template is used.
     pub async fn content_references(
         &self,
         kind: &str,
         id: &str,
     ) -> Result<Vec<ContentReference>, String> {
-        if !matches!(kind, "entities" | "assets" | "trait_templates") {
-            return Err(
-                "References are only available for entities, assets, and trait templates".into(),
-            );
+        if !matches!(
+            kind,
+            "entity_templates" | "gameplay_tags" | "assets" | "trait_templates"
+        ) {
+            return Err("Unsupported reference kind".into());
         }
         let inner = self.inner.lock().await;
         if inner
@@ -836,31 +833,22 @@ impl StudioService {
             .map_err(|e| format!("Invalid scenario format: {e}"))?;
 
         let inner = self.inner.lock().await;
-        let qualities = inner.store.list_qualities().map_err(|e| e.to_string())?;
-        let runtime = inner
+        let templates = inner
             .store
-            .runtime_records()
+            .list_entity_templates()
             .map_err(|e| e.to_string())?;
-
-        let resolved = resolve_scenario_start(
-            &scenario,
-            &qualities,
-            &runtime.locations,
-            &runtime.characters,
-        );
+        let trait_templates = inner
+            .store
+            .list_trait_templates()
+            .map_err(|e| e.to_string())?;
+        let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)?;
+        let resolved =
+            resolve_scenario_start(&scenario, &runtime.locations, &runtime.characters);
         serde_json::to_value(&resolved).map_err(|e| e.to_string())
     }
 
     pub async fn get_authoring_options(&self) -> AuthoringOptions {
         AuthoringOptions {
-            quality_types: vec![
-                "currency".into(),
-                "metric".into(),
-                "tool".into(),
-                "progress".into(),
-                "menace".into(),
-                "territory".into(),
-            ],
             repeatability_modes: vec![
                 "always".into(),
                 "once_ever".into(),
@@ -987,16 +975,23 @@ impl StudioService {
             .store
             .get_project_metadata()
             .map_err(|e| e.to_string())?;
-        let qualities = inner.store.list_qualities().map_err(|e| e.to_string())?;
-        let runtime = inner
+        let templates = inner
             .store
-            .runtime_records()
+            .list_entity_templates()
             .map_err(|e| e.to_string())?;
+        let trait_templates = inner
+            .store
+            .list_trait_templates()
+            .map_err(|e| e.to_string())?;
+        let projection_issues = entities::generic_playtest_projection_issues(&templates);
+        if !projection_issues.is_empty() {
+            return Err(format!(
+                "Workspace cannot be represented by generic playtests: {}",
+                projection_issues.join("; ")
+            ));
+        }
+        let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)?;
         let storylets = inner.store.list_storylets().map_err(|e| e.to_string())?;
-        let npc_behaviors = inner
-            .store
-            .list_npc_behaviors()
-            .map_err(|e| e.to_string())?;
         let events = inner.store.list_events().map_err(|e| e.to_string())?;
 
         let mut scenario_rec: Option<ScenarioRecord> = None;
@@ -1010,9 +1005,8 @@ impl StudioService {
             }
         }
 
-        // Apply start location override if provided
         if let Some(loc_id) = start_location_override {
-            if let Some(ref mut scen) = scenario_rec {
+            if let Some(scen) = &mut scenario_rec {
                 scen.start_location_policy.mode = "fixed".into();
                 scen.start_location_policy.location_id = Some(loc_id.to_string());
             }
@@ -1022,11 +1016,9 @@ impl StudioService {
             &meta.id,
             &meta.name,
             meta.revision,
-            &qualities,
             &runtime.locations,
             &runtime.characters,
             &storylets,
-            &npc_behaviors,
             &events,
             scenario_rec.as_ref(),
         );
@@ -1309,7 +1301,8 @@ fn ensure_content_kind(entity: &str) -> Result<(), String> {
 
 fn kind_label(kind: &str) -> &'static str {
     match kind {
-        "entities" => "entity",
+        "entity_templates" => "entity template",
+        "gameplay_tags" => "gameplay tag",
         "assets" => "asset",
         "trait_templates" => "trait template",
         _ => "item",
@@ -1319,6 +1312,12 @@ fn kind_label(kind: &str) -> &'static str {
 fn build_workspace_index(store: &Store) -> Result<WorkspaceIndex, String> {
     Ok(WorkspaceIndex {
         entities: store.list_entities().map_err(|error| error.to_string())?,
+        entity_templates: store
+            .list_entity_templates()
+            .map_err(|error| error.to_string())?,
+        gameplay_tags: store
+            .list_gameplay_tags()
+            .map_err(|error| error.to_string())?,
         templates: store
             .list_trait_templates()
             .map_err(|error| error.to_string())?,
@@ -1331,6 +1330,205 @@ fn build_workspace_index(store: &Store) -> Result<WorkspaceIndex, String> {
             .map(|storylet| storylet.id)
             .collect(),
     })
+}
+
+fn prepare_gameplay_tag(
+    store: &Store,
+    mut tag: GameplayTagRecord,
+    stored: Option<&GameplayTagRecord>,
+) -> Result<GameplayTagRecord, String> {
+    let name = tag.name.trim().to_owned();
+    let segments: Vec<&str> = name.split('.').collect();
+    if segments.iter().any(|segment| !entities::is_identifier(segment)) {
+        return Err("Gameplay tag name must be a dot-separated identifier path".into());
+    }
+    let tags = store.list_gameplay_tags().map_err(|error| error.to_string())?;
+    if tags.iter().any(|existing| {
+        Some(existing.id.as_str()) != stored.map(|record| record.id.as_str())
+            && existing.name.eq_ignore_ascii_case(&name)
+    }) {
+        return Err(format!("Gameplay tag '{name}' already exists"));
+    }
+    if let Some((parent, _)) = name.rsplit_once('.')
+        && !tags.iter().any(|existing| existing.name.eq_ignore_ascii_case(parent))
+    {
+        return Err(format!(
+            "Gameplay tag parent '{parent}' must exist before creating '{name}'"
+        ));
+    }
+    if let Some(stored) = stored {
+        if stored.name != name {
+            if stored.protected {
+                return Err(format!("Protected gameplay tag '{}' cannot be renamed", stored.name));
+            }
+            if tags.iter().any(|candidate| {
+                candidate
+                    .name
+                    .get(..stored.name.len() + 1)
+                    .is_some_and(|prefix| {
+                        prefix.eq_ignore_ascii_case(&format!("{}.", stored.name))
+                    })
+            }) {
+                return Err(format!(
+                    "Gameplay tag '{}' cannot be renamed while child tags exist",
+                    stored.name
+                ));
+            }
+            if !gameplay_tag_references_for_store(store, stored)?.is_empty() {
+                return Err(format!(
+                    "Gameplay tag '{}' cannot be renamed while it is referenced",
+                    stored.name
+                ));
+            }
+        }
+        tag.id.clone_from(&stored.id);
+        tag.protected = stored.protected;
+        tag.created_at = stored.created_at;
+    } else {
+        if tag.id.trim().is_empty() {
+            tag.id = uuid::Uuid::new_v4().to_string();
+        } else if store
+            .get_content_json("gameplay_tags", &tag.id)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Err(format!("Gameplay tag id '{}' already exists", tag.id));
+        }
+        tag.protected = false;
+    }
+    tag.name = name.to_owned();
+    Ok(tag)
+}
+
+fn gameplay_tag_references_for_store(
+    store: &Store,
+    target: &GameplayTagRecord,
+) -> Result<Vec<ContentReference>, String> {
+    let entities = store
+        .list_entity_templates()
+        .map_err(|error| error.to_string())?;
+    let templates = store
+        .list_trait_templates()
+        .map_err(|error| error.to_string())?;
+    let assets = store.list_assets().map_err(|error| error.to_string())?;
+    let storylets = store.list_storylets().map_err(|error| error.to_string())?;
+    let scenarios = store.list_scenarios().map_err(|error| error.to_string())?;
+    let gameplay_tags = store.list_gameplay_tags().map_err(|error| error.to_string())?;
+    let context = ReferenceContext {
+        entities: &entities,
+        templates: &templates,
+        assets: &assets,
+        storylets: &storylets,
+        scenarios: &scenarios,
+        gameplay_tags: &gameplay_tags,
+    };
+    Ok(references::gameplay_tag_references(target, &context))
+}
+
+fn validate_storylet_gameplay_tags(
+    store: &Store,
+    storylet: &StoryletRecord,
+    graph: &NarrativeGraph,
+) -> Result<(), String> {
+    let tags = store.list_gameplay_tags().map_err(|error| error.to_string())?;
+    let is_registered = |name: &str| tags.iter().any(|tag| tag.name == name);
+    for name in &storylet.location_tags {
+        if !is_registered(name) || (name != "location" && !name.starts_with("location.")) {
+            return Err(format!(
+                "Storylet validation failed: location tag '{name}' must be a registered location gameplay tag"
+            ));
+        }
+    }
+    for parameter in &storylet.parameters {
+        let Some(role) = crate::projection::parse_role_query(&parameter.query) else {
+            return Err(format!(
+                "Storylet validation failed: parameter '{}' must use a canonical role query",
+                parameter.param_name
+            ));
+        };
+        if (role != "character" && !role.starts_with("character."))
+            || !is_registered(&role)
+        {
+            return Err(format!(
+                "Storylet validation failed: role tag '{role}' must be a registered character gameplay tag"
+            ));
+        }
+    }
+
+    let entity_templates = store
+        .list_entity_templates()
+        .map_err(|error| error.to_string())?;
+    fn check_graph_tags(
+        value: &Value,
+        tags: &[GameplayTagRecord],
+        entities: &[EntityTemplateRecord],
+    ) -> Result<(), String> {
+        let Some(object) = value.as_object() else {
+            if let Some(values) = value.as_array() {
+                for item in values {
+                    check_graph_tags(item, tags, entities)?;
+                }
+            }
+            return Ok(());
+        };
+        for (key, value) in object {
+            if let Some(name) = value.as_str() {
+                let role_key = matches!(
+                    key.as_str(),
+                    "speaker_role" | "target_role" | "actor_role" | "action_target"
+                ) || (key == "target"
+                    && object.get("kind").and_then(Value::as_str) == Some("idle_action"));
+                let tag_key = matches!(
+                    key.as_str(),
+                    "tag" | "emotion_tag" | "action_tag" | "emote"
+                );
+                if role_key && name != "player" {
+                    if !name.starts_with("character.")
+                        || !tags.iter().any(|tag| tag.name == name)
+                    {
+                        return Err(format!(
+                            "Storylet validation failed: role '{name}' must be a registered character gameplay tag"
+                        ));
+                    }
+                } else if tag_key {
+                    let Some(tag) = tags.iter().find(|tag| tag.name == name) else {
+                        return Err(format!(
+                            "Storylet validation failed: gameplay tag '{name}' is not registered"
+                        ));
+                    };
+                    if key == "tag"
+                        && let Some(target_id) = object
+                            .get("target_entity_id")
+                            .and_then(Value::as_str)
+                    {
+                        let target = entities
+                            .iter()
+                            .find(|entity| entity.id == target_id)
+                            .ok_or_else(|| {
+                                format!(
+                                    "Storylet validation failed: tag target entity '{target_id}' does not exist"
+                                )
+                            })?;
+                        let target_root = &target.root_tag;
+                        if tag.name != *target_root
+                            && !tag.name.starts_with(&format!("{target_root}."))
+                        {
+                            return Err(format!(
+                                "Storylet validation failed: tag '{name}' is outside target root '{target_root}'"
+                            ));
+                        }
+                    }
+                }
+            }
+            check_graph_tags(value, tags, entities)?;
+        }
+        Ok(())
+    }
+    check_graph_tags(
+        &serde_json::to_value(graph).map_err(|error| error.to_string())?,
+        &tags,
+        &entity_templates,
+    )
 }
 
 fn load_stored_record<T: serde::de::DeserializeOwned>(
@@ -1388,14 +1586,22 @@ fn collect_references(
     kind: &str,
     id: &str,
 ) -> Result<Vec<ContentReference>, String> {
-    if !matches!(kind, "entities" | "assets" | "trait_templates") {
+    if !matches!(
+        kind,
+        "entity_templates" | "gameplay_tags" | "assets" | "trait_templates"
+    ) {
         return Err(
-            "References are only available for entities, assets, and trait templates".to_string(),
+            "References are available for entity templates, gameplay tags, assets, and trait templates"
+                .to_string(),
         );
     }
     let entities = inner
         .store
-        .list_entities()
+        .list_entity_templates()
+        .map_err(|error| error.to_string())?;
+    let gameplay_tags = inner
+        .store
+        .list_gameplay_tags()
         .map_err(|error| error.to_string())?;
     let templates = inner
         .store
@@ -1413,25 +1619,28 @@ fn collect_references(
         .store
         .list_scenarios()
         .map_err(|error| error.to_string())?;
-    let npc_behaviors = inner
-        .store
-        .list_npc_behaviors()
-        .map_err(|error| error.to_string())?;
     let context = ReferenceContext {
         entities: &entities,
         templates: &templates,
         assets: &assets,
         storylets: &storylets,
         scenarios: &scenarios,
-        npc_behaviors: &npc_behaviors,
+        gameplay_tags: &gameplay_tags,
     };
     match kind {
-        "entities" => {
+        "entity_templates" => {
             let target = entities
                 .iter()
                 .find(|entity| entity.id == id)
-                .ok_or_else(|| format!("entities item '{id}' not found"))?;
+                .ok_or_else(|| format!("entity_templates item '{id}' not found"))?;
             Ok(references::entity_references(target, &context))
+        }
+        "gameplay_tags" => {
+            let target = gameplay_tags
+                .iter()
+                .find(|tag| tag.id == id)
+                .ok_or_else(|| format!("gameplay_tags item '{id}' not found"))?;
+            Ok(references::gameplay_tag_references(target, &context))
         }
         "assets" => Ok(references::asset_references(id, &context)),
         _ => Ok(references::trait_template_references(id, &context)),
@@ -1587,11 +1796,6 @@ pub(crate) fn chrono_now_ms() -> i64 {
         .as_millis() as i64
 }
 
-pub type RuntimeService = StudioService;
-
-pub fn router(service: StudioService) -> axum::Router {
-    crate::http::build_router(service, None)
-}
 
 fn validate_event_history(
     conn: &rusqlite::Connection,

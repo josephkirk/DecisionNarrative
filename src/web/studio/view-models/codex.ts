@@ -1,14 +1,14 @@
 import { ref } from "vue";
 import { StudioApi } from "../api.ts";
-import type { EventRecord, NpcBehaviorRecord } from "../contracts.ts";
+import type { EventRecord } from "../contracts.ts";
 import { notify } from "../state.ts";
 import { refreshWorkspace } from "./workspace.ts";
 
-export type CodexCategory = "npc_behaviors" | "events";
-export type CodexRecord = NpcBehaviorRecord | EventRecord;
+export type CodexCategory = "events";
+export type CodexRecord = EventRecord;
 
 export function useCodexViewModel() {
-  const activeCategory = ref<CodexCategory>("npc_behaviors");
+  const activeCategory = ref<CodexCategory>("events");
   const searchQuery = ref("");
   const selectedId = ref<string | null>(null);
   const loading = ref(false);
@@ -16,7 +16,7 @@ export function useCodexViewModel() {
   async function loadAll() {
     loading.value = true;
     try {
-      await refreshWorkspace(["npc_behaviors", "events"]);
+      await refreshWorkspace(["events"]);
     } finally {
       loading.value = false;
     }

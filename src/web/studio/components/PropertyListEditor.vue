@@ -24,9 +24,15 @@ const rows = computed(() => props.modelValue);
 const valueKey = computed(() => (props.mode === "instance" ? "value" : "default"));
 
 function valueOf(row: Row): PropertyValue {
-  return props.mode === "instance"
-    ? ((row as EntityProperty).value ?? null)
-    : ((row as PropertyDefinition).default ?? null);
+  // Entity rows from the server carry `value`; template edits are staged under
+  // `default` (which the backend maps onto `value`). Prefer whichever key the
+  // row actually defines so saved values survive a reload in either shape.
+  const asEntity = row as Partial<EntityProperty>;
+  const asDef = row as Partial<PropertyDefinition>;
+  if (props.mode === "instance") {
+    return asEntity.value !== undefined ? asEntity.value : (asDef.default ?? null);
+  }
+  return asDef.default !== undefined ? asDef.default : (asEntity.value ?? null);
 }
 
 function duplicateKeys(): Set<string> {
@@ -52,9 +58,15 @@ function rowProblem(row: Row): string | null {
 }
 
 function patch(index: number, changes: Partial<Row>) {
-  const next = rows.value.map((row, position) =>
-    position === index ? ({ ...row, ...changes } as Row) : row,
-  );
+  const next = rows.value.map((row, position) => {
+    if (position !== index) return row;
+    const updated = { ...row, ...changes } as Row & Record<string, unknown>;
+    // Keep a single canonical value key per mode: the backend rejects
+    // payloads that carry both `value` and its `default` alias.
+    if (props.mode === "definition") delete updated.value;
+    else delete updated.default;
+    return updated as Row;
+  });
   emit("update:modelValue", next);
 }
 
@@ -75,8 +87,7 @@ function changeType(index: number, event: Event) {
   } as Partial<Row>);
 }
 
-function changeArray(index: number, event: Event) {
-  const isArray = (event.target as HTMLInputElement).checked;
+function setArray(index: number, isArray: boolean) {
   const row = rows.value[index];
   if (!row) return;
   patch(index, {
@@ -85,6 +96,21 @@ function changeArray(index: number, event: Event) {
   } as Partial<Row>);
 }
 
+function changeArray(index: number, event: Event) {
+  setArray(index, (event.target as HTMLInputElement).checked);
+}
+
+function toggleArrayValue(index: number) {
+  const row = rows.value[index];
+  if (!row) return;
+  setArray(index, !(row.is_array === true));
+}
+
+function toggleMultiline(index: number) {
+  const row = rows.value[index];
+  if (!row) return;
+  patch(index, { multiline: !(row.multiline === true) });
+}
 function move(index: number, delta: number) {
   const target = index + delta;
   if (target < 0 || target >= rows.value.length) return;
@@ -118,53 +144,57 @@ function add() {
       <span>Type</span>
       <span>Array</span>
       <span>{{ props.mode === "instance" ? "Value" : "Default" }}</span>
-      <span></span>
+      <span style="text-align:right;">Actions</span>
     </div>
 
-    <div v-if="!rows.length" class="property-list__empty">No properties yet.</div>
+    <div v-if="!rows.length" class="property-list__empty" style="display:flex; flex-direction:column; align-items:center; gap:12px; padding:28px;">
+      <span>No typed properties defined yet.</span>
+      <button v-if="!props.disabled" class="btn btn-primary" type="button" @click="add">+ Add property</button>
+    </div>
 
     <div v-for="(row, index) in rows" :key="`${row.id || index}-${row.type}-${row.is_array}-${row.multiline}`" class="property-list__row">
-      <div class="property-list__cell">
+      <div class="property-list__cell property-list__cell--name">
+        <span class="property-type-dot" :class="`type-${row.type}`" :title="`Type: ${row.type}`"></span>
         <input
-          class="form-input"
+          class="form-input property-name-input"
           :value="row.name"
+          placeholder="Property name"
           :disabled="props.disabled"
           @input="patch(index, { name: ($event.target as HTMLInputElement).value })"
         />
       </div>
-      <div class="property-list__cell">
+      <div class="property-list__cell property-list__cell--key">
         <input
-          class="form-input"
+          class="form-input property-key-input"
           :class="{ 'is-invalid': rowProblem(row) }"
           :value="row.key"
+          placeholder="key_name"
           :disabled="props.disabled"
           @input="patch(index, { key: ($event.target as HTMLInputElement).value })"
         />
         <span v-if="rowProblem(row)" class="property-list__error">{{ rowProblem(row) }}</span>
-        <label v-if="row.type === 'string'" class="property-list__inline">
-          <input
-            type="checkbox"
-            :checked="row.multiline === true"
-            :disabled="props.disabled"
-            @change="patch(index, { multiline: ($event.target as HTMLInputElement).checked })"
-          />
-          Multiline
-        </label>
       </div>
-      <div class="property-list__cell">
-        <select class="form-select" :value="row.type" :disabled="props.disabled" @change="changeType(index, $event)">
+      <div class="property-list__cell property-list__cell--type">
+        <select class="form-select property-type-select" :value="row.type" :disabled="props.disabled" @change="changeType(index, $event)">
           <option v-for="option in PROPERTY_TYPES" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </div>
-      <div class="property-list__cell">
-        <input
-          type="checkbox"
-          :checked="row.is_array === true"
+      <div class="property-list__cell property-list__cell--array">
+        <button
+          type="button"
+          class="array-switch"
+          role="switch"
+          :aria-checked="row.is_array === true"
+          :aria-label="`Multiple values for ${row.name || row.key || 'property'}`"
+          :title="row.is_array ? 'Multiple values on' : 'Multiple values off'"
           :disabled="props.disabled"
-          @change="changeArray(index, $event)"
-        />
+          @click="toggleArrayValue(index)"
+        >
+          <svg class="array-switch__icon" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M1.5 2.5h9M1.5 6h9M1.5 9.5h9"/></svg>
+          <span class="array-switch__state">{{ row.is_array ? 'On' : 'Off' }}</span>
+        </button>
       </div>
-      <div class="property-list__cell">
+      <div class="property-list__cell property-list__cell--value">
         <PropertyValueInput
           :key="`${row.id}-${row.type}-${row.is_array}-${row.multiline}`"
           :model-value="valueOf(row)"
@@ -176,12 +206,209 @@ function add() {
         />
       </div>
       <div class="property-list__actions">
-        <button class="btn btn-secondary" type="button" :disabled="props.disabled || index === 0" @click="move(index, -1)">↑</button>
-        <button class="btn btn-secondary" type="button" :disabled="props.disabled || index === rows.length - 1" @click="move(index, 1)">↓</button>
-        <button class="btn btn-secondary" type="button" :disabled="props.disabled" @click="remove(index)">✕</button>
+        <button v-if="row.type === 'string'" class="btn-micro" type="button" title="Multiline text" :aria-label="`Multiline text for ${row.name || row.key || 'property'}`" :aria-pressed="row.multiline === true" :class="{ 'is-active': row.multiline === true }" :disabled="props.disabled" @click="toggleMultiline(index)">Aa</button>
+        <button class="btn-micro" type="button" title="Move property up" aria-label="Move property up" :disabled="props.disabled || index === 0" @click="move(index, -1)"><svg class="btn-micro__icon" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 7.5 6 4l3.5 3.5"/></svg></button>
+        <button class="btn-micro" type="button" title="Move property down" aria-label="Move property down" :disabled="props.disabled || index === rows.length - 1" @click="move(index, 1)"><svg class="btn-micro__icon" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg></button>
+        <button class="btn-micro danger" type="button" title="Delete property" aria-label="Delete property" :disabled="props.disabled" @click="remove(index)">✕</button>
       </div>
     </div>
 
-    <button class="btn btn-secondary" type="button" :disabled="props.disabled" @click="add">+ Add Property</button>
+    <div class="property-list__footer">
+      <button v-if="!props.disabled" class="btn btn-secondary property-add-btn" type="button" @click="add">
+        <span style="font-size: 14px; line-height: 1;">+</span> Add Property
+      </button>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.property-list {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg, 10px);
+  overflow: hidden;
+}
+
+.property-list__head {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 115px 84px 1.2fr 118px;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-container-high, #212735);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.property-list__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.property-list__row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 115px 84px 1.2fr 118px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background-color 0.12s ease-out;
+}
+
+.property-list__row:hover {
+  background: var(--bg-card-hover, rgba(255, 255, 255, 0.02));
+}
+
+.property-list__cell--name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.property-type-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.property-type-dot.type-int,
+.property-type-dot.type-float { background-color: var(--status-success, #10b981); }
+.property-type-dot.type-string { background-color: var(--tertiary, #ffb95f); }
+.property-type-dot.type-bool { background-color: var(--secondary, #bdc2ff); }
+.property-type-dot.type-entity { background-color: var(--accent, #06b6d4); }
+.property-type-dot.type-asset { background-color: var(--status-danger, #f43f5e); }
+.property-type-dot.type-json { background-color: #a855f7; }
+
+.property-key-input {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.property-type-select {
+  font-size: 11px;
+  padding: 4px 6px;
+  height: 28px;
+  background: var(--bg-badge, #212735);
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.property-list__cell--array {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.array-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out;
+}
+.array-switch:hover:not(:disabled) {
+  background: var(--bg-badge);
+  color: var(--text-main);
+  border-color: var(--border-muted);
+}
+.array-switch[aria-checked="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+.array-switch:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.array-switch__icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.array-switch__state {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.property-list__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.btn-micro {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs, 3px);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.12s ease-out, color 0.12s ease-out, border-color 0.12s ease-out;
+}
+.btn-micro__icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.btn-micro.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.btn-micro:hover:not(:disabled) {
+  background: var(--bg-badge);
+  color: var(--text-main);
+  border-color: var(--border-muted);
+}
+
+.btn-micro.danger:hover:not(:disabled) {
+  background: var(--status-danger-subtle);
+  color: var(--status-danger);
+  border-color: var(--status-danger);
+}
+
+.btn-micro:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.property-list__footer {
+  padding: 8px 12px;
+  background: var(--surface-container-low, #1a1c20);
+}
+
+.property-add-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  gap: 6px;
+}
+
+
+.property-list__error {
+  display: block;
+  font-size: 10px;
+  color: var(--status-danger);
+  margin-top: 2px;
+}
+</style>

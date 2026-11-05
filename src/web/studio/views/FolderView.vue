@@ -10,7 +10,7 @@ import {
   rootDefinition,
   type TreeItem,
 } from "../projectTree.ts";
-import { entityTypeColor } from "../entityModel.ts";
+import { rootTagColor } from "../entityModel.ts";
 import { thumbnailInitial, thumbnailUrl } from "../thumbnails.ts";
 import { useProjectTree } from "../view-models/projectTree.ts";
 
@@ -27,8 +27,8 @@ const source = computed(() =>
   buildTreeItems({
     projectName: studioState.project?.name ?? "Workspace",
     folders: studioState.folders,
-    qualities: studioState.qualities,
     entities: studioState.entities,
+    entityTemplates: studioState.entityTemplates,
     traitTemplates: studioState.traitTemplates,
     assets: studioState.assets,
     storylets: studioState.storylets,
@@ -76,7 +76,7 @@ function openItem(item: TreeItem) {
 }
 
 function tileColor(item: TreeItem): string {
-  return item.entityType ? entityTypeColor(item.entityType) : "var(--accent)";
+  return item.rootTag ? rootTagColor(item.rootTag) : "var(--accent)";
 }
 
 function onDrop(event: DragEvent) {
@@ -133,8 +133,12 @@ function folderDrag(event: DragEvent, id: string) {
           <button :class="['tab-btn', viewMode === 'grid' ? 'active' : '']" @click="viewMode = 'grid'">Grid</button>
           <button :class="['tab-btn', viewMode === 'list' ? 'active' : '']" @click="viewMode = 'list'">List</button>
         </div>
-        <button class="btn btn-secondary" @click="createFolder(root, folderId)">+ New Folder</button>
-        <button class="btn btn-primary" @click="createItem(definition, folderId)">+ {{ definition.newLabel }}</button>
+        <router-link v-if="root === 'storylets'" to="/storylets" class="btn btn-secondary">Library view</router-link>
+        <router-link v-if="root === 'entities'" to="/browse/entity_templates" class="btn btn-secondary">Entity templates</router-link>
+        <template v-if="definition.newLabel">
+          <button class="btn btn-secondary" @click="createFolder(root, folderId)">+ New folder</button>
+          <button class="btn btn-primary" @click="createItem(definition, folderId)">+ {{ definition.newLabel }}</button>
+        </template>
       </div>
     </header>
 
@@ -152,10 +156,16 @@ function folderDrag(event: DragEvent, id: string) {
       @dragover.prevent
       @drop.prevent="onDrop"
     >
-      <div v-if="!contents.folders.length && !contents.items.length" class="folder-empty">
-        This folder is empty.
+      <div v-if="!contents.folders.length && !contents.items.length" class="folder-empty" style="display:flex; flex-direction:column; align-items:center; gap:12px; padding:48px 20px; text-align:center;">
+        <div v-if="root === 'entities'" style="display:flex; flex-direction:column; align-items:center; gap:12px;">
+          <span>No entities in this folder.</span>
+          <button class="btn btn-primary" type="button" @click="createItem(definition, folderId)">+ New entity</button>
+        </div>
+        <template v-else>
+          <span>This folder is empty.</span>
+          <button v-if="definition?.newLabel" class="btn btn-primary" type="button" @click="createItem(definition, folderId)">+ {{ definition.newLabel }}</button>
+        </template>
       </div>
-
       <div v-else-if="viewMode === 'grid'" class="folder-grid">
         <div
           v-for="folder in contents.folders"

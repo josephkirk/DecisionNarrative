@@ -20,6 +20,8 @@ export const PROPERTY_TYPES: PropertyTypeDefinition[] = [
   { value: "int", label: "Integer" },
   { value: "asset", label: "Asset Link" },
   { value: "entity", label: "Entity Reference" },
+  { value: "storylet", label: "Storylet Link" },
+  { value: "tag", label: "Tag" },
 ];
 
 export function propertyTypeLabel(type: PropertyType | string): string {
@@ -29,7 +31,7 @@ export function propertyTypeLabel(type: PropertyType | string): string {
 function isAssetLink(value: unknown): value is AssetLinkValue {
   if (!value || typeof value !== "object") return false;
   const link = value as Partial<AssetLinkValue>;
-  return typeof link.asset_id === "string" && typeof link.version === "string";
+  return typeof link.asset_id === "string";
 }
 
 function scalarMatches(type: PropertyType, value: PropertyScalar): boolean {
@@ -46,6 +48,10 @@ function scalarMatches(type: PropertyType, value: PropertyScalar): boolean {
       return value === null || isAssetLink(value);
     case "entity":
       return value === null || typeof value === "string";
+    case "storylet":
+      return value === null || typeof value === "string";
+    case "tag":
+      return typeof value === "string";
     default:
       return false;
   }
@@ -58,12 +64,15 @@ export function defaultPropertyValue(type: PropertyType, isArray: boolean): Prop
       return false;
     case "string":
       return "";
+    case "tag":
+      return "";
     case "float":
       return 0;
     case "int":
       return 0;
     case "asset":
     case "entity":
+    case "storylet":
       return null;
     default:
       return "";
@@ -156,18 +165,4 @@ export function newPropertyDefinition(existing: PropertyDefinition[]): PropertyD
   };
 }
 
-/** The override when it still fits the definition, otherwise the template default. */
-export function effectiveTraitValue(
-  definition: PropertyDefinition,
-  instance: TraitInstance | undefined,
-): PropertyValue {
-  const override = instance?.values?.[definition.id];
-  if (override !== undefined && isValidPropertyValue(definition.type, definition.is_array ?? false, override)) {
-    return override;
-  }
-  return definition.default ?? defaultPropertyValue(definition.type, definition.is_array ?? false);
-}
 
-export function hasTraitOverride(instance: TraitInstance | undefined, definitionId: string): boolean {
-  return instance?.values?.[definitionId] !== undefined;
-}

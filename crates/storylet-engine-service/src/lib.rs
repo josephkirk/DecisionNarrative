@@ -7,7 +7,6 @@ pub mod contracts;
 pub mod entities;
 pub mod files;
 pub mod http;
-pub mod legacy_import;
 pub mod mcp;
 pub mod projection;
 pub mod references;

@@ -136,7 +136,7 @@ pub async fn handle_mcp_message(service: &StudioService, msg: &Value) -> Option<
 fn get_tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "narrative_platform",
-        "description": "Operate the local DecisionNarrative platform: inspect workspace context and content, manage authored project entities, and exercise deterministic Rust playtests.",
+        "description": "Operate the local DecisionNarrative platform: inspect workspace context and authored entity templates, gameplay tags, and other content, and exercise deterministic Rust playtests.",
         "inputSchema": {
             "type": "object",
             "required": ["operation"],
@@ -359,6 +359,18 @@ async fn dispatch_tool_call(
     }
 }
 
+fn content_kind(args: &Value) -> Result<&'static str, String> {
+    let requested = args
+        .get("entity")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Missing entity".to_string())?;
+    crate::contracts::CONTENT_KINDS
+        .iter()
+        .copied()
+        .find(|kind| *kind == requested)
+        .ok_or_else(|| format!("Unsupported content kind '{requested}'"))
+}
+
 async fn dispatch_narrative_platform_op(
     service: &StudioService,
     op: &str,
@@ -400,17 +412,11 @@ async fn dispatch_narrative_platform_op(
             }))
         }
         "content.list" => {
-            let entity = args
-                .get("entity")
-                .and_then(|e| e.as_str())
-                .ok_or_else(|| "Missing entity".to_string())?;
+            let entity = content_kind(args)?;
             service.list_content(entity).await
         }
         "content.get" => {
-            let entity = args
-                .get("entity")
-                .and_then(|e| e.as_str())
-                .ok_or_else(|| "Missing entity".to_string())?;
+            let entity = content_kind(args)?;
             let id = args
                 .get("id")
                 .and_then(|i| i.as_str())
@@ -418,10 +424,7 @@ async fn dispatch_narrative_platform_op(
             service.get_content_item(entity, id).await
         }
         "content.save" => {
-            let entity = args
-                .get("entity")
-                .and_then(|e| e.as_str())
-                .ok_or_else(|| "Missing entity".to_string())?;
+            let entity = content_kind(args)?;
             let payload = args
                 .get("payload")
                 .ok_or_else(|| "Missing payload".to_string())?;
@@ -434,10 +437,7 @@ async fn dispatch_narrative_platform_op(
             Ok(res)
         }
         "content.delete" => {
-            let entity = args
-                .get("entity")
-                .and_then(|e| e.as_str())
-                .ok_or_else(|| "Missing entity".to_string())?;
+            let entity = content_kind(args)?;
             let id = args
                 .get("id")
                 .and_then(|i| i.as_str())
@@ -454,10 +454,7 @@ async fn dispatch_narrative_platform_op(
             Ok(json!({ "deleted": deleted }))
         }
         "content.move" => {
-            let entity = args
-                .get("entity")
-                .and_then(|e| e.as_str())
-                .ok_or_else(|| "Missing entity".to_string())?;
+            let entity = content_kind(args)?;
             let id = args
                 .get("id")
                 .and_then(|i| i.as_str())
@@ -476,10 +473,7 @@ async fn dispatch_narrative_platform_op(
             Ok(res)
         }
         "content.references" => {
-            let entity = args
-                .get("entity")
-                .and_then(|e| e.as_str())
-                .ok_or_else(|| "Missing entity".to_string())?;
+            let entity = content_kind(args)?;
             let id = args
                 .get("id")
                 .and_then(|i| i.as_str())

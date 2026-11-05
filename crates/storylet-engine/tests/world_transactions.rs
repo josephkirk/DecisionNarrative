@@ -29,11 +29,11 @@ fn add_and_set_commit_as_one_revisioned_event() {
             "cmd-1",
             0,
             vec![
-                Effect::SetQuality {
+                Effect::SetProperty {
                     key: "world.open".into(),
                     value: json!(true),
                 },
-                Effect::AddQuality {
+                Effect::AddProperty {
                     key: "resources.food".into(),
                     amount: 3.0,
                 },
@@ -44,8 +44,8 @@ fn add_and_set_commit_as_one_revisioned_event() {
 
     assert_eq!(result.revision, 1);
     assert_eq!(state.turn, 1);
-    assert_eq!(state.qualities.get("world.open"), Some(&json!(true)));
-    assert_eq!(state.qualities.get("resources.food"), Some(&json!(3.0)));
+    assert_eq!(state.properties.get("world.open"), Some(&json!(true)));
+    assert_eq!(state.properties.get("resources.food"), Some(&json!(3.0)));
     assert_eq!(state.events.len(), 1);
     assert_eq!(state.events[0].id, "cmd-1");
 }
@@ -56,7 +56,7 @@ fn duplicate_command_is_idempotent() {
     let cmd = command(
         "cmd-once",
         0,
-        vec![Effect::AddQuality {
+        vec![Effect::AddProperty {
             key: "stock".into(),
             amount: 4.0,
         }],
@@ -65,7 +65,7 @@ fn duplicate_command_is_idempotent() {
     let result = apply_command(&mut state, cmd).unwrap();
 
     assert!(result.duplicate);
-    assert_eq!(state.qualities.get("stock"), Some(&json!(4.0)));
+    assert_eq!(state.properties.get("stock"), Some(&json!(4.0)));
     assert_eq!(state.revision, 1);
     assert_eq!(state.events.len(), 1);
 }
@@ -81,7 +81,7 @@ fn stale_command_is_rejected_without_mutation() {
         command(
             "stale",
             0,
-            vec![Effect::SetQuality {
+            vec![Effect::SetProperty {
                 key: "bad".into(),
                 value: json!(1),
             }],
@@ -102,20 +102,20 @@ fn stale_command_is_rejected_without_mutation() {
 #[test]
 fn resource_transfer_conserves_total_and_is_atomic_when_insufficient() {
     let mut state = WorldState {
-        qualities: BTreeMap::from([
+        properties: BTreeMap::from([
             ("stock.depot".into(), json!(6.0)),
             ("stock.clinic".into(), json!(2.0)),
         ]),
         ..WorldState::default()
     };
-    let transfer = Effect::TransferQuality {
+    let transfer = Effect::TransferProperty {
         from: "stock.depot".into(),
         to: "stock.clinic".into(),
         amount: 3.0,
     };
     apply_command(&mut state, command("transfer", 0, vec![transfer])).unwrap();
-    assert_eq!(state.qualities.get("stock.depot"), Some(&json!(3.0)));
-    assert_eq!(state.qualities.get("stock.clinic"), Some(&json!(5.0)));
+    assert_eq!(state.properties.get("stock.depot"), Some(&json!(3.0)));
+    assert_eq!(state.properties.get("stock.clinic"), Some(&json!(5.0)));
 
     let before = state.clone();
     let err = apply_command(
@@ -123,7 +123,7 @@ fn resource_transfer_conserves_total_and_is_atomic_when_insufficient() {
         command(
             "too-much",
             1,
-            vec![Effect::TransferQuality {
+            vec![Effect::TransferProperty {
                 from: "stock.depot".into(),
                 to: "stock.clinic".into(),
                 amount: 4.0,
@@ -152,11 +152,11 @@ fn invalid_numbers_are_rejected_without_partial_commit() {
             "nan",
             0,
             vec![
-                Effect::AddQuality {
+                Effect::AddProperty {
                     key: "first".into(),
                     amount: 2.0,
                 },
-                Effect::AddQuality {
+                Effect::AddProperty {
                     key: "second".into(),
                     amount: f64::NAN,
                 },
@@ -170,7 +170,7 @@ fn invalid_numbers_are_rejected_without_partial_commit() {
 }
 
 #[test]
-fn commands_record_visited_locations_and_met_characters() {
+fn commands_record_entity_tags() {
     let mut state = WorldState {
         current_location: Some("location-a".into()),
         actors: std::collections::BTreeMap::from([(
@@ -184,8 +184,8 @@ fn commands_record_visited_locations_and_met_characters() {
         ..WorldState::default()
     };
     apply_command(&mut state, command("record-presence", 0, vec![])).unwrap();
-    assert!(state.visited_locations.contains("location-a"));
-    assert!(state.met_characters.contains("actor-a"));
+    assert!(state.entity_tags["location-a"].contains("visited"));
+    assert!(state.entity_tags["actor-a"].contains("met"));
 }
 
 #[test]
@@ -257,7 +257,7 @@ fn invalid_actor_move_and_same_quality_transfer_are_atomic() {
     );
     assert_eq!(state, before);
     let mut state = WorldState {
-        qualities: BTreeMap::from([("stock".into(), json!(7.0))]),
+        properties: BTreeMap::from([("stock".into(), json!(7.0))]),
         ..WorldState::default()
     };
     let error = apply_command(
@@ -265,7 +265,7 @@ fn invalid_actor_move_and_same_quality_transfer_are_atomic() {
         command(
             "self-transfer",
             0,
-            vec![Effect::TransferQuality {
+            vec![Effect::TransferProperty {
                 from: "stock".into(),
                 to: "stock".into(),
                 amount: 3.0,
@@ -274,7 +274,7 @@ fn invalid_actor_move_and_same_quality_transfer_are_atomic() {
     )
     .unwrap_err();
     assert_eq!(error, EngineError::InvalidTransferAmount);
-    assert_eq!(state.qualities["stock"], json!(7.0));
+    assert_eq!(state.properties["stock"], json!(7.0));
     assert_eq!(state.revision, 0);
 }
 
@@ -286,7 +286,7 @@ fn idempotency_key_cannot_be_reused_for_a_different_action() {
         command(
             "same",
             0,
-            vec![Effect::AddQuality {
+            vec![Effect::AddProperty {
                 key: "x".into(),
                 amount: 1.0,
             }],
@@ -298,7 +298,7 @@ fn idempotency_key_cannot_be_reused_for_a_different_action() {
         command(
             "same",
             0,
-            vec![Effect::AddQuality {
+            vec![Effect::AddProperty {
                 key: "x".into(),
                 amount: 100.0,
             }],
@@ -306,7 +306,7 @@ fn idempotency_key_cannot_be_reused_for_a_different_action() {
     )
     .unwrap_err();
     assert_eq!(err, EngineError::IdempotencyKeyReuse);
-    assert_eq!(state.qualities["x"], json!(1.0));
+    assert_eq!(state.properties["x"], json!(1.0));
 }
 
 #[test]
@@ -330,7 +330,7 @@ fn event_log_replays_and_forks_at_a_causal_prefix() {
     let mut npc = command(
         "npc",
         1,
-        vec![Effect::SetQuality {
+        vec![Effect::SetProperty {
             key: "rumor.heard".into(),
             value: json!(true),
         }],
@@ -342,5 +342,5 @@ fn event_log_replays_and_forks_at_a_causal_prefix() {
     assert_eq!(replay, live);
     let branch = storylet_engine::fork_at(initial, &live.events, "move").unwrap();
     assert_eq!(branch.current_location.as_deref(), Some("market"));
-    assert!(!branch.qualities.contains_key("rumor.heard"));
+    assert!(!branch.properties.contains_key("rumor.heard"));
 }

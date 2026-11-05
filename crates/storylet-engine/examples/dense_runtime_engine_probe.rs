@@ -15,7 +15,7 @@ use storylet_engine::chrono_runtime::{
     RuntimeContext,
 };
 use storylet_engine::chrono_state::{
-    apply_passion_mutation, GameplayTagRegistry, MetricBound, MetricRegistry, MicroPassionDef,
+    apply_passion_mutation, GameplayTagRegistry, MicroPassionDef, PassionBounds,
     PassionMutation, PassionRegistry, RivalPassionLink, StarNpcDef, TagBitset, WorldStateTable,
 };
 
@@ -39,7 +39,6 @@ fn node(guid: u32, kind: NodeKind) -> storylet_engine::chrono_runtime::FlowNodeD
 
 fn main() {
     let tags = GameplayTagRegistry::empty();
-    let metrics = MetricRegistry::empty();
     let mut dispatcher = UnifiedDispatcher::new(vec![
         StoryletDef {
             storylet_id: 1,
@@ -54,7 +53,7 @@ fn main() {
             ..Default::default()
         },
     ]);
-    dispatcher.resolve(&tags, &metrics).unwrap();
+    dispatcher.resolve(&tags).unwrap();
     let graph = FlowGraphAsset {
         asset_id: "qbn-real-type".into(),
         start_node_guid: 1,
@@ -66,6 +65,7 @@ fn main() {
             },
         )],
         edges: Vec::<EdgeConnection>::new(),
+        data_edges: Vec::new(),
     };
     let mut state = WorldStateTable::new();
     let mut instance = FlowGraphInstance::new(1, graph, 7).unwrap();
@@ -101,7 +101,7 @@ fn main() {
                 weight: 1.0,
                 is_hidden: false,
             }],
-            macro_bounds: MetricBound {
+            macro_bounds: PassionBounds {
                 min: -100.0,
                 max: 100.0,
             },
@@ -121,7 +121,7 @@ fn main() {
                 weight: 1.0,
                 is_hidden: false,
             }],
-            macro_bounds: MetricBound {
+            macro_bounds: PassionBounds {
                 min: -100.0,
                 max: 100.0,
             },

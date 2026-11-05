@@ -32,15 +32,11 @@ pub struct WorldState {
     pub random_seed: u64,
     #[serde(default)]
     pub random_cursor: u64,
-    pub qualities: BTreeMap<String, Value>,
+    pub properties: BTreeMap<String, Value>,
     #[serde(default)]
     pub current_location: Option<String>,
     #[serde(default)]
-    pub location_tags: BTreeMap<String, BTreeSet<String>>,
-    #[serde(default)]
-    pub visited_locations: BTreeSet<String>,
-    #[serde(default)]
-    pub met_characters: BTreeSet<String>,
+    pub entity_tags: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     pub actors: BTreeMap<String, crate::storylets::ActorState>,
     #[serde(default)]
@@ -78,35 +74,20 @@ fn default_true() -> bool {
     true
 }
 
-/// Typed operations on qualities. Resource movement is an explicit transfer.
+/// Typed operations on entity properties. Resource movement is an explicit transfer.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Effect {
-    SetQuality {
-        key: String,
-        value: Value,
-    },
-    AddQuality {
-        key: String,
-        amount: f64,
-    },
-    TransferQuality {
-        from: String,
-        to: String,
-        amount: f64,
-    },
-    MovePlayer {
-        location_id: String,
-    },
-    MoveActor {
-        actor_id: String,
-        location_id: String,
-    },
+    SetProperty { key: String, value: Value },
+    AddProperty { key: String, amount: f64 },
+    TransferProperty { from: String, to: String, amount: f64 },
+    MovePlayer { location_id: String },
+    MoveActor { actor_id: String, location_id: String },
 }
 
-/// The before/after values for one quality changed by a committed event.
+/// The before/after values for one property changed by a committed event.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct QualityDelta {
+pub struct PropertyDelta {
     pub key: String,
     pub before: Option<Value>,
     pub after: Option<Value>,
@@ -124,7 +105,7 @@ pub struct WorldEvent {
     pub advanced_turn: bool,
     #[serde(default)]
     pub effects: Vec<Effect>,
-    pub deltas: Vec<QualityDelta>,
+    pub deltas: Vec<PropertyDelta>,
     pub caused_by: Vec<String>,
     #[serde(default)]
     pub location_delta: Option<(Option<String>, Option<String>)>,
@@ -156,8 +137,8 @@ pub enum EngineError {
     ReplayMismatch {
         event_id: String,
     },
-    InvalidQualityKey,
-    NonNumericQuality {
+    InvalidPropertyKey,
+    NonNumericProperty {
         key: String,
     },
     NonFiniteNumber,
@@ -209,15 +190,10 @@ impl fmt::Display for EngineError {
             Self::MissingCausalParent { parent } => {
                 write!(formatter, "causal parent '{parent}' does not exist")
             }
-            Self::InvalidQualityKey => write!(formatter, "quality key must not be empty"),
-            Self::NonNumericQuality { key } => write!(
-                formatter,
-                "quality '{key}' must be numeric for this operation"
-            ),
+            Self::InvalidPropertyKey => write!(formatter, "property key must not be empty"),
+            Self::NonNumericProperty { key } => write!(formatter, "property '{key}' must be numeric for this operation"),
             Self::NonFiniteNumber => write!(formatter, "numeric effects must be finite"),
-            Self::NumericOverflow { key } => {
-                write!(formatter, "numeric effect overflowed quality '{key}'")
-            }
+            Self::NumericOverflow { key } => write!(formatter, "numeric effect overflowed property '{key}'"),
             Self::InvalidTransferAmount => {
                 write!(formatter, "transfer amount must be positive and finite")
             }
@@ -227,7 +203,7 @@ impl fmt::Display for EngineError {
                 requested,
             } => write!(
                 formatter,
-                "quality '{key}' has {available}, cannot transfer {requested}"
+                "property '{key}' has {available}, cannot transfer {requested}"
             ),
             Self::RevisionOverflow => write!(formatter, "world revision overflow"),
             Self::TurnOverflow => write!(formatter, "world turn overflow"),
@@ -320,12 +296,11 @@ pub fn apply_command(
     } else {
         state.turn
     };
-    let mut next_qualities = state.qualities.clone();
+    let mut next_properties = state.properties.clone();
     let mut touched = BTreeSet::new();
     let mut next_location = state.current_location.clone();
     let mut next_actors = state.actors.clone();
-    let mut next_visited_locations = state.visited_locations.clone();
-    let mut next_met_characters = state.met_characters.clone();
+    let mut next_entity_tags = state.entity_tags.clone();
     let mut location_delta = None;
     let mut actor_location_deltas = BTreeMap::new();
 
@@ -358,16 +333,16 @@ pub fn apply_command(
                     actor.current_location = location_id.clone();
                 }
             }
-            _ => apply_effect(&mut next_qualities, effect, &mut touched)?,
+            _ => apply_effect(&mut next_properties, effect, &mut touched)?,
         }
     }
 
     let deltas = touched
         .into_iter()
         .filter_map(|key| {
-            let before = state.qualities.get(&key).cloned();
-            let after = next_qualities.get(&key).cloned();
-            (before != after).then_some(QualityDelta { key, before, after })
+            let before = state.properties.get(&key).cloned();
+            let after = next_properties.get(&key).cloned();
+            (before != after).then_some(PropertyDelta { key, before, after })
         })
         .collect();
 
@@ -388,18 +363,17 @@ pub fn apply_command(
 
     // Commit only after every effect has validated successfully.
     if let Some(location_id) = &next_location {
-        next_visited_locations.insert(location_id.clone());
+        next_entity_tags.entry(location_id.clone()).or_default().insert("visited".into());
         for (actor_id, actor) in &next_actors {
             if actor.current_location == *location_id {
-                next_met_characters.insert(actor_id.clone());
+                next_entity_tags.entry(actor_id.clone()).or_default().insert("met".into());
             }
         }
     }
-    state.qualities = next_qualities;
+    state.properties = next_properties;
     state.current_location = next_location;
     state.actors = next_actors;
-    state.visited_locations = next_visited_locations;
-    state.met_characters = next_met_characters;
+    state.entity_tags = next_entity_tags;
     state.revision = next_revision;
     state.turn = next_turn;
     state
@@ -416,57 +390,39 @@ pub fn apply_command(
 }
 
 fn apply_effect(
-    qualities: &mut BTreeMap<String, Value>,
+    properties: &mut BTreeMap<String, Value>,
     effect: &Effect,
     touched: &mut BTreeSet<String>,
 ) -> Result<(), EngineError> {
     match effect {
-        Effect::SetQuality { key, value } => {
+        Effect::SetProperty { key, value } => {
             validate_key(key)?;
-            qualities.insert(key.clone(), value.clone());
+            properties.insert(key.clone(), value.clone());
             touched.insert(key.clone());
         }
-        Effect::AddQuality { key, amount } => {
+        Effect::AddProperty { key, amount } => {
             validate_key(key)?;
-            if !amount.is_finite() {
-                return Err(EngineError::NonFiniteNumber);
-            }
-            let before = numeric_value(qualities.get(key), key)?;
+            if !amount.is_finite() { return Err(EngineError::NonFiniteNumber); }
+            let before = numeric_value(properties.get(key), key)?;
             let after = before + amount;
-            if !after.is_finite() {
-                return Err(EngineError::NumericOverflow { key: key.clone() });
-            }
-            qualities.insert(key.clone(), number_value(after, key)?);
+            if !after.is_finite() { return Err(EngineError::NumericOverflow { key: key.clone() }); }
+            properties.insert(key.clone(), number_value(after, key)?);
             touched.insert(key.clone());
         }
-        Effect::MovePlayer { .. } | Effect::MoveActor { .. } => {
-            unreachable!("movement effects are applied by the world transaction")
-        }
-        Effect::TransferQuality { from, to, amount } => {
-            if from == to {
-                return Err(EngineError::InvalidTransferAmount);
-            }
+        Effect::MovePlayer { .. } | Effect::MoveActor { .. } => unreachable!(),
+        Effect::TransferProperty { from, to, amount } => {
+            if from == to { return Err(EngineError::InvalidTransferAmount); }
             validate_key(from)?;
             validate_key(to)?;
-            if !amount.is_finite() || *amount <= 0.0 {
-                return Err(EngineError::InvalidTransferAmount);
-            }
-            let available = numeric_value(qualities.get(from), from)?;
-            if available < *amount {
-                return Err(EngineError::InsufficientBalance {
-                    key: from.clone(),
-                    available,
-                    requested: *amount,
-                });
-            }
-            let destination = numeric_value(qualities.get(to), to)?;
+            if !amount.is_finite() || *amount <= 0.0 { return Err(EngineError::InvalidTransferAmount); }
+            let available = numeric_value(properties.get(from), from)?;
+            if available < *amount { return Err(EngineError::InsufficientBalance { key: from.clone(), available, requested: *amount }); }
+            let destination = numeric_value(properties.get(to), to)?;
             let source_after = available - amount;
             let destination_after = destination + amount;
-            if !source_after.is_finite() || !destination_after.is_finite() {
-                return Err(EngineError::NumericOverflow { key: to.clone() });
-            }
-            qualities.insert(from.clone(), number_value(source_after, from)?);
-            qualities.insert(to.clone(), number_value(destination_after, to)?);
+            if !source_after.is_finite() || !destination_after.is_finite() { return Err(EngineError::NumericOverflow { key: to.clone() }); }
+            properties.insert(from.clone(), number_value(source_after, from)?);
+            properties.insert(to.clone(), number_value(destination_after, to)?);
             touched.insert(from.clone());
             touched.insert(to.clone());
         }
@@ -476,7 +432,7 @@ fn apply_effect(
 
 fn validate_key(key: &str) -> Result<(), EngineError> {
     if key.trim().is_empty() {
-        Err(EngineError::InvalidQualityKey)
+        Err(EngineError::InvalidPropertyKey)
     } else {
         Ok(())
     }
@@ -488,7 +444,7 @@ fn numeric_value(value: Option<&Value>, key: &str) -> Result<f64, EngineError> {
         Some(value) => value
             .as_f64()
             .filter(|number| number.is_finite())
-            .ok_or_else(|| EngineError::NonNumericQuality {
+            .ok_or_else(|| EngineError::NonNumericProperty {
                 key: key.to_owned(),
             }),
     }
