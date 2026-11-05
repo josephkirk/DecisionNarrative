@@ -414,6 +414,23 @@ impl UnifiedDispatcher {
         self.try_is_eligible(def, table).unwrap_or(false)
     }
 
+    /// Describe the first missing hard requirement in reader-facing language.
+    pub fn explain_ineligible(&self, def: &StoryletDef, table: &WorldStateTable, registry: &GameplayTagRegistry) -> Option<String> {
+        for i in (0..registry.tag_count()).rev() {
+            let i = i as u16;
+            if def.required_tags.bit(i) && !table.global_tags.bit(i) {
+                let tag = registry.tag(i).unwrap_or("requirement");
+                let label = tag.strip_prefix("fact.").unwrap_or(tag).replace(['_', '.'], " ");
+                let reason = if tag.starts_with("fact.") { format!("needs fact \"{label}\"") } else { format!("needs {label}") };
+                return Some(reason.chars().take(120).collect());
+            }
+        }
+        if !def.required_any_tags.is_empty() && !table.global_tags.intersects(&def.required_any_tags) { return Some("needs an alternative requirement".into()); }
+        if !def.forbidden_tags.is_empty() && table.global_tags.intersects(&def.forbidden_tags) { return Some("a forbidden condition is present".into()); }
+        if !def.required_arc_phases.is_empty() && !table.global_tags.intersects(&def.required_arc_phases) { return Some("needs a different story phase".into()); }
+        if !def.required_roles.is_empty() && self.bind_roles(def, table).is_err() { return Some("needs a participant present".into()); }
+        None
+    }
     /// Fallible form of `is_eligible`: malformed content returns the typed
     /// dispatch error instead of silently deleting the storylet.
     pub fn try_is_eligible(

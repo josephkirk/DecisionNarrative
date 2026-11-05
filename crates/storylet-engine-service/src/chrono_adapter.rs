@@ -22,33 +22,7 @@ use crate::contracts::{
     ScenarioRecord, StoryletRecord, WorldObjectLayer, WorldObjectRecord,
 };
 
-#[derive(Clone, Debug)]
-pub struct CompiledChronoDispatch {
-    pub registry: GameplayTagRegistry,
-    pub dispatcher: UnifiedDispatcher,
-    catalog: StoryletCatalog,
-    pub passion_registry: PassionRegistry,
-    pub passion_indices: BTreeMap<(String, String), u16>,
-    pub entity_game_ids: BTreeMap<String, String>,
-    pub participant_indices: BTreeMap<String, u16>,
-    pub implicit_participant: bool,
-}
-
-impl CompiledChronoDispatch {
-    pub fn storylet_index(&self, id: &str) -> Option<u16> {
-        self.catalog.resolve(id)
-    }
-    pub fn storylet_key(&self, index: u16) -> Option<&str> {
-        self.catalog.key(index)
-    }
-    pub fn storylet_catalog(&self) -> &StoryletCatalog {
-        &self.catalog
-    }
-    pub fn storylet_count(&self) -> usize {
-        self.catalog.len()
-    }
-}
-
+pub use storylet_engine::run::RunContent as CompiledChronoDispatch;
 
 pub fn compile_chrono_dispatch(
     storylets: &[StoryletRecord],
@@ -113,7 +87,16 @@ pub fn compile_chrono_dispatch_with_world(
     let mut defs=Vec::with_capacity(ordered.len());
     for(i,s)in ordered.iter().enumerate(){let set=s.chrono.as_ref();let mut d=StoryletDef{storylet_id:i as u16,is_ending:s.ending,display_priority:set.map_or(0,|x|x.display_priority),urgency_tag:set.map_or("Standard".into(),|x|x.urgency_color_tag.clone()),cluster_type:map_cluster_type(&s.cluster_type)?,payload_node_guid:i as u32,is_repeatable:s.repeatability!="once_ever"&&set.map_or(true,|x|x.is_repeatable),cooldown_ms:set.map_or(0,|x|i64::try_from(x.cooldown_ms).unwrap_or(i64::MAX)),cooldown_turns:if s.repeatability=="cooldown"{s.cooldown_turns as u64}else{0},required_roles:s.parameters.iter().filter_map(|p|crate::projection::parse_role_query(&p.query).map(|r|RoleRequirement{role_tag:r,location_tag:(p.location_policy.trim()!="any").then(||"location.current".into()),..Default::default()})).collect(),..StoryletDef::default()};if let Some(set)=set{add_tags(&registry,&mut d.required_tags,&set.required_tags,&s.id,"required_tags")?;add_any_tags(&registry,&mut d.required_any_tags,&set.required_any_tags,&s.id,"required_any_tags")?;add_any_tags(&registry,&mut d.forbidden_tags,&set.forbidden_tags,&s.id,"forbidden_tags")?;add_any_tags(&registry,&mut d.required_arc_phases,&set.required_arc_phases,&s.id,"required_arc_phases")?;for tag in &set.salience_bonus_tags{let id=registry.id(tag).ok_or_else(||format!("unknown salience tag {tag}"))?;registry.add_hierarchical(&mut d.salience_bonus_tags,id).map_err(|e|e.to_string())?;}}defs.push(d);}
     let mut dispatcher=UnifiedDispatcher::new(defs);dispatcher.resolve(&registry).map_err(|e|e.to_string())?;
-    Ok(CompiledChronoDispatch{registry,dispatcher,catalog,passion_registry,passion_indices,entity_game_ids,participant_indices:BTreeMap::new(),implicit_participant:false})
+    let storylet_titles = ordered.iter().enumerate().map(|(i, s)| (i as u16, s.title.clone())).collect();
+    let mut storylet_location_tags = BTreeMap::new();
+    for (i, storylet) in ordered.iter().enumerate() {
+        let mut mask = TagBitset::new();
+        for tag in &storylet.location_tags {
+            if let Some(id) = registry.id(tag) { mask.set_bit(id).map_err(|error| error.to_string())?; }
+        }
+        storylet_location_tags.insert(i as u16, mask);
+    }
+    Ok(CompiledChronoDispatch{registry,dispatcher,catalog,passion_registry,passion_indices,entity_game_ids,participant_indices:BTreeMap::new(),implicit_participant:false,storylet_titles,storylet_location_tags,..Default::default()})
 }
 
 fn passion_threshold_tag(

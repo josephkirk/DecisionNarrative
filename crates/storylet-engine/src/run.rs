@@ -1,0 +1,896 @@
+use crate::chrono_catalog::StoryletCatalog;
+use crate::chrono_dispatch::UnifiedDispatcher;
+use crate::chrono_participants::PartIx;
+use crate::chrono_runtime::{
+    FlowGraphAsset, FlowGraphInstance, NodeExecutionState, NodeKind, RuntimeContext,
+};
+use crate::chrono_state::{BijectiveDelta, GameplayTagRegistry, PassionRegistry, WorldStateTable};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+pub const MAX_AUTO_ADVANCE_MS: i64 = 600_000;
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunContent {
+    pub registry: GameplayTagRegistry,
+    pub dispatcher: UnifiedDispatcher,
+    pub passion_registry: PassionRegistry,
+    pub storylet_titles: BTreeMap<u16, String>,
+    #[serde(default)]
+    pub storylet_location_tags: BTreeMap<u16, crate::chrono_state::TagBitset>,
+    pub entity_names: BTreeMap<u16, String>,
+    pub start_storylet: u16,
+    pub initial_world: WorldStateTable,
+    pub content_revision: u64,
+    #[serde(default)]
+    pub root_asset: FlowGraphAsset,
+    #[serde(default)]
+    pub mission_assets: BTreeMap<String, FlowGraphAsset>,
+    #[serde(default)]
+    pub catalog: StoryletCatalog,
+    #[serde(skip)]
+    pub passion_indices: BTreeMap<(String, String), u16>,
+    #[serde(default)]
+    pub entity_game_ids: BTreeMap<String, String>,
+    #[serde(default)]
+    pub participant_indices: BTreeMap<String, u16>,
+    #[serde(default)]
+    pub implicit_participant: bool,
+}
+impl RunContent {
+    pub fn storylet_index(&self, id: &str) -> Option<u16> {
+        self.catalog.resolve(id)
+    }
+    pub fn storylet_key(&self, index: u16) -> Option<&str> {
+        self.catalog.key(index)
+    }
+    pub fn storylet_catalog(&self) -> &StoryletCatalog {
+        &self.catalog
+    }
+    pub fn storylet_count(&self) -> usize {
+        self.catalog.len()
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum RunStart {
+    Beginning,
+    Storylet { storylet: u16 },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum RunAction {
+    Choose { node_guid: u32, output_pin: u16 },
+    PlayStorylet { node_guid: u32, storylet: u16 },
+    Topic { node_guid: u32, edge_id: u32 },
+    Move { to: u16 },
+    Wait,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunStep {
+    pub index: u32,
+    pub branch: u32,
+    pub participant: PartIx,
+    pub action: RunAction,
+    pub label: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryletRef {
+    pub id: u16,
+    pub title: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParticipantView {
+    pub id: PartIx,
+    pub name: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaceView {
+    pub id: u16,
+    pub name: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineView {
+    pub text: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceView {
+    pub action: RunAction,
+    pub label: String,
+    pub enabled: bool,
+    pub requirement: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneView {
+    pub storylet: StoryletRef,
+    pub lines: Vec<LineView>,
+    pub choices: Vec<ChoiceView>,
+    pub node_guid: u32,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchView {
+    pub id: u32,
+    pub steps: Vec<RunStep>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunView {
+    pub participant: PartIx,
+    pub participants: Vec<ParticipantView>,
+    pub place: Option<PlaceView>,
+    pub scene: Option<SceneView>,
+    pub also_here: Vec<StoryletRef>,
+    pub nothing_here: bool,
+    pub ending: Option<StoryletRef>,
+    pub steps: Vec<RunStep>,
+    pub current_step: u32,
+    pub branches: Vec<BranchView>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NearMiss {
+    pub storylet: StoryletRef,
+    pub reason: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum RunError {
+    InvalidAction(String),
+    Stalled {
+        storylet: Option<u16>,
+        node_guid: u32,
+    },
+    Engine(String),
+}
+
+#[derive(Clone, Debug)]
+struct PendingSelection {
+    hub: u32,
+    storylet: u16,
+    participant: PartIx,
+    hub_instance_id: u64,
+
+
+    invocation: u64,
+}
+#[derive(Clone, Debug)]
+struct Snapshot {
+    world: WorldStateTable,
+    instance: FlowGraphInstance,
+    commit: usize,
+    storylet: u16,
+    selections: Vec<PendingSelection>,
+}
+#[derive(Clone, Debug)]
+pub struct RunKernel {
+    pub world: WorldStateTable,
+    pub instance: FlowGraphInstance,
+    registry: GameplayTagRegistry,
+    passion_registry: PassionRegistry,
+    dispatcher: UnifiedDispatcher,
+    branches: Vec<BranchView>,
+    snapshots: Vec<Vec<Snapshot>>,
+    branch: usize,
+    current_step: u32,
+    rewound: bool,
+    storylet: u16,
+    selections: Vec<PendingSelection>,
+    next_invocation: u64,
+}
+impl RunKernel {
+    fn reference(content: &RunContent, id: u16) -> StoryletRef {
+        StoryletRef {
+            id,
+            title: content
+                .storylet_titles
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| id.to_string()),
+        }
+    }
+    fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            world: self.world.clone(),
+            instance: self.instance.clone(),
+            commit: self.instance.history.head,
+            storylet: self.storylet,
+            selections: self.selections.clone(),
+        }
+    }
+    fn pending_priority(instance: &FlowGraphInstance, hub: bool) -> Option<u32> {
+        for node in &instance.nodes {
+            if let Some(child) = node.sub_graph.as_deref() {
+                if let Some(guid) = Self::pending_priority(child, hub) {
+                    return Some(guid);
+                }
+            }
+        }
+        instance.nodes.iter().find_map(|node| {
+            if node.state != NodeExecutionState::ActiveLatent {
+                return None;
+            }
+            let def = instance.asset.node(node.node_guid)?;
+            let matches = if hub {
+                matches!(def.kind, NodeKind::QbnHub { .. })
+            } else {
+                matches!(
+                    def.kind,
+                    NodeKind::Choice { .. } | NodeKind::WaypointConversation { .. }
+                )
+            };
+            matches.then_some(node.node_guid)
+        })
+    }
+    fn pending_in(instance: &FlowGraphInstance) -> Option<u32> {
+        Self::pending_priority(instance, false).or_else(|| Self::pending_priority(instance, true))
+    }
+    fn instance_by_id_mut(
+        instance: &mut FlowGraphInstance,
+        id: u64,
+    ) -> Option<&mut FlowGraphInstance> {
+        if instance.instance_id == id {
+            return Some(instance);
+        }
+        instance
+            .nodes
+            .iter_mut()
+            .filter_map(|n| n.sub_graph.as_deref_mut())
+            .find_map(|child| Self::instance_by_id_mut(child, id))
+    }
+    fn scene_busy(&self, selection: &PendingSelection) -> bool {
+        fn owns_work(instance: &FlowGraphInstance, invocation: u64) -> bool {
+            instance.tokens.iter().any(|token| instance.token_invocations.get(&token.token_id) == Some(&invocation))
+                || instance.nodes.iter().any(|node| {
+                    (node.state == NodeExecutionState::ActiveLatent && instance.node_invocations.get(&node.node_guid) == Some(&invocation))
+                        || node.sub_graph.as_deref().is_some_and(|child| owns_work(child, invocation))
+                })
+        }
+        owns_work(&self.instance, selection.invocation)
+    }
+    fn pending(&self) -> Option<u32> {
+        Self::pending_in(&self.instance)
+    }
+    fn owner(instance: &FlowGraphInstance, guid: u32) -> Option<&FlowGraphInstance> {
+        for child in instance.nodes.iter().filter_map(|n| n.sub_graph.as_deref()) {
+            if let Some(owner) = Self::owner(child, guid) {
+                return Some(owner);
+            }
+        }
+        if instance.node(guid).is_some_and(|node| node.state == NodeExecutionState::ActiveLatent) {
+            Some(instance)
+        } else {
+            None
+        }
+    }
+    fn owner_mut(instance: &mut FlowGraphInstance, guid: u32) -> Option<&mut FlowGraphInstance> {
+        let child_index = instance.nodes.iter().position(|n| {
+            n.sub_graph
+                .as_deref()
+                .is_some_and(|child| Self::owner(child, guid).is_some())
+        });
+        if let Some(i) = child_index {
+            return Self::owner_mut(instance.nodes[i].sub_graph.as_deref_mut().unwrap(), guid);
+        }
+        if instance.node(guid).is_some_and(|node| node.state == NodeExecutionState::ActiveLatent) {
+            Some(instance)
+        } else {
+            None
+        }
+    }
+    fn has_queued_tokens(instance: &FlowGraphInstance) -> bool {
+        !instance.tokens.is_empty()
+            || instance
+                .nodes
+                .iter()
+                .filter_map(|node| node.sub_graph.as_deref())
+                .any(Self::has_queued_tokens)
+    }
+    fn auto_advance(&mut self) -> Result<(), RunError> {
+        let start = self.instance.clock_ms;
+        loop {
+            if !Self::has_queued_tokens(&self.instance) {
+                if let Some(selection) = self.selections.last().cloned() {
+                    if self.pending() == Some(selection.hub) && !self.scene_busy(&selection) {
+                        let mut ctx = RuntimeContext::with_registries(
+                            &mut self.world,
+                            &self.dispatcher,
+                            &self.registry,
+                            &self.passion_registry,
+                        );
+                        let owner =
+                            Self::instance_by_id_mut(&mut self.instance, selection.hub_instance_id)
+                                .ok_or_else(|| {
+                                    RunError::Engine("selection hub disappeared".into())
+                                })?;
+                        owner.acting_participant = selection.participant;
+                        owner
+                            .complete_reserved_storylet(&mut ctx, selection.hub, selection.storylet)
+                            .map_err(|e| RunError::Engine(e.to_string()))?;
+                        self.selections.pop();
+                        continue;
+                    }
+                }
+            }
+            let waiting_on_scene = self.selections.last().is_some_and(|selection| {
+                self.scene_busy(selection) && self.pending() == Some(selection.hub)
+            });
+            if self.pending().is_some()
+                && !waiting_on_scene
+                && !Self::has_queued_tokens(&self.instance)
+            {
+                return Ok(());
+            }
+            let active = self
+                .instance
+                .nodes
+                .iter()
+                .any(|n| n.state == NodeExecutionState::ActiveLatent);
+            if self.instance.tokens.is_empty() && !active {
+                return Ok(());
+            }
+            if self.instance.clock_ms.saturating_sub(start) >= MAX_AUTO_ADVANCE_MS {
+                return Err(RunError::Stalled {
+                    storylet: Some(self.storylet),
+                    node_guid: self
+                        .instance
+                        .nodes
+                        .iter()
+                        .find(|n| n.state == NodeExecutionState::ActiveLatent)
+                        .map_or(0, |n| n.node_guid),
+                });
+            }
+            let mut ctx = RuntimeContext::with_registries(
+                &mut self.world,
+                &self.dispatcher,
+                &self.registry,
+                &self.passion_registry,
+            );
+            self.instance
+                .tick(&mut ctx, 1000)
+                .map_err(|e| RunError::Engine(e.to_string()))?;
+        }
+    }
+    pub fn start(content: &RunContent, start: RunStart, seed: u64) -> Result<Self, RunError> {
+        let mut instance = FlowGraphInstance::new(1, content.root_asset.clone(), seed)
+            .map_err(|e| RunError::Engine(e.to_string()))?;
+        instance
+            .attach_mission_assets(&content.mission_assets, seed)
+            .map_err(|e| RunError::Engine(e.to_string()))?;
+        let mut world = content.initial_world.clone();
+        world.ensure_participants();
+        let storylet = match start {
+            RunStart::Beginning => content.start_storylet,
+            RunStart::Storylet { storylet } => storylet,
+        };
+        if matches!(start, RunStart::Beginning) {
+            instance
+                .start()
+                .map_err(|e| RunError::Engine(e.to_string()))?;
+        } else {
+            let start_guid = content
+                .dispatcher
+                .storylet(storylet)
+                .ok_or_else(|| RunError::InvalidAction("unknown storylet".into()))?
+                .payload_node_guid;
+            let key = content.storylet_key(storylet);
+            let guid = instance
+                .asset
+                .nodes
+                .iter()
+                .find(|node| {
+                    matches!(node.kind, NodeKind::Poi { .. })
+                        && (node.node_guid == start_guid
+                            || key.is_some_and(|key| {
+                                node.payload.get("storyletId").and_then(|v| v.as_str()) == Some(key)
+                            }))
+                })
+                .map(|node| node.node_guid)
+                .ok_or_else(|| {
+                    RunError::InvalidAction("storylet has no point of interest".into())
+                })?;
+            let mut ctx = RuntimeContext::with_registries(
+                &mut world,
+                &content.dispatcher,
+                &content.registry,
+                &content.passion_registry,
+            );
+            instance
+                .invoke_story_to_poi(&mut ctx, guid, &BTreeMap::new())
+                .map_err(|e| RunError::Engine(e.to_string()))?;
+            instance
+                .resume_from_poi(guid)
+                .map_err(|e| RunError::Engine(e.to_string()))?;
+        }
+        let mut run = Self {
+            world,
+            instance,
+            registry: content.registry.clone(),
+            passion_registry: content.passion_registry.clone(),
+            dispatcher: content.dispatcher.clone(),
+            branches: vec![BranchView {
+                id: 0,
+                steps: vec![],
+            }],
+            snapshots: vec![vec![]],
+            branch: 0,
+            current_step: 0,
+            rewound: false,
+            storylet,
+            selections: Vec::new(),
+            next_invocation: 1,
+        };
+        run.auto_advance()?;
+        let initial = run.snapshot();
+        run.snapshots[0].push(initial);
+        Ok(run)
+    }
+    pub fn view(&self, content: &RunContent, participant: PartIx) -> RunView {
+        let participants = self
+            .world
+            .participants
+            .keys
+            .iter()
+            .enumerate()
+            .map(|(i, n)| ParticipantView {
+                id: i as u16,
+                name: n.clone(),
+            })
+            .collect();
+        let place = self.world.active_location(participant).map(|id| PlaceView {
+            id,
+            name: content
+                .entity_names
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| id.to_string()),
+        });
+        let lines: Vec<LineView> = self
+            .instance
+            .call_history()
+            .iter()
+            .filter_map(|entry| self.instance.asset.node(entry.node_guid))
+            .filter_map(|node| {
+                let data = node.payload.get("nodeData")?;
+                if data.get("type").and_then(|v| v.as_str()) != Some("dialog") {
+                    return None;
+                }
+                data.get("text")
+                    .and_then(|v| v.as_str())
+                    .filter(|text| !text.is_empty())
+                    .map(|text| LineView {
+                        text: text.to_string(),
+                    })
+            })
+            .collect();
+        let mut also_here = vec![];
+        let mut scene = None;
+        if let Some(guid) = self.pending() {
+            if let Some(owner) = Self::owner(&self.instance, guid) {
+                if let Some(def) = owner.asset.node(guid) {
+                    match &def.kind {
+                        NodeKind::Choice { .. } => {
+                            let choices = def
+                                .output_pins
+                                .iter()
+                                .enumerate()
+                                .map(|(i, p)| ChoiceView {
+                                    action: RunAction::Choose {
+                                        node_guid: guid,
+                                        output_pin: i as u16,
+                                    },
+                                    label: def
+                                        .payload
+                                        .get("nodeData")
+                                        .and_then(|x| x.get("choices"))
+                                        .and_then(|x| x.get(i))
+                                        .and_then(|x| x.get("text"))
+                                        .and_then(|x| x.as_str())
+                                        .unwrap_or(&p.pin_name)
+                                        .to_string(),
+                                    enabled: true,
+                                    requirement: None,
+                                })
+                                .collect();
+                            scene = Some(SceneView {
+                                storylet: Self::reference(content, self.storylet),
+                                lines: lines.clone(),
+                                choices,
+                                node_guid: guid,
+                            });
+                        }
+                        NodeKind::WaypointConversation { graph, .. } => {
+                            let current = owner
+                                .node(guid)
+                                .map(|n| n.current_topic_id.as_str())
+                                .unwrap_or("");
+                            let choices = graph
+                                .edges
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, edge)| edge.from_topic_id == current)
+                                .map(|(i, edge)| ChoiceView {
+                                    action: RunAction::Topic {
+                                        node_guid: guid,
+                                        edge_id: i as u32,
+                                    },
+                                    label: if edge.to_topic_id.is_empty() {
+                                        edge.edge_id.clone()
+                                    } else {
+                                        edge.to_topic_id.clone()
+                                    },
+                                    enabled: true,
+                                    requirement: None,
+                                })
+                                .collect();
+                            scene = Some(SceneView {
+                                storylet: Self::reference(content, self.storylet),
+                                lines: lines.clone(),
+                                choices,
+                                node_guid: guid,
+                            });
+                        }
+                        NodeKind::QbnHub { .. } => {
+                            let mut copy = self.world.clone();
+                            let ctx = RuntimeContext::with_registries(
+                                &mut copy,
+                                &self.dispatcher,
+                                &self.registry,
+                                &self.passion_registry,
+                            );
+                            let mut participant_instance = owner.clone();
+                            participant_instance.acting_participant = participant;
+                            also_here = participant_instance
+                                .present_deck(&ctx, guid)
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|id| Self::reference(content, id))
+                                .collect();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let ending = if self.pending().is_none()
+            && self.instance.tokens.is_empty()
+            && self
+                .dispatcher
+                .storylet(self.storylet)
+                .is_some_and(|d| d.is_ending)
+        {
+            Some(Self::reference(content, self.storylet))
+        } else {
+            None
+        };
+        let nothing_here = scene.is_none() && also_here.is_empty() && ending.is_none();
+        RunView {
+            participant,
+            participants,
+            place,
+            scene,
+            also_here,
+            nothing_here,
+            ending,
+            steps: self.branches[self.branch].steps[..self.current_step as usize].to_vec(),
+            current_step: self.current_step,
+            branches: self.branches.clone(),
+        }
+    }
+    pub fn act(
+        &mut self,
+        content: &RunContent,
+        participant: PartIx,
+        action: RunAction,
+    ) -> Result<u32, RunError> {
+        if participant as usize >= self.world.participants.len() {
+            return Err(RunError::InvalidAction("unknown participant".into()));
+        }
+        let backup = self.clone();
+        self.instance.acting_participant = participant;
+        let pending = self.pending();
+        let result = (|| {
+            let mut ctx = RuntimeContext::with_registries(
+                &mut self.world,
+                &self.dispatcher,
+                &self.registry,
+                &self.passion_registry,
+            );
+            match action {
+                RunAction::Choose {
+                    node_guid,
+                    output_pin,
+                } => {
+                    if pending != Some(node_guid) {
+                        return Err(RunError::InvalidAction("choice is not pending".into()));
+                    }
+                    let owner = Self::owner_mut(&mut self.instance, node_guid)
+                        .ok_or_else(|| RunError::InvalidAction("unknown node".into()))?;
+                    owner.acting_participant = participant;
+                    let pin = owner
+                        .asset
+                        .node(node_guid)
+                        .and_then(|d| d.output_pins.get(output_pin as usize))
+                        .map(|p| p.pin_name.clone())
+                        .ok_or_else(|| RunError::InvalidAction("unknown output".into()))?;
+                    owner
+                        .choose(&mut ctx, node_guid, &pin)
+                        .map_err(|e| RunError::InvalidAction(e.to_string()))?;
+                }
+                RunAction::PlayStorylet {
+                    node_guid,
+                    storylet,
+                } => {
+                    if pending != Some(node_guid) {
+                        return Err(RunError::InvalidAction(
+                            "storylet selection is not pending".into(),
+                        ));
+                    }
+                    let owner = Self::owner_mut(&mut self.instance, node_guid)
+                        .ok_or_else(|| RunError::InvalidAction("unknown node".into()))?;
+                    owner.acting_participant = participant;
+                    let available = owner
+                        .present_deck(&ctx, node_guid)
+                        .map_err(|e| RunError::InvalidAction(e.to_string()))?;
+                    if !available.contains(&storylet) {
+                        return Err(RunError::InvalidAction("storylet is not eligible".into()));
+                    }
+                    let entry = ctx
+                        .dispatcher
+                        .storylet(storylet)
+                        .ok_or_else(|| RunError::InvalidAction("unknown storylet".into()))?
+                        .payload_node_guid;
+                    let hub_instance_id = owner.instance_id;
+                    let local = owner.asset.node(entry).is_some();
+                    let scene_instance_id = if local {
+                        hub_instance_id
+                    } else {
+                        self.instance.instance_id
+                    };
+                    let scene_owner =
+                        Self::instance_by_id_mut(&mut self.instance, scene_instance_id)
+                            .ok_or_else(|| {
+                                RunError::Engine("storylet instance disappeared".into())
+                            })?;
+                    scene_owner.acting_participant = participant;
+                    let invocation = self.next_invocation;
+                    self.next_invocation = self.next_invocation.checked_add(1).ok_or_else(|| RunError::Engine("invocation id exhausted".into()))?;
+                    scene_owner
+                        .enter_storylet_invocation(entry, invocation)
+                        .map_err(|e| RunError::Engine(e.to_string()))?;
+                    self.selections.push(PendingSelection {
+                        hub: node_guid,
+                        storylet,
+                        participant,
+                        hub_instance_id,
+                        invocation,
+                    });
+                    self.storylet = storylet;
+                }
+                RunAction::Topic { node_guid, edge_id } => {
+                    if pending != Some(node_guid) {
+                        return Err(RunError::InvalidAction(
+                            "conversation is not pending".into(),
+                        ));
+                    }
+                    let owner = Self::owner_mut(&mut self.instance, node_guid)
+                        .ok_or_else(|| RunError::InvalidAction("unknown node".into()))?;
+                    owner.acting_participant = participant;
+                    let edge = owner
+                        .asset
+                        .node(node_guid)
+                        .and_then(|d| match &d.kind {
+                            NodeKind::WaypointConversation { graph, .. } => {
+                                graph.edges.get(edge_id as usize).map(|e| e.edge_id.clone())
+                            }
+                            _ => None,
+                        })
+                        .ok_or_else(|| RunError::InvalidAction("unknown topic".into()))?;
+                    owner
+                        .divert_topic(&mut ctx, node_guid, &edge)
+                        .map_err(|e| RunError::InvalidAction(e.to_string()))?;
+                }
+                RunAction::Move { to } => {
+                    let current = ctx.state.active_location(participant).ok_or_else(|| {
+                        RunError::InvalidAction("participant has no location".into())
+                    })?;
+                    let source = ctx.state.vertices.iter().find(|v| {
+                        v.layer == crate::chrono_state::GraphLayer::Location
+                            && v.entity_index == Some(current)
+                    });
+                    let destination = ctx.state.vertices.iter().find(|v| {
+                        v.layer == crate::chrono_state::GraphLayer::Location
+                            && v.entity_index == Some(to)
+                    });
+                    let connected = source.zip(destination).is_some_and(|(a, b)| {
+                        ctx.state.edges.iter().any(|edge| {
+                            edge.relation_type == "connected"
+                                && edge.source_id == a.vertex_id
+                                && edge.target_id == b.vertex_id
+                        })
+                    });
+                    if !connected {
+                        return Err(RunError::InvalidAction(
+                            "destination is not a connected location".into(),
+                        ));
+                    }
+                    let mut delta = BijectiveDelta::default();
+                    ctx.state.apply_move(participant, Some(to), &mut delta);
+                }
+                RunAction::Wait => {}
+            }
+            self.auto_advance()?;
+            Ok(())
+        })();
+        if let Err(e) = result {
+            *self = backup;
+            return Err(e);
+        }
+        if self.rewound {
+            let steps = self.branches[self.branch].steps[..self.current_step as usize].to_vec();
+            let snapshots = self.snapshots[self.branch][..=self.current_step as usize].to_vec();
+            let id = self.branches.len() as u32;
+            self.branches.push(BranchView { id, steps });
+            self.snapshots.push(snapshots);
+            self.branch = id as usize;
+            self.rewound = false;
+        }
+        self.current_step += 1;
+        let step = RunStep {
+            index: self.current_step,
+            branch: self.branch as u32,
+            participant,
+            action: action.clone(),
+            label: format!("{action:?}"),
+        };
+        self.branches[self.branch].steps.push(step);
+        let snapshot = self.snapshot();
+        self.snapshots[self.branch].push(snapshot);
+        let _ = content;
+        Ok(self.current_step)
+    }
+    pub fn rewind(&mut self, to_step: u32) -> Result<(), RunError> {
+        let snap = self.snapshots[self.branch]
+            .get(to_step as usize)
+            .cloned()
+            .ok_or_else(|| RunError::InvalidAction("unknown step".into()))?;
+        let mut ctx = RuntimeContext::with_registries(
+            &mut self.world,
+            &self.dispatcher,
+            &self.registry,
+            &self.passion_registry,
+        );
+        self.instance
+            .checkout(&mut ctx, snap.commit)
+            .map_err(|e| RunError::Engine(e.to_string()))?;
+        self.world = snap.world;
+        self.instance = snap.instance;
+        self.storylet = snap.storylet;
+        self.selections = snap.selections;
+        self.current_step = to_step;
+        self.rewound = true;
+        Ok(())
+    }
+    pub fn why_not(
+        &self,
+        content: &RunContent,
+        participant: PartIx,
+        limit: usize,
+    ) -> Vec<NearMiss> {
+        content
+            .dispatcher
+            .storylets
+            .iter()
+            .filter(
+                |d| match content.storylet_location_tags.get(&d.storylet_id) {
+                    None => true,
+                    Some(mask) if mask.is_empty() => true,
+                    Some(mask) => self
+                        .world
+                        .active_location(participant)
+                        .and_then(|id| self.world.entity_tags.get(id as usize))
+                        .is_some_and(|tags| tags.intersects(mask)),
+                },
+            )
+            .filter_map(|d| {
+                let mut reason =
+                    content
+                        .dispatcher
+                        .explain_ineligible(d, &self.world, &content.registry);
+                if reason.is_none() {
+                    if let Some(graph) = &d.precondition_graph {
+                        let mut world = self.world.clone();
+                        let ctx = RuntimeContext::with_registries(
+                            &mut world,
+                            &content.dispatcher,
+                            &content.registry,
+                            &content.passion_registry,
+                        );
+                        if !FlowGraphInstance::evaluate_precondition_graph_for(
+                            graph,
+                            &ctx,
+                            participant,
+                        )
+                        .unwrap_or(false)
+                        {
+                            reason = graph.nodes.iter().find_map(|node| match node.kind {
+                                NodeKind::Knows {
+                                    holder,
+                                    fact,
+                                    confirmed_only,
+                                } => {
+                                    let holder = match holder {
+                                        crate::chrono_runtime::HolderRef::Acting => participant,
+                                        crate::chrono_runtime::HolderRef::Participant(p) => p,
+                                    };
+                                    let known =
+                                        self.world.knowledge.knows(holder, fact).is_some_and(|r| {
+                                            !confirmed_only || r.kind.is_confirmed()
+                                        });
+                                    if known {
+                                        None
+                                    } else {
+                                        let name = content
+                                            .registry
+                                            .tag(fact)
+                                            .unwrap_or("unknown")
+                                            .strip_prefix("fact.")
+                                            .unwrap_or("unknown")
+                                            .replace(['_', '.'], " ");
+                                        Some(format!("needs fact \"{name}\""))
+                                    }
+                                }
+                                _ => None,
+                            });
+                            if reason.is_none() {
+                                reason = Some("needs another condition".into());
+                            }
+                        }
+                    }
+                }
+                reason.map(|reason| NearMiss {
+                    storylet: Self::reference(content, d.storylet_id),
+                    reason: reason.chars().take(120).collect(),
+                })
+            })
+            .take(limit)
+            .collect()
+    }
+    pub fn replay(
+        content: &RunContent,
+        start: RunStart,
+        seed: u64,
+        actions: &[(PartIx, RunAction)],
+    ) -> (Result<Self, RunError>, Option<u32>) {
+        let mut run = match Self::start(content, start, seed) {
+            Ok(v) => v,
+            Err(e) => return (Err(e), Some(0)),
+        };
+        for (i, (p, a)) in actions.iter().enumerate() {
+            if let Err(e) = run.act(content, *p, a.clone()) {
+                return (Err(e), Some((i + 1) as u32));
+            }
+        }
+        (Ok(run), None)
+    }
+}

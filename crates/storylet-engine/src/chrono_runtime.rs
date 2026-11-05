@@ -1803,6 +1803,14 @@ pub struct FlowGraphInstance {
     pub nodes: Vec<FlowNodeInstance>,
     /// Flat token vector, the runtime ring buffer from REQ-FG-03.
     pub tokens: Vec<SignalToken>,
+    /// Execution lineage for live tokens and latent nodes. Zero denotes legacy
+    /// unscoped execution. Maps are additive for older serialized sessions.
+    #[serde(default)]
+    pub token_invocations: BTreeMap<u64, u64>,
+    #[serde(default)]
+    pub node_invocations: BTreeMap<u32, u64>,
+    #[serde(skip)]
+    pub current_invocation: u64,
     /// Linear call history for the branch that reaches the current head.
     pub global_call_history: Vec<CallHistoryEntry>,
     pub history: PersistentHistoryEngine,
@@ -1869,6 +1877,9 @@ impl FlowGraphInstance {
             asset,
             nodes,
             tokens: Vec::new(),
+            token_invocations: BTreeMap::new(),
+            node_invocations: BTreeMap::new(),
+            current_invocation: 0,
             global_call_history: Vec::new(),
             history: PersistentHistoryEngine::new(),
             composer: SceneComposer::default(),
@@ -1909,6 +1920,9 @@ impl FlowGraphInstance {
             };
         }
         self.tokens.clear();
+        self.token_invocations.clear();
+        self.node_invocations.clear();
+        self.current_invocation = 0;
         self.global_call_history.clear();
         self.history = PersistentHistoryEngine::new();
         self.composer = SceneComposer::default();
@@ -2767,6 +2781,11 @@ impl FlowGraphInstance {
                     .clone_from(&plan.arrived_input_pins);
             }
         }
+        if plan.completed {
+            self.node_invocations.remove(&plan.node_guid);
+        } else {
+            self.node_invocations.insert(plan.node_guid, self.current_invocation);
+        }
         self.pending_passion_events.extend(passion_events);
         if let Some(storylet_id) = plan.storylet_id {
             self.last_completed_ms.insert(storylet_id, self.clock_ms);
@@ -2936,6 +2955,7 @@ impl FlowGraphInstance {
         };
         self.next_token_id += 1;
         self.tokens.push(token.clone());
+        self.token_invocations.insert(token.token_id, self.current_invocation);
         token
     }
 
@@ -3276,6 +3296,7 @@ impl FlowGraphInstance {
                     by_node.entry(command.node_guid).or_default().push(command);
                 }
                 for frame in frames {
+                    self.current_invocation = self.node_invocations.get(&frame.node_guid).copied().unwrap_or(0);
                     let commands = by_node.remove(&frame.node_guid).unwrap_or_default();
                     executed.extend(self.apply_section_frame(
                         frame,
@@ -3313,6 +3334,7 @@ impl FlowGraphInstance {
                 .node(node_guid)
                 .and_then(|node| node.executed_input_pin.clone())
                 .unwrap_or_else(|| DEFAULT_INPUT_PIN.to_string());
+            self.current_invocation = self.node_invocations.get(&node_guid).copied().unwrap_or(0);
             executed.extend(self.execute_mission(
                 ctx,
                 node_guid,
@@ -3359,6 +3381,7 @@ impl FlowGraphInstance {
             remaining = (remaining - cost).max(0);
             executions += 1;
             executed.push(token);
+            self.current_invocation = self.token_invocations.get(&token.token_id).copied().unwrap_or(0);
             let emitted = self.execute_input_at_index(
                 ctx,
                 token.target_node_guid,
@@ -3372,6 +3395,8 @@ impl FlowGraphInstance {
         }
         // Consumed tokens are never reused; keep the ring buffer bounded.
         self.tokens.retain(|token| token.is_active() || token.is_deferred());
+        self.token_invocations.retain(|id, _| self.tokens.iter().any(|token| token.token_id == *id));
+        self.current_invocation = 0;
         Ok(executed)
     }
 
@@ -3401,6 +3426,7 @@ impl FlowGraphInstance {
         pin_index: u16,
         token: &SignalToken,
     ) -> Result<Vec<SignalToken>, GraphError> {
+        self.current_invocation = self.token_invocations.get(&token.token_id).copied().unwrap_or(0);
         if token.graph_instance_id != self.instance_id {
             return Err(GraphError::TokenInstanceMismatch {
                 token_instance_id: token.graph_instance_id,
@@ -3415,6 +3441,12 @@ impl FlowGraphInstance {
                 pin_name: pin_index.to_string(),
             })?
             .to_string();
+        if self.node(node_guid).is_some_and(|node| node.state == NodeExecutionState::ActiveLatent)
+            && self.node_invocations.get(&node_guid).copied().unwrap_or(0) != self.current_invocation
+        {
+            let category = self.asset.node(node_guid).unwrap().category;
+            return Err(GraphError::UnsupportedNode { node_guid, category });
+        }
         let cost = self.node_cost(node_guid)?;
         let budget_ms = i64::from(token.time_budget_ms);
         if cost > budget_ms {
@@ -3447,7 +3479,9 @@ impl FlowGraphInstance {
             true,
             false,
         )?;
-        self.commit_plan(&plan)
+        let result = self.commit_plan(&plan);
+        self.current_invocation = 0;
+        result
     }
 
     /// Resolve a dynamic branch by choosing an output pin.
@@ -3457,6 +3491,7 @@ impl FlowGraphInstance {
         node_guid: u32,
         output_pin: &str,
     ) -> Result<Vec<SignalToken>, GraphError> {
+        self.current_invocation = self.node_invocations.get(&node_guid).copied().unwrap_or(0);
         self.check_pin(node_guid, output_pin, false)?;
         let plan = self.plan(
             ctx,
@@ -3468,7 +3503,9 @@ impl FlowGraphInstance {
             true,
             true,
         )?;
-        self.commit_plan(&plan)
+        let result = self.commit_plan(&plan);
+        self.current_invocation = 0;
+        result
     }
 
     /// Run one storylet on a QBN hub or salience selector.
@@ -3517,6 +3554,22 @@ impl FlowGraphInstance {
                 });
             }
         }
+        self.commit_storylet_selection(ctx, node_guid, storylet_id)
+    }
+
+    /// Complete a previously validated selection after its scene has played.
+    pub fn complete_reserved_storylet(&mut self, ctx: &mut RuntimeContext, node_guid: u32, storylet_id: u16) -> Result<Vec<SignalToken>, GraphError> {
+        let def = self.asset.node(node_guid).ok_or(GraphError::NodeNotFound { node_guid })?;
+        match &def.kind {
+            NodeKind::QbnHub { deck, .. } if deck.contains(&storylet_id) => {}
+            NodeKind::SalienceSelector { pool, .. } if pool.contains(&storylet_id) => {}
+            _ => return Err(GraphError::StoryletNotInDeck { node_guid, storylet_id }),
+        }
+        self.commit_storylet_selection(ctx, node_guid, storylet_id)
+    }
+
+    fn commit_storylet_selection(&mut self, ctx: &mut RuntimeContext, node_guid: u32, storylet_id: u16) -> Result<Vec<SignalToken>, GraphError> {
+        self.current_invocation = self.node_invocations.get(&node_guid).copied().unwrap_or(0);
         let index = self
             .node_index(node_guid)
             .ok_or(GraphError::NodeNotFound { node_guid })?;
@@ -3534,9 +3587,24 @@ impl FlowGraphInstance {
             true,
             false,
         )?;
-        self.commit_plan(&plan)
+        let result = self.commit_plan(&plan);
+        self.current_invocation = 0;
+        result
     }
 
+    /// Queue a selected storylet entry without resetting the active hub or history.
+    pub fn enter_storylet(&mut self, node_guid: u32) -> Result<(), GraphError> {
+        self.enter_storylet_invocation(node_guid, 0)
+    }
+
+    pub fn enter_storylet_invocation(&mut self, node_guid: u32, invocation: u64) -> Result<(), GraphError> {
+        let node = self.asset.node(node_guid).ok_or(GraphError::NodeNotFound { node_guid })?;
+        if node.input_pins.is_empty() { return Err(GraphError::NodeHasNoPins { node_guid }); }
+        self.current_invocation = invocation;
+        self.enqueue_token(node_guid, 0, 0);
+        self.current_invocation = 0;
+        Ok(())
+    }
     /// The deck a hub would present right now, in dispatcher order.
     pub fn present_deck(
         &self,
@@ -3709,6 +3777,7 @@ impl FlowGraphInstance {
             .collect();
         for index in ready {
             let node_guid = self.nodes[index].node_guid;
+            self.current_invocation = self.node_invocations.remove(&node_guid).unwrap_or(0);
             let input_pin = self.nodes[index]
                 .executed_input_pin
                 .clone()
@@ -3729,6 +3798,7 @@ impl FlowGraphInstance {
             // second one here would leave an unmatched entry for rollback.
             executed.extend(self.emit_tokens(node_guid, DEFAULT_OUTPUT_PIN, 0));
         }
+        self.current_invocation = 0;
         Ok(())
     }
 }
@@ -4011,6 +4081,7 @@ impl FlowGraphInstance {
             }
         }
         self.pending_passion_events.extend(inverse_passion_events);
+        self.node_invocations.remove(&node_guid);
         let node = &mut self.nodes[index];
         node.state = NodeExecutionState::Idle;
         node.executed_input_pin = None;
@@ -4227,6 +4298,7 @@ impl FlowGraphInstance {
                 node.chosen_output_pin = None;
             }
         }
+        if frame.just_completed { self.node_invocations.remove(&node_guid); }
         let mut emitted = Vec::new();
         if frame.just_completed {
             let entry = CallHistoryEntry {
@@ -4332,6 +4404,7 @@ impl FlowGraphInstance {
         node_guid: u32,
         edge_id: &str,
     ) -> Result<Vec<SignalToken>, GraphError> {
+        self.current_invocation = self.node_invocations.get(&node_guid).copied().unwrap_or(0);
         let def = self
             .asset
             .node(node_guid)
@@ -4399,7 +4472,9 @@ impl FlowGraphInstance {
         if exits {
             plan.output_pin = Some(exit_pin);
         }
-        self.commit_plan(&plan)
+        let result = self.commit_plan(&plan);
+        self.current_invocation = 0;
+        result
     }
 
     /// Attach the child asset a mission node owns (REQ-CH-04, spec §8.2). The
@@ -4602,6 +4677,9 @@ impl FlowGraphInstance {
             child.acting_participant = self.acting_participant;
             if first_activation {
                 child.start()?;
+                for token in &child.tokens {
+                    child.token_invocations.insert(token.token_id, self.current_invocation);
+                }
             }
             child.tick(ctx, budget_ms)?
         };
@@ -5011,6 +5089,15 @@ impl FlowGraphInstance {
         Ok(path)
     }
 
+    /// Queue the authored outgoing edges after a point-of-interest seek.
+    pub fn resume_from_poi(&mut self, node_guid: u32) -> Result<(), GraphError> {
+        let def = self.asset.node(node_guid).ok_or(GraphError::NodeNotFound { node_guid })?;
+        if !matches!(def.kind, NodeKind::Poi { .. }) {
+            return Err(GraphError::UnsupportedNode { node_guid, category: def.category });
+        }
+        self.emit_tokens(node_guid, DEFAULT_OUTPUT_PIN, 0);
+        Ok(())
+    }
     /// Post-order seek from a POI back through the graph. AND gates take every
     /// incoming edge; ANY, choice, and multi-fan-in nodes take the declared
     /// route, falling back to the first incoming edge in deterministic order.

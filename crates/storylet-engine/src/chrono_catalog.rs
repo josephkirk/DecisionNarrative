@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
+use serde::{Deserialize, Serialize};
 
 /// One `u16` storylet index space. Capacity is a single contract shared by the
 /// catalog, completion bitset, and profile pools.
@@ -41,7 +42,7 @@ impl fmt::Display for CatalogError {
 impl Error for CatalogError {}
 
 /// Stable-key -> dense-index registry.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoryletSpace {
     keys: Vec<String>,
     by_key: BTreeMap<String, StoryletIndex>,
@@ -141,7 +142,7 @@ impl StoryletSpace {
 /// Catalog metadata needed by selection and working-set loading. The catalog is
 /// the storylet registry plus payload/profile metadata; it is not a
 /// parallel registry.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StoryletCatalog {
     space: StoryletSpace,
     is_ending: Vec<bool>,
