@@ -129,6 +129,9 @@ pub struct StoryletDef {
     /// Authoring marker: this storylet is a dedicated ending candidate.
     #[serde(default)]
     pub is_ending: bool,
+    /// Filler content used only when no progress storylet is available.
+    #[serde(default)]
+    pub is_fallback: bool,
     /// Ranks storylets in a large QBN deck; higher first.
     #[serde(default)]
     pub display_priority: i32,

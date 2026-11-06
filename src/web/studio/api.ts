@@ -1,6 +1,7 @@
 import type {
   AuthoringOptions,
   ContentReference,
+  CoverageReport,
   InspectView,
   LibraryPageResult,
   NearMiss,
@@ -61,6 +62,7 @@ function post<T>(path: string, body: unknown): Promise<T> {
 const runPath = (id: string) => `/api/v4/runs/${encodeURIComponent(id)}`;
 
 const runs: RunsApi & {
+  coverage(runs: number, seed?: string): Promise<CoverageReport>;
   list(): Promise<RunSummary[]>;
   remove(id: string, expectedRevision: number, idempotencyKey: string): Promise<{ ok: boolean }>;
 } = {
@@ -68,6 +70,7 @@ const runs: RunsApi & {
     const expectedRevision = input.expectedRevision ?? (await request<ProjectMetadata>("/api/v3/project")).revision;
     return post<RunEnvelope>("/api/v4/runs", { ...input, expectedRevision, idempotencyKey: crypto.randomUUID() });
   },
+  coverage: (runs, seed) => post<CoverageReport>("/api/v4/coverage", { runs, seed }),
   list: () => request<RunSummary[]>("/api/v4/runs"),
   view: (id, participant) => request<RunEnvelope>(`${runPath(id)}?participant=${participant}`),
   act: (id, participant, action, expectedRevision, idempotencyKey) =>

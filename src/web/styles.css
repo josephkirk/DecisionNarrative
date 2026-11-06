@@ -1516,3 +1516,18 @@ button.btn:active, .tab-btn:active, .thumb-avatar-btn:active {
 .play-end-turn { margin-left: auto; }
 .play-world-notes { list-style: none; margin: 0; padding: 0 0 0 10px; border-left: 2px solid var(--tertiary); color: var(--text-muted); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
 @media (prefers-reduced-motion: reduce) { .play-chip { transition: none; } }
+
+/* Coverage inherits the Play visual contract. */
+.coverage { display: flex; flex-direction: column; gap: 18px; max-width: 760px; }
+.coverage__header, .coverage__violation, .coverage__bar-row > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.coverage__form { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.coverage__form .play-field { flex: 1 1 180px; }
+.coverage__cell, .coverage__invariants, .coverage__warning { border: 1px solid var(--border-subtle); background: var(--bg-card); padding: 16px; }
+.coverage__invariants--fail, .coverage__warning { border-color: var(--status-danger); }
+.coverage h3, .coverage h4 { margin: 0 0 8px; }
+.coverage h4 { margin-top: 16px; }
+.coverage__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.coverage__list a { margin-left: 8px; }
+.coverage__bar { height: 8px; background: var(--bg-card-hover); margin-top: 4px; }
+.coverage__bar span { display: block; height: 100%; background: var(--status-danger); }
+.coverage .form-input { border-radius: 0; }

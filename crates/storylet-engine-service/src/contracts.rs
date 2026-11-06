@@ -246,8 +246,13 @@ pub struct StoryletRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approved_revision: Option<u64>,
     pub title: String,
+    #[serde(default = "default_storylet_origin")]
+    pub origin: String,
     #[serde(default)]
     pub ending: bool,
+    /// Filler offered when no progress storylet is available.
+    #[serde(default)]
+    pub is_fallback: bool,
     /// Participant entity ids who play this storylet; empty = any human.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub played_by: Vec<String>,
@@ -282,6 +287,7 @@ pub struct StoryletRecord {
     pub created_at: i64,
 }
 
+fn default_storylet_origin() -> String { "human".into() }
 fn default_revision() -> u64 {
     1
 }
@@ -397,6 +403,8 @@ pub struct ResolvedScenarioStart {
 pub struct LibrarySummaryItem {
     pub id: String,
     pub title: String,
+    #[serde(default = "default_storylet_origin")]
+    pub origin: String,
     pub excerpt: String,
     pub location_tags: Vec<String>,
     pub role_tags: Vec<String>,
@@ -543,7 +551,7 @@ pub struct SystemTraitTemplateSpec {
 
 /// System traits added after v5 shipped. Older projects get them virtually and
 /// bundles without them still validate.
-pub const ADDITIVE_SYSTEM_TRAITS: &[&str] = &["participant", "connection", "clock"];
+pub const ADDITIVE_SYSTEM_TRAITS: &[&str] = &["participant", "connection", "clock", "milestone", "intent_probe"];
 
 pub const SYSTEM_TRAIT_TEMPLATES: &[SystemTraitTemplateSpec] = &[
     SystemTraitTemplateSpec { key: "participant", name: "Participant", allow_multiple: false, properties: &[
@@ -562,7 +570,19 @@ pub const SYSTEM_TRAIT_TEMPLATES: &[SystemTraitTemplateSpec] = &[
         SystemTraitPropertySpec { key: "slot_labels", name: "Slot Labels", property_type: PropertyType::String, is_array: true, default_json: "[]" },
         SystemTraitPropertySpec { key: "actions_per_slot", name: "Actions Per Slot", property_type: PropertyType::Int, is_array: false, default_json: "2" },
     ] },
-    SystemTraitTemplateSpec { key: "character_settings", name: "Character Settings", allow_multiple: false, properties: &[
+    SystemTraitTemplateSpec { key: "milestone", name: "Milestone", allow_multiple: true, properties: &[
+        SystemTraitPropertySpec { key: "key", name: "Key", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
+        SystemTraitPropertySpec { key: "name", name: "Name", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
+        SystemTraitPropertySpec { key: "routes", name: "Routes", property_type: PropertyType::Storylet, is_array: true, default_json: "[]" },
+        SystemTraitPropertySpec { key: "reachable_for", name: "Reachable For", property_type: PropertyType::String, is_array: true, default_json: "[]" },
+        SystemTraitPropertySpec { key: "deadline_slot", name: "Deadline Slot", property_type: PropertyType::Int, is_array: false, default_json: "-1" },
+    ] },
+    SystemTraitTemplateSpec { key: "intent_probe", name: "Intent Probe", allow_multiple: true, properties: &[
+        SystemTraitPropertySpec { key: "name", name: "Name", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
+        SystemTraitPropertySpec { key: "holder_knows", name: "Holder Knows", property_type: PropertyType::String, is_array: true, default_json: "[]" },
+        SystemTraitPropertySpec { key: "colocated_with", name: "Colocated With", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
+        SystemTraitPropertySpec { key: "expected_routes", name: "Expected Routes", property_type: PropertyType::Storylet, is_array: true, default_json: "[]" },
+    ] },    SystemTraitTemplateSpec { key: "character_settings", name: "Character Settings", allow_multiple: false, properties: &[
         SystemTraitPropertySpec { key: "role", name: "Role", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
         SystemTraitPropertySpec { key: "home_location", name: "Home Location", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
         SystemTraitPropertySpec { key: "current_location", name: "Current Location", property_type: PropertyType::Entity, is_array: false, default_json: "null" },

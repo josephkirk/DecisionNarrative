@@ -380,3 +380,27 @@ fn participant_views_say_who_is_human() {
     let humans: Vec<_> = participants.iter().map(|p| p.human).collect();
     assert_eq!(humans, [true, false, false]);
 }
+
+#[test]
+fn failed_rule_storylet_rolls_back_the_triggering_action() {
+    let mut content = with_rules(&[(1, "fact.a", 0)]);
+    let node = content.root_asset.nodes.iter_mut().find(|n| n.node_guid == 110).unwrap();
+    node.kind = NodeKind::Choice { default_output_pin: String::new() };
+    node.category = NodeCategory::LogicGate;
+    let mut run = started(&content);
+    let before = run.view(&content, 0);
+    let world_before = run.world.clone();
+    assert!(run.act(&content, 0, RunAction::Wait).is_err());
+    assert_eq!(run.view(&content, 0), before);
+    assert_eq!(run.world, world_before);
+}
+
+#[test]
+fn rule_knowledge_has_a_source_step_when_triggered_by_wait() {
+    let content = with_rules(&[(1, "fact.a", 0)]);
+    let mut run = started(&content);
+    run.act(&content, 0, RunAction::Wait).unwrap();
+    let inspect = run.inspect(&content, ROSA);
+    let fact = inspect.knows.iter().find(|row| row.fact == "fact.a").unwrap();
+    assert_eq!(fact.source_step, Some(1));
+}

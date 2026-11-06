@@ -85,6 +85,7 @@ pub struct StudioService {
     pub(crate) inner: Arc<Mutex<StudioInner>>,
     pub updates: broadcast::Sender<SessionChange>,
     pub resource_root: PathBuf,
+    pub(crate) coverage_running: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub(crate) struct StudioInner {
@@ -134,6 +135,20 @@ fn normalize_storylet_ending(value: &mut Value) {
     }
 }
 
+fn shared_coverage_guard(store: &Store) -> Arc<std::sync::atomic::AtomicBool> {
+    use std::sync::{Mutex as StdMutex, OnceLock, Weak};
+    static GUARDS: OnceLock<StdMutex<BTreeMap<PathBuf, Weak<std::sync::atomic::AtomicBool>>>> = OnceLock::new();
+    let Some(path) = store.conn.path().filter(|path| !path.is_empty() && *path != ":memory:") else {
+        return Arc::new(std::sync::atomic::AtomicBool::new(false));
+    };
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+    let mut guards = GUARDS.get_or_init(|| StdMutex::new(BTreeMap::new())).lock().unwrap_or_else(|error| error.into_inner());
+    guards.retain(|_, guard| guard.strong_count() > 0);
+    if let Some(guard) = guards.get(&path).and_then(Weak::upgrade) { return guard; }
+    let guard = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    guards.insert(path, Arc::downgrade(&guard));
+    guard
+}
 impl StudioService {
     pub fn open(
         db_path: impl AsRef<Path>,
@@ -154,6 +169,7 @@ impl StudioService {
     }
 
     fn build(store: Store, resource_root: impl Into<PathBuf>) -> Result<Self, String> {
+        let coverage_running = shared_coverage_guard(&store);
         let mut runtime = StoryletRuntime::default();
         let saved_sessions = store.list_runtime_sessions().map_err(|e| e.to_string())?;
         for state in saved_sessions {
@@ -177,6 +193,7 @@ impl StudioService {
             })),
             updates,
             resource_root: res_root,
+            coverage_running,
         })
     }
 
@@ -388,6 +405,10 @@ impl StudioService {
     }
 
     pub async fn save_content_item(&self, entity: &str, payload: &Value) -> Result<Value, String> {
+        self.save_content_item_with_origin(entity, payload, "human").await
+    }
+
+    pub(crate) async fn save_content_item_with_origin(&self, entity: &str, payload: &Value, created_origin: &str) -> Result<Value, String> {
         ensure_content_kind(entity)?;
         let inner = self.inner.lock().await;
         let index = build_workspace_index(&inner.store)?;
@@ -472,7 +493,8 @@ impl StudioService {
                     .and_then(Value::as_u64)
                     .unwrap_or(1),
             };
-            if let Some(object) = final_payload.as_object_mut() {
+            let origin = inner.store.get_storylet(&id).map_err(|e| e.to_string())?.map(|story| story.origin).unwrap_or_else(|| created_origin.to_string());            if let Some(object) = final_payload.as_object_mut() {
+                object.insert("origin".into(), Value::String(origin));
                 object.insert("revision".into(), Value::from(next_rev));
                 object.insert("approved_revision".into(), Value::Null);
             }

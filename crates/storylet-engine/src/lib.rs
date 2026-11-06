@@ -14,6 +14,7 @@ pub mod chrono_catalog;
 pub mod chrono_chronicle;
 pub mod chrono_completion;
 pub mod chrono_features;
+pub mod chrono_explore;
 pub mod chrono_participants;
 pub mod chrono_space;
 pub mod chrono_tables;

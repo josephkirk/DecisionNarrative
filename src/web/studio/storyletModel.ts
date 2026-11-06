@@ -16,3 +16,8 @@ export function togglePlayedBy(current: string[], id: string, checked: boolean):
   if (!checked) return current.filter((existing) => existing !== id);
   return current.includes(id) ? current : [...current, id];
 }
+
+/** Mark agent-authored material until its current revision is approved. */
+export function originBadge(storylet: { origin?: string; revision: number; approved_revision?: number | null }): string | null {
+  return storylet.origin === "agent" && storylet.approved_revision !== storylet.revision ? "Agent draft" : null;
+}

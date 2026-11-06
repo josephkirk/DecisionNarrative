@@ -5,7 +5,7 @@ import { studioState } from "../../state.ts";
 import { stepCountText } from "../../runModel.ts";
 
 const props = defineProps<{ recent: RunSummary[]; scenarios: Array<{ id: string; name?: string }>; busy: boolean }>();
-const emit = defineEmits<{ (e: "start", input: RunStartInput): void }>();
+const emit = defineEmits<{ (e: "start", input: RunStartInput): void; (e: "coverage"): void }>();
 
 const mode = ref<"beginning" | "storylet">("beginning");
 const search = ref("");
@@ -73,6 +73,7 @@ function submit() {
       </details>
 
       <button type="submit" class="btn btn-primary play-btn" :disabled="!canStart">Start playing</button>
+      <button type="button" class="btn btn-secondary play-btn" :disabled="busy" @click="emit('coverage')">Let bots play</button>
     </form>
 
     <section v-if="recent.length" class="play-recent" aria-label="Recent runs">

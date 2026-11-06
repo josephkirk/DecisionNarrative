@@ -3646,6 +3646,10 @@ impl FlowGraphInstance {
         ctx: &RuntimeContext,
         node_guid: u32,
     ) -> Result<Vec<u16>, GraphError> {
+        self.present_deck_for(ctx, node_guid, self.acting_participant)
+    }
+
+    pub fn present_deck_for(&self, ctx: &RuntimeContext, node_guid: u32, participant: PartIx) -> Result<Vec<u16>, GraphError> {
         let def = self
             .asset
             .node(node_guid)
@@ -3666,9 +3670,9 @@ impl FlowGraphInstance {
                 continue;
             }
             let eligible = match ctx.dispatcher.storylet(storylet_id) {
-                Some(storylet) if !storylet.played_by.is_empty() && !storylet.played_by.contains(&self.acting_participant) => false,
+                Some(storylet) if !storylet.played_by.is_empty() && !storylet.played_by.contains(&participant) => false,
                 Some(storylet) => match storylet.precondition_graph.as_ref() {
-                    Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
+                    Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, participant)?,
                     None => true,
                 },
                 None => false,

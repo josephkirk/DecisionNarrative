@@ -28,6 +28,8 @@ struct StartConfig {
     scenario_id: Option<String>,
     #[serde(default)]
     storylet_id: Option<String>,
+    #[serde(default)]
+    participant_config: Option<storylet_engine::chrono_explore::ParticipantConfig>,
     content: RunContent,
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -324,7 +326,12 @@ pub struct StartRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     storylet_id: Option<String>,
     scenario_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_seed")]
     seed: Option<u64>,
+    #[serde(default)]
+    actions: Vec<(u16, RunAction)>,
+    #[serde(default)]
+    participant_config: Option<storylet_engine::chrono_explore::ParticipantConfig>,
     expected_revision: u64,
     idempotency_key: String,
 }
@@ -389,10 +396,16 @@ impl StudioService {
             Err(error) => return Err(RunApiError::invalid(error)),
         };
         let seed = req.seed.unwrap_or(default_seed);
-        let (kernel, stalled) =
+        let content = req.participant_config.map_or(content.clone(), |config| storylet_engine::chrono_explore::configured_content(&content, config));
+        let (mut kernel, mut stalled) =
             RunKernel::start_preserving_stall(&content, req.start.clone(), seed)
                 .map_err(kernel_error)?;
-        let now = chrono_now_ms();
+        let mut recorded = Vec::with_capacity(req.actions.len());
+        for (participant, action) in &req.actions {
+            let (_, next_stalled) = kernel.act_preserving_stall(&content, *participant, action.clone()).map_err(kernel_error)?;
+            stalled = next_stalled;
+            recorded.push(RunOp::Act { participant: *participant, action: action.clone() });
+        }        let now = chrono_now_ms();
         let row = Row {
             id: uuid::Uuid::new_v4().to_string(),
             project_revision: content.content_revision,
@@ -401,9 +414,10 @@ impl StudioService {
                 start: req.start,
                 scenario_id: req.scenario_id,
                 storylet_id: req.storylet_id,
+                participant_config: req.participant_config,
                 content: content.clone(),
             },
-            actions: vec![],
+            actions: recorded,
             revision: 0,
             last_key: String::new(),
             last_result: String::new(),
@@ -648,6 +662,8 @@ impl StudioService {
         let (content, _) =
             compile_run_content(&inner.store, row.start.scenario_id.as_deref(), None, row.start.storylet_id.as_deref())
                 .map_err(RunApiError::invalid)?;
+        let content = row.start.participant_config.map_or(content.clone(), |config| storylet_engine::chrono_explore::configured_content(&content, config));
+
         if row.start.content.catalog.space() != content.catalog.space()
             || row.start.content.registry != content.registry
             || row.start.content.participant_indices != content.participant_indices
@@ -818,3 +834,93 @@ handler!(act, run_act, ActRequest);
 handler!(rewind, run_rewind, RewindRequest);
 handler!(reload, run_reload, RevisionRequest);
 handler!(delete, run_delete, RevisionRequest);
+
+fn deserialize_optional_seed<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where D: serde::Deserializer<'de> {
+    let value = Option::<Value>::deserialize(deserializer)?;
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(number)) => number.as_u64().map(Some).ok_or_else(|| serde::de::Error::custom("seed must be an unsigned integer")),
+        Some(Value::String(text)) => text.parse::<u64>().map(Some).map_err(serde::de::Error::custom),
+        _ => Err(serde::de::Error::custom("seed must be an unsigned integer or decimal string")),
+    }
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct CoverageRequest {
+    pub runs: Option<u32>,
+    #[serde(default, deserialize_with = "deserialize_optional_seed")]
+    pub seed: Option<u64>,
+}
+
+struct CoveragePermit(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl Drop for CoveragePermit {
+    fn drop(&mut self) { self.0.store(false, std::sync::atomic::Ordering::Release); }
+}
+
+fn compile_coverage_config(world: &crate::contracts::EntityRecord, content: &RunContent, req: &CoverageRequest) -> Result<storylet_engine::chrono_explore::ExploreConfig, RunApiError> {
+    use storylet_engine::chrono_explore::{ExploreConfig, IntentProbe, Milestone, ParticipantConfig};
+    let mut cfg = ExploreConfig { runs: req.runs.unwrap_or(2000), seed: req.seed.unwrap_or(0), ..Default::default() };
+    let text = |v: &std::collections::BTreeMap<String, Value>, key: &str| v.get(key).and_then(Value::as_str).unwrap_or("").to_string();
+    let strings = |v: &std::collections::BTreeMap<String, Value>, key: &str| -> Result<Vec<String>, RunApiError> {
+        v.get(key).and_then(Value::as_array).map(|items| items.iter().map(|item| item.as_str().map(str::to_owned).ok_or_else(|| RunApiError::invalid(format!("{key} must contain strings")))).collect()).unwrap_or_else(|| Ok(Vec::new()))
+    };
+    for trait_instance in &world.traits {
+        let values = &trait_instance.values;
+        let routes = |key: &str| -> Result<Vec<u16>, RunApiError> { strings(values, key)?.iter().map(|id| content.storylet_index(id).ok_or_else(|| RunApiError::invalid(format!("unknown storylet {id}")))).collect() };
+        match trait_instance.template_id.as_str() {
+            "system.milestone" => {
+                let reachable_for = strings(values, "reachable_for")?.iter().map(|name| match name.as_str() { "solo" => Ok(ParticipantConfig::Solo), "coop" => Ok(ParticipantConfig::AllHumans), _ => Err(RunApiError::invalid(format!("unknown participant configuration {name}"))) }).collect::<Result<Vec<_>, _>>()?;
+                let raw_deadline = values.get("deadline_slot").and_then(Value::as_i64).unwrap_or(-1);
+                let deadline_slot = if raw_deadline == -1 { None } else { Some(u32::try_from(raw_deadline).map_err(|_| RunApiError::invalid("invalid milestone deadline"))?) };
+                cfg.milestones.push(Milestone { key: text(values, "key"), name: text(values, "name"), routes: routes("routes")?, reachable_for, deadline_slot });
+            }
+            "system.intent_probe" => {
+                let holder_knows = strings(values, "holder_knows")?.iter().map(|fact| content.registry.id(fact).ok_or_else(|| RunApiError::invalid(format!("unknown fact {fact}")))).collect::<Result<Vec<_>, _>>()?;
+                let colocated_with = values.get("colocated_with").and_then(Value::as_str).filter(|id| !id.is_empty()).map(|id| {
+                    let p = content.participant_indices.get(id).ok_or_else(|| RunApiError::invalid(format!("unknown participant {id}")))?;
+                    content.initial_world.participants.entity.get(*p as usize).copied().ok_or_else(|| RunApiError::invalid(format!("unknown participant {id}")))
+                }).transpose()?;
+                cfg.probes.push(IntentProbe { name: text(values, "name"), holder_knows, colocated_with, expected_routes: routes("expected_routes")? });
+            }
+            _ => {}
+        }
+    }
+    Ok(cfg)
+}
+
+impl StudioService {
+    pub async fn run_coverage(&self, req: CoverageRequest) -> Result<Value, RunApiError> {
+        if req.runs.is_some_and(|runs| runs == 0 || runs > 50_000) { return Err(RunApiError::invalid("runs must be between 1 and 50000")); }
+        if self.coverage_running.compare_exchange(false, true, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire).is_err() { return Err(RunApiError::conflict("coverage already running")); }
+        let permit = CoveragePermit(self.coverage_running.clone());
+        let (content, config) = {
+            let inner = self.inner.lock().await;
+            let (content, scenario_seed) = compile_run_content(&inner.store, None, None, None).map_err(RunApiError::invalid)?;
+            let world = inner.store.list_entities().map_err(RunApiError::internal)?.into_iter().find(|e| e.id == crate::entities::WORLD_ENTITY_ID).ok_or_else(|| RunApiError::invalid("missing World entity"))?;
+            if inner.store.get_project_metadata().map_err(RunApiError::internal)?.revision != content.content_revision { return Err(RunApiError::conflict("project changed while compiling coverage")); }
+            let mut config = compile_coverage_config(&world, &content, &req)?;
+            if req.seed.is_none() { config.seed = scenario_seed; }
+            (content, config)
+        };
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let mut report = serde_json::to_value(storylet_engine::chrono_explore::explore(&content, &config)).map_err(RunApiError::internal)?;
+            report["content_revision"] = json!(content.content_revision);
+            report["runs"] = json!(config.runs);
+            report["seed"] = json!(config.seed.to_string());
+            for field in ["violations", "errors"] {
+                if let Some(rows) = report[field].as_array_mut() {
+                    for row in rows { if let Some(seed) = row["seed"].as_u64() { row["seed"] = json!(seed.to_string()); } }
+                }
+            }
+            report["milestones"] = json!(config.milestones);
+            report["probes"] = json!(config.probes);
+            report["storylets"] = Value::Object(content.storylet_titles.iter().map(|(id, title)| (id.to_string(), json!({"title":title,"key":content.storylet_key(*id)}))).collect());
+            report["locations"] = Value::Object(content.entity_names.iter().map(|(id, name)| (id.to_string(), json!(name))).collect());
+            Ok(report)
+        }).await.map_err(RunApiError::internal)?
+    }
+}
+pub async fn coverage(State(s): State<StudioService>, Json(req): Json<CoverageRequest>) -> Response {
+    match s.run_coverage(req).await { Ok(value) => Json(value).into_response(), Err(error) => error.into_response() }
+}

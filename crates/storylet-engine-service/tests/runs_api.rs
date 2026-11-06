@@ -540,3 +540,182 @@ async fn start_from_storylet_id_resolves_the_index() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
 }
+
+#[test]
+fn coverage_system_traits_are_available_to_old_and_new_projects() {
+    use storylet_engine_service::contracts::{PropertyType, TraitTemplateRecord};
+    let store = storylet_engine_service::store::Store::open_in_memory().unwrap();
+    for (id, expected) in [
+        ("system.milestone", vec![("routes", PropertyType::Storylet, true), ("deadline_slot", PropertyType::Int, false)]),
+        ("system.intent_probe", vec![("holder_knows", PropertyType::String, true), ("expected_routes", PropertyType::Storylet, true)]),
+    ] {
+        let raw = store.get_content_json("trait_templates", id).unwrap().expect("missing system trait");
+        let record: TraitTemplateRecord = serde_json::from_str(&raw).unwrap();
+        assert!(record.allow_multiple);
+        for (key, kind, array) in expected {
+            let property = record.properties.iter().find(|p| p.property.key == key).unwrap();
+            assert_eq!(property.property.property_type, kind);
+            assert_eq!(property.property.is_array, array);
+        }
+    }
+}
+
+#[tokio::test]
+async fn coverage_rejects_runs_over_50000() {
+    let app = build_router(StudioService::open_in_memory(".").unwrap(), None);
+    let (status, _) = req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":50001}))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn coverage_runs_compiled_project() {
+    let (path, _) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, report) = req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":1,"seed":7}))).await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(report["cells"].as_array().unwrap().len(), 4);
+    assert_eq!(report["error_count"], 0);
+    assert_eq!(report["content_revision"], 3);
+    assert_eq!(report["storylets"]["0"]["key"], "story");
+}
+
+#[tokio::test]
+async fn coverage_reports_milestones_from_world_traits() {
+    let (path, _) = fixture();
+    let store = storylet_engine_service::store::Store::open(&path).unwrap();
+    let mut world = store.list_entities().unwrap().into_iter().find(|entity| entity.id == "world").unwrap();
+    world.traits.push(serde_json::from_value(json!({"template_id":"system.milestone","values":{"key":"rescue","name":"Rescue","routes":["story"],"reachable_for":["solo","coop"],"deadline_slot":-1}})).unwrap());
+    store.save_content("entities", "world", &serde_json::to_string(&world).unwrap(), 2, None).unwrap();
+    drop(store);
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, report) = req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":1,"seed":7}))).await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(report["cells"][0]["milestone_reached"][0][0], "rescue");
+}
+
+#[tokio::test]
+async fn mcp_workspace_coverage_listed() {
+    let service = StudioService::open_in_memory(".").unwrap();
+    let response = storylet_engine_service::mcp::handle_mcp_message(&service, &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).await.unwrap();
+    let operations = response["result"]["tools"][0]["inputSchema"]["properties"]["operation"]["enum"].as_array().unwrap();
+    assert!(operations.contains(&json!("workspace.coverage")));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_coverage_requests_do_not_overlap() {
+    let (path, _) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (first, second) = tokio::join!(req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":5000}))), req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":5000}))));
+    let statuses = [first.0, second.0];
+    assert!(statuses.contains(&StatusCode::OK), "{first:?} {second:?}");
+    assert!(statuses.contains(&StatusCode::CONFLICT), "{first:?} {second:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coverage_is_exclusive_across_services_for_the_same_project() {
+    let (path, _) = fixture();
+    let a = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let b = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (first, second) = tokio::join!(req(&a, "POST", "/api/v4/coverage", Some(json!({"runs":5000}))), req(&b, "POST", "/api/v4/coverage", Some(json!({"runs":5000}))));
+    let statuses = [first.0, second.0];
+    assert!(statuses.contains(&StatusCode::OK));
+    assert!(statuses.contains(&StatusCode::CONFLICT), "{first:?} {second:?}");
+}
+
+#[tokio::test]
+async fn mcp_and_http_coverage_return_the_same_report() {
+    let (path, _) = fixture();
+    let service = StudioService::open(&path, ".").unwrap();
+    let app = build_router(service.clone(), None);
+    let (_, http) = req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":2,"seed":7}))).await;
+    let message = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"narrative_platform","arguments":{"operation":"workspace.coverage","runs":2,"seed":7}}});
+    let result = storylet_engine_service::mcp::handle_mcp_message(&service, &message).await.unwrap();
+    assert!(result["result"]["isError"].is_null(), "{result}");
+    let mcp: Value = serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(mcp, http);
+}
+
+#[tokio::test]
+async fn start_with_recorded_actions_opens_at_last_step_and_survives_restart() {
+    let (path, _) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (_, original) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"expectedRevision":3,"idempotencyKey":"original"}))).await;
+    let action = original["view"]["scene"]["choices"][0]["action"].clone();
+    let (status, replay) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"seed":7,"actions":[[0,action]],"expectedRevision":3,"idempotencyKey":"replay"}))).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["view"]["currentStep"], 1);
+    let id = replay["id"].as_str().unwrap().to_owned();
+    drop(app);
+    let restarted = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, restored) = req(&restarted, "GET", &format!("/api/v4/runs/{id}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(restored["view"]["currentStep"], 1);
+}
+
+#[tokio::test]
+async fn replay_participant_configuration_survives_reload() {
+    let (path, _) = fixture();
+    let store = storylet_engine_service::store::Store::open(&path).unwrap();
+    for (id, seat) in [("mara", 0), ("teodor", 1)] {
+        let value = json!({"id":id,"name":id,"root_tag":"character","traits":[{"template_id":"system.participant","values":{"controller":"human","seat":seat,"start_location":"harbor"}},{"template_id":"system.character_settings","values":{"home_location":"harbor","current_location":"harbor"}}]});
+        store.save_content("entity_templates", id, &value.to_string(), 1, None).unwrap();
+    }
+    let revision = store.get_project_metadata().unwrap().revision;
+    drop(store);
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, start) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"participantConfig":"solo","expectedRevision":revision,"idempotencyKey":"solo"}))).await;
+    assert_eq!(status, StatusCode::OK, "{start}");
+    assert_eq!(start["view"]["participants"][1]["human"], false);
+    let id = start["id"].as_str().unwrap();
+    let (status, reloaded) = req(&app, "POST", &format!("/api/v4/runs/{id}/reload"), Some(json!({"expectedRevision":0,"idempotencyKey":"reload"}))).await;
+    assert_eq!(status, StatusCode::OK, "{reloaded}");
+    assert_eq!(reloaded["view"]["participants"][1]["human"], false);
+}
+
+#[test]
+fn fallback_storylet_metadata_reaches_the_explorer_dispatcher() {
+    let story: storylet_engine_service::contracts::StoryletRecord = serde_json::from_value(json!({"id":"filler","title":"Filler","content":{"text_template":"Wait"},"created_at":1,"is_fallback":true})).unwrap();
+    let content = storylet_engine_service::chrono_adapter::compile_chrono_dispatch(&[story], &[], &[]).unwrap();
+    assert!(content.dispatcher.storylet(0).unwrap().is_fallback);
+}
+
+#[tokio::test]
+async fn coverage_and_replay_preserve_large_seeds_exactly() {
+    let (path, _) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let seed = "18446744073709551615";
+    let (status, report) = req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":1,"seed":seed}))).await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(report["seed"], seed);
+    let (status, replay) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"seed":seed,"expectedRevision":3,"idempotencyKey":"wide-seed"}))).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+}
+
+#[tokio::test]
+async fn mcp_created_storylet_has_agent_origin() {
+    let service = StudioService::open_in_memory(".").unwrap();
+    let message = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"narrative_platform","arguments":{"operation":"content.save","entity":"storylets","payload":{"id":"agent-story","title":"Agent story","content":{"text_template":"Hello"},"created_at":1}}}});
+    let result = storylet_engine_service::mcp::handle_mcp_message(&service, &message).await.unwrap();
+    assert!(result["result"]["isError"].is_null(), "{result}");
+    let story = service.get_content_item("storylets", "agent-story").await.unwrap();
+    assert_eq!(story["origin"], "agent");
+    assert!(story["approved_revision"].is_null());
+    let library = service.query_library(&Default::default()).await.unwrap();
+    assert_eq!(library.items.iter().find(|item| item.id == "agent-story").unwrap().origin, "agent");
+    let mut edited = story.clone();
+    edited["origin"] = json!("human");
+    let saved = service.save_content_item("storylets", &edited).await.unwrap();
+    assert_eq!(saved["origin"], "agent");
+    let revision = saved["revision"].as_u64().unwrap();
+    let approved = service.approve_storylet("agent-story", revision).await.unwrap();
+    assert_eq!(approved.origin, "agent");
+    assert_eq!(approved.approved_revision, Some(revision));
+}
+
+#[tokio::test]
+async fn http_created_storylet_has_human_origin() {
+    let app = build_router(StudioService::open_in_memory(".").unwrap(), None);
+    let (status, story) = req(&app, "POST", "/api/v3/content/storylets", Some(json!({"id":"human-story","title":"Human story","content":{"text_template":"Hello"},"created_at":1}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{story}");
+    assert_eq!(story["origin"], "human");
+}

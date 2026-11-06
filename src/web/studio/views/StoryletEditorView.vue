@@ -6,6 +6,7 @@ import NarrativeGraphCanvas from "../components/NarrativeGraphCanvas.vue";
 import PropertyInspector from "../components/PropertyInspector.vue";
 import { buildGraphFromStorylet, compileGraphToStorylet, validateNarrativeGraph, validatePreconditionGraph, type NarrativeGraph } from "../narrativeGraphTypes.ts";
 import { notify, studioState } from "../state.ts";
+import { originBadge } from "../storyletModel.ts";
 import { StudioApi } from "../api.ts";
 import { interactionContextKey } from "../interactionContext.ts";
 
@@ -159,6 +160,7 @@ function deleteSelectedNode(nodeId: string) {
         <button class="btn btn-secondary" @click="goBack">← Back to storylets</button>
         <input v-model="draft.title" class="form-input storylet-title-input" placeholder="Storylet title…" aria-label="Storylet title" />
         <span :class="['badge', isApproved ? 'approved' : '']">{{ isApproved ? "Approved" : "Draft" }} · v{{ draft.revision }}</span>
+        <span v-if="originBadge(draft)" class="badge">{{ originBadge(draft) }}</span>
         <span v-if="isDirty" class="badge unsaved">Unsaved edits</span>
       </div>
       <div class="toolbar-right">

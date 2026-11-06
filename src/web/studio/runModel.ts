@@ -135,3 +135,13 @@ export function alsoHereActions(view: RunView): Array<{ storylet: StoryletRef; a
   if (hub === undefined) return [];
   return view.alsoHere.map((storylet) => ({ storylet, action: { kind: "play_storylet", nodeGuid: hub, storylet: storylet.id } }));
 }
+
+/** Normalize ending counts within the endings that were reached. */
+export function endingBars(endings: Array<[number, number]>): Array<{ id: number; count: number; percent: number }> {
+  const total = endings.reduce((sum, [, count]) => sum + count, 0);
+  return endings.map(([id, count]) => ({ id, count, percent: total ? count * 100 / total : 0 }));
+}
+
+export function invariantSeverity(report: { violations: unknown[] }): "pass" | "fail" {
+  return report.violations.length ? "fail" : "pass";
+}

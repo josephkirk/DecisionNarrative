@@ -149,6 +149,7 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
             "/api/v3/chrono/playtests/{id}/reconcile",
             post(reconcile_chrono_playtest),
         )
+        .route("/api/v4/coverage", post(crate::runs::coverage))
         .route("/api/v4/runs", get(crate::runs::list).post(crate::runs::start))
         .route("/api/v4/runs/{id}", get(crate::runs::view).delete(crate::runs::delete))
         .route("/api/v4/runs/{id}/act", post(crate::runs::act))

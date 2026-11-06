@@ -1285,3 +1285,48 @@ fn view_has_no_hub_when_a_plain_choice_is_pending() {
     let run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
     assert!(run.view(&content, 0).hub.is_none());
 }
+
+#[test]
+fn hub_does_not_offer_or_play_storylets_at_another_location() {
+    let mut content = support::weirs_crossing::content();
+    let mut missing_place = storylet_engine::chrono_state::TagBitset::new();
+    let tag = content.registry.id("fact.logbook").unwrap();
+    missing_place.set_bit(tag).unwrap();
+    let storylet = support::weirs_crossing::LAMP_SOOT;
+    content.storylet_location_tags.insert(storylet, missing_place);
+    let mut run = RunKernel::start(&content, RunStart::Beginning, 7).unwrap();
+    run.act(&content, 0, RunAction::Choose { node_guid: 1, output_pin: 0 }).unwrap();
+    assert!(!run.view(&content, 0).also_here.iter().any(|s| s.id == storylet));
+    assert!(run.act(&content, 0, RunAction::PlayStorylet { node_guid: 10, storylet }).is_err());
+}
+
+#[test]
+fn predicting_a_destination_uses_its_location_without_moving_the_player() {
+    let mut content = support::weirs_crossing::content();
+    let tag = content.registry.id("fact.logbook").unwrap();
+    content.initial_world.entity_tags[1].set_bit(tag).unwrap();
+    let mut mask = storylet_engine::chrono_state::TagBitset::new();
+    mask.set_bit(tag).unwrap();
+    let storylet = support::weirs_crossing::LAMP_SOOT;
+    content.storylet_location_tags.insert(storylet, mask);
+    let mut run = RunKernel::start(&content, RunStart::Beginning, 7).unwrap();
+    run.act(&content, 0, RunAction::Choose { node_guid: 1, output_pin: 0 }).unwrap();
+    assert!(!run.view(&content, 0).also_here.iter().any(|s| s.id == storylet));
+    assert!(run.storylets_at(&content, 0, 1).iter().any(|s| s.id == storylet));
+    assert_eq!(run.world.active_location(0), Some(0));
+}
+
+#[test]
+fn exploration_view_preserves_current_choices_without_copying_the_timeline() {
+    let content = support::weirs_crossing::content();
+    let mut run = RunKernel::start(&content, RunStart::Beginning, 7).unwrap();
+    run.act(&content, 0, RunAction::Choose { node_guid: 1, output_pin: 0 }).unwrap();
+    let full = run.view(&content, 0);
+    let compact = run.exploration_view(&content, 0);
+    assert_eq!(compact.scene, full.scene);
+    assert_eq!(compact.also_here, full.also_here);
+    assert_eq!(compact.place, full.place);
+    assert_eq!(compact.hub, full.hub);
+    assert_eq!(compact.current_step, full.current_step);
+    assert!(compact.steps.is_empty() && compact.branches.is_empty());
+}

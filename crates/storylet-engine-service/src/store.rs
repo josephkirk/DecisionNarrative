@@ -542,6 +542,7 @@ impl Store {
                 LibrarySummaryItem {
                     id: st.id.clone(),
                     title: st.title.clone(),
+                    origin: st.origin.clone(),
                     excerpt,
                     location_tags: st.location_tags.clone(),
                     role_tags,

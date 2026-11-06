@@ -104,7 +104,9 @@ export interface StoryletRecord {
   revision: number;
   approved_revision?: number | null;
   title: string;
+  origin?: "human" | "agent";
   ending: boolean;
+  is_fallback?: boolean;
   location_tags: string[];
   /** Participant entity ids who play this storylet; empty = any human. */
   played_by?: string[];
@@ -137,6 +139,7 @@ export interface LibrarySummaryItem {
 export interface LibrarySummaryItem {
   id: string;
   title: string;
+  origin?: "human" | "agent";
   excerpt: string;
   location_tags: string[];
   role_tags: string[];
@@ -293,7 +296,9 @@ export interface RunStartInput {
   scenarioId?: string;
   /** Begin at this authored storylet instead of the scenario default. */
   storyletId?: string;
-  seed?: number;
+  seed?: number | string;
+  actions?: Array<[number, RunAction]>;
+  participantConfig?: CoverageParticipantConfig;
   /** Project revision the caller compiled against; the client fills it from the project when omitted. */
   expectedRevision?: number;
 }
@@ -369,4 +374,38 @@ export interface ChronicleRowView { key: string; label: string; place: string | 
 export interface AdvancedView { runSeed: number; contentRevision: number; nodeGuid: number | null; interaction: string | null }
 export interface InspectView {
   knows: KnowRowView[]; worldChanges: ChangeView[]; chronicle: ChronicleRowView[]; advanced: AdvancedView;
+}
+
+export type CoverageParticipantConfig = "solo" | "all_humans";
+export type CoveragePersona = { kind: "wanderer" } | { kind: "investigator"; epsilon_permille: number };
+export interface CoverageViolation {
+  invariant: { kind: string; details?: [string, string] };
+  seed: string;
+  persona: CoveragePersona;
+  config: CoverageParticipantConfig;
+  step: number;
+  actions: Array<[number, RunAction]>;
+}
+export interface CoverageCell {
+  persona: CoveragePersona;
+  config: CoverageParticipantConfig;
+  endings: Array<[number, number]>;
+  milestone_reached: Array<[string, number]>;
+  probe_hits: Array<[string, number, number]>;
+  telling_orders: number;
+  dead_air_by_location: Array<[number, number, number]>;
+}
+export interface CoverageReport {
+  cells: CoverageCell[];
+  violations: CoverageViolation[];
+  determinism_mismatches: number;
+  errors: Array<{ seed: string; message: string; step: number }>;
+  error_count: number;
+  content_revision: number;
+  runs: number;
+  seed: string;
+  storylets: Record<string, { title: string; key: string | null }>;
+  locations: Record<string, string>;
+  milestones: Array<{ key: string; name: string; routes: number[]; reachable_for: CoverageParticipantConfig[] }>;
+  probes: Array<{ name: string; expected_routes: number[] }>;
 }

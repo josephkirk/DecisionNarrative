@@ -3,6 +3,7 @@ import { inject, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useLibraryViewModel } from "../view-models/library.ts";
 import { interactionContextKey } from "../interactionContext.ts";
+import { originBadge } from "../storyletModel.ts";
 import { thumbnailUrl } from "../thumbnails.ts";
 const router = useRouter();
 const {
@@ -171,6 +172,7 @@ function onFilterChange() {
                 <h3 class="card-title">{{ item.title }}</h3>
                 <div style="display:flex; gap:4px;">
                   <span v-if="item.ending" class="badge ending">Ending</span>
+                  <span v-if="originBadge(item)" class="badge">{{ originBadge(item) }}</span>
                   <span :class="['badge', item.approved_revision === item.revision ? 'approved' : '']">
                     {{ item.approved_revision === item.revision ? 'Approved' : 'Draft' }} · v{{ item.revision }}
                   </span>

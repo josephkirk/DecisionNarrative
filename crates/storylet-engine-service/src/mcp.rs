@@ -145,7 +145,7 @@ fn get_tool_definitions() -> Vec<Value> {
                     "type": "string",
                     "enum": [
                         "run.list", "run.start", "run.view", "run.act", "run.rewind", "run.why_not", "run.inspect", "run.reload", "run.delete",
-                        "platform.health", "workspace.context", "workspace.inspect", "workspace.validate", "workspace.replace",
+                        "platform.health", "workspace.context", "workspace.inspect", "workspace.validate", "workspace.replace", "workspace.coverage",
                         "content.list", "content.get", "content.save", "content.delete", "content.move", "content.references", "storylet.approve",
                         "scenarios.list", "scenarios.get", "scenarios.create", "scenarios.save", "scenarios.delete", "scenarios.preview",
                         "playtest.list", "playtest.create_from_workspace", "playtest.snapshot",
@@ -181,7 +181,8 @@ fn get_tool_definitions() -> Vec<Value> {
                 "branchSessionId": { "type": "string" },
                 "targetTensionSlope": { "type": "number" },
                 "sessionId": { "type": "string" },
-                "seed": { "type": "integer", "minimum": 0 },
+                "seed": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "string", "pattern": "^[0-9]+$" }] },
+                "runs": { "type": "integer", "minimum": 1, "maximum": 50000 },
                 "nodeGuid": { "type": "integer", "minimum": 1 },
                 "outputPin": { "type": "string" },
                 "edgeId": { "type": "string" },
@@ -400,6 +401,7 @@ async fn dispatch_narrative_platform_op(
         "platform.health" => {
             Ok(json!({ "status": "ok", "service": "decisionnarrative_studio_rust" }))
         }
+        "workspace.coverage" => service.run_coverage(serde_json::from_value(args.clone()).map_err(|e| e.to_string())?).await.map_err(|e| e.to_string()),
         "workspace.context" => service.get_interaction_context().await,
         "workspace.inspect" => {
             let bundle = service.export_project_bundle().await?;
@@ -448,7 +450,7 @@ async fn dispatch_narrative_platform_op(
             let payload = args
                 .get("payload")
                 .ok_or_else(|| "Missing payload".to_string())?;
-            let res = service.save_content_item(entity, payload).await?;
+            let res = service.save_content_item_with_origin(entity, payload, "agent").await?;
             if let Err(e) = service.mark_interaction_context_stale().await {
                 eprintln!(
                     "Warning: failed to mark interaction context stale after content save: {e}"

@@ -1098,6 +1098,10 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
       </div>
 
 
+      <div class="form-group">
+        <label class="played-by__option"><input v-model="storylet.is_fallback" type="checkbox" @change="$emit('update-storylet')" /> Fallback storylet</label>
+        <small class="field-sublabel">Mark filler so coverage can measure places with no progress storylets.</small>
+      </div>
       <!-- ACTOR ROLES -->
       <div class="form-group">
         <label class="field-label">Character Roles Required</label>

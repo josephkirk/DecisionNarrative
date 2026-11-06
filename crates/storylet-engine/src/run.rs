@@ -48,6 +48,15 @@ pub struct RunContent {
     #[serde(default)]
     pub clock: Option<crate::chrono_space::Clock>,
 }
+fn storylet_at_location(content: &RunContent, world: &WorldStateTable, participant: PartIx, storylet: u16) -> bool {
+    match content.storylet_location_tags.get(&storylet) {
+        None => true,
+        Some(mask) if mask.is_empty() => true,
+        Some(mask) => world.active_location(participant)
+            .and_then(|location| world.entity_tags.get(location as usize))
+            .is_some_and(|tags| tags.intersects(mask)),
+    }
+}
 impl RunContent {
     pub fn storylet_index(&self, id: &str) -> Option<u16> {
         self.catalog.resolve(id)
@@ -533,7 +542,29 @@ impl RunKernel {
         run.snapshots[0].push(initial);
         Ok((run, stalled))
     }
+    /// Preview eligible storylets at a destination without changing the run.
+    /// The caller must still use a legal Move action to travel there.
+    pub fn storylets_at(&self, content: &RunContent, participant: PartIx, location: u16) -> Vec<StoryletRef> {
+        if participant as usize >= self.world.participants.len() || location as usize >= self.world.entity_tags.len() { return Vec::new(); }
+        let Some(guid) = self.pending() else { return Vec::new() };
+        let Some(owner) = Self::owner(&self.instance, guid) else { return Vec::new() };
+        if !owner.asset.node(guid).is_some_and(|def| matches!(def.kind, NodeKind::QbnHub { .. })) { return Vec::new(); }
+        let mut world = self.world.clone();
+        world.apply_move(participant, Some(location), &mut BijectiveDelta::default());
+        let ctx = RuntimeContext::with_registries(&mut world, &self.dispatcher, &self.registry, &self.passion_registry);
+        owner.present_deck_for(&ctx, guid, participant).unwrap_or_default().into_iter()
+
+            .filter(|id| storylet_at_location(content, ctx.state, participant, *id))
+            .map(|id| Self::reference(content, id)).collect()
+    }
     pub fn view(&self, content: &RunContent, participant: PartIx) -> RunView {
+        self.view_internal(content, participant, true)
+    }
+    /// Current interaction without the accumulated timeline, for headless traversal.
+    pub fn exploration_view(&self, content: &RunContent, participant: PartIx) -> RunView {
+        self.view_internal(content, participant, false)
+    }
+    fn view_internal(&self, content: &RunContent, participant: PartIx, include_timeline: bool) -> RunView {
         let participants = self
             .world
             .participants
@@ -661,12 +692,12 @@ impl RunKernel {
                                 &self.registry,
                                 &self.passion_registry,
                             );
-                            let mut participant_instance = owner.clone();
-                            participant_instance.acting_participant = participant;
-                            also_here = participant_instance
-                                .present_deck(&ctx, guid)
+                            also_here = owner
+                                .present_deck_for(&ctx, guid, participant)
+
                                 .unwrap_or_default()
                                 .into_iter()
+                                .filter(|id| storylet_at_location(content, &self.world, participant, *id))
                                 .map(|id| Self::reference(content, id))
                                 .collect();
                         }
@@ -696,9 +727,9 @@ impl RunKernel {
             hub,
             nothing_here,
             ending,
-            steps: self.branches[self.branch].steps[..self.current_step as usize].to_vec(),
+            steps: if include_timeline { self.branches[self.branch].steps[..self.current_step as usize].to_vec() } else { Vec::new() },
             current_step: self.current_step,
-            branches: self.branches.clone(),
+            branches: if include_timeline { self.branches.clone() } else { Vec::new() },
         }
     }
     pub fn act(
@@ -784,7 +815,7 @@ impl RunKernel {
                     let available = owner
                         .present_deck(&ctx, node_guid)
                         .map_err(|e| RunError::InvalidAction(e.to_string()))?;
-                    if !available.contains(&storylet) {
+                    if !available.contains(&storylet) || !storylet_at_location(content, ctx.state, participant, storylet) {
                         return Err(RunError::InvalidAction("storylet is not eligible".into()));
                     }
                     let entry = ctx
@@ -904,7 +935,13 @@ impl RunKernel {
         let (notes, slot_advanced) = self.spend_action(content, participant, &action);
         let is_human = self.world.participants.humans().any(|h| h == participant);
         let rule_plays = if is_human && (content.clock.is_none() || slot_advanced) {
-            self.rule_pass(content)?
+            match self.rule_pass(content) {
+                Ok(plays) => plays,
+                Err(error) => {
+                    *self = backup;
+                    return Err(error);
+                }
+            }
         } else {
             Vec::new()
         };
@@ -1060,9 +1097,9 @@ impl RunKernel {
             scratch.tick(&mut ctx, 1000).map_err(|e| RunError::Engine(e.to_string()))?;
             ticks += 1;
         }
-        // The scratch instance has its own call history; point what it taught
-        // at the last event of the real run so Inspect links it to this step.
-        let source = self.instance.call_history().len().saturating_sub(1) as u32;
+        // Rule plays are recorded on the triggering run step. A high-bit
+        // source refers to that step, distinct from graph call-history indices.
+        let source = 0x8000_0000 | (self.current_step + 1);
         for row in &mut self.world.knowledge.rows {
             if !known_before.contains(&(row.holder, row.fact)) {
                 row.source_event = source;
@@ -1251,7 +1288,12 @@ impl RunKernel {
     /// The run step during which the call-history event `event` happened: the
     /// first step whose snapshot has recorded more than `event` calls. Step 0
     /// is the automatic advance at the start.
-    fn step_of_event(&self, event: u32) -> Option<u32> {
+    pub fn step_of_event(&self, event: u32) -> Option<u32> {
+        if event & 0x8000_0000 != 0 {
+            let step = event & 0x7fff_ffff;
+            return self.branches[self.branch].steps.get(step.checked_sub(1)? as usize)
+                .filter(|entry| !entry.rule_plays.is_empty()).map(|_| step);
+        }
         (0..=self.current_step).find(|&step| {
             self.snapshots[self.branch]
                 .get(step as usize)

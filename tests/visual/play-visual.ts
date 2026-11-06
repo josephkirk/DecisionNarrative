@@ -308,6 +308,34 @@ try {
   check("the closing tide drives the occupant back", await page.getByText(/is driven from Rock back to Lighthouse/).isVisible());
   check("the occupant is back at the lighthouse", (await page.locator(".play-place__name").textContent()) === "Lighthouse");
 
+  // Coverage: use a real report, adding a synthetic violation so replay is testable
+  // without deliberately corrupting the temporary project's content.
+  await page.route("**/api/v4/coverage", async (route) => {
+    const response = await route.fetch();
+    const report = await response.json();
+    report.violations = [{ invariant: { kind: "knowledge_without_source" }, seed: 123, persona: { kind: "wanderer" }, config: "solo", step: 1, actions: [[0, { kind: "wait" }]] }];
+    await route.fulfill({ response, json: report });
+  });
+  await page.goto(`${base}/#/play`);
+  await page.getByRole("button", { name: "Let bots play" }).click();
+  await page.getByLabel("Runs per configuration").fill("1");
+  await page.getByLabel("Seed (blank for scenario default)").fill("123");
+  await page.getByRole("button", { name: "Run exploration" }).click();
+  await page.getByText("1 invariant violation", { exact: true }).waitFor();
+  check("coverage report shows all four configurations", (await page.locator(".coverage__cell").count()) === 4);
+  check("coverage failure offers replay", await page.getByRole("button", { name: "Replay seed" }).isVisible());
+  await shot(page, "17-coverage-report");
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.getByRole("button", { name: "Collapse project tree" }).click();
+  await shot(page, "19-coverage-narrow");
+  check("coverage controls remain visible on mobile", await page.getByRole("button", { name: "Run exploration" }).isVisible());
+  check("coverage has no horizontal overflow on mobile", await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.getByRole("button", { name: "Replay seed" }).click();
+  await page.locator(".play-timeline").waitFor();
+  check("replay opens at the recorded step", await page.getByRole("button", { name: /Step 1:.*Waited/ }).getAttribute("aria-current") === "step");
+  await shot(page, "18-coverage-replay");
+  await page.unroute("**/api/v4/coverage");
   // 8. Narrow viewport keeps the layout usable.
   await page.setViewportSize({ width: 390, height: 780 });
   await shot(page, "09-narrow");

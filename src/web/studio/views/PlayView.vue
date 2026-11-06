@@ -2,9 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { StudioApi } from "../api.ts";
-import type { RunStartInput, RunSummary } from "../contracts.ts";
+import type { CoverageReport, CoverageViolation, RunStartInput, RunSummary } from "../contracts.ts";
 import { usePlay } from "../view-models/run.ts";
 import PlayStart from "../components/play/PlayStart.vue";
+import CoverageReportView from "../components/play/CoverageReport.vue";
 import PlayStory from "../components/play/PlayStory.vue";
 import PlayTimeline from "../components/play/PlayTimeline.vue";
 import PlayWhereWhen from "../components/play/PlayWhereWhen.vue";
@@ -20,6 +21,9 @@ const runId = computed(() => (typeof route.params.runId === "string" ? route.par
 const recent = ref<RunSummary[]>([]);
 const scenarios = ref<Array<{ id: string; name?: string }>>([]);
 const loading = ref(true);
+const coverageOpen = ref(false);
+const coverageBusy = ref(false);
+const coverageReport = ref<CoverageReport | null>(null);
 const highlightStep = ref<number | null>(null);
 const worldNotes = computed(() => {
   const view = state.envelope?.view;
@@ -41,6 +45,19 @@ async function startRun(input: RunStartInput) {
   if (state.envelope && !state.error) await router.push({ name: "play-run", params: { runId: state.envelope.id } });
 }
 
+async function runCoverage(runs: number, seed?: string) {
+  if (coverageBusy.value) return;
+  coverageBusy.value = true;
+  state.error = null;
+  try { coverageReport.value = await StudioApi.runs.coverage(runs, seed); }
+  catch (error) { state.error = error instanceof Error ? error.message : String(error); }
+  finally { coverageBusy.value = false; }
+}
+async function replayViolation(violation: CoverageViolation) {
+  if (!coverageReport.value) return;
+  await startRun({ start: { kind: "beginning" }, seed: violation.seed, actions: violation.actions,
+    participantConfig: violation.config, expectedRevision: coverageReport.value.content_revision });
+}
 async function restart() {
   await startRun({ start: { kind: "beginning" } });
 }
@@ -72,7 +89,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
   <div class="play-view">
     <p v-if="state.error" class="play-error" role="alert">{{ state.error }}</p>
 
-    <PlayStart v-if="!runId" :recent="recent" :scenarios="scenarios" :busy="state.busy" @start="startRun" />
+    <template v-if="!runId">
+      <CoverageReportView v-if="coverageOpen" :report="coverageReport" :busy="coverageBusy || state.busy" @run="runCoverage" @replay="replayViolation" @close="coverageOpen = false" />
+      <PlayStart v-else :recent="recent" :scenarios="scenarios" :busy="state.busy" @start="startRun" @coverage="coverageOpen = true" />
+    </template>
 
     <div v-else-if="loading || !state.envelope" class="play-skeleton" role="status" aria-live="polite" aria-busy="true" aria-label="Loading run">
       <div class="play-skeleton__bar"></div>

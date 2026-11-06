@@ -184,3 +184,17 @@ test("alsoHereActions turns listed storylets into playable actions only when a h
   ]);
   expect(alsoHereActions(view({ alsoHere: [{ id: 3, title: "Ledger" }] }))).toEqual([]);
 });
+
+test("coverage ending bars sum to 100 percent for completed endings", async () => {
+  const { endingBars } = await import("../../src/web/studio/runModel.ts");
+  const bars = endingBars([[2, 3], [4, 7]]);
+  expect(bars.map((bar) => bar.percent)).toEqual([30, 70]);
+  expect(bars.reduce((total, bar) => total + bar.percent, 0)).toBeCloseTo(100, 1);
+  expect(endingBars([])).toEqual([]);
+});
+
+test("coverage severity reports invariant failures", async () => {
+  const { invariantSeverity } = await import("../../src/web/studio/runModel.ts");
+  expect(invariantSeverity({ violations: [] })).toBe("pass");
+  expect(invariantSeverity({ violations: [{}] })).toBe("fail");
+});
