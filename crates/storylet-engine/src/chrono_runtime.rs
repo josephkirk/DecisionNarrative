@@ -21,6 +21,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::chrono_completion::StoryletBitset;
+use crate::chrono_chronicle::ChronIx;
 use crate::chrono_participants::{FactIx, KnowKind, KnowledgeRow, PartIx};
 use crate::chrono_dispatch::{DispatchError, UnifiedDispatcher, WaypointStep, WaypointTopicGraph};
 use crate::chrono_state::{
@@ -286,6 +287,10 @@ pub enum HolderRef { Acting, Participant(PartIx) }
 pub enum NodeKind {
     Learn { fact: FactIx, #[serde(rename = "knowledge_kind")] kind: KnowKind, visibility: Visibility },
     MoveParticipant { location_entity: u16 },
+    /// Tells the acting participant a canon chronicle entry (and, when
+    /// co-located, witnesses) and teaches them its facts. `facts` is copied
+    /// from the entry at compile time so execution needs no chronicle lookup.
+    Reveal { entry: ChronIx, #[serde(rename = "knowledge_kind")] kind: KnowKind, visibility: Visibility, #[serde(default)] facts: Vec<FactIx> },
     Knows { holder: HolderRef, fact: FactIx, confirmed_only: bool },
     GetEntity { entity_id: String },
     GetEntityProperty { property_key: String, value_type: String },
@@ -2203,6 +2208,27 @@ impl FlowGraphInstance {
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
             }
+            NodeKind::Reveal { entry, kind, visibility, facts } => {
+                let actor = self.acting_participant;
+                if usize::from(actor) >= ctx.state.participants.len() {
+                    return Err(GraphError::ParticipantNotFound { node_guid, participant: actor });
+                }
+                let source_event = match def.mission_scope {
+                    Some(scope) => self.nodes[self.node_index(scope).ok_or(GraphError::MissionScopeNotFound { node_guid, scope })?].local_call_history.len(),
+                    None => self.global_call_history.len(),
+                } as u32;
+                let witnesses: Vec<_> = if *visibility == Visibility::CoLocated {
+                    ctx.state.participants.colocated(actor).collect()
+                } else { Vec::new() };
+                ctx.state.apply_reveal(actor, *entry, facts, *kind, source_event, &mut plan.delta);
+                for holder in witnesses {
+                    ctx.state.apply_reveal(holder, *entry, facts, KnowKind::Witnessed, source_event, &mut plan.delta);
+                }
+                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.completed = true;
+                plan.record = true;
+                plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
+            }
             NodeKind::MoveParticipant { location_entity } => {
                 let actor = self.acting_participant;
                 if usize::from(actor) >= ctx.state.participants.len() {
@@ -2868,14 +2894,18 @@ impl FlowGraphInstance {
             // source index, so never rebase rows by index alone.
             let mut ordinal = BTreeMap::<u32, usize>::new();
             let mut rebases = Vec::new();
+            let mut telling_rebases = Vec::new();
             for (index, entry) in history.iter().enumerate() {
-                if !self.asset.node(entry.node_guid).is_some_and(|def| matches!(def.kind, NodeKind::Learn { .. })) { continue; }
+                if !self.asset.node(entry.node_guid).is_some_and(|def| matches!(def.kind, NodeKind::Learn { .. } | NodeKind::Reveal { .. })) { continue; }
                 let count = ordinal.entry(entry.node_guid).or_default();
                 if index > position {
                     if let Some(node_index) = self.node_index(entry.node_guid) {
                         if let Some(NodeCallData::Delta { delta }) = self.nodes[node_index].call_data.get(*count) {
                             for &(holder, fact) in &delta.knowledge_added {
                                 rebases.push((holder, fact, index as u32));
+                            }
+                            for &(holder, told) in &delta.tellings_added {
+                                telling_rebases.push((holder, told, index as u32));
                             }
                         }
                     }
@@ -2888,8 +2918,13 @@ impl FlowGraphInstance {
                         row.source_event -= 1;
                     }
                 }
+                for (holder, told, old_index) in telling_rebases {
+                    if let Some(row) = state.telling.rows.iter_mut().find(|row| row.holder == holder && row.entry == told && row.source_event == old_index) {
+                        row.source_event -= 1;
+                    }
+                }
             } else {
-                debug_assert!(rebases.is_empty(), "history removal without state must be tail-only");
+                debug_assert!(rebases.is_empty() && telling_rebases.is_empty(), "history removal without state must be tail-only");
             }
         }
         if let Some(mission) = scope {

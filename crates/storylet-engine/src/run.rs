@@ -37,6 +37,9 @@ pub struct RunContent {
     pub participant_indices: BTreeMap<String, u16>,
     #[serde(default)]
     pub implicit_participant: bool,
+    /// Canon events in story-time order, for `Reveal` nodes and Inspect.
+    #[serde(default)]
+    pub chronicle: crate::chrono_chronicle::ChronicleTable,
 }
 impl RunContent {
     pub fn storylet_index(&self, id: &str) -> Option<u16> {

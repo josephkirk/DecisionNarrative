@@ -12,6 +12,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::chrono_chronicle::{ChronIx, TellingRow, TellingTable};
 use crate::chrono_participants::{
     FactIx, KnowledgeRow, KnowledgeTable, ParticipantTable, PartIx,
 };
@@ -711,6 +712,9 @@ pub struct WorldStateTable {
     /// Who knows which fact.
     #[serde(default)]
     pub knowledge: KnowledgeTable,
+    /// Who was told which canon entry, in telling order.
+    #[serde(default)]
+    pub telling: TellingTable,
 }
 
 impl WorldStateTable {
@@ -725,6 +729,7 @@ impl WorldStateTable {
             current_location_tag_mask: TagBitset::new(),
             participants: ParticipantTable::default(),
             knowledge: KnowledgeTable::default(),
+            telling: TellingTable::default(),
         }
     }
 
@@ -740,6 +745,7 @@ impl WorldStateTable {
             current_location_tag_mask: TagBitset::new(),
             participants: ParticipantTable::default(),
             knowledge: KnowledgeTable::default(),
+            telling: TellingTable::default(),
         }
     }
 
@@ -822,6 +828,28 @@ impl WorldStateTable {
         if self.knowledge.learn(row) {
             delta.knowledge_added.push((row.holder, row.fact));
         }
+    }
+
+    /// Tells `holder` the chronicle `entry` and teaches them its `facts` with
+    /// `kind`. Returns `false` and changes nothing if they were already told.
+    pub fn apply_reveal(
+        &mut self,
+        holder: PartIx,
+        entry: ChronIx,
+        facts: &[FactIx],
+        kind: crate::chrono_participants::KnowKind,
+        source_event: u32,
+        delta: &mut BijectiveDelta,
+    ) -> bool {
+        self.stamp_previous_location(delta);
+        if !self.telling.reveal(TellingRow { holder, entry, source_event }) {
+            return false;
+        }
+        delta.tellings_added.push((holder, entry));
+        for &fact in facts {
+            self.apply_learn(KnowledgeRow { holder, fact, kind, source_event }, delta);
+        }
+        true
     }
 
     /// Moves participant `p`. Moving participant 0 also updates the
@@ -1492,6 +1520,9 @@ pub struct BijectiveDelta {
     /// `(participant, from, to)`, undone in reverse order.
     #[serde(default)]
     pub participant_moves: Vec<(PartIx, Option<u16>, Option<u16>)>,
+    /// Chronicle entries newly told, undone with `TellingTable::forget`.
+    #[serde(default)]
+    pub tellings_added: Vec<(PartIx, ChronIx)>,
 }
 
 impl BijectiveDelta {
@@ -1503,6 +1534,7 @@ impl BijectiveDelta {
             && self.graph_diffs.is_empty()
             && self.knowledge_added.is_empty()
             && self.participant_moves.is_empty()
+            && self.tellings_added.is_empty()
     }
 }
 
@@ -1628,6 +1660,9 @@ pub fn revert_delta(
     }
     for &(holder, fact) in &delta.knowledge_added {
         state.knowledge.forget(holder, fact);
+    }
+    for &(holder, entry) in delta.tellings_added.iter().rev() {
+        state.telling.forget(holder, entry);
     }
     Ok(())
 }
