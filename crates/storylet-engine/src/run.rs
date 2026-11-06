@@ -1008,6 +1008,16 @@ pub struct AdvancedView {
     pub interaction: Option<String>,
 }
 impl RunKernel {
+    /// The run step during which the call-history event `event` happened: the
+    /// first step whose snapshot has recorded more than `event` calls. Step 0
+    /// is the automatic advance at the start.
+    fn step_of_event(&self, event: u32) -> Option<u32> {
+        (0..=self.current_step).find(|&step| {
+            self.snapshots[self.branch]
+                .get(step as usize)
+                .is_some_and(|snapshot| snapshot.instance.call_history().len() > event as usize)
+        })
+    }
     pub fn inspect(&self, content: &RunContent, participant: PartIx) -> InspectView {
         let knows = self
             .world
@@ -1022,7 +1032,22 @@ impl RunKernel {
                     .to_string(),
                 kind: r.kind,
                 confirmed: r.kind.is_confirmed(),
-                source_step: None,
+                source_step: self.step_of_event(r.source_event),
+            })
+            .collect();
+        let chronicle = content
+            .chronicle
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(ix, entry)| ChronicleRowView {
+                key: entry.key.clone(),
+                label: entry.label.clone(),
+                place: entry
+                    .location
+                    .and_then(|id| content.entity_names.get(&id).cloned()),
+                story_time: entry.story_time,
+                told: self.world.telling.told_number(participant, ix as u16),
             })
             .collect();
         let mut world_changes = Vec::new();
@@ -1049,7 +1074,7 @@ impl RunKernel {
         InspectView {
             knows,
             world_changes,
-            chronicle: Vec::new(),
+            chronicle,
             advanced: AdvancedView {
                 run_seed: self.run_seed,
                 content_revision: content.content_revision,

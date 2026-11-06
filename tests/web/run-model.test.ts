@@ -106,3 +106,35 @@ test("stepCountText pluralises", () => {
   expect(stepCountText(1)).toBe("1 step");
   expect(stepCountText(12)).toBe("12 steps");
 });
+
+import { knowKindLabel, knowRowStatus, changeText, toldMark } from "../../src/web/studio/runModel.ts";
+
+test("knowKindLabel names every knowledge kind in plain words", () => {
+  expect(knowKindLabel("rumor")).toBe("rumour");
+  expect(knowKindLabel("evidence")).toBe("evidence");
+  expect(knowKindLabel("testimony")).toBe("testimony");
+});
+
+test("knowRowStatus labels unconfirmed rows in words, not colour alone", () => {
+  expect(knowRowStatus({ fact: "fact.x", kind: "testimony", confirmed: false, sourceStep: 3 })).toBe("not confirmed");
+  expect(knowRowStatus({ fact: "fact.x", kind: "evidence", confirmed: true, sourceStep: null })).toBeNull();
+});
+
+test("changeText shows before to after", () => {
+  expect(changeText({ key: "mood", before: "1", after: "2" })).toBe("mood: 1 → 2");
+});
+
+test("toldMark uses circled numbers up to 20 and falls back to the number", () => {
+  expect(toldMark(1)).toBe("①");
+  expect(toldMark(3)).toBe("③");
+  expect(toldMark(21)).toBe("(21)");
+  expect(toldMark(null)).toBe("");
+});
+
+test("chronicleRows renders untold entries with told null", () => {
+  const rows = chronicleRows([
+    { key: "a", label: "A", place: null, storyTime: 1, told: null },
+    { key: "b", label: "B", place: null, storyTime: 2, told: 1 },
+  ]);
+  expect(rows.map((r) => r.told)).toEqual([null, 1]);
+});

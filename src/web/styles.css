@@ -1474,3 +1474,30 @@ button.btn:active, .tab-btn:active, .thumb-avatar-btn:active {
 .play-skeleton__block { height: 240px; background: var(--bg-card); border: 1px solid var(--border-subtle); }
 
 @media (prefers-reduced-motion: reduce) { .play-choice { transition: none; } }
+
+/* Play: Inspect panel (closed by default; I toggles). Violet = knowledge kinds. */
+.play-layout { display: flex; gap: 16px; align-items: flex-start; }
+.play-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.play-inspect { flex: 0 0 340px; max-width: 100%; border: 1px solid var(--border-subtle); background: var(--bg-card); padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.play-inspect__head { display: flex; align-items: center; justify-content: space-between; }
+.play-inspect__tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.play-muted { color: var(--text-muted); font-size: 13px; margin: 0; }
+.play-knows, .play-changes, .play-chronicle { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.play-knows li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid var(--border-subtle); padding-top: 8px; }
+.play-fact { font-family: var(--font-mono); font-size: 12px; color: var(--text-main); }
+.play-kind { border: 1px solid #a855f7; color: var(--text-main); background: rgba(168, 85, 247, 0.12); padding: 0 6px; font-size: 11px; letter-spacing: 0.04em; }
+.play-unconfirmed { color: var(--tertiary); font-size: 12px; }
+.play-source { min-height: 44px; min-width: 44px; background: transparent; border: 0; color: var(--accent-hover); cursor: pointer; text-decoration: underline; font-size: 12px; }
+.play-source:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.play-advanced { margin-top: 12px; }
+.play-advanced summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.play-advanced dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 12px; }
+.play-advanced dt { color: var(--text-muted); }
+.play-advanced dd { margin: 0; font-family: var(--font-mono); }
+.play-chronicle li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.play-chronicle li.is-untold { color: var(--text-dim); border-left: 2px solid var(--border-muted); padding-left: 8px; }
+.play-chronicle li.is-told { border-left: 2px solid #a855f7; padding-left: 8px; }
+.play-told { min-width: 1.2em; color: #a855f7; }
+.play-dot.is-highlight::after { outline: 2px solid var(--tertiary); outline-offset: 3px; }
+.play-inspect-toggle { align-self: flex-start; }
+@media (max-width: 900px) { .play-layout { flex-direction: column; } .play-inspect { flex-basis: auto; width: 100%; } }

@@ -1,5 +1,5 @@
 // Pure helpers over a RunView. No Vue, no fetch: everything here is unit-testable.
-import type { ChronicleRowView, NearMiss, RunAction, RunStep, RunView, StoryletRef } from "./contracts.ts";
+import type { ChangeView, ChronicleRowView, KnowKind, KnowRowView, NearMiss, RunAction, RunStep, RunView, StoryletRef } from "./contracts.ts";
 
 /** "1".."9" -> the nth choice's action. Disabled choices and any other key give null. */
 export function choiceForKey(view: RunView, key: string): RunAction | null {
@@ -76,4 +76,28 @@ export function editLink(ref: StoryletRef): string | null {
 
 export function stepCountText(n: number): string {
   return `${n} ${n === 1 ? "step" : "steps"}`;
+}
+
+const KIND_LABELS: Record<KnowKind, string> = {
+  evidence: "evidence", witnessed: "witnessed", told: "told", rumor: "rumour",
+  recollection: "recollection", testimony: "testimony", inference: "inference",
+};
+export function knowKindLabel(kind: KnowKind): string {
+  return KIND_LABELS[kind];
+}
+
+/** Rumour and testimony may be wrong; the panel says so in words. */
+export function knowRowStatus(row: KnowRowView): string | null {
+  return row.confirmed ? null : "not confirmed";
+}
+
+export function changeText(change: ChangeView): string {
+  return `${change.key}: ${change.before} → ${change.after}`;
+}
+
+const CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";
+/** ①②③ for the first twenty tellings, "(n)" after that, empty when untold. */
+export function toldMark(n: number | null): string {
+  if (n === null) return "";
+  return n >= 1 && n <= 20 ? CIRCLED[n - 1] : `(${n})`;
 }

@@ -90,6 +90,36 @@ try {
   await api("POST", "/api/v3/content/entity_templates", { id: "harbor", name: "Harbor", root_tag: "location" });
   await api("POST", "/api/v3/content/scenarios", { id: "scenario", name: "Scenario", seed: 7, start_location_policy: { mode: "fixed", location_id: "harbor" } });
   await api("POST", "/api/v3/content/storylets", lantern());
+  // Knowledge content for the Inspect panel: a learn node, a reveal node, a canon event.
+  await api("POST", "/api/v3/content/gameplay_tags", { id: "fact.clue", name: "fact.clue", protected: false });
+  await api("POST", "/api/v3/content/events", {
+    id: "flood", title: "The flood", description: "", event_type: "canon", trigger: {}, effects: {},
+    story_time: 20, story_time_label: "D1 evening", facts: ["fact.clue"], text: "The river rose past the weir.",
+  });
+  await api("POST", "/api/v3/content/events", {
+    id: "theft", title: "The theft", description: "", event_type: "canon", trigger: {}, effects: {}, story_time: 10, facts: [],
+  });
+  await api("POST", "/api/v3/content/storylets", {
+    id: "clue", title: "A muddy ledger", content: { text_template: "x" }, created_at: 2,
+    graph: {
+      nodes: [
+        node("start", "start", 0, { text: "Start" }),
+        node("learn", "learn", 100, { fact_tag: "fact.clue", kind: "testimony", visibility: "private" }),
+        node("reveal", "reveal", 200, { event_id: "flood", kind: "recollection", visibility: "private" }),
+        node("line", "dialog", 300, { text: "The ledger is soaked through." }),
+        node("choice", "choice", 400, { choices: [{ id: "a", text: "Read on" }, { id: "b", text: "Put it down" }] }),
+        node("end", "end", 500, { is_terminal: true }),
+      ],
+      edges: [
+        { id: "k0", from_node: "start", from_port: "output", to_node: "learn", to_port: "input" },
+        { id: "k1", from_node: "learn", from_port: "output", to_node: "reveal", to_port: "input" },
+        { id: "k2", from_node: "reveal", from_port: "output", to_node: "line", to_port: "input" },
+        { id: "k3", from_node: "line", from_port: "output", to_node: "choice", to_port: "input" },
+        { id: "k4", from_node: "choice", from_port: "choice_0", to_node: "end", to_port: "input" },
+        { id: "k5", from_node: "choice", from_port: "choice_1", to_node: "end", to_port: "input" },
+      ],
+    },
+  });
 
   browser = await chromium.launch({ executablePath: chromePath, headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -106,6 +136,9 @@ try {
   check("start screen offers Start playing", await page.getByRole("button", { name: "Start playing" }).isEnabled());
 
   // 2. Start: the scene shows, with numbered choices.
+  await page.getByLabel("From a storylet…").check();
+  await page.getByLabel("Find a storylet").fill("lantern");
+  await page.getByLabel("Storylet", { exact: true }).selectOption({ label: "The Lantern on the Water" });
   await page.getByRole("button", { name: "Start playing" }).click();
   await page.getByRole("heading", { name: "The Lantern on the Water" }).waitFor();
   await shot(page, "02-scene");
@@ -165,6 +198,31 @@ try {
   await page.getByRole("heading", { name: "The Lantern on the Water" }).waitFor();
   check("Play from here opens a run", /#\/play\/[0-9a-f-]{36}$/.test(page.url()), page.url());
   await shot(page, "08-play-from-here");
+
+  // 7a. Inspect panel (Task 3.3): knowledge provenance and the chronicle.
+  const knowRun = await api("POST", "/api/v4/runs", {
+    start: { kind: "beginning" }, storyletId: "clue", expectedRevision: (await api("GET", "/api/v3/project")).revision, idempotencyKey: "visual-clue",
+  });
+  await page.goto(`${base}/#/play/${knowRun.id}`);
+  await page.getByRole("heading", { name: "A muddy ledger" }).waitFor();
+  check("inspect is closed by default", (await page.locator(".play-inspect").count()) === 0);
+  await page.keyboard.press("i");
+  await page.locator(".play-inspect").waitFor();
+  await page.getByText("fact.clue").waitFor();
+  await shot(page, "11-inspect-knows");
+  check("knows tab lists the fact with its kind badge in words", await page.locator(".play-kind").first().textContent() === "testimony");
+  check("testimony is labelled not confirmed", await page.getByText("not confirmed").first().isVisible());
+  await page.getByRole("tab", { name: "Story so far" }).click();
+  await page.locator(".play-chronicle").waitFor();
+  await shot(page, "12-inspect-story");
+  const chron = await page.locator(".play-chronicle li").allTextContents();
+  check("story so far lists canon in story-time order", chron.length === 2 && chron[0].includes("THE THEFT".replace("THE THEFT", "The theft")) && chron[1].includes("D1 evening"), JSON.stringify(chron));
+  check("told entry is numbered, untold entry says not told yet", chron[1].includes("①") && chron[0].includes("not told yet"), JSON.stringify(chron));
+  await page.getByRole("tab", { name: "World" }).click();
+  await page.getByText("Advanced").click();
+  check("advanced fold shows read-only engine details", await page.getByText("Content revision").isVisible());
+  await page.keyboard.press("Escape");
+  check("Esc closes inspect", (await page.locator(".play-inspect").count()) === 0);
 
   // 7b. Codex: a canon event is authored through visible-label chronicle fields (Task 3.2).
   await page.goto(`${base}/#/codex`);

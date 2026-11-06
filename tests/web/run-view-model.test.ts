@@ -139,3 +139,15 @@ test("setParticipant selects a known participant and re-reads the view", async (
   play.setParticipant(9);
   expect(play.state.activeParticipant).toBe(1);
 });
+
+test("toggleInspect loads inspect data when it opens and Esc closes it", async () => {
+  const api = fakeApi();
+  const play = usePlay(api);
+  await play.open("r1");
+  play.toggleInspect();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(play.state.inspectOpen).toBe(true);
+  expect(play.state.inspect).not.toBeNull();
+  await play.onKey({ key: "Escape", ctrlKey: false });
+  expect(play.state.inspectOpen).toBe(false);
+});

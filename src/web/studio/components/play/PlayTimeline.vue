@@ -3,7 +3,7 @@ import { computed } from "vue";
 import type { RunView } from "../../contracts.ts";
 import { activeBranchId, stepText, timelineDots, type TimelineDot } from "../../runModel.ts";
 
-const props = defineProps<{ view: RunView; busy: boolean }>();
+const props = defineProps<{ view: RunView; busy: boolean; highlight?: number | null }>();
 const emit = defineEmits<{ (e: "rewind", step: number): void; (e: "undo"): void }>();
 
 const dots = computed(() => timelineDots(props.view));
@@ -25,7 +25,7 @@ function label(d: TimelineDot): string {
         <button
           type="button"
           class="play-dot"
-          :class="`is-${d.state}`"
+          :class="[`is-${d.state}`, { 'is-highlight': highlight === d.index }]"
           :aria-label="label(d)"
           :title="label(d)"
           :aria-current="d.state === 'current' ? 'step' : undefined"

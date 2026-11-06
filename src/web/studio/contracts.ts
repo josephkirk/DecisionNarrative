@@ -335,7 +335,7 @@ export interface RunSummary {
 
 export interface NearMiss { storylet: StoryletRef; reason: string }
 
-export type KnowKind = "evidence" | "witnessed" | "told" | "rumor" | "recollection" | "testimony";
+export type KnowKind = "evidence" | "witnessed" | "told" | "rumor" | "recollection" | "testimony" | "inference";
 export interface KnowRowView { fact: string; kind: KnowKind; confirmed: boolean; sourceStep: number | null }
 export interface ChangeView { key: string; before: string; after: string }
 export interface ChronicleRowView { key: string; label: string; place: string | null; storyTime: number; told: number | null }

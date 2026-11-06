@@ -1147,3 +1147,119 @@ fn selected_root_choice_is_not_routed_to_dormant_mission_copy() {
     assert_eq!(run.instance.mission_instance(10).unwrap().node(1).unwrap().state, NodeExecutionState::Idle);
     assert!(run.instance.completed_storylets.contains(1));
 }
+
+// --- Inspect: provenance and chronicle ---------------------------------------
+
+use storylet_engine::chrono_chronicle::{ChronicleEntry, ChronicleTable};
+use storylet_engine::chrono_participants::KnowKind;
+use storylet_engine::chrono_runtime::Visibility;
+
+fn mutator(guid: u32, kind: NodeKind) -> FlowNodeDef {
+    FlowNodeDef {
+        node_guid: guid,
+        node_type_id: "mutator".into(),
+        category: NodeCategory::Mutator,
+        kind,
+        input_pins: vec![pin("In", true)],
+        output_pins: vec![pin("Out", false)],
+        ..Default::default()
+    }
+}
+fn edge(from: u32, from_pin: &str, to: u32) -> EdgeConnection {
+    EdgeConnection {
+        source_node_guid: from,
+        source_pin_name: from_pin.into(),
+        target_node_guid: to,
+        target_pin_name: "In".into(),
+    }
+}
+
+/// `choice(left) -> chain of mutators -> end`; `right -> end`.
+fn chain_fixture(chain: Vec<NodeKind>) -> RunContent {
+    let mut content = fixture();
+    content.registry = GameplayTagRegistry::compile(["fact".to_string(), "fact.clue".to_string()]).unwrap();
+    content.root_asset.edges.clear();
+    let mut previous = (1u32, "left".to_string());
+    for (offset, kind) in chain.into_iter().enumerate() {
+        let guid = 10 + offset as u32;
+        content.root_asset.nodes.push(mutator(guid, kind));
+        content.root_asset.edges.push(edge(previous.0, &previous.1, guid));
+        previous = (guid, "Out".to_string());
+    }
+    content.root_asset.edges.push(edge(previous.0, &previous.1, 2));
+    content.root_asset.edges.push(edge(1, "right", 2));
+    content
+}
+fn choose(pin: u16) -> RunAction {
+    RunAction::Choose { node_guid: 1, output_pin: pin }
+}
+
+#[test]
+fn inspect_marks_testimony_unconfirmed_and_links_source_step() {
+    let content = chain_fixture(vec![NodeKind::Learn {
+        fact: 1,
+        kind: KnowKind::Testimony,
+        visibility: Visibility::Private,
+    }]);
+    let mut run = RunKernel::start(&content, RunStart::Beginning, 3).unwrap();
+    run.act(&content, 0, choose(0)).unwrap();
+    let inspect = run.inspect(&content, 0);
+    assert_eq!(inspect.knows.len(), 1);
+    let row = &inspect.knows[0];
+    assert_eq!(row.fact, "fact.clue");
+    assert_eq!(row.kind, KnowKind::Testimony);
+    assert!(!row.confirmed);
+    assert_eq!(row.source_step, Some(1));
+}
+
+#[test]
+fn inspect_evidence_is_confirmed() {
+    let content = chain_fixture(vec![NodeKind::Learn {
+        fact: 1,
+        kind: KnowKind::Evidence,
+        visibility: Visibility::Private,
+    }]);
+    let mut run = RunKernel::start(&content, RunStart::Beginning, 3).unwrap();
+    run.act(&content, 0, choose(0)).unwrap();
+    assert!(run.inspect(&content, 0).knows[0].confirmed);
+}
+
+fn reveal(entry: u16) -> NodeKind {
+    NodeKind::Reveal {
+        entry,
+        kind: KnowKind::Recollection,
+        visibility: Visibility::Private,
+        facts: vec![],
+    }
+}
+fn canon_entry(key: &str, story_time: i64) -> ChronicleEntry {
+    ChronicleEntry {
+        key: key.into(),
+        story_time,
+        label: key.to_uppercase(),
+        location: None,
+        facts: vec![],
+        text: String::new(),
+    }
+}
+
+#[test]
+fn inspect_chronicle_numbers_told_entries_in_telling_order() {
+    // Canon order after sorting: p1 (0), p2 (1), p3 (2). P2 is told first, then P1; P3 is never told.
+    let mut content = chain_fixture(vec![reveal(1), reveal(0)]);
+    content.chronicle = ChronicleTable::new(vec![canon_entry("p1", 10), canon_entry("p2", 20), canon_entry("p3", 30)]);
+    let mut run = RunKernel::start(&content, RunStart::Beginning, 3).unwrap();
+    run.act(&content, 0, choose(0)).unwrap();
+    let rows = run.inspect(&content, 0).chronicle;
+    let told: Vec<_> = rows.iter().map(|r| (r.key.as_str(), r.told)).collect();
+    assert_eq!(told, [("p1", Some(2)), ("p2", Some(1)), ("p3", None)]);
+    let times: Vec<_> = rows.iter().map(|r| r.story_time).collect();
+    assert_eq!(times, [10, 20, 30]);
+}
+
+#[test]
+fn inspect_chronicle_is_per_participant_and_empty_without_canon() {
+    let content = chain_fixture(vec![]);
+    let run = RunKernel::start(&content, RunStart::Beginning, 3).unwrap();
+    assert!(run.inspect(&content, 0).chronicle.is_empty());
+}

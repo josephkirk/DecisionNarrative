@@ -129,6 +129,11 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
 
   function toggleInspect(): void {
     state.inspectOpen = !state.inspectOpen;
+    if (!state.inspectOpen || !state.runId) return;
+    api.inspect(state.runId, state.activeParticipant).then(
+      (inspect) => { state.inspect = inspect; },
+      (e) => { state.error = message(e); },
+    );
   }
 
   async function setInspectTab(tab: PlayState["inspectTab"]): Promise<void> {
@@ -174,7 +179,10 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
       return;
     }
     const key = e.key.toLowerCase();
-    if (key === "g") awaitingMove = true;
+    if (e.key === "Escape") {
+      if (state.inspectOpen) state.inspectOpen = false;
+      else if (state.whyOpen) state.whyOpen = false;
+    } else if (key === "g") awaitingMove = true;
     else if (key === "?") await toggleWhy();
     else if (key === "i") toggleInspect();
     else if (key === "[") nextParticipant(-1);

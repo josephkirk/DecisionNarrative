@@ -8,6 +8,7 @@ import PlayStart from "../components/play/PlayStart.vue";
 import PlayStory from "../components/play/PlayStory.vue";
 import PlayTimeline from "../components/play/PlayTimeline.vue";
 import PlayWhereWhen from "../components/play/PlayWhereWhen.vue";
+import PlayInspect from "../components/play/PlayInspect.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -18,6 +19,7 @@ const runId = computed(() => (typeof route.params.runId === "string" ? route.par
 const recent = ref<RunSummary[]>([]);
 const scenarios = ref<Array<{ id: string; name?: string }>>([]);
 const loading = ref(true);
+const highlightStep = ref<number | null>(null);
 
 async function loadStartData() {
   try {
@@ -44,7 +46,6 @@ function isTyping(target: EventTarget | null): boolean {
 
 function onKeydown(e: KeyboardEvent) {
   if (isTyping(e.target) || e.altKey || e.metaKey) return;
-  if (e.key === "Escape" && state.whyOpen) { void play.toggleWhy(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "z") e.preventDefault();
   void play.onKey({ key: e.key, ctrlKey: e.ctrlKey });
 }
@@ -77,6 +78,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       </div>
       <p v-if="state.reloadNote" class="play-note" role="status">{{ state.reloadNote }}</p>
 
+      <div class="play-layout" :class="{ 'has-inspect': state.inspectOpen }">
+      <div class="play-main">
       <PlayWhereWhen :view="state.envelope.view" :active="state.activeParticipant" @select-participant="play.setParticipant" />
       <PlayStory
         :envelope="state.envelope"
@@ -88,7 +91,18 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         @undo="play.undo"
         @restart="restart"
       />
-      <PlayTimeline :view="state.envelope.view" :busy="state.busy" @rewind="play.rewind" @undo="play.undo" />
+      <PlayTimeline :view="state.envelope.view" :busy="state.busy" :highlight="highlightStep" @rewind="play.rewind" @undo="play.undo" />
+      <button v-if="!state.inspectOpen" type="button" class="btn btn-secondary play-btn play-inspect-toggle" aria-keyshortcuts="I" @click="play.toggleInspect()">Inspect <kbd class="play-kbd">I</kbd></button>
+      </div>
+      <PlayInspect
+        v-if="state.inspectOpen"
+        :inspect="state.inspect"
+        :tab="state.inspectTab"
+        @tab="play.setInspectTab"
+        @focus-step="highlightStep = $event"
+        @close="play.toggleInspect()"
+      />
+      </div>
     </template>
   </div>
 </template>
