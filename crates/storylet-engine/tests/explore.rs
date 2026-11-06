@@ -286,3 +286,14 @@ fn weirs_crossing_has_no_invariant_violations() {
     assert_eq!(report.error_count, 0, "{:?}", report.errors);
     assert!(report.violations.is_empty(), "{:?}", report.violations);
 }
+
+#[test]
+#[cfg_attr(debug_assertions, ignore)]
+fn bluff_fills_probe_in_coop() {
+    use storylet_engine::chrono_explore::{explore, ExploreConfig, IntentProbe, ParticipantConfig, Persona};
+    let content = weirs_crossing::content_all_humans();
+    let config = ExploreConfig { runs: 2000, max_steps: 500, personas: vec![Persona::Investigator { epsilon_permille: 150 }], configs: vec![ParticipantConfig::AllHumans], probes: vec![IntentProbe { name: "suspects_and_faces_benedek".into(), holder_knows: vec![content.registry.id("fact.benedek_suspected").unwrap()], colocated_with: Some(12), expected_routes: vec![weirs_crossing::BLUFF_BENEDEK] }], ..Default::default() };
+    let report = explore(&content, &config);
+    assert_eq!(report.error_count, 0, "{:?}", report.errors);
+    assert!(report.cells[0].probe_hits[0].2 > 0, "{:?}", report.cells[0].probe_hits);
+}

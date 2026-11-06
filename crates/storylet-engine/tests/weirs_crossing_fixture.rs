@@ -236,3 +236,51 @@ fn reveal_records_the_matching_past_marker_and_telling() {
     assert!(run.world.knowledge.knows(0, marker).is_some());
     assert!(run.world.telling.is_told(0, 0));
 }
+
+#[test]
+fn bluff_requires_a_suspect_real_evidence_and_benedek_present() {
+    use storylet_engine::chrono_participants::{KnowKind, KnowledgeRow};
+    use storylet_engine::chrono_runtime::{FlowGraphInstance, RuntimeContext};
+    let content = weirs_crossing::content_all_humans();
+    let graph = content
+        .dispatcher
+        .storylet(weirs_crossing::BLUFF_BENEDEK)
+        .unwrap()
+        .precondition_graph
+        .as_ref()
+        .expect("bluff must be gated");
+    let mut world = content.initial_world.clone();
+    world.participants.location[0] = Some(weirs_crossing::CUSTOMS);
+    let check = |world: &mut storylet_engine::chrono_state::WorldStateTable| {
+        let ctx = RuntimeContext::with_registries(
+            world,
+            &content.dispatcher,
+            &content.registry,
+            &content.passion_registry,
+        );
+        FlowGraphInstance::evaluate_precondition_graph_for(graph, &ctx, 0).unwrap()
+    };
+    assert!(!check(&mut world));
+    for (fact, expected) in [
+        ("fact.benedek_suspected", false),
+        ("fact.light_doused", true),
+    ] {
+        world.knowledge.learn(KnowledgeRow {
+            holder: 0,
+            fact: content.registry.id(fact).unwrap(),
+            kind: KnowKind::Evidence,
+            source_event: 0,
+        });
+        assert_eq!(check(&mut world), expected);
+    }
+    world.participants.location[weirs_crossing::BENEDEK as usize] = Some(weirs_crossing::INN);
+    assert!(!check(&mut world));
+    world.participants.location[weirs_crossing::BENEDEK as usize] = Some(weirs_crossing::CUSTOMS);
+    world.knowledge.learn(KnowledgeRow {
+        holder: 0,
+        fact: content.registry.id("fact.benedek_identified").unwrap(),
+        kind: KnowKind::Evidence,
+        source_event: 0,
+    });
+    assert!(!check(&mut world));
+}

@@ -2,12 +2,17 @@ use storylet_engine::chrono_participants::{
     Controller, KnowKind, KnowledgeRow, KnowledgeTable, ParticipantTable,
 };
 use storylet_engine::chrono_state::{
-    apply_mutation, revert_delta, BijectiveDelta, GraphLayer, MutationOp, TagBitset, WorldStateTable,
-    WorldVertex,
+    BijectiveDelta, GraphLayer, MutationOp, TagBitset, WorldStateTable, WorldVertex,
+    apply_mutation, revert_delta,
 };
 
 fn row(holder: u16, fact: u16, kind: KnowKind, source_event: u32) -> KnowledgeRow {
-    KnowledgeRow { holder, fact, kind, source_event }
+    KnowledgeRow {
+        holder,
+        fact,
+        kind,
+        source_event,
+    }
 }
 
 #[test]
@@ -85,7 +90,10 @@ fn tables_round_trip_through_serde() {
     table.push("npc", 3, Controller::Rule, None);
     let json = serde_json::to_string(&table).unwrap();
     assert!(json.contains("\"kind\":\"human\""));
-    assert_eq!(serde_json::from_str::<ParticipantTable>(&json).unwrap(), table);
+    assert_eq!(
+        serde_json::from_str::<ParticipantTable>(&json).unwrap(),
+        table
+    );
 }
 
 #[test]
@@ -170,13 +178,18 @@ fn v5_world_json_loads_with_implicit_player() {
     assert!(world.participants.is_empty());
     world.ensure_participants();
     assert_eq!(world.participants.len(), 1);
-    assert_eq!(world.participants.location[0], world.current_location_entity);
+    assert_eq!(
+        world.participants.location[0],
+        world.current_location_entity
+    );
 }
 
 #[test]
 fn ensure_participants_normalizes_uneven_columns() {
     let mut world = WorldStateTable::new();
-    world.participants.push("a", 0, Controller::Human { seat: 0 }, None);
+    world
+        .participants
+        .push("a", 0, Controller::Human { seat: 0 }, None);
     world.participants.push("b", 1, Controller::Rule, None);
     world.participants.location.pop();
     world.knowledge.rows = vec![
@@ -189,7 +202,12 @@ fn ensure_participants_normalizes_uneven_columns() {
     assert_eq!(world.participants.entity.len(), 1);
     assert_eq!(world.participants.controller.len(), 1);
     assert_eq!(world.participants.location.len(), 1);
-    let keys: Vec<_> = world.knowledge.rows.iter().map(|r| (r.holder, r.fact)).collect();
+    let keys: Vec<_> = world
+        .knowledge
+        .rows
+        .iter()
+        .map(|r| (r.holder, r.fact))
+        .collect();
     assert_eq!(keys, vec![(0, 9), (1, 2)]);
     assert_eq!(world.knowledge.knows(0, 9).unwrap().kind, KnowKind::Rumor);
 }
@@ -214,7 +232,10 @@ fn mutation_move_player_syncs_participant_zero_and_reverts() {
     world.seed_current_location(1).unwrap();
     world.ensure_participants();
     let before = world.clone();
-    let op = MutationOp { move_player: Some(2), ..MutationOp::default() };
+    let op = MutationOp {
+        move_player: Some(2),
+        ..MutationOp::default()
+    };
     let delta = apply_mutation(&mut world, &op).unwrap();
     assert_eq!(world.current_location_entity, Some(2));
     assert_eq!(world.active_location(0), world.current_location_entity);
@@ -239,12 +260,15 @@ fn seed_current_location_after_ensure_participants_moves_participant_zero() {
 use storylet_engine::chrono_dispatch::UnifiedDispatcher;
 use storylet_engine::chrono_runtime::{
     DataEdgeConnection, DataPinDefinition, EdgeConnection, FlowGraphAsset, FlowGraphInstance,
-    FlowNodeDef, GraphError, HolderRef, NodeCategory, NodeExecutionState, NodeKind,
-    PinDefinition, RuntimeContext, Visibility,
+    FlowNodeDef, GraphError, HolderRef, NodeCategory, NodeExecutionState, NodeKind, PinDefinition,
+    RuntimeContext, Visibility,
 };
 
 fn pin(name: &str, is_input: bool) -> PinDefinition {
-    PinDefinition { pin_name: name.to_owned(), is_input }
+    PinDefinition {
+        pin_name: name.to_owned(),
+        is_input,
+    }
 }
 
 fn flow_node(guid: u32, kind: NodeKind, category: NodeCategory) -> FlowNodeDef {
@@ -271,7 +295,10 @@ fn flow_edge(from: u32, from_pin: &str, to: u32) -> EdgeConnection {
 fn end_node(guid: u32) -> FlowNodeDef {
     flow_node(
         guid,
-        NodeKind::End { jump_to_storylet: None, precondition_result: true },
+        NodeKind::End {
+            jump_to_storylet: None,
+            precondition_result: true,
+        },
         NodeCategory::Mutator,
     )
 }
@@ -290,7 +317,10 @@ fn linear_instance(mutator: NodeKind, acting: u16) -> FlowGraphInstance {
             flow_node(MUTATOR, mutator, NodeCategory::Mutator),
             end_node(END),
         ],
-        edges: vec![flow_edge(START, "Out", MUTATOR), flow_edge(MUTATOR, "Out", END)],
+        edges: vec![
+            flow_edge(START, "Out", MUTATOR),
+            flow_edge(MUTATOR, "Out", END),
+        ],
         data_edges: vec![],
     };
     let mut instance = FlowGraphInstance::new(1, asset, 7).unwrap();
@@ -300,13 +330,19 @@ fn linear_instance(mutator: NodeKind, acting: u16) -> FlowGraphInstance {
 }
 
 fn learn(kind: KnowKind, visibility: Visibility) -> NodeKind {
-    NodeKind::Learn { fact: 7, kind, visibility }
+    NodeKind::Learn {
+        fact: 7,
+        kind,
+        visibility,
+    }
 }
 
 /// Participants 0 and 1 at location 3, participant 2 at location 4.
 fn three_participant_world() -> WorldStateTable {
     let mut world = WorldStateTable::new();
-    world.participants.push("a", 0, Controller::Human { seat: 0 }, Some(3));
+    world
+        .participants
+        .push("a", 0, Controller::Human { seat: 0 }, Some(3));
     world.participants.push("b", 1, Controller::Rule, Some(3));
     world.participants.push("c", 2, Controller::Rule, Some(4));
     world
@@ -320,7 +356,10 @@ fn learn_records_call_history_source() {
     let mut ctx = RuntimeContext::new(&mut world, &dispatcher);
     let mut instance = linear_instance(learn(KnowKind::Evidence, Visibility::Private), 0);
     instance.tick(&mut ctx, 16).unwrap();
-    assert_eq!(instance.node(END).unwrap().state, NodeExecutionState::Completed);
+    assert_eq!(
+        instance.node(END).unwrap().state,
+        NodeExecutionState::Completed
+    );
     let learn_index = instance
         .call_history()
         .iter()
@@ -356,7 +395,10 @@ fn private_learn_creates_no_witness_rows() {
     let mut ctx = RuntimeContext::new(&mut world, &dispatcher);
     let mut instance = linear_instance(learn(KnowKind::Told, Visibility::Private), 1);
     instance.tick(&mut ctx, 16).unwrap();
-    assert_eq!(ctx.state.knowledge.knows(1, 7).unwrap().kind, KnowKind::Told);
+    assert_eq!(
+        ctx.state.knowledge.knows(1, 7).unwrap().kind,
+        KnowKind::Told
+    );
     assert!(ctx.state.knowledge.knows(0, 7).is_none());
 }
 
@@ -375,7 +417,10 @@ fn knows_branch(world: &mut WorldStateTable, holder: HolderRef, confirmed_only: 
         }],
         ..flow_node(
             CONDITION,
-            NodeKind::Condition { operator: Default::default(), literal: None },
+            NodeKind::Condition {
+                operator: Default::default(),
+                literal: None,
+            },
             NodeCategory::LogicGate,
         )
     };
@@ -387,13 +432,24 @@ fn knows_branch(world: &mut WorldStateTable, holder: HolderRef, confirmed_only: 
             value_type: "bool".to_owned(),
             is_input: false,
         }],
-        ..flow_node(KNOWS, NodeKind::Knows { holder, fact: 7, confirmed_only }, NodeCategory::LogicGate)
+        ..flow_node(
+            KNOWS,
+            NodeKind::Knows {
+                holder,
+                fact: 7,
+                confirmed_only,
+            },
+            NodeCategory::LogicGate,
+        )
     };
     let asset = FlowGraphAsset {
         asset_id: "knows".to_owned(),
         start_node_guid: CONDITION,
         nodes: vec![condition, knows, end_node(ON_TRUE), end_node(ON_FALSE)],
-        edges: vec![flow_edge(CONDITION, "true", ON_TRUE), flow_edge(CONDITION, "false", ON_FALSE)],
+        edges: vec![
+            flow_edge(CONDITION, "true", ON_TRUE),
+            flow_edge(CONDITION, "false", ON_FALSE),
+        ],
         data_edges: vec![DataEdgeConnection {
             source_node_guid: KNOWS,
             source_pin_name: "value".to_owned(),
@@ -436,7 +492,12 @@ fn cancel_and_revert_learn_removes_rows() {
     for holder in 0..3 {
         assert!(ctx.state.knowledge.knows(holder, 7).is_none());
     }
-    assert!(instance.call_history().iter().all(|entry| entry.node_guid != MUTATOR));
+    assert!(
+        instance
+            .call_history()
+            .iter()
+            .all(|entry| entry.node_guid != MUTATOR)
+    );
     assert_eq!(*ctx.state, before);
 }
 
@@ -447,13 +508,18 @@ fn force_complete_learn_uses_same_source_rule() {
     let dispatcher = UnifiedDispatcher::new(vec![]);
     let mut ctx = RuntimeContext::new(&mut world, &dispatcher);
     let mut instance = linear_instance(learn(KnowKind::Inference, Visibility::Private), 0);
-    instance.force_complete(&mut ctx, MUTATOR, "Out", None).unwrap();
+    instance
+        .force_complete(&mut ctx, MUTATOR, "Out", None)
+        .unwrap();
     let index = instance
         .call_history()
         .iter()
         .position(|entry| entry.node_guid == MUTATOR)
         .unwrap();
-    assert_eq!(ctx.state.knowledge.knows(0, 7).unwrap().source_event, index as u32);
+    assert_eq!(
+        ctx.state.knowledge.knows(0, 7).unwrap().source_event,
+        index as u32
+    );
 }
 
 #[test]
@@ -465,7 +531,10 @@ fn move_participant_moves_acting_and_reverts() {
     let mut instance = linear_instance(NodeKind::MoveParticipant { location_entity: 4 }, 1);
     instance.tick(&mut ctx, 16).unwrap();
     assert_eq!(ctx.state.active_location(1), Some(4));
-    assert_eq!(ctx.state.participants.colocated(1).collect::<Vec<_>>(), vec![2]);
+    assert_eq!(
+        ctx.state.participants.colocated(1).collect::<Vec<_>>(),
+        vec![2]
+    );
     instance.cancel_and_revert(&mut ctx, MUTATOR).unwrap();
     assert_eq!(*ctx.state, before);
 }
@@ -478,7 +547,10 @@ fn nodes_without_a_participant_return_typed_errors() {
     let mut instance = linear_instance(learn(KnowKind::Evidence, Visibility::Private), 0);
     assert!(matches!(
         instance.tick(&mut ctx, 16),
-        Err(GraphError::ParticipantNotFound { node_guid: MUTATOR, participant: 0 })
+        Err(GraphError::ParticipantNotFound {
+            node_guid: MUTATOR,
+            participant: 0
+        })
     ));
     let mut world = WorldStateTable::new();
     world.ensure_participants();
@@ -486,7 +558,10 @@ fn nodes_without_a_participant_return_typed_errors() {
     let mut instance = linear_instance(NodeKind::MoveParticipant { location_entity: 2 }, 3);
     assert!(matches!(
         instance.tick(&mut ctx, 16),
-        Err(GraphError::ParticipantNotFound { node_guid: MUTATOR, participant: 3 })
+        Err(GraphError::ParticipantNotFound {
+            node_guid: MUTATOR,
+            participant: 3
+        })
     ));
     let mut world = WorldStateTable::with_capacity(2);
     world.ensure_participants();
@@ -494,7 +569,10 @@ fn nodes_without_a_participant_return_typed_errors() {
     let mut instance = linear_instance(NodeKind::MoveParticipant { location_entity: 2 }, 0);
     assert!(matches!(
         instance.tick(&mut ctx, 16),
-        Err(GraphError::EntityIndexOutOfRange { node_guid: MUTATOR, entity_index: 2 })
+        Err(GraphError::EntityIndexOutOfRange {
+            node_guid: MUTATOR,
+            entity_index: 2
+        })
     ));
 }
 
@@ -503,18 +581,36 @@ fn new_node_kinds_round_trip_through_serde() {
     for kind in [
         learn(KnowKind::Rumor, Visibility::CoLocated),
         NodeKind::MoveParticipant { location_entity: 9 },
-        NodeKind::Knows { holder: HolderRef::Participant(2), fact: 7, confirmed_only: true },
-        NodeKind::Knows { holder: HolderRef::Acting, fact: 7, confirmed_only: false },
+        NodeKind::Knows {
+            holder: HolderRef::Participant(2),
+            fact: 7,
+            confirmed_only: true,
+        },
+        NodeKind::Knows {
+            holder: HolderRef::Acting,
+            fact: 7,
+            confirmed_only: false,
+        },
     ] {
         let json = serde_json::to_string(&kind).unwrap();
-        assert_eq!(serde_json::from_str::<NodeKind>(&json).unwrap(), kind, "{json}");
+        assert_eq!(
+            serde_json::from_str::<NodeKind>(&json).unwrap(),
+            kind,
+            "{json}"
+        );
     }
     let json = serde_json::to_value(learn(KnowKind::Rumor, Visibility::CoLocated)).unwrap();
     assert_eq!(json["kind"], "learn");
     assert_eq!(json["visibility"], "co_located");
     let instance: FlowGraphInstance = {
         let mut value = serde_json::to_value(linear_instance(NodeKind::LogicAll, 0)).unwrap();
-        assert!(value.as_object_mut().unwrap().remove("acting_participant").is_some());
+        assert!(
+            value
+                .as_object_mut()
+                .unwrap()
+                .remove("acting_participant")
+                .is_some()
+        );
         serde_json::from_value(value).unwrap()
     };
     assert_eq!(instance.acting_participant, 0);
@@ -527,16 +623,23 @@ fn removing_earlier_call_rebases_later_knowledge_source() {
     let dispatcher = UnifiedDispatcher::new(vec![]);
     let mut ctx = RuntimeContext::new(&mut world, &dispatcher);
     let mut instance = linear_instance(learn(KnowKind::Evidence, Visibility::Private), 0);
-    instance.asset.nodes.push(flow_node(4, NodeKind::Mutation { op: MutationOp::default() }, NodeCategory::Mutator));
+    instance.asset.nodes.push(flow_node(
+        4,
+        NodeKind::Mutation {
+            op: MutationOp::default(),
+        },
+        NodeCategory::Mutator,
+    ));
     // Add the corresponding runtime instance by reconstructing from the asset.
     instance = FlowGraphInstance::new(1, instance.asset, 7).unwrap();
     instance.force_complete(&mut ctx, 4, "Out", None).unwrap();
-    instance.force_complete(&mut ctx, MUTATOR, "Out", None).unwrap();
+    instance
+        .force_complete(&mut ctx, MUTATOR, "Out", None)
+        .unwrap();
     instance.cancel_and_revert(&mut ctx, 4).unwrap();
     assert_eq!(instance.call_history()[0].node_guid, MUTATOR);
     assert_eq!(ctx.state.knowledge.knows(0, 7).unwrap().source_event, 0);
     instance.cancel_and_revert(&mut ctx, MUTATOR).unwrap();
-
 }
 
 #[test]
@@ -545,19 +648,58 @@ fn precondition_graph_uses_requested_actor() {
     world.knowledge.learn(row(1, 7, KnowKind::Evidence, 0));
     let condition = FlowNodeDef {
         output_pins: vec![pin("true", false), pin("false", false)],
-        data_input_pins: vec![DataPinDefinition { pin_name: "input".into(), value_type: "bool".into(), is_input: true }],
-        ..flow_node(1, NodeKind::Condition { operator: Default::default(), literal: None }, NodeCategory::LogicGate)
+        data_input_pins: vec![DataPinDefinition {
+            pin_name: "input".into(),
+            value_type: "bool".into(),
+            is_input: true,
+        }],
+        ..flow_node(
+            1,
+            NodeKind::Condition {
+                operator: Default::default(),
+                literal: None,
+            },
+            NodeCategory::LogicGate,
+        )
     };
     let knows = FlowNodeDef {
-        input_pins: vec![], output_pins: vec![],
-        data_output_pins: vec![DataPinDefinition { pin_name: "value".into(), value_type: "bool".into(), is_input: false }],
-        ..flow_node(2, NodeKind::Knows { holder: HolderRef::Acting, fact: 7, confirmed_only: true }, NodeCategory::LogicGate)
+        input_pins: vec![],
+        output_pins: vec![],
+        data_output_pins: vec![DataPinDefinition {
+            pin_name: "value".into(),
+            value_type: "bool".into(),
+            is_input: false,
+        }],
+        ..flow_node(
+            2,
+            NodeKind::Knows {
+                holder: HolderRef::Acting,
+                fact: 7,
+                confirmed_only: true,
+            },
+            NodeCategory::LogicGate,
+        )
     };
-    let false_end = flow_node(4, NodeKind::End { jump_to_storylet: None, precondition_result: false }, NodeCategory::Mutator);
-    let asset = FlowGraphAsset { asset_id: "precondition".into(), start_node_guid: 1,
+    let false_end = flow_node(
+        4,
+        NodeKind::End {
+            jump_to_storylet: None,
+            precondition_result: false,
+        },
+        NodeCategory::Mutator,
+    );
+    let asset = FlowGraphAsset {
+        asset_id: "precondition".into(),
+        start_node_guid: 1,
         nodes: vec![condition, knows, end_node(3), false_end],
         edges: vec![flow_edge(1, "true", 3), flow_edge(1, "false", 4)],
-        data_edges: vec![DataEdgeConnection { source_node_guid: 2, source_pin_name: "value".into(), target_node_guid: 1, target_pin_name: "input".into() }] };
+        data_edges: vec![DataEdgeConnection {
+            source_node_guid: 2,
+            source_pin_name: "value".into(),
+            target_node_guid: 1,
+            target_pin_name: "input".into(),
+        }],
+    };
     let dispatcher = UnifiedDispatcher::new(vec![]);
     let ctx = RuntimeContext::new(&mut world, &dispatcher);
     assert!(!FlowGraphInstance::evaluate_precondition_graph(&asset, &ctx).unwrap());
@@ -571,7 +713,12 @@ fn mission_uses_actor_changed_after_attachment() {
     let mut ctx = RuntimeContext::new(&mut world, &dispatcher);
     let mut child = linear_instance(learn(KnowKind::Evidence, Visibility::Private), 0).asset;
     child.asset_id = "child".into();
-    let mut parent = linear_instance(NodeKind::MissionSubGraph { sub_graph_asset_id: child.asset_id.clone() }, 0);
+    let mut parent = linear_instance(
+        NodeKind::MissionSubGraph {
+            sub_graph_asset_id: child.asset_id.clone(),
+        },
+        0,
+    );
     parent.attach_mission_asset(MUTATOR, &child, 7).unwrap();
     parent.acting_participant = 1;
     parent.tick(&mut ctx, 16).unwrap();
@@ -582,7 +729,9 @@ fn mission_uses_actor_changed_after_attachment() {
     let mut replay_world = three_participant_world();
     let mut replay_ctx = RuntimeContext::new(&mut replay_world, &dispatcher);
     parent.acting_participant = 2;
-    parent.replay_history_with_missions(&mut replay_ctx, &entries, &scoped).unwrap();
+    parent
+        .replay_history_with_missions(&mut replay_ctx, &entries, &scoped)
+        .unwrap();
     assert!(replay_ctx.state.knowledge.knows(2, 7).is_some());
     assert!(replay_ctx.state.knowledge.knows(1, 7).is_none());
 }
@@ -594,13 +743,21 @@ fn unrelated_graph_knowledge_does_not_block_or_rebase_cancel() {
     let mut ctx = RuntimeContext::new(&mut world, &dispatcher);
     let mut other = linear_instance(learn(KnowKind::Evidence, Visibility::Private), 1);
     // Put the other graph's Learn at index 5.
-    for _ in 0..5 { other.force_complete(&mut ctx, START, "Out", None).unwrap(); }
-    other.force_complete(&mut ctx, MUTATOR, "Out", None).unwrap();
+    for _ in 0..5 {
+        other.force_complete(&mut ctx, START, "Out", None).unwrap();
+    }
+    other
+        .force_complete(&mut ctx, MUTATOR, "Out", None)
+        .unwrap();
     let other_row = ctx.state.knowledge.knows(1, 7).unwrap();
     assert_eq!(other_row.source_event, 5);
     let mut instance = linear_instance(learn(KnowKind::Evidence, Visibility::Private), 0);
-    instance.force_complete(&mut ctx, START, "Out", None).unwrap();
-    instance.force_complete(&mut ctx, MUTATOR, "Out", None).unwrap();
+    instance
+        .force_complete(&mut ctx, START, "Out", None)
+        .unwrap();
+    instance
+        .force_complete(&mut ctx, MUTATOR, "Out", None)
+        .unwrap();
     instance.cancel_and_revert(&mut ctx, MUTATOR).unwrap();
     assert!(ctx.state.knowledge.knows(0, 7).is_none());
     assert_eq!(ctx.state.knowledge.knows(1, 7).unwrap().source_event, 5);
@@ -614,14 +771,83 @@ fn removing_earlier_call_rebases_each_repeated_learn_invocation() {
     let dispatcher = UnifiedDispatcher::new(vec![]);
     let mut ctx = RuntimeContext::new(&mut world, &dispatcher);
     let mut instance = linear_instance(learn(KnowKind::Evidence, Visibility::Private), 0);
-    instance.force_complete(&mut ctx, START, "Out", None).unwrap();
-    instance.force_complete(&mut ctx, MUTATOR, "Out", None).unwrap();
+    instance
+        .force_complete(&mut ctx, START, "Out", None)
+        .unwrap();
+    instance
+        .force_complete(&mut ctx, MUTATOR, "Out", None)
+        .unwrap();
     instance.acting_participant = 1;
-    instance.force_complete(&mut ctx, MUTATOR, "Out", None).unwrap();
+    instance
+        .force_complete(&mut ctx, MUTATOR, "Out", None)
+        .unwrap();
     instance.cancel_and_revert(&mut ctx, START).unwrap();
     assert_eq!(ctx.state.knowledge.knows(0, 7).unwrap().source_event, 0);
     assert_eq!(ctx.state.knowledge.knows(1, 7).unwrap().source_event, 1);
     instance.cancel_and_revert(&mut ctx, MUTATOR).unwrap();
     assert!(ctx.state.knowledge.knows(1, 7).is_none());
     assert!(ctx.state.knowledge.knows(0, 7).is_some());
+}
+
+#[test]
+fn colocation_precondition_uses_the_acting_participant_and_requires_a_place() {
+    let mut world = three_participant_world();
+    world.participants.location = vec![Some(1), Some(2), Some(2)];
+    let condition = FlowNodeDef {
+        output_pins: vec![pin("true", false), pin("false", false)],
+        data_input_pins: vec![DataPinDefinition {
+            pin_name: "input".into(),
+            value_type: "bool".into(),
+            is_input: true,
+        }],
+        ..flow_node(
+            1,
+            NodeKind::Condition {
+                operator: Default::default(),
+                literal: None,
+            },
+            NodeCategory::LogicGate,
+        )
+    };
+    let present = FlowNodeDef {
+        input_pins: vec![],
+        output_pins: vec![],
+        data_output_pins: vec![DataPinDefinition {
+            pin_name: "value".into(),
+            value_type: "bool".into(),
+            is_input: false,
+        }],
+        ..flow_node(
+            2,
+            NodeKind::Colocated { participant: 2 },
+            NodeCategory::LogicGate,
+        )
+    };
+    let false_end = flow_node(
+        4,
+        NodeKind::End {
+            jump_to_storylet: None,
+            precondition_result: false,
+        },
+        NodeCategory::Mutator,
+    );
+    let asset = FlowGraphAsset {
+        asset_id: "colocation".into(),
+        start_node_guid: 1,
+        nodes: vec![condition, present, end_node(3), false_end],
+        edges: vec![flow_edge(1, "true", 3), flow_edge(1, "false", 4)],
+        data_edges: vec![DataEdgeConnection {
+            source_node_guid: 2,
+            source_pin_name: "value".into(),
+            target_node_guid: 1,
+            target_pin_name: "input".into(),
+        }],
+    };
+    let dispatcher = UnifiedDispatcher::new(vec![]);
+    let ctx = RuntimeContext::new(&mut world, &dispatcher);
+    assert!(!FlowGraphInstance::evaluate_precondition_graph_for(&asset, &ctx, 0).unwrap());
+    assert!(FlowGraphInstance::evaluate_precondition_graph_for(&asset, &ctx, 1).unwrap());
+    ctx.state.participants.location[1] = None;
+    ctx.state.participants.location[2] = None;
+    assert!(!FlowGraphInstance::evaluate_precondition_graph_for(&asset, &ctx, 1).unwrap());
 }

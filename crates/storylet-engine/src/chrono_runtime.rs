@@ -292,6 +292,8 @@ pub enum NodeKind {
     /// from the entry at compile time so execution needs no chronicle lookup.
     Reveal { entry: ChronIx, #[serde(rename = "knowledge_kind")] kind: KnowKind, visibility: Visibility, #[serde(default)] facts: Vec<FactIx> },
     Knows { holder: HolderRef, fact: FactIx, confirmed_only: bool },
+    /// True when the acting participant shares a location with another participant.
+    Colocated { participant: PartIx },
     GetEntity { entity_id: String },
     GetEntityProperty { property_key: String, value_type: String },
     ApplyCommand { property_key: String, operation: PropertyOperation, value: DataValue },
@@ -713,6 +715,7 @@ impl FlowGraphAsset {
             let data_only = matches!(
                 node.kind,
                 NodeKind::Knows { .. }
+                    | NodeKind::Colocated { .. }
                     | NodeKind::GetEntity { .. }
                     | NodeKind::GetEntityProperty { .. }
                     | NodeKind::HasEntityTag { .. }
@@ -2176,6 +2179,7 @@ impl FlowGraphInstance {
 
         match &def.kind {
             NodeKind::Knows { .. }
+            | NodeKind::Colocated { .. }
             | NodeKind::GetEntity { .. }
             | NodeKind::GetEntityProperty { .. }
             | NodeKind::HasEntityTag { .. }
@@ -3069,6 +3073,7 @@ impl FlowGraphInstance {
                 value(asset, ctx, acting_participant, edge.source_node_guid, seen)
             };
             let out = match &node.kind {
+                NodeKind::Colocated { participant } => DataValue::Bool(participants_colocated(ctx.state, acting_participant, *participant, guid)?),
                 NodeKind::Knows { holder, fact, confirmed_only } => {
                     let participant = match holder { HolderRef::Acting => acting_participant, HolderRef::Participant(p) => *p };
                     if usize::from(participant) >= ctx.state.participants.len() { return Err(GraphError::ParticipantNotFound { node_guid: guid, participant }); }
@@ -3168,6 +3173,11 @@ fn attribute_to_data_value(value: &AttributeValue) -> Option<DataValue> {
     })
 }
 
+fn participants_colocated(world: &WorldStateTable, actor: PartIx, other: PartIx, node_guid: u32) -> Result<bool, GraphError> {
+    let actor_location = world.participants.location.get(actor as usize).ok_or(GraphError::ParticipantNotFound { node_guid, participant: actor })?;
+    let other_location = world.participants.location.get(other as usize).ok_or(GraphError::ParticipantNotFound { node_guid, participant: other })?;
+    Ok(actor != other && actor_location.is_some() && actor_location == other_location)
+}
 fn resolve_data_input(instance: &FlowGraphInstance, ctx: &RuntimeContext, target: u32, pin: &str, seen: &mut BTreeSet<u32>) -> Result<DataValue, GraphError> {
     let edge = instance.asset.data_edges.iter().find(|e| e.target_node_guid == target && e.target_pin_name == pin)
         .ok_or(GraphError::NoDeclaredRoute { node_guid: target })?;
@@ -3178,6 +3188,7 @@ fn resolve_data_node(instance: &FlowGraphInstance, ctx: &RuntimeContext, guid: u
     if !seen.insert(guid) { return Err(GraphError::ZeroCostCycle { node_guid: guid }); }
     let node = instance.asset.node(guid).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
     let result = match &node.kind {
+        NodeKind::Colocated { participant } => DataValue::Bool(participants_colocated(ctx.state, instance.acting_participant, *participant, guid)?),
         NodeKind::Knows { holder, fact, confirmed_only } => {
             let participant = match holder { HolderRef::Acting => instance.acting_participant, HolderRef::Participant(p) => *p };
             if usize::from(participant) >= ctx.state.participants.len() { return Err(GraphError::ParticipantNotFound { node_guid: guid, participant }); }

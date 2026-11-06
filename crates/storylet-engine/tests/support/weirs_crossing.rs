@@ -265,6 +265,115 @@ fn require_unknown(mut graph: FlowGraphAsset, fact: u16) -> FlowGraphAsset {
     });
     graph
 }
+fn require_any(mut graph: FlowGraphAsset, facts: &[u16]) -> FlowGraphAsset {
+    let mut any = node(500, NodeKind::Or, NodeCategory::LogicGate, &[]);
+    any.data_input_pins = (0..facts.len())
+        .map(|i| DataPinDefinition {
+            pin_name: format!("input_{i}"),
+            value_type: "bool".into(),
+            is_input: true,
+        })
+        .collect();
+    any.data_output_pins = vec![DataPinDefinition {
+        pin_name: "value".into(),
+        value_type: "bool".into(),
+        is_input: false,
+    }];
+    for (i, fact) in facts.iter().enumerate() {
+        let guid = 510 + i as u32;
+        let mut knows = node(
+            guid,
+            NodeKind::Knows {
+                holder: HolderRef::Acting,
+                fact: *fact,
+                confirmed_only: false,
+            },
+            NodeCategory::LogicGate,
+            &[],
+        );
+        knows.data_output_pins = vec![DataPinDefinition {
+            pin_name: "value".into(),
+            value_type: "bool".into(),
+            is_input: false,
+        }];
+        graph.nodes.push(knows);
+        graph.data_edges.push(DataEdgeConnection {
+            source_node_guid: guid,
+            source_pin_name: "value".into(),
+            target_node_guid: 500,
+            target_pin_name: format!("input_{i}"),
+        });
+    }
+    graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.node_guid == 200)
+        .unwrap()
+        .data_input_pins
+        .push(DataPinDefinition {
+            pin_name: "any".into(),
+            value_type: "bool".into(),
+            is_input: true,
+        });
+    graph.nodes.push(any);
+    graph.data_edges.push(DataEdgeConnection {
+        source_node_guid: 500,
+        source_pin_name: "value".into(),
+        target_node_guid: 200,
+        target_pin_name: "any".into(),
+    });
+    graph
+}
+
+fn require_colocated(
+    mut graph: FlowGraphAsset,
+    participant: u16,
+    expected: bool,
+) -> FlowGraphAsset {
+    graph
+        .edges
+        .iter_mut()
+        .find(|edge| edge.target_node_guid == 102)
+        .unwrap()
+        .target_node_guid = 600;
+    let mut condition = node(
+        600,
+        NodeKind::Condition {
+            operator: Default::default(),
+            literal: None,
+        },
+        NodeCategory::LogicGate,
+        &["true", "false"],
+    );
+    condition.data_input_pins = vec![DataPinDefinition {
+        pin_name: "input".into(),
+        value_type: "bool".into(),
+        is_input: true,
+    }];
+    let mut present = node(
+        601,
+        NodeKind::Colocated { participant },
+        NodeCategory::LogicGate,
+        &[],
+    );
+    present.data_output_pins = vec![DataPinDefinition {
+        pin_name: "value".into(),
+        value_type: "bool".into(),
+        is_input: false,
+    }];
+    graph.nodes.extend([condition, present]);
+    graph.edges.extend([
+        edge(600, "true", if expected { 102 } else { 103 }),
+        edge(600, "false", if expected { 103 } else { 102 }),
+    ]);
+    graph.data_edges.push(DataEdgeConnection {
+        source_node_guid: 601,
+        source_pin_name: "value".into(),
+        target_node_guid: 600,
+        target_pin_name: "input".into(),
+    });
+    graph
+}
 /// Full explorer scenario: Mara starts at the inn and Teodor is an NPC.
 pub fn explorer_content() -> RunContent {
     build(false, true)
@@ -660,7 +769,25 @@ fn build(teodor_is_human: bool, causeway_has_close_rule: bool) -> RunContent {
                 ),
                 registry.id("fact.benedek_identified").unwrap(),
             )),
-            CONFRONT_BENEDEK => Some(knows_graph(registry.id("fact.benedek_identified").unwrap())),
+            CONFRONT_BENEDEK => Some(require_colocated(
+                knows_graph(registry.id("fact.benedek_identified").unwrap()),
+                BENEDEK,
+                true,
+            )),
+            BLUFF_BENEDEK => Some(require_colocated(
+                require_unknown(
+                    require_any(
+                        knows_all_graph(&[registry.id("fact.benedek_suspected").unwrap()]),
+                        &[
+                            registry.id("fact.light_doused").unwrap(),
+                            registry.id("fact.crates_landed").unwrap(),
+                        ],
+                    ),
+                    registry.id("fact.benedek_identified").unwrap(),
+                ),
+                BENEDEK,
+                true,
+            )),
             _ => None,
         };
         let mut def = StoryletDef {
