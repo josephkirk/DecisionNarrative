@@ -6,9 +6,9 @@ The platform couples a host-independent Rust decision core with a unified local 
 
 ## Architecture
 
-- **Narrative Core (`crates/storylet-engine`)**: Host-independent Rust library with zero I/O dependencies. ChronoFlow v5 uses data-oriented world state, fixed gameplay-tag bitsets, reversible mutation deltas, persistent call history, and deterministic QBN, salience, waypoint, token, timeline, invoke, and reconciliation runtime APIs. Exports a C ABI for native embedding (Unreal / Unity / Godot / .NET).
+- **Narrative Core (`crates/storylet-engine`)**: Host-independent Rust library with zero I/O dependencies. ChronoFlow v5 uses data-oriented world state, fixed gameplay-tag bitsets, reversible mutation deltas, persistent call history, and deterministic QBN, salience, waypoint, token, timeline, invoke, and reconciliation runtime APIs. Adds participants with per-participant knowledge, a canon chronicle with per-participant telling and `Reveal` nodes, `Learn` / `Move` / `Knows` / `Colocated` nodes, and a world clock with scheduled connections and occupancy rules. A deterministic run kernel replays an action log against content, so runs can be rewound, reloaded after edits, and explained. Exports a C ABI for native embedding (Unreal / Unity / Godot / .NET), including `dn_run_*` entry points for deterministic runs.
 - **Unified Local Service (`crates/storylet-engine-service`)**: Axum, Tokio, and rusqlite service providing single-store SQLite persistence, REST endpoints, Server-Sent Events (SSE) live streams, and stdio/HTTP Model Context Protocol (MCP) server.
-- **Authoring Studio (`src/web`)**: Vue 3 (Composition API) + Vite + Vue Router application. Articy:draft-style project tree (Storylets, intrinsic Entities, Entity Templates, Trait Templates, Assets) with custom folders/subfolders, live search, drag-and-drop hierarchy, and grid/list folder browsing. Generic entity-template authoring (characters, locations, items, facts, other) with Blueprint-style custom properties, composable trait templates, thumbnail storage, and bidirectional reference tracking with graph jump-to-node. Full-width graph storylet editor with a contextual property inspector, Tag Manager reference tracking, world/canon events, and starting-condition scenarios.
+- **Authoring Studio (`src/web`)**: Vue 3 (Composition API) + Vite + Vue Router application. Articy:draft-style project tree (Storylets, intrinsic Entities, Entity Templates, Trait Templates, Assets) with custom folders/subfolders, live search, drag-and-drop hierarchy, and grid/list folder browsing. Generic entity-template authoring (characters, locations, items, facts, other) with Blueprint-style custom properties, composable trait templates, thumbnail storage, and bidirectional reference tracking with graph jump-to-node. Full-width graph storylet editor with a contextual property inspector, Tag Manager reference tracking, world/canon events, and starting-condition scenarios. A **Play** view (`/play`) reads and plays the story directly; see [docs/design/playtest-ui.md](docs/design/playtest-ui.md).
 - **Drama Director (`crates/storylet-engine`)**: Deterministic eligibility and selection in Rust; no embedding ranker or model dependency.
 - **Interaction Context (`src/web/studio/interactionContext.ts`)**: Shares the active studio view, project, focused entity/selection, and playtest revision with a local MCP agent. The agent works through MCP operations directly; the studio does not call a model or generate content.
 
@@ -64,7 +64,10 @@ cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 - **Tag Manager**: Browse the hierarchical Gameplay Tag catalog, add root and child tags, inspect references, and open referenced entities or storylets.
 - **Story Codex & World Bible**: Author world and canon events. Character settings, location settings, and passion data are composed from reusable trait templates.
 - **Project Tree & Entities**: Keep the intrinsic World entity under Entities; author characters, locations, items, facts, and other game objects as Entity Templates under the separate Entity Templates root. Compose reusable Trait Templates with default values and entity-specific overrides, and manage append-only Assets with versioning and external storage references.
-- **Playtest & Director**: Playtest runs through HTTP/MCP; the Play view is being rebuilt (docs/design/playtest-ui.md).
+- **Play**: A Play button in the top toolbar (and **Play from here** in the storylet editor) starts a run. The prose column is the centre of the screen; the run advances itself until it needs a choice, a move, or an ending. A *where & when* strip shows the clock, place, and participant tabs (hot-seat). Every step is on a timeline: click an earlier step to rewind, and choosing differently branches automatically. When content changes, **Reload run** replays the same actions on the new content and reports where it diverged. A closed-by-default *Inspect* panel shows knowledge provenance and the chronicle, and *Why?* explains the nearest misses when nothing is available.
+- **Coverage Explorer**: `workspace.coverage` / `/api/v4/coverage` deterministically explores the compiled project by replaying runs, so unreachable content can be found without hand-playing.
+- **Participants & Knowledge**: Characters act through storylets on the world clock. Knowledge is tracked per participant with provenance, co-presence witnesses what happens, and `Reveal` nodes tell canon chronicle events to chosen participants.
+- **Project Authoring Aids**: Storylets can carry time windows and participant badges; world connections and the clock are authored as system traits and validated.
 - **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v5) containing entities, entity templates, folders, trait templates, assets, storylets, and scenarios, with transactional validation. Earlier bundle schemas are rejected; use a fresh schema-v5 database rather than migrating a legacy database.
 
 ## Model Context Protocol (MCP)
@@ -77,7 +80,9 @@ cargo run --manifest-path crates/storylet-engine-service/Cargo.toml --bin storyl
 ```
 
 Tools exposed:
-- `narrative_platform`: Read active workspace context, inspect/validate project content, manage entities, and exercise deterministic Rust playtests.
+- `narrative_platform`: Read active workspace context, inspect/validate project content, manage entities, and exercise deterministic Rust playtests. Run operations are `run.start`, `run.view`, `run.act`, `run.rewind`, `run.reload`, `run.inspect`, `run.why_not`, `run.list`, and `run.delete`; `workspace.coverage` explores content coverage.
+
+The same runs are available over HTTP under `/api/v4/runs` (list/start, `/{id}` view/delete, `/{id}/act`, `/{id}/rewind`, `/{id}/reload`, `/{id}/inspect`, `/{id}/why-not`) with optimistic locking and idempotent actions, plus `/api/v4/coverage`.
 
 ## License
 
