@@ -309,3 +309,74 @@ pub unsafe extern "C" fn dn_playtest_execute_choice(
             .map_err(|error| error.to_string()),
     )
 }
+
+/// A native host owns one deterministic run and its immutable content.
+pub struct DnRunHandle {
+    content: crate::run::RunContent,
+    kernel: crate::run::RunKernel,
+}
+
+fn into_c_json(value: &impl Serialize) -> *mut std::ffi::c_char {
+    match serde_json::to_string(value).ok().and_then(|s| std::ffi::CString::new(s).ok()) {
+        Some(value) => value.into_raw(),
+        None => ptr::null_mut(),
+    }
+}
+
+unsafe fn parse_c_json<T: for<'de> Deserialize<'de>>(input: *const std::ffi::c_char) -> Result<T, String> {
+    if input.is_null() { return Err("null JSON input".into()); }
+    let input = unsafe { std::ffi::CStr::from_ptr(input) }.to_str().map_err(|e| e.to_string())?;
+    serde_json::from_str(input).map_err(|e| e.to_string())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dn_run_start(content_json: *const std::ffi::c_char, start_json: *const std::ffi::c_char, seed: u64, error_out: *mut *mut std::ffi::c_char) -> *mut DnRunHandle {
+    if !error_out.is_null() { unsafe { *error_out = ptr::null_mut(); } }
+    let result = (|| {
+        let mut content: crate::run::RunContent = unsafe { parse_c_json(content_json) }?;
+        content.dispatcher.rebuild_index();
+        let start: crate::run::RunStart = unsafe { parse_c_json(start_json) }?;
+        let kernel = crate::run::RunKernel::start(&content, start, seed).map_err(|e| format!("{e:?}"))?;
+        Ok::<_, String>(DnRunHandle { content, kernel })
+    })();
+    match result {
+        Ok(handle) => Box::into_raw(Box::new(handle)),
+        Err(error) => {
+            if !error_out.is_null() { unsafe { *error_out = into_c_json(&json!({"error": error})); } }
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dn_run_view(handle: *mut DnRunHandle, participant: u16) -> *mut std::ffi::c_char {
+    let Some(run) = (unsafe { handle.as_ref() }) else { return into_c_json(&json!({"error":"null run"})); };
+    if participant as usize >= run.kernel.world.participants.len() { return into_c_json(&json!({"error":"unknown participant"})); }
+    into_c_json(&run.kernel.view(&run.content, participant))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dn_run_act(handle: *mut DnRunHandle, participant: u16, action_json: *const std::ffi::c_char) -> *mut std::ffi::c_char {
+    let Some(run) = (unsafe { handle.as_mut() }) else { return into_c_json(&json!({"error":"null run"})); };
+    let action = match unsafe { parse_c_json(action_json) } { Ok(action) => action, Err(error) => return into_c_json(&json!({"error":error})) };
+    match run.kernel.act(&run.content, participant, action) {
+        Ok(_) => into_c_json(&run.kernel.view(&run.content, participant)),
+        Err(error) => into_c_json(&json!({"error":format!("{error:?}")})),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dn_run_rewind(handle: *mut DnRunHandle, step: u32) -> i32 {
+    let Some(run) = (unsafe { handle.as_mut() }) else { return -1 };
+    if run.kernel.rewind(step).is_ok() { 0 } else { -1 }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dn_run_free(handle: *mut DnRunHandle) {
+    if !handle.is_null() { drop(unsafe { Box::from_raw(handle) }); }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dn_string_free(value: *mut std::ffi::c_char) {
+    if !value.is_null() { drop(unsafe { std::ffi::CString::from_raw(value) }); }
+}

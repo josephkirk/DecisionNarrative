@@ -1,0 +1,1380 @@
+{
+  "registry": {
+    "tag_to_id": {
+      "fact.light_doused": 0,
+      "fact.logbook": 1,
+      "fact.teodor_statement": 2,
+      "fact.tides": 3,
+      "location.harbor": 4
+    },
+    "ancestors": [
+      {
+        "words": [
+          1,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "words": [
+          2,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "words": [
+          4,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "words": [
+          8,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "words": [
+          16,
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "descendants": [
+      {
+        "words": [
+          1,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "words": [
+          2,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "words": [
+          4,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "words": [
+          8,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "words": [
+          16,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
+  },
+  "dispatcher": {
+    "storylets": [
+      {
+        "storylet_id": 0,
+        "is_ending": false,
+        "is_fallback": false,
+        "display_priority": 0,
+        "urgency_tag": "",
+        "cluster_type": "player_passage",
+        "required_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_any_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "forbidden_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "salience_bonus_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_arc_phases": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_roles": [],
+        "played_by": [],
+        "window": [],
+        "precondition_graph": null,
+        "effects_on_complete": [],
+        "on_complete_mutation": {
+          "add_global_tags": {
+            "words": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "remove_global_tags": {
+            "words": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "entity_tag_ops": [],
+          "move_player": null
+        },
+        "payload_node_guid": 1,
+        "is_repeatable": true,
+        "cooldown_ms": 0,
+        "cooldown_turns": 0
+      },
+      {
+        "storylet_id": 1,
+        "is_ending": false,
+        "is_fallback": false,
+        "display_priority": 0,
+        "urgency_tag": "",
+        "cluster_type": "player_passage",
+        "required_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_any_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "forbidden_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "salience_bonus_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_arc_phases": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_roles": [],
+        "played_by": [],
+        "window": [],
+        "precondition_graph": null,
+        "effects_on_complete": [],
+        "on_complete_mutation": {
+          "add_global_tags": {
+            "words": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "remove_global_tags": {
+            "words": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "entity_tag_ops": [],
+          "move_player": null
+        },
+        "payload_node_guid": 20,
+        "is_repeatable": true,
+        "cooldown_ms": 0,
+        "cooldown_turns": 0
+      },
+      {
+        "storylet_id": 2,
+        "is_ending": false,
+        "is_fallback": false,
+        "display_priority": 0,
+        "urgency_tag": "",
+        "cluster_type": "player_passage",
+        "required_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_any_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "forbidden_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "salience_bonus_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_arc_phases": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_roles": [],
+        "played_by": [],
+        "window": [],
+        "precondition_graph": null,
+        "effects_on_complete": [],
+        "on_complete_mutation": {
+          "add_global_tags": {
+            "words": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "remove_global_tags": {
+            "words": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "entity_tag_ops": [],
+          "move_player": null
+        },
+        "payload_node_guid": 23,
+        "is_repeatable": true,
+        "cooldown_ms": 0,
+        "cooldown_turns": 0
+      },
+      {
+        "storylet_id": 3,
+        "is_ending": false,
+        "is_fallback": false,
+        "display_priority": 0,
+        "urgency_tag": "",
+        "cluster_type": "player_passage",
+        "required_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_any_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "forbidden_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "salience_bonus_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_arc_phases": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_roles": [],
+        "played_by": [],
+        "window": [],
+        "precondition_graph": null,
+        "effects_on_complete": [],
+        "on_complete_mutation": {
+          "add_global_tags": {
+            "words": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "remove_global_tags": {
+            "words": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "entity_tag_ops": [],
+          "move_player": null
+        },
+        "payload_node_guid": 26,
+        "is_repeatable": true,
+        "cooldown_ms": 0,
+        "cooldown_turns": 0
+      },
+      {
+        "storylet_id": 4,
+        "is_ending": false,
+        "is_fallback": false,
+        "display_priority": 0,
+        "urgency_tag": "",
+        "cluster_type": "player_passage",
+        "required_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_any_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "forbidden_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "salience_bonus_tags": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_arc_phases": {
+          "words": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "required_roles": [],
+        "played_by": [],
+        "window": [],
+        "precondition_graph": {
+          "asset_id": "press_gate",
+          "start_node_guid": 100,
+          "nodes": [
+            {
+              "node_guid": 100,
+              "node_type_id": "node_100",
+              "category": "logic_gate",
+              "kind": {
+                "kind": "condition",
+                "operator": "eq",
+                "literal": null
+              },
+              "entity_path": "",
+              "input_pins": [
+                {
+                  "pin_name": "In",
+                  "is_input": true
+                }
+              ],
+              "output_pins": [
+                {
+                  "pin_name": "true",
+                  "is_input": false
+                },
+                {
+                  "pin_name": "false",
+                  "is_input": false
+                }
+              ],
+              "data_input_pins": [
+                {
+                  "pin_name": "input",
+                  "value_type": "bool",
+                  "is_input": true
+                }
+              ],
+              "data_output_pins": [],
+              "cost_ms": 0,
+              "mission_scope": null,
+              "payload": null
+            },
+            {
+              "node_guid": 101,
+              "node_type_id": "node_101",
+              "category": "logic_gate",
+              "kind": {
+                "kind": "knows",
+                "holder": "acting",
+                "fact": 0,
+                "confirmed_only": false
+              },
+              "entity_path": "",
+              "input_pins": [
+                {
+                  "pin_name": "In",
+                  "is_input": true
+                }
+              ],
+              "output_pins": [],
+              "data_input_pins": [],
+              "data_output_pins": [
+                {
+                  "pin_name": "value",
+                  "value_type": "bool",
+                  "is_input": false
+                }
+              ],
+              "cost_ms": 0,
+              "mission_scope": null,
+              "payload": null
+            },
+            {
+              "node_guid": 102,
+              "node_type_id": "node_102",
+              "category": "mutator",
+              "kind": {
+                "kind": "end",
+                "jump_to_storylet": null,
+                "precondition_result": true
+              },
+              "entity_path": "",
+              "input_pins": [
+                {
+                  "pin_name": "In",
+                  "is_input": true
+                }
+              ],
+              "output_pins": [
+                {
+                  "pin_name": "Out",
+                  "is_input": false
+                }
+              ],
+              "data_input_pins": [],
+              "data_output_pins": [],
+              "cost_ms": 0,
+              "mission_scope": null,
+              "payload": null
+            },
+            {
+              "node_guid": 103,
+              "node_type_id": "node_103",
+              "category": "mutator",
+              "kind": {
+                "kind": "end",
+                "jump_to_storylet": null,
+                "precondition_result": false
+              },
+              "entity_path": "",
+              "input_pins": [
+                {
+                  "pin_name": "In",
+                  "is_input": true
+                }
+              ],
+              "output_pins": [
+                {
+                  "pin_name": "Out",
+                  "is_input": false
+                }
+              ],
+              "data_input_pins": [],
+              "data_output_pins": [],
+              "cost_ms": 0,
+              "mission_scope": null,
+              "payload": null
+            }
+          ],
+          "edges": [
+            {
+              "source_node_guid": 100,
+              "source_pin_name": "true",
+              "target_node_guid": 102,
+              "target_pin_name": "In"
+            },
+            {
+              "source_node_guid": 100,
+              "source_pin_name": "false",
+              "target_node_guid": 103,
+              "target_pin_name": "In"
+            }
+          ],
+          "data_edges": [
+            {
+              "source_node_guid": 101,
+              "source_pin_name": "value",
+              "target_node_guid": 100,
+              "target_pin_name": "input"
+            }
+          ]
+        },
+        "effects_on_complete": [],
+        "on_complete_mutation": {
+          "add_global_tags": {
+            "words": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "remove_global_tags": {
+            "words": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "entity_tag_ops": [],
+          "move_player": null
+        },
+        "payload_node_guid": 29,
+        "is_repeatable": true,
+        "cooldown_ms": 0,
+        "cooldown_turns": 0
+      }
+    ]
+  },
+  "passionRegistry": {
+    "npcs": {},
+    "passion_owner": {},
+    "thresholds": []
+  },
+  "storyletTitles": {
+    "0": "Watch the water",
+    "1": "Lamp soot",
+    "2": "Ilse's logbook",
+    "3": "Harbor master tides",
+    "4": "Press Teodor"
+  },
+  "storyletLocationTags": {
+    "0": {
+      "words": [
+        16,
+        0,
+        0,
+        0
+      ]
+    },
+    "1": {
+      "words": [
+        16,
+        0,
+        0,
+        0
+      ]
+    },
+    "2": {
+      "words": [
+        16,
+        0,
+        0,
+        0
+      ]
+    },
+    "3": {
+      "words": [
+        16,
+        0,
+        0,
+        0
+      ]
+    },
+    "4": {
+      "words": [
+        16,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "entityNames": {
+    "0": "Harbor",
+    "1": "Teodor"
+  },
+  "startStorylet": 0,
+  "initialWorld": {
+    "global_tags": {
+      "words": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "entity_tags": [
+      {
+        "words": [
+          16,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "words": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "passions": {
+      "micro": [],
+      "macro_values": [
+        0.0,
+        0.0
+      ],
+      "active": []
+    },
+    "vertices": [],
+    "edges": [],
+    "current_location_entity": null,
+    "current_location_tag_mask": {
+      "words": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "participants": {
+      "keys": [
+        "player",
+        "teodor"
+      ],
+      "entity": [
+        65535,
+        1
+      ],
+      "controller": [
+        {
+          "kind": "human",
+          "seat": 0
+        },
+        {
+          "kind": "rule"
+        }
+      ],
+      "location": [
+        0,
+        0
+      ]
+    },
+    "knowledge": {
+      "rows": []
+    },
+    "telling": {
+      "rows": []
+    },
+    "clock": null
+  },
+  "contentRevision": 0,
+  "rootAsset": {
+    "asset_id": "weirs-crossing-legacy",
+    "start_node_guid": 1,
+    "nodes": [
+      {
+        "node_guid": 1,
+        "node_type_id": "node_1",
+        "category": "logic_gate",
+        "kind": {
+          "kind": "choice",
+          "default_output_pin": ""
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "watch",
+            "is_input": false
+          },
+          {
+            "pin_name": "wait",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": null
+      },
+      {
+        "node_guid": 10,
+        "node_type_id": "node_10",
+        "category": "dynamic_dispatcher",
+        "kind": {
+          "kind": "qbn_hub",
+          "deck": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "exit_storylet_id": null
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "Out",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": null
+      },
+      {
+        "node_guid": 20,
+        "node_type_id": "node_20",
+        "category": "logic_gate",
+        "kind": {
+          "kind": "choice",
+          "default_output_pin": ""
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "examine",
+            "is_input": false
+          },
+          {
+            "pin_name": "leave",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": {
+          "nodeData": {
+            "choices": [
+              {
+                "text": "Examine Lamp soot"
+              },
+              {
+                "text": "Leave"
+              }
+            ],
+            "type": "choice"
+          }
+        }
+      },
+      {
+        "node_guid": 21,
+        "node_type_id": "node_21",
+        "category": "mutator",
+        "kind": {
+          "kind": "learn",
+          "fact": 0,
+          "knowledge_kind": "evidence",
+          "visibility": "co_located"
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "Out",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": null
+      },
+      {
+        "node_guid": 22,
+        "node_type_id": "node_22",
+        "category": "mutator",
+        "kind": {
+          "kind": "end",
+          "jump_to_storylet": null,
+          "precondition_result": true
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "Out",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": null
+      },
+      {
+        "node_guid": 23,
+        "node_type_id": "node_23",
+        "category": "logic_gate",
+        "kind": {
+          "kind": "choice",
+          "default_output_pin": ""
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "examine",
+            "is_input": false
+          },
+          {
+            "pin_name": "leave",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": {
+          "nodeData": {
+            "choices": [
+              {
+                "text": "Examine Ilse's logbook"
+              },
+              {
+                "text": "Leave"
+              }
+            ],
+            "type": "choice"
+          }
+        }
+      },
+      {
+        "node_guid": 24,
+        "node_type_id": "node_24",
+        "category": "mutator",
+        "kind": {
+          "kind": "learn",
+          "fact": 1,
+          "knowledge_kind": "evidence",
+          "visibility": "co_located"
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "Out",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": null
+      },
+      {
+        "node_guid": 25,
+        "node_type_id": "node_25",
+        "category": "mutator",
+        "kind": {
+          "kind": "end",
+          "jump_to_storylet": null,
+          "precondition_result": true
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "Out",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": null
+      },
+      {
+        "node_guid": 26,
+        "node_type_id": "node_26",
+        "category": "logic_gate",
+        "kind": {
+          "kind": "choice",
+          "default_output_pin": ""
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "examine",
+            "is_input": false
+          },
+          {
+            "pin_name": "leave",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": {
+          "nodeData": {
+            "choices": [
+              {
+                "text": "Examine Harbor master tides"
+              },
+              {
+                "text": "Leave"
+              }
+            ],
+            "type": "choice"
+          }
+        }
+      },
+      {
+        "node_guid": 27,
+        "node_type_id": "node_27",
+        "category": "mutator",
+        "kind": {
+          "kind": "learn",
+          "fact": 3,
+          "knowledge_kind": "evidence",
+          "visibility": "co_located"
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "Out",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": null
+      },
+      {
+        "node_guid": 28,
+        "node_type_id": "node_28",
+        "category": "mutator",
+        "kind": {
+          "kind": "end",
+          "jump_to_storylet": null,
+          "precondition_result": true
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "Out",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": null
+      },
+      {
+        "node_guid": 29,
+        "node_type_id": "node_29",
+        "category": "logic_gate",
+        "kind": {
+          "kind": "choice",
+          "default_output_pin": ""
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "examine",
+            "is_input": false
+          },
+          {
+            "pin_name": "leave",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": {
+          "nodeData": {
+            "choices": [
+              {
+                "text": "Examine Press Teodor"
+              },
+              {
+                "text": "Leave"
+              }
+            ],
+            "type": "choice"
+          }
+        }
+      },
+      {
+        "node_guid": 30,
+        "node_type_id": "node_30",
+        "category": "mutator",
+        "kind": {
+          "kind": "learn",
+          "fact": 2,
+          "knowledge_kind": "evidence",
+          "visibility": "co_located"
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "Out",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": null
+      },
+      {
+        "node_guid": 31,
+        "node_type_id": "node_31",
+        "category": "mutator",
+        "kind": {
+          "kind": "end",
+          "jump_to_storylet": null,
+          "precondition_result": true
+        },
+        "entity_path": "",
+        "input_pins": [
+          {
+            "pin_name": "In",
+            "is_input": true
+          }
+        ],
+        "output_pins": [
+          {
+            "pin_name": "Out",
+            "is_input": false
+          }
+        ],
+        "data_input_pins": [],
+        "data_output_pins": [],
+        "cost_ms": 0,
+        "mission_scope": null,
+        "payload": null
+      }
+    ],
+    "edges": [
+      {
+        "source_node_guid": 1,
+        "source_pin_name": "watch",
+        "target_node_guid": 10,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 1,
+        "source_pin_name": "wait",
+        "target_node_guid": 10,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 20,
+        "source_pin_name": "examine",
+        "target_node_guid": 21,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 20,
+        "source_pin_name": "leave",
+        "target_node_guid": 22,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 21,
+        "source_pin_name": "Out",
+        "target_node_guid": 22,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 23,
+        "source_pin_name": "examine",
+        "target_node_guid": 24,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 23,
+        "source_pin_name": "leave",
+        "target_node_guid": 25,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 24,
+        "source_pin_name": "Out",
+        "target_node_guid": 25,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 26,
+        "source_pin_name": "examine",
+        "target_node_guid": 27,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 26,
+        "source_pin_name": "leave",
+        "target_node_guid": 28,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 27,
+        "source_pin_name": "Out",
+        "target_node_guid": 28,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 29,
+        "source_pin_name": "examine",
+        "target_node_guid": 30,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 29,
+        "source_pin_name": "leave",
+        "target_node_guid": 31,
+        "target_pin_name": "In"
+      },
+      {
+        "source_node_guid": 30,
+        "source_pin_name": "Out",
+        "target_node_guid": 31,
+        "target_pin_name": "In"
+      }
+    ],
+    "data_edges": []
+  },
+  "missionAssets": {},
+  "catalog": {
+    "space": {
+      "keys": [
+        "watch_the_water",
+        "lamp_soot",
+        "ilse_logbook",
+        "harbor_master_tides",
+        "press_teodor"
+      ],
+      "by_key": {
+        "harbor_master_tides": 3,
+        "ilse_logbook": 2,
+        "lamp_soot": 1,
+        "press_teodor": 4,
+        "watch_the_water": 0
+      },
+      "revision": 0,
+      "frozen": false
+    },
+    "is_ending": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "payload_ref": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "duration_minutes": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "frozen": false
+  },
+  "entityGameIds": {},
+  "participantIndices": {},
+  "implicitParticipant": false,
+  "chronicle": {
+    "entries": []
+  },
+  "connections": [],
+  "clock": null
+}

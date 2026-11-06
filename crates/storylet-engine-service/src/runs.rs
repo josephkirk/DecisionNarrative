@@ -924,3 +924,11 @@ impl StudioService {
 pub async fn coverage(State(s): State<StudioService>, Json(req): Json<CoverageRequest>) -> Response {
     match s.run_coverage(req).await { Ok(value) => Json(value).into_response(), Err(error) => error.into_response() }
 }
+
+pub async fn run_content(State(service): State<StudioService>) -> Response {
+    let inner = service.inner.lock().await;
+    match compile_run_content(&inner.store, None, None, None) {
+        Ok((content, _)) => Json(content).into_response(),
+        Err(error) => RunApiError::invalid(error).into_response(),
+    }
+}

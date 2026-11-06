@@ -6,9 +6,20 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+typedef struct DnRunHandle DnRunHandle;
 typedef struct DnEngineHandle DnEngineHandle;
 typedef struct DnPlaytestHandle DnPlaytestHandle;
 typedef struct { uint8_t *data; size_t len; } DnBuffer;
+/* Run API: UTF-8, NUL-terminated JSON. Returned strings belong to the engine
+ * and must be released with dn_string_free. On start failure, error_out receives
+ * an error JSON string when non-NULL. Rewind returns 0 on success and -1 on error.
+ * A handle is owned by one caller and must not be accessed concurrently. */
+DnRunHandle *dn_run_start(const char *content_json, const char *start_json, uint64_t seed, char **error_out);
+char *dn_run_view(DnRunHandle *run, uint16_t participant);
+char *dn_run_act(DnRunHandle *run, uint16_t participant, const char *action_json);
+int32_t dn_run_rewind(DnRunHandle *run, uint32_t to_step);
+void dn_run_free(DnRunHandle *run);
+void dn_string_free(char *value);
 uint32_t dn_engine_abi_version(void);
 DnEngineHandle *dn_engine_create(void);
 void dn_engine_destroy(DnEngineHandle *handle);

@@ -13,7 +13,7 @@ target_compile_features(storylet_native_host PRIVATE cxx_std_17)
 target_include_directories(storylet_native_host PRIVATE "${STORYLET_ROOT}/crates/storylet-engine/include")
 target_link_libraries(storylet_native_host PRIVATE "${STORYLET_TARGET_DIR}/storylet_engine.dll.lib")
 target_compile_definitions(storylet_native_host PRIVATE
-  STORYLET_PROJECT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/storylet-project.json")
+  STORYLET_CONTENT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/run-content.json")
 add_custom_command(TARGET storylet_native_host POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${STORYLET_TARGET_DIR}/storylet_engine.dll"

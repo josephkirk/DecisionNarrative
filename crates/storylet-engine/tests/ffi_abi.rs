@@ -89,3 +89,56 @@ fn native_abi_hosts_a_generic_storylet_from_scenario_through_choice() {
     unsafe { dn_playtest_destroy(restored) };
     unsafe { dn_playtest_destroy(handle) };
 }
+
+#[path = "support/weirs_crossing.rs"]
+mod weirs_crossing;
+
+#[test]
+fn ffi_run_round_trip() {
+    use std::ffi::{CStr, CString};
+    use storylet_engine::ffi::{dn_run_act, dn_run_free, dn_run_rewind, dn_run_start, dn_run_view, dn_string_free};
+    let content = CString::new(serde_json::to_string(&weirs_crossing::content()).unwrap()).unwrap();
+    let start = CString::new(r#"{"kind":"beginning"}"#).unwrap();
+    let mut error = std::ptr::null_mut();
+    let run = unsafe { dn_run_start(content.as_ptr(), start.as_ptr(), 7, &mut error) };
+    assert!(error.is_null());
+    assert!(!run.is_null());
+    let read = |pointer: *mut std::ffi::c_char| { assert!(!pointer.is_null()); let value: Value = serde_json::from_str(unsafe { CStr::from_ptr(pointer) }.to_str().unwrap()).unwrap(); unsafe { dn_string_free(pointer) }; value };
+    let first = read(unsafe { dn_run_view(run, 0) });
+    let action = CString::new(first["scene"]["choices"][0]["action"].to_string()).unwrap();
+    let acted = read(unsafe { dn_run_act(run, 0, action.as_ptr()) });
+    assert_eq!(acted["currentStep"], 1);
+    assert_eq!(unsafe { dn_run_rewind(run, 0) }, 0);
+    assert_eq!(read(unsafe { dn_run_view(run, 0) })["currentStep"], 0);
+    unsafe { dn_run_free(run) };
+}
+
+#[test]
+fn ffi_invalid_action_returns_error_json() {
+    use std::ffi::{CStr, CString};
+    use storylet_engine::ffi::{dn_run_act, dn_run_free, dn_run_start, dn_string_free};
+    let content = CString::new(serde_json::to_string(&weirs_crossing::content()).unwrap()).unwrap();
+    let start = CString::new(r#"{"kind":"beginning"}"#).unwrap();
+    let run = unsafe { dn_run_start(content.as_ptr(), start.as_ptr(), 7, std::ptr::null_mut()) };
+    assert!(!run.is_null());
+    let bad = CString::new(r#"{"kind":"choose","nodeGuid":999,"outputPin":0}"#).unwrap();
+    let response = unsafe { dn_run_act(run, 0, bad.as_ptr()) };
+    let value: Value = serde_json::from_str(unsafe { CStr::from_ptr(response) }.to_str().unwrap()).unwrap();
+    assert!(value["error"].is_string());
+    unsafe { dn_string_free(response); dn_run_free(run); }
+}
+
+#[test]
+fn ffi_start_reports_invalid_json_and_allows_null_cleanup() {
+    use std::ffi::{CStr, CString};
+    use storylet_engine::ffi::{dn_run_free, dn_run_start, dn_string_free};
+    let invalid = CString::new("not json").unwrap();
+    let start = CString::new(r#"{"kind":"beginning"}"#).unwrap();
+    let mut error = std::ptr::null_mut();
+    let handle = unsafe { dn_run_start(invalid.as_ptr(), start.as_ptr(), 0, &mut error) };
+    assert!(handle.is_null());
+    assert!(!error.is_null());
+    let value: Value = serde_json::from_str(unsafe { CStr::from_ptr(error) }.to_str().unwrap()).unwrap();
+    assert!(value["error"].is_string());
+    unsafe { dn_string_free(error); dn_string_free(std::ptr::null_mut()); dn_run_free(handle); }
+}

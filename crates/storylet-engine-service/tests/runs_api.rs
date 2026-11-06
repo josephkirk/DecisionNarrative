@@ -764,3 +764,23 @@ async fn invalid_replay_does_not_create_a_partial_run() {
     let (_, runs) = req(&app, "GET", "/api/v4/runs", None).await;
     assert!(runs.as_array().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn compiled_run_content_is_available_to_native_hosts() {
+    let (path, _) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, content) = req(&app, "GET", "/api/v4/run-content", None).await;
+    assert_eq!(status, StatusCode::OK, "{content}");
+    assert_eq!(content["contentRevision"], 3);
+    assert!(content["rootAsset"]["nodes"].as_array().unwrap().len() > 0);
+    use std::ffi::{CStr, CString};
+    use storylet_engine::ffi::{dn_run_free, dn_run_start, dn_run_view, dn_string_free};
+    let data = CString::new(content.to_string()).unwrap();
+    let start = CString::new(r#"{"kind":"beginning"}"#).unwrap();
+    let handle = unsafe { dn_run_start(data.as_ptr(), start.as_ptr(), 7, std::ptr::null_mut()) };
+    assert!(!handle.is_null());
+    let view = unsafe { dn_run_view(handle, 0) };
+    let value: Value = serde_json::from_str(unsafe { CStr::from_ptr(view) }.to_str().unwrap()).unwrap();
+    assert!(value["scene"].is_object());
+    unsafe { dn_string_free(view); dn_run_free(handle); }
+}

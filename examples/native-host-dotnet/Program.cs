@@ -1,107 +1,56 @@
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
-
-[StructLayout(LayoutKind.Sequential)]
-struct DnBuffer
-{
-    public IntPtr Data;
-    public nuint Len;
-}
 
 static class StoryletAbi
 {
     private const string Library = "storylet_engine.dll";
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    public static extern uint dn_engine_abi_version();
-
+    public static extern IntPtr dn_run_start([MarshalAs(UnmanagedType.LPUTF8Str)] string content,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string start, ulong seed, out IntPtr error);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr dn_playtest_create();
-
+    public static extern IntPtr dn_run_view(IntPtr run, ushort participant);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    public static extern void dn_playtest_destroy(IntPtr handle);
-
+    public static extern IntPtr dn_run_act(IntPtr run, ushort participant, [MarshalAs(UnmanagedType.LPUTF8Str)] string action);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    public static extern DnBuffer dn_playtest_start(IntPtr handle, byte[] projectJson, nuint projectLen, byte[] scenarioId, nuint scenarioLen);
-
+    public static extern int dn_run_rewind(IntPtr run, uint step);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    public static extern DnBuffer dn_playtest_evaluate(IntPtr handle, double targetTensionSlope);
-
+    public static extern void dn_run_free(IntPtr run);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    public static extern DnBuffer dn_playtest_execute_choice(IntPtr handle, byte[] choiceJson, nuint choiceLen);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    public static extern DnBuffer dn_playtest_snapshot(IntPtr handle);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    public static extern void dn_buffer_free(DnBuffer buffer);
+    public static extern void dn_string_free(IntPtr value);
 }
 
 static class Program
 {
-    private static string ReadAndFree(DnBuffer buffer)
+    private static JsonDocument ReadAndFree(IntPtr value)
     {
-        try
-        {
-            var length = checked((int)buffer.Len);
-            var bytes = new byte[length];
-            Marshal.Copy(buffer.Data, bytes, 0, length);
-            return Encoding.UTF8.GetString(bytes);
-        }
-        finally
-        {
-            StoryletAbi.dn_buffer_free(buffer);
-        }
+        if (value == IntPtr.Zero) throw new InvalidOperationException("Engine returned a null string.");
+        try { return JsonDocument.Parse(Marshal.PtrToStringUTF8(value)!); }
+        finally { StoryletAbi.dn_string_free(value); }
     }
 
-    private static JsonDocument RequireSuccess(string json)
+    public static async Task Main(string[] args)
     {
-        var document = JsonDocument.Parse(json);
-        if (!document.RootElement.GetProperty("ok").GetBoolean())
+        var path = args.Length > 0 ? args[0] : Path.Combine(AppContext.BaseDirectory, "run-content.json");
+        var content = await File.ReadAllTextAsync(path);
+        var run = StoryletAbi.dn_run_start(content, "{\"kind\":\"beginning\"}", 7, out var error);
+        if (run == IntPtr.Zero)
         {
-            var error = document.RootElement.GetProperty("error").GetString();
-            document.Dispose();
-            throw new InvalidOperationException(error);
+            using var detail = ReadAndFree(error);
+            throw new InvalidOperationException(detail.RootElement.ToString());
         }
-        return document;
-    }
-
-    public static async Task Main()
-    {
-        if (StoryletAbi.dn_engine_abi_version() != 1)
-            throw new InvalidOperationException("Unsupported storylet engine ABI version.");
-
-        var handle = StoryletAbi.dn_playtest_create();
-        if (handle == IntPtr.Zero) throw new InvalidOperationException("Could not create the storylet engine.");
         try
         {
-            var project = await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "storylet-project.json"));
-            var scenario = Encoding.UTF8.GetBytes("opening");
-            using (RequireSuccess(ReadAndFree(StoryletAbi.dn_playtest_start(handle, project, (nuint)project.Length, scenario, (nuint)scenario.Length))))
-                Console.WriteLine("Started the generic Archive Mystery scenario through the C ABI.");
-
-            using (var evaluation = RequireSuccess(ReadAndFree(StoryletAbi.dn_playtest_evaluate(handle, 0.15))))
-            {
-                var selected = evaluation.RootElement.GetProperty("result").GetProperty("selected").GetString();
-                if (selected != "read-receipt") throw new InvalidOperationException($"Unexpected selection: {selected}");
-                Console.WriteLine($"Rust director selected {selected}.");
-            }
-
-            var choice = Encoding.UTF8.GetBytes("{\"storyletId\":\"read-receipt\",\"choiceId\":\"read\",\"idempotencyKey\":\"dotnet:read-receipt\",\"expectedRevision\":0}");
-            using (var applied = RequireSuccess(ReadAndFree(StoryletAbi.dn_playtest_execute_choice(handle, choice, (nuint)choice.Length))))
-            {
-                var clue = applied.RootElement.GetProperty("result").GetProperty("world").GetProperty("properties").GetProperty("clue.receipt").GetBoolean();
-                if (!clue) throw new InvalidOperationException("Storylet effect did not reach the native host.");
-                Console.WriteLine("Choice effect reached the native host.");
-            }
-
-            using var snapshot = RequireSuccess(ReadAndFree(StoryletAbi.dn_playtest_snapshot(handle)));
-            Console.WriteLine(snapshot.RootElement.GetProperty("result").GetProperty("world").GetRawText());
+            using var first = ReadAndFree(StoryletAbi.dn_run_view(run, 0));
+            var action = first.RootElement.GetProperty("scene").GetProperty("choices")[0].GetProperty("action").GetRawText();
+            using var acted = ReadAndFree(StoryletAbi.dn_run_act(run, 0, action));
+            if (acted.RootElement.TryGetProperty("error", out var failure)) throw new InvalidOperationException(failure.ToString());
+            if (acted.RootElement.GetProperty("currentStep").GetInt32() != 1) throw new InvalidOperationException("Action did not advance the run.");
+            if (StoryletAbi.dn_run_rewind(run, 0) != 0) throw new InvalidOperationException("Rewind failed.");
+            using var rewound = ReadAndFree(StoryletAbi.dn_run_view(run, 0));
+            if (rewound.RootElement.GetProperty("currentStep").GetInt32() != 0) throw new InvalidOperationException("Rewind did not restore the start.");
+            Console.WriteLine("RunKernel start, act, view, and rewind passed through the C ABI.");
         }
-        finally
-        {
-            StoryletAbi.dn_playtest_destroy(handle);
-        }
+        finally { StoryletAbi.dn_run_free(run); }
     }
 }

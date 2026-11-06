@@ -1,21 +1,19 @@
 # Native storylet host
 
-This example demonstrates hosting a complete, generic storylet scenario from a native game process. `storylet-project.json` is an Archive Mystery fixture, not a built-in game world: the host loads it as project data, asks the Rust director to evaluate it, executes the selected choice, and reads the resulting world snapshot.
+The native examples load a compiled `RunContent` JSON document and drive the same deterministic run kernel as Play. The checked-in `run-content.json` is a small Weir's Crossing fixture. For another project, fetch `GET /api/v4/run-content` from its local Studio service and pass the saved JSON file as the first argument to either host.
 
-## ABI contract
+## C ABI
 
-The public C header is `crates/storylet-engine/include/storylet_engine.h`. The ABI accepts UTF-8 JSON buffers and returns UTF-8 JSON in `DnBuffer`. Inputs are borrowed until the function returns. Every returned buffer, including error results, must be released exactly once with `dn_buffer_free`. Check the `ok` field and then read either `result` or `error`. Destroy each handle with its matching destroy function. A `DnPlaytestHandle` owns one active scenario; create a new handle to host a different scenario. The ABI version is reported by `dn_engine_abi_version()`.
+Include `crates/storylet-engine/include/storylet_engine.h`. `dn_run_start` takes NUL-terminated UTF-8 JSON for content and start mode, plus a seed. On failure it returns a null handle and, when requested, an owned JSON error string. `dn_run_view` and `dn_run_act` return owned JSON strings; free each with `dn_string_free`. `dn_run_rewind` returns zero on success. Release the handle with `dn_run_free` and do not access one handle concurrently from multiple threads.
 
-## Verify the ABI
+## Verify
 
 On Windows with Rust and the .NET 8 SDK installed, run from the repository root:
 
 ```powershell
-pnpm smoke:native-host
+pwsh -NoProfile -File scripts/run-native-host.ps1
 ```
 
-The .NET console app uses P/Invoke against the exported C ABI and exercises scenario load, director evaluation, choice execution, and snapshot retrieval. This is the automated cross-language host check.
+The .NET host loads the fixture and checks start, view, action, and rewind through the exported C ABI. To use another compiled document, build the Rust library and run the .NET project with the document path after `--`.
 
-## C++ / Unreal integration
-
-`main.cpp` is a small C++ host and `CMakeLists.txt` builds it against the generated Windows import library. Build the `storylet-engine` Rust crate first, then configure CMake with a C++ toolchain. Unreal modules can include the same C header and link the platform-specific library produced by Cargo; keep the engine handle owned by the game subsystem and pass scenario/project JSON from game content. The C++ sample has not been compiled in environments without a C++ compiler.
+The C++ host uses the same API. Its CMake project links the Windows Rust DLL import library; build the Rust crate first, then configure and build `examples/native-host` with a C++ toolchain. Its built-in action targets the checked-in fixture's opening choice, so a different document needs a matching action supplied by the host.

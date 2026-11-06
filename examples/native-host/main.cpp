@@ -1,69 +1,31 @@
 #include "storylet_engine.h"
-
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <string>
 
-static std::string copy_and_free(DnBuffer buffer) {
-  if (buffer.data == nullptr || buffer.len == 0) {
-    dn_buffer_free(buffer);
-    return {};
-  }
-  std::string result(reinterpret_cast<const char *>(buffer.data), buffer.len);
-  dn_buffer_free(buffer);
+static std::string copy_and_free(char *value) {
+  if (!value) return {};
+  std::string result(value);
+  dn_string_free(value);
   return result;
 }
 
-static bool call_succeeded(const std::string &json) {
-  return json.find("\"ok\":true") != std::string::npos;
-}
-
-int main() {
-  std::ifstream project_file(STORYLET_PROJECT_PATH, std::ios::binary);
-  if (!project_file) {
-    std::cerr << "Could not open the generic sample project.\n";
-    return 1;
-  }
-  const std::string project((std::istreambuf_iterator<char>(project_file)), {});
-  const std::string scenario = "opening";
-
-  DnPlaytestHandle *engine = dn_playtest_create();
-  if (engine == nullptr) {
-    std::cerr << "Could not create a storylet engine handle.\n";
-    return 1;
-  }
-
-  const std::string started = copy_and_free(dn_playtest_start(
-      engine, reinterpret_cast<const uint8_t *>(project.data()), project.size(),
-      reinterpret_cast<const uint8_t *>(scenario.data()), scenario.size()));
-  if (!call_succeeded(started)) {
-    std::cerr << started << '\n';
-    dn_playtest_destroy(engine);
-    return 1;
-  }
-  std::cout << "Started generic scenario: " << started << '\n';
-
-  const std::string evaluation = copy_and_free(dn_playtest_evaluate(engine, 0.15));
-  if (!call_succeeded(evaluation) || evaluation.find("\"selected\":\"read-receipt\"") == std::string::npos) {
-    std::cerr << "Director did not select the expected eligible storylet: " << evaluation << '\n';
-    dn_playtest_destroy(engine);
-    return 1;
-  }
-  std::cout << "Director selected: " << evaluation << '\n';
-
-  const std::string choice = R"({"storyletId":"read-receipt","choiceId":"read","idempotencyKey":"native:read-receipt","expectedRevision":0})";
-  const std::string applied = copy_and_free(dn_playtest_execute_choice(
-      engine, reinterpret_cast<const uint8_t *>(choice.data()), choice.size()));
-  if (!call_succeeded(applied) || applied.find("\"clue.receipt\":true") == std::string::npos) {
-    std::cerr << "The storylet choice did not apply its authored effect: " << applied << '\n';
-    dn_playtest_destroy(engine);
-    return 1;
-  }
-  std::cout << "Choice applied: " << applied << '\n';
-
-  const std::string snapshot = copy_and_free(dn_playtest_snapshot(engine));
-  std::cout << "Final session: " << snapshot << '\n';
-  dn_playtest_destroy(engine);
+int main(int argc, char **argv) {
+  const char *path = argc > 1 ? argv[1] : STORYLET_CONTENT_PATH;
+  std::ifstream file(path, std::ios::binary);
+  if (!file) { std::cerr << "Could not open run content.\n"; return 1; }
+  const std::string content((std::istreambuf_iterator<char>(file)), {});
+  char *error = nullptr;
+  DnRunHandle *run = dn_run_start(content.c_str(), R"({"kind":"beginning"})", 7, &error);
+  if (!run) { std::cerr << copy_and_free(error) << '\n'; return 1; }
+  const auto before = copy_and_free(dn_run_view(run, 0));
+  // This fixture's opening interaction is node 1, first choice.
+  const auto after = copy_and_free(dn_run_act(run, 0, R"({"kind":"choose","nodeGuid":1,"outputPin":0})"));
+  const bool ok = before.find("\"currentStep\":0") != std::string::npos &&
+                  after.find("\"currentStep\":1") != std::string::npos && dn_run_rewind(run, 0) == 0;
+  dn_run_free(run);
+  if (!ok) { std::cerr << "Run failed: " << after << '\n'; return 1; }
+  std::cout << "RunKernel start, act, view, and rewind passed.\n";
   return 0;
 }

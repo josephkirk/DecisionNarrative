@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <None Include="../native-host/storylet-project.json" Link="storylet-project.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../native-host/run-content.json" Link="run-content.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../crates/storylet-engine/target/debug/storylet_engine.dll" Link="storylet_engine.dll" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
