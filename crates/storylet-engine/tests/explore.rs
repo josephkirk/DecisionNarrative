@@ -98,12 +98,12 @@ fn milestone_requires_completed_route_not_just_selecting_a_storylet() {
 
 #[test]
 #[cfg_attr(debug_assertions, ignore)]
-fn release_explorer_2000_short_runs_finishes_within_budget() {
+fn release_explorer_2000_runs_finishes_within_budget() {
     use storylet_engine::chrono_explore::{ExploreConfig, ParticipantConfig, Persona, explore};
     let content = weirs_crossing::content_all_humans();
     let config = ExploreConfig {
         runs: 2000,
-        max_steps: 30,
+        max_steps: 500,
         personas: vec![Persona::Investigator {
             epsilon_permille: 150,
         }],
@@ -212,10 +212,77 @@ fn probe_colocation_uses_authored_entity_identity() {
 
 #[test]
 fn dead_air_counts_a_hub_that_offers_only_fallback_storylets() {
-    use storylet_engine::chrono_explore::{explore, ExploreConfig, ParticipantConfig, Persona};
+    use storylet_engine::chrono_explore::{ExploreConfig, ParticipantConfig, Persona, explore};
     let mut content = weirs_crossing::content();
-    for storylet in &mut content.dispatcher.storylets { storylet.is_fallback = true; }
-    let config = ExploreConfig { runs: 1, seed: 1, max_steps: 2, personas: vec![Persona::Investigator { epsilon_permille: 0 }], configs: vec![ParticipantConfig::Solo], ..Default::default() };
+    for storylet in &mut content.dispatcher.storylets {
+        storylet.is_fallback = true;
+    }
+    let config = ExploreConfig {
+        runs: 1,
+        seed: 1,
+        max_steps: 2,
+        personas: vec![Persona::Investigator {
+            epsilon_permille: 0,
+        }],
+        configs: vec![ParticipantConfig::Solo],
+        ..Default::default()
+    };
     let report = explore(&content, &config);
     assert_eq!(report.cells[0].dead_air_by_location[0].1, 1);
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore)]
+fn stranding_detected_without_on_close_replays_the_recorded_actions() {
+    use storylet_engine::chrono_explore::{
+        ExploreConfig, Invariant, ParticipantConfig, Persona, explore,
+    };
+    use storylet_engine::run::{RunKernel, RunStart};
+    let content = weirs_crossing::content_without_causeway_close_rule();
+    let config = ExploreConfig {
+        runs: 2000,
+        max_steps: 40,
+        personas: vec![Persona::Wanderer],
+        configs: vec![ParticipantConfig::Solo],
+        ..Default::default()
+    };
+    let report = explore(&content, &config);
+    let violation = report
+        .violations
+        .iter()
+        .find(|v| matches!(v.invariant, Invariant::OccupantBeyondClosedEdge))
+        .expect("expected a stranding trace");
+    assert!(!violation.actions.is_empty());
+    let (replayed, divergence) = RunKernel::replay(
+        &content,
+        RunStart::Beginning,
+        violation.seed,
+        &violation.actions,
+    );
+    assert_eq!(divergence, None);
+    assert!(
+        replayed
+            .unwrap()
+            .world
+            .participants
+            .location
+            .iter()
+            .any(|place| *place == Some(weirs_crossing::ROCK))
+    );
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore)]
+fn weirs_crossing_has_no_invariant_violations() {
+    use storylet_engine::chrono_explore::{ExploreConfig, ParticipantConfig, Persona, explore};
+    let config = ExploreConfig {
+        runs: 2000,
+        max_steps: 40,
+        personas: vec![Persona::Wanderer],
+        configs: vec![ParticipantConfig::Solo],
+        ..Default::default()
+    };
+    let report = explore(&weirs_crossing::explorer_content(), &config);
+    assert_eq!(report.error_count, 0, "{:?}", report.errors);
+    assert!(report.violations.is_empty(), "{:?}", report.violations);
 }

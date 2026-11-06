@@ -349,6 +349,13 @@ try {
   await page.getByText("Agent draft", { exact: true }).waitFor();
   check("agent draft is marked in the editor", await page.getByText("Agent draft", { exact: true }).isVisible());
   await shot(page, "20-agent-draft");
+  await page.getByRole("checkbox", { name: "Fallback storylet" }).check();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes("/api/v3/content/storylets/agent-draft") && response.request().method() === "PUT" && response.ok()),
+    page.getByRole("button", { name: "Save draft" }).click(),
+  ]);
+  const savedDraft = await api("GET", "/api/v3/content/storylets/agent-draft");
+  check("fallback marker saves from the inspector", savedDraft.is_fallback === true);
   const draft = await api("GET", "/api/v3/content/storylets/agent-draft");
   await api("POST", "/api/v3/storylets/agent-draft/approve", { expectedRevision: draft.revision });
   await page.reload();
