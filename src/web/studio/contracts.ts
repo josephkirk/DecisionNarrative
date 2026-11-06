@@ -267,3 +267,70 @@ export interface ContentReference {
   field: string;
   via: ReferenceVia;
 }
+
+// ---- Run API (/api/v4/runs); mirrors crates/storylet-engine run.rs and storylet-engine-service runs.rs ----
+
+export type RunAction =
+  | { kind: "choose"; nodeGuid: number; outputPin: number }
+  | { kind: "play_storylet"; nodeGuid: number; storylet: number }
+  | { kind: "topic"; nodeGuid: number; edgeId: number }
+  | { kind: "move"; to: number }
+  | { kind: "wait" };
+
+export type RunStart = { kind: "beginning" } | { kind: "storylet"; storylet: number };
+
+export interface RunStartInput {
+  start: RunStart;
+  scenarioId?: string;
+  seed?: number;
+  /** Project revision the caller compiled against; the client fills it from the project when omitted. */
+  expectedRevision?: number;
+}
+
+export interface StoryletRef { id: number; title: string }
+export interface ParticipantView { id: number; name: string }
+export interface PlaceView { id: number; name: string; /** Present only when the project has a clock. */ clock?: string }
+export interface LineView { text: string }
+export interface ChoiceView { action: RunAction; label: string; enabled: boolean; requirement: string | null }
+export interface SceneView { storylet: StoryletRef; lines: LineView[]; choices: ChoiceView[]; nodeGuid: number }
+export interface RunStep { index: number; branch: number; participant: number; action: RunAction; label: string }
+export interface BranchView { id: number; steps: RunStep[] }
+
+export interface RunView {
+  participant: number;
+  participants: ParticipantView[];
+  place: PlaceView | null;
+  scene: SceneView | null;
+  alsoHere: StoryletRef[];
+  nothingHere: boolean;
+  ending: StoryletRef | null;
+  steps: RunStep[];
+  currentStep: number;
+  branches: BranchView[];
+}
+
+export interface RunEnvelope {
+  id: string;
+  revision: number;
+  stale: boolean;
+  contentRevision: number;
+  view: RunView;
+  stalled?: { storyletId: number | null; nodeGuid: number };
+}
+
+export interface RunReloadResult extends RunEnvelope { replayed: number; divergedAt: number | null }
+
+export interface RunSummary {
+  id: string; title: string; steps: number; ending: StoryletRef | null; stale: boolean; updatedAt: number;
+}
+
+export interface NearMiss { storylet: StoryletRef; reason: string }
+
+export type KnowKind = "evidence" | "witnessed" | "told" | "rumor" | "recollection" | "testimony";
+export interface KnowRowView { fact: string; kind: KnowKind; confirmed: boolean; sourceStep: number | null }
+export interface ChangeView { key: string; before: string; after: string }
+export interface ChronicleRowView { key: string; label: string; place: string | null; storyTime: number; told: number | null }
+export interface AdvancedView { runSeed: number; contentRevision: number; nodeGuid: number | null; interaction: string | null }
+export interface InspectView {
+  knows: KnowRowView[]; worldChanges: ChangeView[]; chronicle: ChronicleRowView[]; advanced: AdvancedView;
+}

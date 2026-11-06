@@ -1,8 +1,15 @@
 import type {
   AuthoringOptions,
   ContentReference,
+  InspectView,
   LibraryPageResult,
+  NearMiss,
   ProjectMetadata,
+  RunAction,
+  RunEnvelope,
+  RunReloadResult,
+  RunStartInput,
+  RunSummary,
   StoryletRecord,
 } from "./contracts.ts";
 import type { StudioInteractionContext } from "./interactionContext.ts";
@@ -37,7 +44,47 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return (await resp.json()) as T;
 }
 
+/** The slice of the runs client the play view-model depends on (kept small so tests can fake it). */
+export interface RunsApi {
+  start(input: RunStartInput): Promise<RunEnvelope>;
+  view(id: string, participant: number): Promise<RunEnvelope>;
+  act(id: string, participant: number, action: RunAction, expectedRevision: number, idempotencyKey: string): Promise<RunEnvelope>;
+  rewind(id: string, toStep: number, expectedRevision: number, idempotencyKey: string): Promise<RunEnvelope>;
+  whyNot(id: string, participant: number): Promise<{ nearMisses: NearMiss[] }>;
+  inspect(id: string, participant: number): Promise<InspectView>;
+  reload(id: string, expectedRevision: number, idempotencyKey: string): Promise<RunReloadResult>;
+}
+
+function post<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, { method: "POST", body: JSON.stringify(body) });
+}
+const runPath = (id: string) => `/api/v4/runs/${encodeURIComponent(id)}`;
+
+const runs: RunsApi & {
+  list(): Promise<RunSummary[]>;
+  remove(id: string, expectedRevision: number, idempotencyKey: string): Promise<{ ok: boolean }>;
+} = {
+  async start(input) {
+    const expectedRevision = input.expectedRevision ?? (await request<ProjectMetadata>("/api/v3/project")).revision;
+    return post<RunEnvelope>("/api/v4/runs", { ...input, expectedRevision, idempotencyKey: crypto.randomUUID() });
+  },
+  list: () => request<RunSummary[]>("/api/v4/runs"),
+  view: (id, participant) => request<RunEnvelope>(`${runPath(id)}?participant=${participant}`),
+  act: (id, participant, action, expectedRevision, idempotencyKey) =>
+    post<RunEnvelope>(`${runPath(id)}/act`, { participant, action, expectedRevision, idempotencyKey }),
+  rewind: (id, toStep, expectedRevision, idempotencyKey) =>
+    post<RunEnvelope>(`${runPath(id)}/rewind`, { toStep, expectedRevision, idempotencyKey }),
+  whyNot: (id, participant) => request<{ nearMisses: NearMiss[] }>(`${runPath(id)}/why-not?participant=${participant}`),
+  inspect: (id, participant) => request<InspectView>(`${runPath(id)}/inspect?participant=${participant}`),
+  reload: (id, expectedRevision, idempotencyKey) =>
+    post<RunReloadResult>(`${runPath(id)}/reload`, { expectedRevision, idempotencyKey }),
+  remove: (id, expectedRevision, idempotencyKey) =>
+    request<{ ok: boolean }>(runPath(id), { method: "DELETE", body: JSON.stringify({ expectedRevision, idempotencyKey }) }),
+};
+
 export const StudioApi = {
+  runs,
+
   // Authoring options
   getAuthoringOptions(): Promise<AuthoringOptions> {
     return request<AuthoringOptions>("/api/v3/authoring-options");
