@@ -13,12 +13,14 @@
     "engine:service": "cargo run --manifest-path crates/storylet-engine-service/Cargo.toml --bin storylet-engine-service",
     "smoke:native-host": "pwsh -NoProfile -File scripts/run-native-host.ps1",
     "test": "bun test",
+    "test:visual": "bun run build && node tests/visual/play-visual.ts",
     "bench": "cargo run --release --manifest-path crates/storylet-engine/Cargo.toml --bin storylet-engine-bench --"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@vitejs/plugin-vue": "^6.0.10",
     "bun-types": "1.3.14",
+    "playwright-core": "^1.65.0",
     "typescript": "^5.7.0",
     "vite": "^8.3.4",
     "vue-tsc": "^3.3.13"

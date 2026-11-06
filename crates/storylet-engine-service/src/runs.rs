@@ -26,6 +26,8 @@ pub(crate) struct CachedRun {
 struct StartConfig {
     start: RunStart,
     scenario_id: Option<String>,
+    #[serde(default)]
+    storylet_id: Option<String>,
     content: RunContent,
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -318,6 +320,9 @@ fn require_key(key: &str) -> Result<(), RunApiError> {
 #[serde(rename_all = "camelCase")]
 pub struct StartRequest {
     start: RunStart,
+    /// Start at this storylet (by authored id); overrides `start`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    storylet_id: Option<String>,
     scenario_id: Option<String>,
     seed: Option<u64>,
     expected_revision: u64,
@@ -366,6 +371,7 @@ impl StudioService {
             &inner.store,
             req.scenario_id.as_deref(),
             Some(req.expected_revision),
+            req.storylet_id.as_deref(),
         ) {
             Ok(compiled) => compiled,
             Err(error) if error == "stale revision" => {
@@ -394,6 +400,7 @@ impl StudioService {
             start: StartConfig {
                 start: req.start,
                 scenario_id: req.scenario_id,
+                storylet_id: req.storylet_id,
                 content: content.clone(),
             },
             actions: vec![],
@@ -639,7 +646,7 @@ impl StudioService {
             return Err(RunApiError::conflict("stale revision"));
         }
         let (content, _) =
-            compile_run_content(&inner.store, row.start.scenario_id.as_deref(), None)
+            compile_run_content(&inner.store, row.start.scenario_id.as_deref(), None, row.start.storylet_id.as_deref())
                 .map_err(RunApiError::invalid)?;
         if row.start.content.catalog.space() != content.catalog.space()
             || row.start.content.registry != content.registry

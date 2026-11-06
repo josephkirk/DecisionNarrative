@@ -282,12 +282,14 @@ export type RunStart = { kind: "beginning" } | { kind: "storylet"; storylet: num
 export interface RunStartInput {
   start: RunStart;
   scenarioId?: string;
+  /** Begin at this authored storylet instead of the scenario default. */
+  storyletId?: string;
   seed?: number;
   /** Project revision the caller compiled against; the client fills it from the project when omitted. */
   expectedRevision?: number;
 }
 
-export interface StoryletRef { id: number; title: string }
+export interface StoryletRef { id: number; title: string; /** Authored storylet id; use for editor links. */ key?: string }
 export interface ParticipantView { id: number; name: string }
 export interface PlaceView { id: number; name: string; /** Present only when the project has a clock. */ clock?: string }
 export interface LineView { text: string }

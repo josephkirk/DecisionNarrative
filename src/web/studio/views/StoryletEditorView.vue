@@ -6,6 +6,7 @@ import NarrativeGraphCanvas from "../components/NarrativeGraphCanvas.vue";
 import PropertyInspector from "../components/PropertyInspector.vue";
 import { buildGraphFromStorylet, compileGraphToStorylet, validateNarrativeGraph, validatePreconditionGraph, type NarrativeGraph } from "../narrativeGraphTypes.ts";
 import { notify, studioState } from "../state.ts";
+import { StudioApi } from "../api.ts";
 import { interactionContextKey } from "../interactionContext.ts";
 
 const route = useRoute();
@@ -109,6 +110,15 @@ function goBack() {
   router.push("/storylets");
 }
 
+async function playFromHere() {
+  try {
+    const run = await StudioApi.runs.start({ start: { kind: "beginning" }, storyletId: String(draft.id) });
+    await router.push({ name: "play-run", params: { runId: run.id } });
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), "error");
+  }
+}
+
 async function handleSave() {
   const graphIssues = [...validateNarrativeGraph(currentGraph.value), ...validatePreconditionGraph(preconditionGraph.value)];
   if (graphIssues.length) { notify(graphIssues.join(" "), "error"); return; }
@@ -152,6 +162,12 @@ function deleteSelectedNode(nodeId: string) {
         <span v-if="isDirty" class="badge unsaved">Unsaved edits</span>
       </div>
       <div class="toolbar-right">
+        <button
+          class="btn btn-secondary"
+          :disabled="loading || isNew || isDirty"
+          :title="isNew || isDirty ? 'Save the draft before playing it' : 'Play starting at this storylet'"
+          @click="playFromHere"
+        >▶ Play from here</button>
         <button class="btn btn-secondary" :disabled="loading" @click="handleSave">Save draft</button>
         <button class="btn btn-primary" :disabled="!canApprove" :title="isDirty ? 'Save draft before approving' : 'Approve current revision'" @click="handleApprove">Approve revision</button>
       </div>

@@ -141,19 +141,23 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
     }
   }
 
-  function nextParticipant(dir: 1 | -1): void {
+  function setParticipant(id: number): void {
     const count = state.envelope?.view.participants.length ?? 0;
-    if (count < 2 || !state.runId) return;
-    state.activeParticipant = (state.activeParticipant + dir + count) % count;
-    const id = state.runId;
-    const participant = state.activeParticipant;
+    if (!state.runId || id < 0 || id >= count) return;
+    state.activeParticipant = id;
     // Switching who is playing re-reads the view; the latest selection wins if reads overlap.
-    api.view(id, participant).then(
+    api.view(state.runId, id).then(
       (envelope) => {
-        if (participant === state.activeParticipant) void adopt(envelope);
+        if (id === state.activeParticipant) void adopt(envelope);
       },
       (e) => { state.error = message(e); },
     );
+  }
+
+  function nextParticipant(dir: 1 | -1): void {
+    const count = state.envelope?.view.participants.length ?? 0;
+    if (count < 2) return;
+    setParticipant((state.activeParticipant + dir + count) % count);
   }
 
   async function onKey(e: { key: string; ctrlKey: boolean }): Promise<void> {
@@ -182,6 +186,6 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
   }
 
   return {
-    state, start, open, act, rewind, undo, reload, toggleWhy, toggleInspect, setInspectTab, nextParticipant, onKey,
+    state, start, open, act, rewind, undo, reload, toggleWhy, toggleInspect, setInspectTab, setParticipant, nextParticipant, onKey,
   };
 }

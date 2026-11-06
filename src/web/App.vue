@@ -122,6 +122,8 @@ onMounted(async () => {
         </router-link>
       </nav>
 
+      <router-link to="/play" class="btn btn-primary studio-toolbar__play" aria-label="Play the project">▶ Play</router-link>
+
       <div class="studio-toolbar__status">
         {{ studioState.project?.name ?? "Workspace" }} · rev {{ studioState.project?.revision ?? 0 }}
       </div>

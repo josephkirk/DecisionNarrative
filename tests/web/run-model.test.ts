@@ -65,3 +65,44 @@ test("chronicleRows keeps story-time order and told only on revealed rows", () =
     { label: "Flood", told: 3, place: "Weir" },
   ]);
 });
+
+import { activeBranchId, editLink, stepText, timelineDots } from "../../src/web/studio/runModel.ts";
+import type { BranchView, RunStep } from "../../src/web/studio/contracts.ts";
+
+const stepOf = (index: number, branch: number, action: RunStep["action"]): RunStep => ({ index, branch, participant: 0, action, label: "debug" });
+
+test("stepText describes each action kind in plain words", () => {
+  expect(stepText(stepOf(1, 0, { kind: "choose", nodeGuid: 1, outputPin: 1 }))).toBe("Chose option 2");
+  expect(stepText(stepOf(2, 0, { kind: "play_storylet", nodeGuid: 1, storylet: 3 }))).toBe("Started a storylet");
+  expect(stepText(stepOf(3, 0, { kind: "topic", nodeGuid: 1, edgeId: 3 }))).toBe("Asked about a topic");
+  expect(stepText(stepOf(4, 0, { kind: "move", to: 2 }))).toBe("Moved");
+  expect(stepText(stepOf(5, 0, { kind: "wait" }))).toBe("Waited");
+});
+
+test("timelineDots marks done, current and ghost steps from the active branch", () => {
+  const a = stepOf(1, 0, { kind: "wait" });
+  const b = stepOf(2, 0, { kind: "wait" });
+  const c = stepOf(3, 0, { kind: "wait" });
+  const branches: BranchView[] = [{ id: 0, steps: [a, b, c] }];
+  const v = view({ steps: [a], currentStep: 1, branches });
+  expect(timelineDots(v).map((d) => [d.index, d.state])).toEqual([[0, "done"], [1, "current"], [2, "ghost"], [3, "ghost"]]);
+  expect(timelineDots(view({ steps: [], currentStep: 0, branches: [] })).map((d) => d.state)).toEqual(["current"]);
+});
+
+test("activeBranchId follows the last applied step and branch chips need two branches", () => {
+  const s = stepOf(1, 2, { kind: "wait" });
+  expect(activeBranchId(view({ steps: [s], currentStep: 1, branches: [{ id: 0, steps: [] }, { id: 2, steps: [s] }] }))).toBe(2);
+  expect(activeBranchId(view())).toBe(0);
+});
+
+test("editLink points at the authored storylet when its key is known", () => {
+  expect(editLink({ id: 1, title: "A", key: "a b" })).toBe("/storylets/a%20b/edit");
+  expect(editLink({ id: 1, title: "A" })).toBeNull();
+});
+
+import { stepCountText } from "../../src/web/studio/runModel.ts";
+test("stepCountText pluralises", () => {
+  expect(stepCountText(0)).toBe("0 steps");
+  expect(stepCountText(1)).toBe("1 step");
+  expect(stepCountText(12)).toBe("12 steps");
+});

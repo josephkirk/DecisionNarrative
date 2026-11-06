@@ -2969,7 +2969,7 @@ mod tests {
 }
 
 /// Compile a deterministic Run API content snapshot from the authored workspace.
-pub(crate) fn compile_run_content(store: &Store, scenario_id: Option<&str>, expected_revision: Option<u64>) -> Result<(storylet_engine::run::RunContent, u64), String> {
+pub(crate) fn compile_run_content(store: &Store, scenario_id: Option<&str>, expected_revision: Option<u64>, start_storylet_id: Option<&str>) -> Result<(storylet_engine::run::RunContent, u64), String> {
     let tx = store.conn.unchecked_transaction().map_err(|e|e.to_string())?;
     let meta = store.get_project_metadata().map_err(|e| e.to_string())?;
     if expected_revision.is_some_and(|expected| expected != meta.revision) { return Err("stale revision".into()); }
@@ -3001,9 +3001,20 @@ pub(crate) fn compile_run_content(store: &Store, scenario_id: Option<&str>, expe
         if mask.is_none_or(|mask|mask.is_empty()) || matched {candidates.push((!matched,storylet.id.as_str()));}
     }
     candidates.sort();
-    let start=candidates.first().map(|(_,id)|*id).ok_or("No eligible storylet at the starting location")?;
+    let start=match start_storylet_id {
+        Some(id) => content.storylets.iter().map(|s|s.id.as_str()).find(|s|*s==id).filter(|id|graphs.storylet_start_nodes.contains_key(*id)).ok_or_else(||format!("unknown storylet \"{id}\""))?,
+        None => candidates.first().map(|(_,id)|*id).ok_or("No eligible storylet at the starting location")?,
+    };
     graphs.asset.start_node_guid = graphs.storylet_start_nodes[start];
     compiled.start_storylet = compiled.storylet_index(start).ok_or("Missing starting storylet")?;
+    compiled.entity_names = content
+        .locations
+        .iter()
+        .map(|e| (&e.id, &e.name))
+        .chain(content.characters.iter().map(|e| (&e.id, &e.name)))
+        .chain(content.world_objects.iter().map(|e| (&e.id, &e.name)))
+        .filter_map(|(id, name)| seed.entity_indices.get(id).map(|index| (*index, name.clone())))
+        .collect();
     compiled.initial_world = seed.state;
     compiled.content_revision = meta.revision;
     compiled.root_asset = graphs.asset;
@@ -3027,7 +3038,7 @@ mod run_compile_revision_tests {
         assert_eq!(reader.get_project_metadata().unwrap().revision,expected);
         let writer=Store::open(&path).unwrap();
         writer.save_content("storylets","new","{}",1,None).unwrap();
-        let error=compile_run_content(&reader,None,Some(expected)).unwrap_err();
+        let error=compile_run_content(&reader,None,Some(expected),None).unwrap_err();
         assert_eq!(error,"stale revision");
     }
 }

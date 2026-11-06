@@ -89,6 +89,9 @@ pub struct RunStep {
 pub struct StoryletRef {
     pub id: u16,
     pub title: String,
+    /// The authored storylet id, for links back to the editor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -209,6 +212,7 @@ impl RunKernel {
                 .get(&id)
                 .cloned()
                 .unwrap_or_else(|| id.to_string()),
+            key: content.storylet_key(id).map(str::to_string),
         }
     }
     fn snapshot(&self) -> Snapshot {

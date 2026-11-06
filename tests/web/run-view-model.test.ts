@@ -125,3 +125,17 @@ test("nextParticipant wraps and onKey dispatches choices", async () => {
   await play.onKey({ key: "1", ctrlKey: false });
   expect(api.calls).toContain("act");
 });
+
+test("setParticipant selects a known participant and re-reads the view", async () => {
+  const api = fakeApi({
+    view: async (_id, p) => { api.calls.push(`view:${p}`); return env({}, { participant: p, participants: [{ id: 0, name: "A" }, { id: 1, name: "B" }] }); },
+  });
+  const play = usePlay(api);
+  await play.open("r1");
+  play.setParticipant(1);
+  expect(play.state.activeParticipant).toBe(1);
+  await Promise.resolve();
+  expect(api.calls).toContain("view:1");
+  play.setParticipant(9);
+  expect(play.state.activeParticipant).toBe(1);
+});

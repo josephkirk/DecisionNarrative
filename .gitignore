@@ -39,3 +39,6 @@ graphify-out/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
 
 # Uploaded project assets (thumbnails) served from the project resource root
 /project-files/
+
+# Visual test screenshots
+tests/visual/out/

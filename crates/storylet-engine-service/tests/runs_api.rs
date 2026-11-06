@@ -515,3 +515,28 @@ fn failed_revision_update_rolls_back_content_save() {
     );
     assert_eq!(store.get_project_metadata().unwrap().revision, before);
 }
+
+#[tokio::test]
+async fn start_from_storylet_id_resolves_the_index() {
+    let (path, _) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, started) = req(
+        &app,
+        "POST",
+        "/api/v4/runs",
+        Some(json!({"start":{"kind":"beginning"},"storyletId":"story","expectedRevision":3,"idempotencyKey":"by-id"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    assert_eq!(started["view"]["scene"]["storylet"]["title"], "Story");
+    assert_eq!(started["view"]["scene"]["storylet"]["key"], "story");
+    assert_eq!(started["view"]["place"]["name"], "Harbor");
+    let (status, error) = req(
+        &app,
+        "POST",
+        "/api/v4/runs",
+        Some(json!({"start":{"kind":"beginning"},"storyletId":"nope","expectedRevision":3,"idempotencyKey":"bad-id"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+}
