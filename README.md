@@ -28,6 +28,8 @@ bun run build
 bun run play
 ```
 
+On Windows you can run `run.bat` (or `run.bat fresh`) instead, which installs dependencies if needed, then builds and starts the service.
+
 Open `http://127.0.0.1:3000` in your browser (e.g. Microsoft Edge, Chrome, Safari). `bun run play` uses `data/storylet_studio_v5.db`; set `STORYLET_STUDIO_DB_PATH` to select a different file or `:memory:` for isolated testing.
 
 `bun run play:fresh` opens the separate `data/storylet_studio_v5_clean.db` workspace and binds on port 3001; it does not modify the default database. Earlier schema versions are rejected without migration. The MCP process inherits `STORYLET_STUDIO_DB_PATH` when the agent client passes it through.
