@@ -753,3 +753,14 @@ async fn invalid_default_learn_visibility_is_rejected() {
     let (status, _) = req(&app, "POST", "/api/v3/content/storylets", Some(json!({"id":"bad-visibility","title":"Bad","content":{"text_template":"x"},"created_at":1,"default_learn_visibility":"everyone"}))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn invalid_replay_does_not_create_a_partial_run() {
+    let (path, _) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let body = json!({"start":{"kind":"beginning"},"actions":[[0,{"kind":"choose","nodeGuid":999999,"outputPin":0}]],"expectedRevision":3,"idempotencyKey":"bad-replay"});
+    let (status, _) = req(&app, "POST", "/api/v4/runs", Some(body)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, runs) = req(&app, "GET", "/api/v4/runs", None).await;
+    assert!(runs.as_array().unwrap().is_empty());
+}
