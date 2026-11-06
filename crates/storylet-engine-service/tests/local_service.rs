@@ -151,3 +151,38 @@ async fn old_v5_virtual_participant_trait_is_directly_readable_and_protected() {
     drop(conn);
     std::fs::remove_file(path).unwrap();
 }
+
+fn reveal_storylet(event_id: &str) -> Value {
+    json!({"id":"tell","title":"Tell","content":{"text_template":"x"},"created_at":1,
+      "graph":{"nodes":[
+        {"id":"start","title":"Start","type":"start","text":"Start","x":0,"y":0,"width":100,"height":80},
+        {"id":"reveal","title":"Tell the flood","type":"reveal","event_id":event_id,"kind":"recollection","visibility":"private","x":100,"y":0,"width":100,"height":80},
+        {"id":"end","title":"End","type":"end","is_terminal":true,"x":200,"y":0,"width":100,"height":80}],
+       "edges":[
+        {"id":"e1","from_node":"start","from_port":"output","to_node":"reveal","to_port":"input"},
+        {"id":"e2","from_node":"reveal","from_port":"output","to_node":"end","to_port":"input"}]}})
+}
+
+fn event(id: &str, kind: &str, story_time: Value) -> Value {
+    json!({"id":id,"title":id,"description":"","event_type":kind,"trigger":null,"effects":null,"story_time":story_time})
+}
+
+#[tokio::test]
+async fn reveal_requires_canon_event_with_story_time() {
+    let app = test_app();
+    for e in [event("flood", "canon", json!(20)), event("untimed", "canon", Value::Null), event("storm", "world", json!(5))] {
+        let (status, body) = request(&app, "POST", "/api/v3/content/events", Some(e)).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+    }
+    let (status, body) = request(&app, "POST", "/api/v3/content/storylets", Some(reveal_storylet("flood"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    for bad in ["untimed", "storm", "missing"] {
+        let (status, body) = request(&app, "POST", "/api/v3/content/storylets", Some(reveal_storylet(bad))).await;
+        assert!(status.is_client_error(), "{bad}: {status} {body}");
+        let message = body["error"].as_str().unwrap_or_default().to_string();
+        assert!(
+            message.contains(&format!("Reveal node \"Tell the flood\": event \"{bad}\" is not a canon event with a story time")),
+            "{bad}: {message}"
+        );
+    }
+}

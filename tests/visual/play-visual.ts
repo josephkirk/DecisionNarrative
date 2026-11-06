@@ -166,6 +166,27 @@ try {
   check("Play from here opens a run", /#\/play\/[0-9a-f-]{36}$/.test(page.url()), page.url());
   await shot(page, "08-play-from-here");
 
+  // 7b. Codex: a canon event is authored through visible-label chronicle fields (Task 3.2).
+  await page.goto(`${base}/#/codex`);
+  await page.getByRole("button", { name: "New event" }).first().click();
+  await page.getByLabel("Event type").selectOption("canon");
+  await page.getByRole("group", { name: "Chronicle entry" }).waitFor();
+  await shot(page, "10-codex-canon");
+  check("chronicle fields have visible labels", (await page.getByLabel("Story time", { exact: true }).count()) === 1
+    && (await page.getByLabel("Place").count()) === 1 && (await page.getByLabel("Text", { exact: true }).count()) === 1);
+  check("canon form hides the raw JSON editors", (await page.getByText("Trigger condition (JSON)").count()) === 0);
+  await page.getByLabel("Event ID").fill("flood");
+  await page.getByLabel("Title", { exact: true }).fill("The flood");
+  await page.getByLabel("Story time", { exact: true }).fill("20");
+  await page.getByLabel("Story time label").fill("D1 evening");
+  await page.getByLabel("Text", { exact: true }).fill("The river rose past the weir.");
+  await page.getByRole("button", { name: "Save record" }).click();
+  await page.getByText("Saved events item").waitFor();
+  const savedEvent = await api("GET", "/api/v3/content/events/flood");
+  check("canon event saved with story time and text", savedEvent.story_time === 20 && savedEvent.text === "The river rose past the weir." && savedEvent.story_time_label === "D1 evening", JSON.stringify(savedEvent));
+  await page.getByLabel("Event type").selectOption("world");
+  check("switching to a world event shows the trigger editor again", (await page.getByText("Trigger condition (JSON)").count()) === 1);
+
   // 8. Narrow viewport keeps the layout usable.
   await page.setViewportSize({ width: 390, height: 780 });
   await shot(page, "09-narrow");

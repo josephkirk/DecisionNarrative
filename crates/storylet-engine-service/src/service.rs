@@ -1457,6 +1457,18 @@ fn validate_storylet_gameplay_tags(
         }
     }
 
+    let events = store.list_events().map_err(|error| error.to_string())?;
+    for node in &graph.nodes {
+        if let crate::narrative_graph::NarrativeNodeData::Reveal { event_id, .. } = &node.data
+            && !events.iter().any(|event| event.id == *event_id && event.is_chronicle_entry())
+        {
+            return Err(format!(
+                "Storylet validation failed: Reveal node \"{}\": event \"{event_id}\" is not a canon event with a story time",
+                node.title
+            ));
+        }
+    }
+
     let entity_templates = store
         .list_entity_templates()
         .map_err(|error| error.to_string())?;

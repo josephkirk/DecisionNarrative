@@ -70,6 +70,13 @@ export interface EventRecord {
   effects: Record<string, unknown>;
   delay_turns?: number;
   repeatable?: boolean;
+  /** Canon events with a story time form the chronicle. */
+  story_time?: number;
+  story_time_label?: string;
+  location_id?: string;
+  /** Fact tags (under `fact.`) a participant learns when told this event. */
+  facts?: string[];
+  text?: string;
 }
 
 export interface StoryletParameterRecord {

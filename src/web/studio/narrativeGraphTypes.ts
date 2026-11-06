@@ -31,6 +31,7 @@ export type NodeType =
   | "image"
   | "teleport"
   | "learn"
+  | "reveal"
   | "knows"
   | "go_to_location"
   | "graph_transform"
@@ -211,6 +212,7 @@ export interface NarrativeNode {
   fact_tag?: string;
   kind?: "evidence" | "witnessed" | "told" | "rumor" | "recollection" | "testimony" | "inference";
   visibility?: "private" | "co_located";
+  event_id?: string;
   holder?: string;
   confirmed_only?: boolean;
   is_terminal?: boolean;
@@ -423,7 +425,7 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
   const allowedTypes = new Set<NodeType>([
     "start", "dialog", "choice", "condition", "compare", "get_entity", "get_entity_property", "apply_command", "qbn_storylet_hub",
     "salience_selector", "waypoint_conversation", "waiter", "and", "or",
-    "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "learn", "knows", "graph_transform", "passion_mutation",
+    "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "learn", "reveal", "knows", "graph_transform", "passion_mutation",
     "add_entity_tag", "remove_entity_tag", "has_entity_tag", "end",
   ]);
   if (graph.nodes.some((node) => !node || typeof node !== "object" || typeof node.id !== "string" || !node.id.trim() || !allowedTypes.has(node.type))) {
@@ -431,6 +433,7 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
   }
   for (const node of graph.nodes) {
     if ((node.type === "learn" || node.type === "knows") && (!node.fact_tag?.startsWith("fact.") || node.fact_tag.length <= 5)) issues.push(`${node.type} node ${node.title} must choose a fact tag under fact.`);
+    if (node.type === "reveal" && !node.event_id?.trim()) issues.push(`Reveal node ${node.title} must choose a canon event.`);
     if (node.type === "go_to_location" && !node.location_id?.trim()) issues.push("Go To Location nodes must select a location.");
     if (node.type === "get_entity" && !node.entity_path?.trim()) issues.push(`Get Entity node ${node.title} must select an Entity.`);
     if (node.type === "get_entity_property") {
@@ -800,5 +803,5 @@ export function validatePreconditionGraph(graph: NarrativeGraph): string[] {
 export function graphNodeTypes(mode: "story" | "preconditions"): NodeType[] {
   const pure: NodeType[] = ["start", "get_entity", "get_entity_property", "compare", "condition", "and", "or", "has_entity_tag", "knows", "end"];
   if (mode === "preconditions") return pure;
-  return [...pure, "learn", "dialog", "choice", "apply_command", "qbn_storylet_hub", "salience_selector", "waypoint_conversation", "waiter", "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "add_entity_tag", "remove_entity_tag"];
+  return [...pure, "learn", "reveal", "dialog", "choice", "apply_command", "qbn_storylet_hub", "salience_selector", "waypoint_conversation", "waiter", "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "add_entity_tag", "remove_entity_tag"];
 }

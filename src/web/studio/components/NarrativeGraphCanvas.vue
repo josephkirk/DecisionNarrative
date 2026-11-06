@@ -403,6 +403,10 @@ function addNode(type: NodeType) {
     baseNode.fact_tag = "";
     if (type === "learn") { baseNode.kind = "evidence"; baseNode.visibility = "private"; }
     else { baseNode.holder = "acting"; baseNode.confirmed_only = false; }
+  } else if (type === "reveal") {
+    baseNode.event_id = "";
+    baseNode.kind = "recollection";
+    baseNode.visibility = "private";
   } else if (type === "go_to_location") {
     baseNode.location_id = studioState.entityTemplates.find((entity) => entity.root_tag === "location")?.id ?? "";
     baseNode.height = 100;
@@ -561,6 +565,7 @@ const computedEdges = computed(() => {
         <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('remove_entity_tag')">- Tag</button>
         <button class="node-tool-btn" @click="addNode('has_entity_tag')">Has tag</button>
         <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('learn')">Learn</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('reveal')">Reveal</button>
         <button class="node-tool-btn" @click="addNode('knows')">Knows</button>
         <button class="node-tool-btn" @click="addNode('end')">End</button>
       </div>
@@ -787,6 +792,7 @@ const computedEdges = computed(() => {
             <div style="font-size:10px; color:var(--text-muted);">Boolean output</div>
           </div>
           <div v-else-if="node.type === 'learn' || node.type === 'knows'">{{ node.fact_tag || 'Choose fact' }}</div>
+          <div v-else-if="node.type === 'reveal'">{{ node.event_id || 'Choose canon event' }}</div>
           <div v-else-if="node.type === 'end'">
             <div v-if="props.graphMode === 'preconditions'" style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.precondition_result === false ? 'Reject candidate' : 'Valid candidate' }}</div>
             <div v-else style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.jump_to_storylet || 'Terminal ending' }}</div>

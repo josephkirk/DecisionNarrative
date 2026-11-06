@@ -1195,3 +1195,71 @@ mod participant_seed_tests {
         assert_ne!(seed.state.participants.entity[1], u16::MAX);
     }
 }
+
+/// Compiles canon events with a story time into the chronicle, sorted by
+/// `(story_time, id)`. Fact tags must be registered; a location must be a
+/// known entity.
+pub fn compile_chronicle(
+    events: &[crate::contracts::EventRecord],
+    registry: &storylet_engine::chrono_state::GameplayTagRegistry,
+    entity_indices: &BTreeMap<String, u16>,
+) -> Result<storylet_engine::chrono_chronicle::ChronicleTable, String> {
+    use storylet_engine::chrono_chronicle::{ChronicleEntry, ChronicleTable};
+    let mut entries = Vec::new();
+    for event in events.iter().filter(|event| event.is_chronicle_entry()) {
+        let facts = event
+            .facts
+            .iter()
+            .map(|tag| registry.id(tag).ok_or_else(|| format!("Event \"{}\": fact tag \"{tag}\" is not registered", event.id)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let location = event
+            .location_id
+            .as_deref()
+            .map(|id| entity_indices.get(id).copied().ok_or_else(|| format!("Event \"{}\": unknown location \"{id}\"", event.id)))
+            .transpose()?;
+        entries.push(ChronicleEntry {
+            key: event.id.clone(),
+            story_time: event.story_time.unwrap_or_default(),
+            label: event.story_time_label.clone().filter(|label| !label.is_empty()).unwrap_or_else(|| event.title.clone()),
+            location,
+            facts,
+            text: event.text.clone().unwrap_or_default(),
+        });
+    }
+    Ok(ChronicleTable::new(entries))
+}
+
+#[cfg(test)]
+mod chronicle_compile_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn event(id: &str, kind: &str, time: Option<i64>, facts: &[&str]) -> crate::contracts::EventRecord {
+        serde_json::from_value(json!({
+            "id": id, "title": id, "description": "", "event_type": kind, "trigger": null, "effects": null,
+            "story_time": time, "facts": facts,
+        })).unwrap()
+    }
+
+    #[test]
+    fn canon_events_compile_sorted_by_story_time() {
+        let registry = storylet_engine::chrono_state::GameplayTagRegistry::empty();
+        let events = vec![
+            event("late", "canon", Some(30), &[]),
+            event("early", "canon", Some(10), &[]),
+            event("world-event", "world", Some(5), &[]),
+            event("untimed", "canon", None, &[]),
+        ];
+        let table = compile_chronicle(&events, &registry, &BTreeMap::new()).unwrap();
+        let keys: Vec<_> = table.entries.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, ["early", "late"]);
+    }
+
+    #[test]
+    fn unregistered_fact_tag_is_an_error() {
+        let registry = storylet_engine::chrono_state::GameplayTagRegistry::empty();
+        let events = vec![event("e", "canon", Some(1), &["fact.nope"])];
+        let error = compile_chronicle(&events, &registry, &BTreeMap::new()).unwrap_err();
+        assert!(error.contains("fact.nope"), "{error}");
+    }
+}

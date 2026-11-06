@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { sortChronicle } from "../chronicleModel.ts";
 import { ref, computed, watch } from "vue";
 import type { NarrativeNode, NarrativeGraph, DialogueSection, DialogueItem, GraphLayer, AttributeOp, AttributeValueType, AttributeValue, GraphBinding, VertexPattern } from "../narrativeGraphTypes.ts";
 import { applyCommandOperationsForType, isGraphTransformNode, isPassionMutationNode } from "../narrativeGraphTypes.ts";
@@ -174,6 +175,7 @@ watch(
     }
   },
 );
+const chronicleEntries = computed(() => sortChronicle(studioState.events));
 const factTagOptions = computed(() => uniqueTagNames(studioState.gameplayTags.map((tag) => tag.name)).filter((name) => name.startsWith("fact.")));
 const catalogTagNames = computed(() => uniqueTagNames(studioState.gameplayTags.map((tag) => tag.name)));
 const roleTagOptions = computed(() => catalogTagNames.value.filter((name) => name.startsWith("character.")));
@@ -590,6 +592,19 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 
       <div v-else-if="selectedNode.type === 'teleport'">
         <div class="form-group"><label class="field-label">Destination Storylet</label><select v-model="selectedNode.destination_storylet" class="form-select" @change="emitGraphUpdate(selectedNode)"><option value="">Choose destination…</option><option v-for="story in props.storylets" :key="story.id" :value="story.id">{{ story.title }} ({{ story.id }})</option></select></div>
+      </div>
+
+      <div v-else-if="selectedNode.type === 'reveal'">
+        <div class="form-group">
+          <label class="field-label" for="reveal-event">Canon event</label>
+          <select id="reveal-event" v-model="selectedNode.event_id" class="form-select" @change="emitGraphUpdate(selectedNode)">
+            <option value="">Choose a canon event…</option>
+            <option v-for="entry in chronicleEntries" :key="entry.id" :value="entry.id">{{ entry.story_time_label || entry.title }} ({{ entry.id }})</option>
+          </select>
+          <p v-if="!chronicleEntries.length" class="field-hint">No canon events with a story time yet. Add one in Rules &amp; events.</p>
+        </div>
+        <div class="form-group"><label class="field-label" for="reveal-kind">Knowledge kind</label><select id="reveal-kind" v-model="selectedNode.kind" class="form-select" @change="emitGraphUpdate(selectedNode)"><option v-for="kind in ['evidence','witnessed','told','rumor','recollection','testimony','inference']" :key="kind" :value="kind">{{ kind }}</option></select></div>
+        <div class="form-group"><label class="field-label" for="reveal-visibility">Visibility</label><select id="reveal-visibility" v-model="selectedNode.visibility" class="form-select" @change="emitGraphUpdate(selectedNode)"><option value="private">Private</option><option value="co_located">Co-located</option></select></div>
       </div>
 
       <div v-else-if="selectedNode.type === 'learn' || selectedNode.type === 'knows'">

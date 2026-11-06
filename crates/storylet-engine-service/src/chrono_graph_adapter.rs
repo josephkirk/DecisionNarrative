@@ -413,6 +413,11 @@ fn compile_node_kind(
         NarrativeNodeData::Teleport { destination_storylet } => (NodeKind::Teleport { destination_storylet:Some(storylet_index_for(compiled,destination_storylet)?), destination_node_guid:storylet_start_nodes.get(destination_storylet).copied() }, NodeCategory::Mutator),
         NarrativeNodeData::Learn { fact_tag, kind, visibility } => (NodeKind::Learn { fact: compiled.registry.id(fact_tag).ok_or_else(|| format!("unknown fact {fact_tag}"))?, kind: *kind, visibility: *visibility }, NodeCategory::Mutator),
         NarrativeNodeData::Knows { holder, fact_tag, confirmed_only } => (NodeKind::Knows { holder: if holder == "acting" { HolderRef::Acting } else { HolderRef::Participant(*compiled.participant_indices.get(holder).ok_or_else(|| format!("unknown participant {holder}"))?) }, fact: compiled.registry.id(fact_tag).ok_or_else(|| format!("unknown fact {fact_tag}"))?, confirmed_only: *confirmed_only }, NodeCategory::LogicGate),
+        NarrativeNodeData::Reveal { event_id, kind, visibility } => {
+            let entry = compiled.chronicle.index_of(event_id).ok_or_else(|| format!("Reveal node: event \"{event_id}\" is not a canon event with a story time"))?;
+            let facts = compiled.chronicle.entries[entry as usize].facts.clone();
+            (NodeKind::Reveal { entry, kind: *kind, visibility: *visibility, facts }, NodeCategory::Mutator)
+        }
         NarrativeNodeData::GoToLocation { location_id } => {
             let index = *entity_indices.get(location_id).ok_or_else(|| format!("unknown location {location_id}"))?;
             (NodeKind::MoveParticipant { location_entity: index }, NodeCategory::Mutator)
@@ -871,6 +876,7 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::RemoveEntityTag { .. } => "RemoveEntityTag",
         NarrativeNodeData::HasEntityTag { .. } => "HasEntityTag",
         NarrativeNodeData::Learn { .. } => "Learn",
+        NarrativeNodeData::Reveal { .. } => "Reveal",
         NarrativeNodeData::Knows { .. } => "Knows",
         NarrativeNodeData::End { .. } => "End",
     }

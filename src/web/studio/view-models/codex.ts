@@ -4,6 +4,8 @@ import type { EventRecord } from "../contracts.ts";
 import { notify } from "../state.ts";
 import { refreshWorkspace } from "./workspace.ts";
 
+export { isChronicleEntry, sortChronicle } from "../chronicleModel.ts";
+
 export type CodexCategory = "events";
 export type CodexRecord = EventRecord;
 

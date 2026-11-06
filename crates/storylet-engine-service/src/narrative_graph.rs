@@ -156,6 +156,8 @@ pub enum NarrativeNodeData {
     },
     Learn { fact_tag: String, kind: storylet_engine::chrono_participants::KnowKind, visibility: storylet_engine::chrono_runtime::Visibility },
     Knows { holder: String, fact_tag: String, #[serde(default)] confirmed_only: bool },
+    /// Tells the acting participant a canon chronicle event.
+    Reveal { event_id: String, kind: storylet_engine::chrono_participants::KnowKind, visibility: storylet_engine::chrono_runtime::Visibility },
     GoToLocation {
         location_id: String,
     },
@@ -443,6 +445,7 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::Teleport { .. } => "Teleport",
         NarrativeNodeData::Learn { .. } => "Learn",
         NarrativeNodeData::Knows { .. } => "Knows",
+        NarrativeNodeData::Reveal { .. } => "Reveal",
         NarrativeNodeData::GoToLocation { .. } => "Go To Location",
         NarrativeNodeData::GraphTransform { .. } => "Graph Transform",
         NarrativeNodeData::PassionMutation { .. } => "Passion Mutation",
@@ -819,6 +822,11 @@ impl NarrativeGraph {
                     }
                     if !fact_tag.starts_with("fact.") || fact_tag.len() <= 5 {
                         issues.push(format!("{} node \"{}\": fact tag \"{}\" must be under \"fact.\"", node_type_name(&node.data), node.title, fact_tag));
+                    }
+                }
+                NarrativeNodeData::Reveal { event_id, .. } => {
+                    if event_id.trim().is_empty() {
+                        issues.push(format!("Reveal node \"{}\" must select a canon event.", node.title));
                     }
                 }
                 NarrativeNodeData::GoToLocation { location_id } => {

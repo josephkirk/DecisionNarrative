@@ -114,6 +114,25 @@ pub struct EventRecord {
     pub delay_turns: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeatable: Option<bool>,
+    /// Canon events with a story time form the chronicle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub story_time: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub story_time_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location_id: Option<String>,
+    /// Fact tags (under `fact.`) a participant learns when told this event.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+impl EventRecord {
+    /// A canon event with a story time is a chronicle entry.
+    pub fn is_chronicle_entry(&self) -> bool {
+        self.event_type == "canon" && self.story_time.is_some()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

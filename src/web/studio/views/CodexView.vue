@@ -3,6 +3,8 @@ import { computed, inject, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useCodexViewModel, type CodexCategory, type CodexRecord } from "../view-models/codex.ts";
 import { CODEX_CATEGORIES } from "../definitions.ts";
+import TagEditor from "../components/TagEditor.vue";
+import { isChronicleEntry } from "../chronicleModel.ts";
 import { studioState } from "../state.ts";
 import { interactionContextKey } from "../interactionContext.ts";
 
@@ -82,7 +84,19 @@ function itemLabel(item: CodexRecord): string {
 }
 
 function itemDetail(item: CodexRecord): string {
-  return item.event_type;
+  return isChronicleEntry(item) ? `canon · time ${item.story_time}` : item.event_type;
+}
+
+const locationOptions = computed(() => studioState.entityTemplates.filter((entity) => entity.root_tag === "location"));
+const factOptions = computed(() => studioState.gameplayTags.map((tag) => tag.name).filter((name) => name.startsWith("fact.")));
+const isCanon = computed(() => editingItem.value?.event_type === "canon");
+function setStoryTime(event: Event) {
+  if (!editingItem.value) return;
+  const raw = (event.target as HTMLInputElement).value.trim();
+  editingItem.value.story_time = raw === "" ? undefined : Number(raw);
+}
+function setFacts(value: string | string[]) {
+  if (editingItem.value) editingItem.value.facts = Array.isArray(value) ? value : value ? [value] : [];
 }
 </script>
 
@@ -129,7 +143,7 @@ function itemDetail(item: CodexRecord): string {
             <div style="font-weight:600; font-size:13px;">{{ itemLabel(item) }}</div>
             <div style="font-size:11px; color:var(--text-muted);">{{ itemDetail(item) }}</div>
           </div>
-          <button class="btn" style="padding:2px 6px; color:var(--status-danger);" :title="'Delete ' + itemLabel(item)" :aria-label="'Delete ' + itemLabel(item)" @click.stop="deleteItem(activeCategory, item.id)">✕</button>
+          <button type="button" class="btn" style="padding:2px 6px; color:var(--status-danger);" :title="'Delete ' + itemLabel(item)" :aria-label="'Delete ' + itemLabel(item)" @click.stop="deleteItem(activeCategory, item.id)">Delete</button>
         </div>
       </div>
     </div>
@@ -177,6 +191,36 @@ function itemDetail(item: CodexRecord): string {
               <label for="event-repeatable" class="form-label" style="margin:0; cursor:pointer;">Repeatable</label>
             </div>
           </div>
+          <template v-if="isCanon">
+            <fieldset class="canon-fields">
+              <legend>Chronicle entry</legend>
+              <div style="display:grid; grid-template-columns:1fr 2fr; gap:12px;">
+                <div class="form-group">
+                  <label class="form-label" for="event-story-time">Story time</label>
+                  <input id="event-story-time" :value="editingItem.story_time ?? ''" type="number" class="form-input" @input="setStoryTime" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="event-story-label">Story time label</label>
+                  <input id="event-story-label" v-model="editingItem.story_time_label" class="form-input" aria-label="Story time label" placeholder="e.g. D1 evening" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="event-place">Place</label>
+                <select id="event-place" v-model="editingItem.location_id" class="form-select">
+                  <option :value="undefined">Anywhere</option>
+                  <option v-for="place in locationOptions" :key="place.id" :value="place.id">{{ place.name }}</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <TagEditor :model-value="editingItem.facts ?? []" :options="factOptions" :allow-create="false" label="Facts learned" placeholder="Choose a fact" @update:model-value="setFacts" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="event-text">Text</label>
+                <textarea id="event-text" v-model="editingItem.text" class="form-textarea canon-text" rows="5" placeholder="What happened, in the author's words…"></textarea>
+              </div>
+            </fieldset>
+          </template>
+          <template v-else>
           <div class="form-group">
             <label class="form-label">Trigger condition (JSON)</label>
             <textarea class="form-textarea" rows="3" :value="JSON.stringify(editingItem.trigger || {}, null, 2)" placeholder="{}" @change="updateJsonField('trigger', $event)"></textarea>
@@ -185,9 +229,16 @@ function itemDetail(item: CodexRecord): string {
             <label class="form-label">Effects (JSON)</label>
             <textarea class="form-textarea" rows="3" :value="JSON.stringify(editingItem.effects || {}, null, 2)" placeholder="{}" @change="updateJsonField('effects', $event)"></textarea>
           </div>
+          </template>
         </div>
 
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.canon-fields { border: 1px solid var(--border-subtle); padding: 12px 16px; margin: 0 0 16px; }
+.canon-fields legend { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); padding: 0 4px; }
+.canon-text { font-family: var(--font-serif); font-size: 16px; line-height: 24px; }
+</style>
