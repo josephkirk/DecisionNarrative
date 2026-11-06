@@ -224,3 +224,159 @@ fn clock_state_survives_rewind() {
     run.rewind(0).unwrap();
     assert_eq!(run.view(&content, 0).place.unwrap().actions_left, Some(2));
 }
+
+// --- Rule participants -------------------------------------------------------
+
+use storylet_engine::chrono_participants::Controller;
+use storylet_engine::chrono_runtime::Visibility;
+
+const ROSA: u16 = 1;
+const BENEDEK: u16 = 2;
+
+fn learn_node(guid: u32, fact: u16, kind: KnowKind, visibility: Visibility) -> FlowNodeDef {
+    FlowNodeDef {
+        node_guid: guid,
+        node_type_id: "learn".into(),
+        category: NodeCategory::Mutator,
+        kind: NodeKind::Learn { fact, kind, visibility },
+        input_pins: vec![pin("In", true)],
+        output_pins: vec![pin("Out", false)],
+        ..Default::default()
+    }
+}
+fn end_node(guid: u32) -> FlowNodeDef {
+    FlowNodeDef {
+        node_guid: guid,
+        node_type_id: "end".into(),
+        category: NodeCategory::Mutator,
+        kind: NodeKind::End { jump_to_storylet: None, precondition_result: true },
+        input_pins: vec![pin("In", true)],
+        output_pins: vec![pin("Out", false)],
+        ..Default::default()
+    }
+}
+fn flow(from: u32, to: u32) -> EdgeConnection {
+    EdgeConnection { source_node_guid: from, source_pin_name: "Out".into(), target_node_guid: to, target_pin_name: "In".into() }
+}
+
+/// Adds Rosa and Benedek (rule participants at the harbor) and one gossip
+/// storylet per entry of `gossip`: `(storylet id, fact it teaches, display priority)`.
+fn with_rules(gossip: &[(u16, &str, i32)]) -> RunContent {
+    let mut content = content();
+    content.registry = GameplayTagRegistry::compile(
+        ["fact", "fact.tide_table", "fact.a", "fact.b"].map(String::from),
+    )
+    .unwrap();
+    content.initial_world.participants.push("rosa", 10, Controller::Rule, Some(HARBOR));
+    content.initial_world.participants.push("benedek", 11, Controller::Rule, Some(HARBOR));
+    let mut defs = vec![StoryletDef { storylet_id: 0, payload_node_guid: 1, ..Default::default() }];
+    for &(id, fact_name, priority) in gossip {
+        let fact = content.registry.id(fact_name).unwrap();
+        let learn = 100 + id as u32 * 10;
+        content.root_asset.nodes.push(learn_node(learn, fact, KnowKind::Told, Visibility::CoLocated));
+        content.root_asset.nodes.push(end_node(learn + 1));
+        content.root_asset.edges.push(flow(learn, learn + 1));
+        content.storylet_titles.insert(id, format!("Gossip {id}"));
+        defs.push(StoryletDef {
+            storylet_id: id,
+            payload_node_guid: learn,
+            display_priority: priority,
+            played_by: vec![ROSA],
+            ..Default::default()
+        });
+    }
+    content.dispatcher = UnifiedDispatcher::new(defs);
+    content
+}
+fn registry_fact(content: &RunContent, name: &str) -> u16 {
+    content.registry.id(name).unwrap()
+}
+
+#[test]
+fn rule_storylet_plays_at_slot_start() {
+    let content = with_rules(&[(1, "fact.a", 0)]);
+    let fact_a = registry_fact(&content, "fact.a");
+    let mut run = started(&content);
+    assert!(run.world.knowledge.knows(BENEDEK, fact_a).is_none());
+    // The player ends the turn; the slot advances and Rosa gossips to Benedek, who shares her place.
+    run.act(&content, 0, RunAction::Wait).unwrap();
+    let row = run.world.knowledge.knows(BENEDEK, fact_a).expect("Benedek overheard the gossip");
+    assert_eq!(row.kind, KnowKind::Witnessed);
+    assert_eq!(run.world.knowledge.knows(ROSA, fact_a).unwrap().kind, KnowKind::Told);
+    // The player was not at the harbor.
+    assert!(run.world.knowledge.knows(0, fact_a).is_none());
+}
+
+#[test]
+fn rule_pass_one_play_per_participant() {
+    // Both storylets belong to Rosa; the higher display priority goes first, one per pass.
+    let content = with_rules(&[(1, "fact.a", 0), (2, "fact.b", 5)]);
+    let (fact_a, fact_b) = (registry_fact(&content, "fact.a"), registry_fact(&content, "fact.b"));
+    let mut run = started(&content);
+    run.act(&content, 0, RunAction::Wait).unwrap();
+    assert!(run.world.knowledge.knows(ROSA, fact_b).is_some(), "priority 5 plays first");
+    assert!(run.world.knowledge.knows(ROSA, fact_a).is_none(), "only one play per participant per pass");
+    run.act(&content, 0, RunAction::Wait).unwrap();
+    assert!(run.world.knowledge.knows(ROSA, fact_a).is_some(), "the other plays at the next slot");
+}
+
+#[test]
+fn rule_storylet_does_not_repeat_unless_repeatable() {
+    let content = with_rules(&[(1, "fact.a", 0)]);
+    let mut run = started(&content);
+    run.act(&content, 0, RunAction::Wait).unwrap();
+    run.act(&content, 0, RunAction::Wait).unwrap();
+    let plays: usize = run.view(&content, 0).steps.iter().map(|s| s.rule_plays.len()).sum();
+    assert_eq!(plays, 1);
+}
+
+#[test]
+fn rule_play_is_recorded_on_the_triggering_step() {
+    let content = with_rules(&[(1, "fact.a", 0)]);
+    let mut run = started(&content);
+    run.act(&content, 0, RunAction::Wait).unwrap();
+    let view = run.view(&content, 0);
+    let step = view.steps.last().unwrap();
+    assert_eq!(step.participant, 0, "the step is the human's act");
+    assert_eq!(step.rule_plays.len(), 1);
+    assert_eq!(step.rule_plays[0].participant, ROSA);
+    assert_eq!(step.rule_plays[0].storylet.title, "Gossip 1");
+}
+
+#[test]
+fn rule_pass_without_a_clock_runs_after_every_human_act() {
+    let mut content = with_rules(&[(1, "fact.a", 0)]);
+    content.clock = None;
+    let fact_a = registry_fact(&content, "fact.a");
+    let mut run = started(&content);
+    run.act(&content, 0, choose_left()).unwrap();
+    assert!(run.world.knowledge.knows(ROSA, fact_a).is_some());
+}
+
+#[test]
+fn rule_play_is_undone_by_rewind() {
+    let content = with_rules(&[(1, "fact.a", 0)]);
+    let fact_a = registry_fact(&content, "fact.a");
+    let mut run = started(&content);
+    run.act(&content, 0, RunAction::Wait).unwrap();
+    run.rewind(0).unwrap();
+    assert!(run.world.knowledge.knows(ROSA, fact_a).is_none());
+    run.act(&content, 0, RunAction::Wait).unwrap();
+    assert!(run.world.knowledge.knows(ROSA, fact_a).is_some(), "the replayed slot start plays it again");
+}
+
+#[test]
+fn storylets_played_by_a_rule_participant_are_not_offered_to_humans() {
+    let content = with_rules(&[(1, "fact.a", 0)]);
+    let run = started(&content);
+    assert!(run.why_not(&content, 0, 10).iter().all(|m| m.storylet.id != 1));
+}
+
+#[test]
+fn participant_views_say_who_is_human() {
+    let content = with_rules(&[]);
+    let run = started(&content);
+    let participants = run.view(&content, 0).participants;
+    let humans: Vec<_> = participants.iter().map(|p| p.human).collect();
+    assert_eq!(humans, [true, false, false]);
+}

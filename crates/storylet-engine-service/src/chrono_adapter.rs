@@ -1411,3 +1411,61 @@ mod space_compile_tests {
         assert_eq!(c.on_close, Some(storylet_engine::chrono_space::OnClose::Return { to: 0 }));
     }
 }
+
+/// Resolves each storylet's authored `played_by` entity ids to participant
+/// indices. Must run after `participant_indices` is known.
+pub fn bind_played_by(compiled: &mut storylet_engine::run::RunContent, storylets: &[crate::contracts::StoryletRecord]) -> Result<(), String> {
+    for storylet in storylets.iter().filter(|s| !s.played_by.is_empty()) {
+        let Some(index) = compiled.storylet_index(&storylet.id) else { continue };
+        let mut played_by = Vec::new();
+        for id in &storylet.played_by {
+            let participant = compiled
+                .participant_indices
+                .get(id)
+                .copied()
+                .ok_or_else(|| format!("Storylet \"{}\": played_by \"{id}\" is not a participant", storylet.id))?;
+            played_by.push(participant);
+        }
+        if let Some(def) = compiled.dispatcher.storylets.iter_mut().find(|d| d.storylet_id == index) {
+            def.played_by = played_by;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod played_by_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn storylets(played_by: Value) -> Vec<crate::contracts::StoryletRecord> {
+        serde_json::from_value(json!([{"id": "gossip", "title": "Gossip", "content": {"text_template": "x"}, "created_at": 1, "played_by": played_by}])).unwrap()
+    }
+
+    #[test]
+    fn played_by_binds_participant_indices() {
+        let records = storylets(json!(["rosa"]));
+        let mut compiled = compile_chrono_dispatch_with_world(&records, &[], &[], &[], &[], &[], &BTreeMap::new()).unwrap();
+        compiled.participant_indices = BTreeMap::from([("rosa".to_string(), 1)]);
+        bind_played_by(&mut compiled, &records).unwrap();
+        let index = compiled.storylet_index("gossip").unwrap();
+        assert_eq!(compiled.dispatcher.storylet(index).unwrap().played_by, vec![1]);
+    }
+
+    #[test]
+    fn unknown_played_by_is_rejected() {
+        let records = storylets(json!(["nobody"]));
+        let mut compiled = compile_chrono_dispatch_with_world(&records, &[], &[], &[], &[], &[], &BTreeMap::new()).unwrap();
+        let error = bind_played_by(&mut compiled, &records).unwrap_err();
+        assert_eq!(error, "Storylet \"gossip\": played_by \"nobody\" is not a participant");
+    }
+
+    #[test]
+    fn empty_played_by_means_any_human() {
+        let records = storylets(json!([]));
+        let mut compiled = compile_chrono_dispatch_with_world(&records, &[], &[], &[], &[], &[], &BTreeMap::new()).unwrap();
+        bind_played_by(&mut compiled, &records).unwrap();
+        let index = compiled.storylet_index("gossip").unwrap();
+        assert!(compiled.dispatcher.storylet(index).unwrap().played_by.is_empty());
+    }
+}

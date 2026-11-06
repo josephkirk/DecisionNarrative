@@ -3666,6 +3666,7 @@ impl FlowGraphInstance {
                 continue;
             }
             let eligible = match ctx.dispatcher.storylet(storylet_id) {
+                Some(storylet) if !storylet.played_by.is_empty() && !storylet.played_by.contains(&self.acting_participant) => false,
                 Some(storylet) => match storylet.precondition_graph.as_ref() {
                     Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
                     None => true,

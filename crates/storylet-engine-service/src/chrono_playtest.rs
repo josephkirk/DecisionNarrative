@@ -2989,6 +2989,7 @@ pub(crate) fn compile_run_content(store: &Store, scenario_id: Option<&str>, expe
     compiled.implicit_participant = seed.state.participants.entity.as_slice() == [u16::MAX];
     (compiled.connections, compiled.clock) = crate::chrono_adapter::compile_space(&content.world, &content.entities, &content.locations, &seed.entity_indices, &compiled.registry)?;
     compiled.chronicle = crate::chrono_adapter::compile_chronicle(&content.events, &compiled.registry, &seed.entity_indices)?;
+    crate::chrono_adapter::bind_played_by(&mut compiled, &content.storylets)?;
     let mut graphs = compile_narrative_graphs(&meta.id, &content.storylets, &compiled, &seed.entity_indices)?;
     bind_precondition_graphs(&mut compiled, &content.storylets, &seed.entity_indices)?;
     bind_storylet_start_nodes(&mut compiled, &graphs)?;

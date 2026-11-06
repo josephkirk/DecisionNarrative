@@ -155,6 +155,10 @@ pub struct StoryletDef {
     /// Role selectors. A non-empty list requires at least one bound entity.
     #[serde(default)]
     pub required_roles: Vec<RoleRequirement>,
+    /// Participants who may play this storylet. Empty = any human. A rule
+    /// participant plays its storylets on its own at the start of a slot.
+    #[serde(default)]
+    pub played_by: Vec<crate::chrono_participants::PartIx>,
     /// Optional pure candidate gate compiled from the authored precondition graph.
     #[serde(default)]
     pub precondition_graph: Option<crate::chrono_runtime::FlowGraphAsset>,

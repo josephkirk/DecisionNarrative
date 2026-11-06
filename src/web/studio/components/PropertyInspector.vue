@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { sortChronicle } from "../chronicleModel.ts";
+import { participantOptions, togglePlayedBy } from "../storyletModel.ts";
 import { ref, computed, watch } from "vue";
 import type { NarrativeNode, NarrativeGraph, DialogueSection, DialogueItem, GraphLayer, AttributeOp, AttributeValueType, AttributeValue, GraphBinding, VertexPattern } from "../narrativeGraphTypes.ts";
 import { applyCommandOperationsForType, isGraphTransformNode, isPassionMutationNode } from "../narrativeGraphTypes.ts";
@@ -175,6 +176,11 @@ watch(
     }
   },
 );
+const playerOptions = computed(() => participantOptions(studioState.entityTemplates));
+function setPlayedBy(id: string, checked: boolean) {
+  props.storylet.played_by = togglePlayedBy(props.storylet.played_by ?? [], id, checked);
+  emit("update-storylet");
+}
 const chronicleEntries = computed(() => sortChronicle(studioState.events));
 const factTagOptions = computed(() => uniqueTagNames(studioState.gameplayTags.map((tag) => tag.name)).filter((name) => name.startsWith("fact.")));
 const catalogTagNames = computed(() => uniqueTagNames(studioState.gameplayTags.map((tag) => tag.name)));
@@ -1059,6 +1065,16 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         <small class="field-sublabel">Eligible at any location sharing one of these tags; leave empty for any location.</small>
       </div>
 
+      <fieldset class="form-group played-by">
+        <legend class="field-label">Played by</legend>
+        <p v-if="!playerOptions.length" class="field-sublabel">No participants yet. Add the Participant trait to a character.</p>
+        <label v-for="option in playerOptions" :key="option.id" class="played-by__option">
+          <input type="checkbox" :checked="(storylet.played_by ?? []).includes(option.id)" @change="setPlayedBy(option.id, ($event.target as HTMLInputElement).checked)" />
+          {{ option.name }}
+        </label>
+        <small class="field-sublabel">Leave empty for any human. A rule participant plays its storylets on its own at the start of each slot.</small>
+      </fieldset>
+
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
         <div class="form-group">
           <label class="field-label">Cluster Type</label>
@@ -1264,4 +1280,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
   gap: 6px;
   margin-top: 4px;
 }
+.played-by { border: 1px solid var(--border-subtle); padding: 8px 12px; margin: 0 0 12px; }
+.played-by__option { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 13px; }
 </style>

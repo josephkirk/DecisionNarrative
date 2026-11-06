@@ -96,6 +96,17 @@ pub struct RunStep {
     /// What the world did because of this step (for example someone driven back).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// Storylets rule participants played because of this step.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rule_plays: Vec<RulePlay>,
+}
+/// A storylet a rule participant played on its own; its causal parent is the
+/// step that carries it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RulePlay {
+    pub participant: PartIx,
+    pub storylet: StoryletRef,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -111,6 +122,12 @@ pub struct StoryletRef {
 pub struct ParticipantView {
     pub id: PartIx,
     pub name: String,
+    /// `false` for rule participants, which the UI never offers as a seat.
+    #[serde(default = "default_true")]
+    pub human: bool,
+}
+fn default_true() -> bool {
+    true
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -205,6 +222,7 @@ struct Snapshot {
     storylet: u16,
     selections: Vec<PendingSelection>,
     stalled: Option<RunError>,
+    rule_played: Vec<(PartIx, u16)>,
 }
 #[derive(Clone, Debug)]
 pub struct RunKernel {
@@ -223,6 +241,7 @@ pub struct RunKernel {
     next_invocation: u64,
     run_seed: u64,
     stalled: Option<RunError>,
+    rule_played: Vec<(PartIx, u16)>,
 }
 impl RunKernel {
     fn reference(content: &RunContent, id: u16) -> StoryletRef {
@@ -244,6 +263,7 @@ impl RunKernel {
             storylet: self.storylet,
             selections: self.selections.clone(),
             stalled: self.stalled.clone(),
+            rule_played: self.rule_played.clone(),
         }
     }
     fn pending_priority(instance: &FlowGraphInstance, hub: bool) -> Option<u32> {
@@ -497,6 +517,7 @@ impl RunKernel {
             next_invocation: 1,
             run_seed: seed,
             stalled: None,
+            rule_played: Vec::new(),
         };
         let stalled = match run.auto_advance() {
             Ok(()) => None,
@@ -518,6 +539,10 @@ impl RunKernel {
             .map(|(i, n)| ParticipantView {
                 id: i as u16,
                 name: n.clone(),
+                human: matches!(
+                    self.world.participants.controller.get(i),
+                    Some(crate::chrono_participants::Controller::Human { .. })
+                ),
             })
             .collect();
         let place = self.world.active_location(participant).map(|id| PlaceView {
@@ -869,7 +894,13 @@ impl RunKernel {
             }
         };
         self.stalled = stalled.clone();
-        let notes = self.spend_action(content, participant, &action);
+        let (notes, slot_advanced) = self.spend_action(content, participant, &action);
+        let is_human = self.world.participants.humans().any(|h| h == participant);
+        let rule_plays = if is_human && (content.clock.is_none() || slot_advanced) {
+            self.rule_pass(content)?
+        } else {
+            Vec::new()
+        };
         if self.rewound {
             let steps = self.branches[self.branch].steps[..self.current_step as usize].to_vec();
             let snapshots = self.snapshots[self.branch][..=self.current_step as usize].to_vec();
@@ -887,6 +918,7 @@ impl RunKernel {
             action: action.clone(),
             label: format!("{action:?}"),
             notes,
+            rule_plays,
         };
         self.branches[self.branch].steps.push(step);
         let snapshot = self.snapshot();
@@ -897,9 +929,9 @@ impl RunKernel {
     /// Spends the actor's action (all of them for `Wait`) and, once every human
     /// is out of actions, advances the clock. Returns what the world did as a
     /// result, as plain-language notes for the step.
-    fn spend_action(&mut self, content: &RunContent, participant: PartIx, action: &RunAction) -> Vec<String> {
+    fn spend_action(&mut self, content: &RunContent, participant: PartIx, action: &RunAction) -> (Vec<String>, bool) {
         let Some(state) = self.world.clock.as_mut() else {
-            return Vec::new();
+            return (Vec::new(), false);
         };
         if let Some(left) = state.actions_left.get_mut(participant as usize) {
             *left = if matches!(action, RunAction::Wait) { 0 } else { left.saturating_sub(1) };
@@ -910,12 +942,13 @@ impl RunKernel {
             .humans()
             .all(|h| state.actions_left.get(h as usize).copied().unwrap_or(0) == 0);
         if !all_done {
-            return Vec::new();
+            return (Vec::new(), false);
         }
+        let slot_before = self.world.clock.as_ref().map(|c| c.slot);
         let mut delta = BijectiveDelta::default();
         let name = |id: u16| content.entity_names.get(&id).cloned().unwrap_or_else(|| id.to_string());
         let events = crate::chrono_space::advance_slot(&mut self.world, content, &mut delta);
-        events
+        let notes = events
             .into_iter()
             .map(|event| {
                 let who = self.world.participants.keys.get(event.participant as usize).cloned().unwrap_or_default();
@@ -924,7 +957,116 @@ impl RunKernel {
                     None => format!("{who} is stranded at {}", name(event.from)),
                 }
             })
-            .collect()
+            .collect();
+        let advanced = self.world.clock.as_ref().map(|c| c.slot) != slot_before;
+        (notes, advanced)
+    }
+
+    /// Each rule participant, in participant order, plays at most one eligible
+    /// storylet that lists it in `played_by`: highest display priority first,
+    /// then lowest storylet index. Rule storylets run off-stage on a scratch
+    /// instance, so they must not need an interaction.
+    fn rule_pass(&mut self, content: &RunContent) -> Result<Vec<RulePlay>, RunError> {
+        let mut plays = Vec::new();
+        let participants = self.world.participants.len() as PartIx;
+        for p in 0..participants {
+            if !matches!(self.world.participants.controller[p as usize], crate::chrono_participants::Controller::Rule) {
+                continue;
+            }
+            let Some(storylet) = self.next_rule_storylet(content, p) else { continue };
+            self.play_rule_storylet(content, p, storylet)?;
+            self.rule_played.push((p, storylet));
+            plays.push(RulePlay { participant: p, storylet: Self::reference(content, storylet) });
+            if plays.len() >= participants as usize {
+                break;
+            }
+        }
+        Ok(plays)
+    }
+    fn next_rule_storylet(&self, content: &RunContent, p: PartIx) -> Option<u16> {
+        let location_tags = self
+            .world
+            .active_location(p)
+            .and_then(|id| self.world.entity_tags.get(id as usize));
+        let mut best: Option<(i32, u16)> = None;
+        for def in &self.dispatcher.storylets {
+            if !def.played_by.contains(&p) {
+                continue;
+            }
+            if !def.is_repeatable && self.rule_played.contains(&(p, def.storylet_id)) {
+                continue;
+            }
+            if let Some(mask) = content.storylet_location_tags.get(&def.storylet_id) {
+                if !mask.is_empty() && !location_tags.is_some_and(|tags| tags.intersects(mask)) {
+                    continue;
+                }
+            }
+            if !self.dispatcher.is_eligible(def, &self.world) {
+                continue;
+            }
+            if let Some(graph) = &def.precondition_graph {
+                let mut world = self.world.clone();
+                let ctx = RuntimeContext::with_registries(&mut world, &self.dispatcher, &self.registry, &self.passion_registry);
+                if !FlowGraphInstance::evaluate_precondition_graph_for(graph, &ctx, p).unwrap_or(false) {
+                    continue;
+                }
+            }
+            let better = best.is_none_or(|(priority, id)| {
+                def.display_priority > priority || (def.display_priority == priority && def.storylet_id < id)
+            });
+            if better {
+                best = Some((def.display_priority, def.storylet_id));
+            }
+        }
+        best.map(|(_, id)| id)
+    }
+    fn play_rule_storylet(&mut self, content: &RunContent, p: PartIx, storylet: u16) -> Result<(), RunError> {
+        let entry = self
+            .dispatcher
+            .storylet(storylet)
+            .ok_or_else(|| RunError::InvalidAction("unknown storylet".into()))?
+            .payload_node_guid;
+        let seed = self.run_seed ^ (u64::from(storylet) << 16) ^ (u64::from(p) << 8) ^ self.rule_played.len() as u64;
+        let mut scratch = FlowGraphInstance::new(1, content.root_asset.clone(), seed)
+            .map_err(|e| RunError::Engine(e.to_string()))?;
+        scratch
+            .attach_mission_assets(&content.mission_assets, seed)
+            .map_err(|e| RunError::Engine(e.to_string()))?;
+        scratch.acting_participant = p;
+        scratch
+            .enter_storylet_invocation(entry, 1)
+            .map_err(|e| RunError::Engine(e.to_string()))?;
+        let known_before: Vec<(PartIx, u16)> = self.world.knowledge.rows.iter().map(|r| (r.holder, r.fact)).collect();
+        let told_before: Vec<(PartIx, u16)> = self.world.telling.rows.iter().map(|r| (r.holder, r.entry)).collect();
+        let mut ticks = 0;
+        loop {
+            let active = scratch.nodes.iter().any(|n| n.state == NodeExecutionState::ActiveLatent);
+            if scratch.tokens.is_empty() && !active {
+                break;
+            }
+            if ticks >= 10_000 || (scratch.tokens.is_empty() && active && ticks > 0 && Self::pending_in(&scratch).is_some()) {
+                return Err(RunError::InvalidAction(format!(
+                    "rule storylet {storylet} needs an interaction; rule storylets must not contain choices"
+                )));
+            }
+            let mut ctx = RuntimeContext::with_registries(&mut self.world, &self.dispatcher, &self.registry, &self.passion_registry);
+            scratch.tick(&mut ctx, 1000).map_err(|e| RunError::Engine(e.to_string()))?;
+            ticks += 1;
+        }
+        // The scratch instance has its own call history; point what it taught
+        // at the last event of the real run so Inspect links it to this step.
+        let source = self.instance.call_history().len().saturating_sub(1) as u32;
+        for row in &mut self.world.knowledge.rows {
+            if !known_before.contains(&(row.holder, row.fact)) {
+                row.source_event = source;
+            }
+        }
+        for row in &mut self.world.telling.rows {
+            if !told_before.contains(&(row.holder, row.entry)) {
+                row.source_event = source;
+            }
+        }
+        Ok(())
     }
     pub fn stalled(&self) -> Option<RunError> {
         self.stalled.clone()
@@ -947,6 +1089,7 @@ impl RunKernel {
         self.instance = snap.instance;
         self.storylet = snap.storylet;
         self.selections = snap.selections;
+        self.rule_played = snap.rule_played;
         self.stalled = snap.stalled;
         self.current_step = to_step;
         self.rewound = true;
@@ -962,6 +1105,7 @@ impl RunKernel {
             .dispatcher
             .storylets
             .iter()
+            .filter(|d| d.played_by.is_empty() || d.played_by.contains(&participant))
             .filter(
                 |d| match content.storylet_location_tags.get(&d.storylet_id) {
                     None => true,

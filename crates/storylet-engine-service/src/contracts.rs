@@ -248,6 +248,9 @@ pub struct StoryletRecord {
     pub title: String,
     #[serde(default)]
     pub ending: bool,
+    /// Participant entity ids who play this storylet; empty = any human.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub played_by: Vec<String>,
     #[serde(default)]
     pub location_tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -106,6 +106,8 @@ export interface StoryletRecord {
   title: string;
   ending: boolean;
   location_tags: string[];
+  /** Participant entity ids who play this storylet; empty = any human. */
+  played_by?: string[];
   group_tag?: string | null;
   cluster_type: "linear_progression" | "player_passage" | "wheel_deck" | "aftermath_accelerator";
   urgency_weight: number;
