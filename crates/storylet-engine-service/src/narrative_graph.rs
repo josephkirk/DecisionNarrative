@@ -396,6 +396,10 @@ pub struct NarrativeNode {
     pub y: i32,
     pub width: i32,
     pub height: i32,
+    /// Authoring metadata for core nodes lowered from a studio plugin node.
+    /// The engine ignores it; the studio uses it to raise the plugin node back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<Value>,
     #[serde(flatten)]
     pub data: NarrativeNodeData,
 }
@@ -1288,7 +1292,7 @@ impl NarrativeGraph {
         let mut edges = Vec::new();
 
         // 1. Start node
-        nodes.push(NarrativeNode {
+        nodes.push(NarrativeNode { plugin: None,
             id: "node_start".into(),
             title: "Start".into(),
             x: 60,
@@ -1330,7 +1334,7 @@ impl NarrativeGraph {
             items: vec![opening_item],
         };
 
-        nodes.push(NarrativeNode {
+        nodes.push(NarrativeNode { plugin: None,
             id: "node_dialog_1".into(),
             title: "Dialog".into(),
             x: 250,
@@ -1355,7 +1359,7 @@ impl NarrativeGraph {
         });
 
 
-        nodes.push(NarrativeNode {
+        nodes.push(NarrativeNode { plugin: None,
             id: "node_end".into(),
             title: "End".into(),
             x: 560,

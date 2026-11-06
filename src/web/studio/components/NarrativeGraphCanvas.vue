@@ -2,6 +2,7 @@
 import { ref, computed, watch } from "vue";
 import { learnNodeDefaults, graphNodeTypes, graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, GRAPH_PIN_COLORS, type GraphValueType, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType } from "../narrativeGraphTypes.ts";
 import { studioState, notify } from "../state.ts";
+import { registry, nodeTypeContribution } from "../plugins/runtime.ts";
 
 const props = withDefaults(defineProps<{
   initialGraph: NarrativeGraph;
@@ -325,8 +326,8 @@ function removeNode(nodeId: string) {
 }
 
 // Create new node of type
-function addNode(type: NodeType) {
-  const nextId = `node_${type}_${Date.now().toString(36)}`;
+function addNode(type: NodeType, pluginType?: string) {
+  const nextId = `node_${pluginType ? pluginType.replace(/[^a-z0-9]/gi, "_") : type}_${Date.now().toString(36)}`;
   const fromCanvasMenu = contextMenu.value?.kind === "canvas" && contextWorld.value !== null;
   let x = fromCanvasMenu
     ? contextWorld.value!.x
@@ -464,6 +465,13 @@ function addNode(type: NodeType) {
   } else if (type === "end") {
     baseNode.is_terminal = true;
     baseNode.height = 80;
+  } else if (type === "plugin") {
+    const contribution = nodeTypeContribution(pluginType);
+    if (!contribution) return;
+    baseNode.plugin_type = contribution.type;
+    baseNode.plugin_config = contribution.defaults();
+    baseNode.title = contribution.label;
+    baseNode.height = 100;
   }
 
   nodes.value.push(baseNode);
@@ -569,6 +577,9 @@ const computedEdges = computed(() => {
         <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('reveal')">Reveal</button>
         <button class="node-tool-btn" @click="addNode('knows')">Knows</button>
         <button class="node-tool-btn" @click="addNode('end')">End</button>
+        <template v-if="props.graphMode === 'story'">
+          <button v-for="contribution in registry.nodeTypes" :key="contribution.type" class="node-tool-btn node-tool-plugin" :title="`Plugin node: ${contribution.type}`" @click="addNode('plugin', contribution.type)">{{ contribution.label }}</button>
+        </template>
       </div>
 
       <div style="display:flex; align-items:center; gap:8px;">
@@ -642,7 +653,7 @@ const computedEdges = computed(() => {
         <div class="node-header" @mousedown="startNodeDrag($event, node)">
           <div class="node-header-title">
             <span class="node-icon">
-              {{ node.type === 'start' ? '▶' : node.type === 'dialog' ? '💬' : node.type === 'choice' ? '🔀' : node.type === 'image' ? '🎨' : node.type === 'go_to_location' ? '📍' : node.type === 'graph_transform' ? '🕸️' : node.type === 'passion_mutation' ? '💗' : node.type === 'add_entity_tag' ? '🏷️+' : node.type === 'remove_entity_tag' ? '🏷️-' : node.type === 'has_entity_tag' ? '🏷️?' : '⚙️' }}
+              {{ node.type === 'start' ? '▶' : node.type === 'dialog' ? '💬' : node.type === 'choice' ? '🔀' : node.type === 'image' ? '🎨' : node.type === 'go_to_location' ? '📍' : node.type === 'graph_transform' ? '🕸️' : node.type === 'passion_mutation' ? '💗' : node.type === 'add_entity_tag' ? '🏷️+' : node.type === 'remove_entity_tag' ? '🏷️-' : node.type === 'has_entity_tag' ? '🏷️?' : node.type === 'plugin' ? '🧩' : '⚙️' }}
             </span>
             <input v-model="node.title" class="node-title-input" @input="emitUpdate" />
           </div>
@@ -794,6 +805,10 @@ const computedEdges = computed(() => {
           </div>
           <div v-else-if="node.type === 'learn' || node.type === 'knows'">{{ node.fact_tag || 'Choose fact' }}</div>
           <div v-else-if="node.type === 'reveal'">{{ node.event_id || 'Choose canon event' }}</div>
+          <div v-else-if="node.type === 'plugin'" :style="{ borderLeft: `3px solid ${nodeTypeContribution(node.plugin_type)?.color ?? '#8e8e93'}`, paddingLeft: '6px' }">
+            <div class="field-label">{{ nodeTypeContribution(node.plugin_type)?.label ?? `Missing plugin: ${node.plugin_type}` }}</div>
+            <div style="font-size:11px;">{{ nodeTypeContribution(node.plugin_type)?.summary?.(node.plugin_config ?? {}) ?? '' }}</div>
+          </div>
           <div v-else-if="node.type === 'end'">
             <div v-if="props.graphMode === 'preconditions'" style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.precondition_result === false ? 'Reject candidate' : 'Valid candidate' }}</div>
             <div v-else style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.jump_to_storylet || 'Terminal ending' }}</div>
@@ -824,6 +839,9 @@ const computedEdges = computed(() => {
       <template v-if="contextMenu.kind === 'canvas'">
         <input v-model="nodeSearch" class="form-input" placeholder="Search node types" autofocus @keydown.esc="contextMenu = null" />
         <button v-for="type in matchingNodeTypes" :key="type" class="context-menu-item" @click="addNode(type)">+ {{ nodeTypeLabel(type) }}</button>
+        <template v-if="props.graphMode === 'story'">
+          <button v-for="contribution in registry.nodeTypes.filter((entry) => entry.label.toLowerCase().includes(nodeSearch.trim().toLowerCase()))" :key="contribution.type" class="context-menu-item" @click="addNode('plugin', contribution.type)">+ {{ contribution.label }} <small>(plugin)</small></button>
+        </template>
         <div v-if="!matchingNodeTypes.length" class="context-menu-empty">No matching node types</div>
       </template>
       <button v-else class="context-menu-item danger" @click="contextMenu.kind === 'node' ? removeNode(contextMenu.targetId!) : removeEdge(contextMenu.targetId!); contextMenu = null">Delete {{ contextMenu.kind }}</button>

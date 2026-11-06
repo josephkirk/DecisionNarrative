@@ -912,8 +912,8 @@ mod tests {
     fn property_graph(source: NarrativeNodeData, property: NarrativeNodeData) -> NarrativeGraph {
         NarrativeGraph {
             nodes: vec![
-                NarrativeNode { id: "source".into(), title: "Source".into(), x: 0, y: 0, width: 100, height: 80, data: source },
-                NarrativeNode { id: "property".into(), title: "Property".into(), x: 120, y: 0, width: 100, height: 80, data: property },
+                NarrativeNode { plugin: None, id: "source".into(), title: "Source".into(), x: 0, y: 0, width: 100, height: 80, data: source },
+                NarrativeNode { plugin: None, id: "property".into(), title: "Property".into(), x: 120, y: 0, width: 100, height: 80, data: property },
             ],
             edges: vec![crate::narrative_graph::NarrativeEdge {
                 id: "source-property".into(), from_node: "source".into(), from_port: "output".into(),
@@ -930,7 +930,7 @@ mod tests {
         graph.nodes[1].id = "reference".into();
         graph.nodes[1].title = "Reference".into();
         graph.edges[0].to_node = "reference".into();
-        graph.nodes.push(NarrativeNode {
+        graph.nodes.push(NarrativeNode { plugin: None,
             id: "property".into(), title: "Property".into(), x: 240, y: 0,
             width: 100, height: 80, data: property,
         });
@@ -1012,7 +1012,7 @@ mod tests {
             "id": "hub", "title": "Hub", "content": {"text_template": "x"}, "effects": {}, "created_at": 1
         })).expect("storylet fixture");
         let dispatch = compile_chrono_dispatch(&[storylet], &[], &[]).expect("dispatch");
-        let node = |id: &str, data: NarrativeNodeData| NarrativeNode {
+        let node = |id: &str, data: NarrativeNodeData| NarrativeNode { plugin: None,
             id: id.into(), title: id.into(), x: 0, y: 0, width: 100, height: 80, data
         };
         let hub = node("hub", NarrativeNodeData::QbnStoryletHub { deck_storylet_ids: vec!["hub".into()], hub_exit_storylet_id: "hub".into() });
@@ -1091,7 +1091,7 @@ mod tests {
             ("world".to_string(), 0_u16),
             ("actor".to_string(), 1_u16),
         ]);
-        let node = |id: &str, data: NarrativeNodeData| NarrativeNode {
+        let node = |id: &str, data: NarrativeNodeData| NarrativeNode { plugin: None,
             id: id.into(), title: id.into(), x: 0, y: 0, width: 160, height: 80, data
         };
 
@@ -1282,6 +1282,57 @@ mod tests {
         assert_eq!(score, Some(&AttributeValue::Int(7)));
     }
     #[test]
+    fn lowered_modify_canvas_plugin_node_opens_gate_and_removes_key() {
+        // Shape the studio produces when it lowers a Modify Canvas plugin node.
+        let storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
+            "id": "unlock", "title": "Unlock", "content": { "text_template": "The gate." }, "effects": {}, "created_at": 1,
+            "graph": {
+                "nodes": [
+                    { "id": "start", "type": "start", "title": "Start", "text": "Go", "x": 0, "y": 0, "width": 100, "height": 80 },
+                    { "id": "mc__entity", "type": "get_entity", "title": "Canvas Entity", "entity_path": "world", "x": 0, "y": 0, "width": 100, "height": 80,
+                      "plugin": { "group": "mc" } },
+                    { "id": "mc__op0", "type": "apply_command", "title": "Remove key", "property_key": "map_s_key_present", "operation": "set", "value_type": "bool", "value": false,
+                      "x": 0, "y": 0, "width": 100, "height": 80,
+                      "plugin": { "group": "mc", "exit": "mc__op1", "source": { "id": "mc", "type": "plugin", "plugin_type": "canvas.modify" } } },
+                    { "id": "mc__op1", "type": "apply_command", "title": "Open gate", "property_key": "map_s_gate_open", "operation": "set", "value_type": "bool", "value": true,
+                      "x": 0, "y": 0, "width": 100, "height": 80, "plugin": { "group": "mc" } },
+                    { "id": "end", "type": "end", "title": "End", "is_terminal": true, "x": 0, "y": 0, "width": 100, "height": 80 }
+                ],
+                "edges": [
+                    { "id": "e1", "from_node": "start", "from_port": "output", "to_node": "mc__op0", "to_port": "input", "kind": "flow" },
+                    { "id": "mc__op0__next", "from_node": "mc__op0", "from_port": "output", "to_node": "mc__op1", "to_port": "input", "kind": "flow" },
+                    { "id": "e2", "from_node": "mc__op1", "from_port": "output", "to_node": "end", "to_port": "input", "kind": "flow" },
+                    { "id": "d0", "from_node": "mc__entity", "from_port": "output", "to_node": "mc__op0", "to_port": "entity", "kind": "data" },
+                    { "id": "d1", "from_node": "mc__entity", "from_port": "output", "to_node": "mc__op1", "to_port": "entity", "kind": "data" }
+                ]
+            }
+        })).expect("valid storylet");
+        let graph = storylet.graph.as_ref().expect("graph");
+        graph.validate().expect("lowered plugin graph validates");
+        let stored = serde_json::to_value(graph).expect("serialize");
+        assert_eq!(stored["nodes"][2]["plugin"]["source"]["plugin_type"], "canvas.modify", "plugin metadata round-trips");
+
+        let mut dispatch = compile_chrono_dispatch(std::slice::from_ref(&storylet), &[], &[]).expect("dispatch compiles");
+        let graphs = compile_narrative_graphs("project-a", std::slice::from_ref(&storylet), &dispatch, &std::collections::BTreeMap::new())
+            .expect("graph compiles");
+        bind_storylet_start_nodes(&mut dispatch, &graphs).expect("start node binds");
+        let mut state = WorldStateTable::new();
+        state.vertices.push(WorldVertex {
+            vertex_id: "world".into(), layer: GraphLayer::Fact, entity_index: None,
+            attributes: std::collections::BTreeMap::from([
+                ("prop.map_s_key_present".into(), AttributeValue::Bool(true)),
+                ("prop.map_s_gate_open".into(), AttributeValue::Bool(false)),
+            ]),
+        });
+        let mut instance = FlowGraphInstance::new(1, graphs.asset, 7).expect("runtime instance");
+        let mut context = RuntimeContext::with_registry(&mut state, &dispatch.dispatcher, &dispatch.registry);
+        instance.start().expect("start token");
+        instance.tick(&mut context, 100).expect("execute");
+        let crypt = state.vertices.iter().find(|vertex| vertex.vertex_id == "world").expect("world");
+        assert_eq!(crypt.attributes.get("prop.map_s_key_present"), Some(&AttributeValue::Bool(false)));
+        assert_eq!(crypt.attributes.get("prop.map_s_gate_open"), Some(&AttributeValue::Bool(true)));
+    }
+    #[test]
     fn choice_branches_converge_on_dialog_in_play_and_story_invoke() {
         use crate::narrative_graph::{
             ChoiceOption, NarrativeEdge, NarrativeGraph, NarrativeNode, NarrativeNodeData,
@@ -1289,7 +1340,7 @@ mod tests {
         use std::collections::BTreeMap;
         use storylet_engine::chrono_runtime::NodeKind;
 
-        let node = |id: &str, title: &str, data: NarrativeNodeData| NarrativeNode {
+        let node = |id: &str, title: &str, data: NarrativeNodeData| NarrativeNode { plugin: None,
             id: id.into(),
             title: title.into(),
             x: 0,
@@ -1523,11 +1574,11 @@ mod tests {
         .unwrap();
         let graph = NarrativeGraph {
             nodes: vec![
-                NarrativeNode {
+                NarrativeNode { plugin: None,
                     id: "start".into(), title: "Start".into(), x: 0, y: 0, width: 100, height: 80,
                     data: NarrativeNodeData::Start { label: "Begin".into() },
                 },
-                NarrativeNode {
+                NarrativeNode { plugin: None,
                     id: "end".into(), title: "End".into(), x: 200, y: 0, width: 100, height: 80,
                     data: NarrativeNodeData::End {
                         is_terminal: true,
@@ -1557,7 +1608,7 @@ mod tests {
         };
         use storylet_engine::chrono_runtime::NodeKind;
 
-        let node = |id: &str, data: NarrativeNodeData| NarrativeNode {
+        let node = |id: &str, data: NarrativeNodeData| NarrativeNode { plugin: None,
             id: id.into(),
             title: id.into(),
             x: 0,
@@ -1712,7 +1763,7 @@ mod tests {
                 previous
             })
             .unwrap();
-        graph.nodes.push(NarrativeNode {
+        graph.nodes.push(NarrativeNode { plugin: None,
             id: "mission".into(),
             title: "Mission".into(),
             x: 500,
@@ -1794,7 +1845,7 @@ mod tests {
     #[test]
     fn entity_tag_nodes_execute_add_remove_and_conditional_branch() {
         use crate::narrative_graph::{NarrativeEdge, NarrativeGraph, NarrativeNode, NarrativeNodeData};
-        let node = |id: &str, data: NarrativeNodeData| NarrativeNode {
+        let node = |id: &str, data: NarrativeNodeData| NarrativeNode { plugin: None,
             id: id.into(), title: id.into(), x: 0, y: 0, width: 160, height: 80, data
         };
         let authored = NarrativeGraph {
@@ -1852,7 +1903,7 @@ mod tests {
             ("world".to_string(), 0_u16),
             ("actor".to_string(), 1_u16),
         ]);
-        let node = |id: &str, data: NarrativeNodeData| NarrativeNode {
+        let node = |id: &str, data: NarrativeNodeData| NarrativeNode { plugin: None,
             id: id.into(), title: id.into(), x: 0, y: 0, width: 160, height: 80, data
         };
 

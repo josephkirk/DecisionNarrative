@@ -9,6 +9,7 @@ import TagEditor from "./TagEditor.vue";
 import ThumbnailPicker from "./ThumbnailPicker.vue";
 import { normalizeTagName, uniqueTagNames, buildTagIndex } from "../tagData.ts";
 import { studioState, notify } from "../state.ts";
+import { nodeTypeContribution } from "../plugins/runtime.ts";
 const props = defineProps<{
   storylet: StoryletRecord;
   graph: NarrativeGraph;
@@ -933,6 +934,17 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
       </div>
 
       <!-- HAS ENTITY TAG -->
+      <div v-else-if="selectedNode.type === 'plugin'" data-testid="plugin-node-inspector">
+        <component
+          :is="nodeTypeContribution(selectedNode.plugin_type)!.inspector"
+          v-if="nodeTypeContribution(selectedNode.plugin_type)?.inspector"
+          :node="selectedNode"
+          :graph="graph"
+          :config="selectedNode.plugin_config ?? {}"
+          @update:config="selectedNode.plugin_config = $event; emitGraphUpdate(selectedNode)"
+        />
+        <p v-else class="field-sublabel">Plugin '{{ selectedNode.plugin_type }}' is not loaded or has no inspector.</p>
+      </div>
       <div v-else-if="selectedNode.type === 'get_entity'">
         <div class="form-group">
           <label class="field-label">Entity</label>

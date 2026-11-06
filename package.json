@@ -14,7 +14,8 @@
     "smoke:native-host": "pwsh -NoProfile -File scripts/run-native-host.ps1",
     "test": "bun test",
     "test:visual": "bun run build && node tests/visual/play-visual.ts",
-    "bench": "cargo run --release --manifest-path crates/storylet-engine/Cargo.toml --bin storylet-engine-bench --"
+    "bench": "cargo run --release --manifest-path crates/storylet-engine/Cargo.toml --bin storylet-engine-bench --",
+    "test:visual:canvas": "bun run build && node tests/visual/canvas-visual.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

@@ -10,9 +10,12 @@ import PropertyListEditor from "../components/PropertyListEditor.vue";
 import ReferenceList from "../components/ReferenceList.vue";
 import TagEditor from "../components/TagEditor.vue";
 import ThumbnailPicker from "../components/ThumbnailPicker.vue";
+import { entityPanelsFor } from "../plugins/runtime.ts";
 const route = useRoute(); const router = useRouter(); const entityId = typeof route.params.id === "string" ? route.params.id : "";
 const editor = useEntityEditor(entityId); const { draft, dirty, loading, saving, activeTab, references, referencesLoading, isWorld, isEntityRoute, loadReferences, patch, addTrait, removeTrait, setTraitValue, traitPropertyDisplayValue, save, remove } = editor;
 const intrinsic = computed(() => isWorld.value);
+const pluginPanels = computed(() => draft.value ? entityPanelsFor(draft.value) : []);
+const activePanel = computed(() => pluginPanels.value.find((panel) => activeTab.value === `plugin:${panel.id}`));
 const templateId = computed(() => (draft.value && "template_id" in draft.value ? draft.value.template_id : null));
 const parentTemplate = computed(() => {
   const tid = templateId.value;
@@ -170,6 +173,9 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
         References
         <span class="tab-badge">{{ references.length }}</span>
       </button>
+      <button v-for="panel in pluginPanels" :key="panel.id" :class="['entity-tab', activeTab === `plugin:${panel.id}` && 'is-active']" @click="activeTab = `plugin:${panel.id}`">
+        {{ panel.label }}
+      </button>
     </nav>
 
     <!-- Properties Content Stack -->
@@ -298,6 +304,10 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
         </div>
         <button v-if="!intrinsic" class="btn btn-danger" @click="removeTrait(entry.instance.id)">Remove</button>
       </details>
+    </section>
+
+    <section v-else-if="activePanel" class="entity-content-stack" :data-plugin-panel="activePanel.id">
+      <component :is="activePanel.component" :entity="draft" :readonly="intrinsic" @patch="patch" />
     </section>
 
     <ReferenceList v-else :references="references" :loading="referencesLoading" />

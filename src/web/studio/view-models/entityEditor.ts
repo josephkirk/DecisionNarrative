@@ -5,7 +5,8 @@ import type { ContentReference, EntityRecord, EntityTemplateRecord, PropertyValu
 import { newTraitInstance } from "../entityModel.ts";
 import { notify } from "../state.ts";
 import { refreshWorkspace, currentFolderId } from "./workspace.ts";
-export type EntityTab = "properties" | "traits" | "references";
+/** Built-in tabs, or `plugin:<panel id>` for an entity panel contributed by a plugin. */
+export type EntityTab = "properties" | "traits" | "references" | `plugin:${string}`;
 export function useEntityEditor(entityId: string) {
   const isEntityRoute = useRoute().name === "entity";
   const isWorld = computed(() => isEntityRoute && entityId === "world");

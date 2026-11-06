@@ -4,6 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 import { useStoryletEditorViewModel } from "../view-models/storyletEditor.ts";
 import NarrativeGraphCanvas from "../components/NarrativeGraphCanvas.vue";
 import PropertyInspector from "../components/PropertyInspector.vue";
+import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../plugins/graphLowering.ts";
+import type { AnyEntity } from "../plugins/runtime.ts";
 import { buildGraphFromStorylet, compileGraphToStorylet, validateNarrativeGraph, validatePreconditionGraph, type NarrativeGraph } from "../narrativeGraphTypes.ts";
 import { notify, studioState } from "../state.ts";
 import { originBadge } from "../storyletModel.ts";
@@ -64,7 +66,8 @@ onMounted(async () => {
   const loads: Promise<unknown>[] = [];
   if (storyletId) loads.push(loadStorylet(storyletId));
   await Promise.all(loads);
-  currentGraph.value = buildGraphFromStorylet(draft);
+  currentGraph.value = raisePluginGraph(buildGraphFromStorylet(draft));
+  draft.graph = currentGraph.value;
   preconditionGraph.value = draft.precondition_graph?.nodes.length ? draft.precondition_graph : defaultPreconditionGraph();
   draft.precondition_graph = preconditionGraph.value;
   lastSavedSnapshot.value = JSON.stringify(draft);
@@ -120,24 +123,39 @@ async function playFromHere() {
   }
 }
 
+/** Plugin nodes are lowered to core nodes for validation and storage. */
+function lowerForEngine(): NarrativeGraph | null {
+  const entities = [...studioState.entities, ...studioState.entityTemplates] as AnyEntity[];
+  const pluginIssues = validatePluginNodes(currentGraph.value, entities);
+  if (pluginIssues.length) { notify(pluginIssues.join(" "), "error"); return null; }
+  const lowered = lowerPluginGraph(currentGraph.value, entities);
+  const graphIssues = [...validateNarrativeGraph(lowered), ...validatePreconditionGraph(preconditionGraph.value)];
+  if (graphIssues.length) { notify(graphIssues.join(" "), "error"); return null; }
+  return lowered;
+}
+
 async function handleSave() {
-  const graphIssues = [...validateNarrativeGraph(currentGraph.value), ...validatePreconditionGraph(preconditionGraph.value)];
-  if (graphIssues.length) { notify(graphIssues.join(" "), "error"); return; }
+  const lowered = lowerForEngine();
+  if (!lowered) return;
   const wasNew = isNew.value;
-  compileGraphToStorylet(currentGraph.value, draft);
+  compileGraphToStorylet(lowered, draft);
   draft.precondition_graph = preconditionGraph.value;
-  if (await saveDraft()) {
+  const saved = await saveDraft();
+  draft.graph = currentGraph.value;
+  if (saved) {
     lastSavedSnapshot.value = JSON.stringify(draft);
     if (wasNew) router.replace("/storylets/" + draft.id + "/edit");
   }
 }
 
 async function handleApprove() {
-  const graphIssues = [...validateNarrativeGraph(currentGraph.value), ...validatePreconditionGraph(preconditionGraph.value)];
-  if (graphIssues.length) { notify(graphIssues.join(" "), "error"); return; }
-  compileGraphToStorylet(currentGraph.value, draft);
+  const lowered = lowerForEngine();
+  if (!lowered) return;
+  compileGraphToStorylet(lowered, draft);
   draft.precondition_graph = preconditionGraph.value;
-  if (await approveStorylet()) lastSavedSnapshot.value = JSON.stringify(draft);
+  const approved = await approveStorylet();
+  draft.graph = currentGraph.value;
+  if (approved) lastSavedSnapshot.value = JSON.stringify(draft);
 }
 
 function deleteSelectedNode(nodeId: string) {

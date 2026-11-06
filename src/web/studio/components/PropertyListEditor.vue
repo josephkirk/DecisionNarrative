@@ -10,6 +10,7 @@ import {
   toggleArray,
 } from "../propertyModel.ts";
 import PropertyValueInput from "./PropertyValueInput.vue";
+import { propertyEditorFor } from "../plugins/runtime.ts";
 
 type Row = EntityProperty | PropertyDefinition;
 
@@ -195,7 +196,16 @@ function add() {
         </button>
       </div>
       <div class="property-list__cell property-list__cell--value">
+        <component
+          :is="propertyEditorFor(row)!.component"
+          v-if="propertyEditorFor(row)"
+          :property="row"
+          :model-value="valueOf(row)"
+          :disabled="props.disabled"
+          @update:model-value="patchValue(index, $event)"
+        />
         <PropertyValueInput
+          v-else
           :key="`${row.id}-${row.type}-${row.is_array}-${row.multiline}`"
           :model-value="valueOf(row)"
           :type="row.type"

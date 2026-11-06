@@ -72,6 +72,29 @@ cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 - **Project Authoring Aids**: Storylets can carry time windows and participant badges; world connections and the clock are authored as system traits and validated.
 - **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v5) containing entities, entity templates, folders, trait templates, assets, storylets, and scenarios, with transactional validation. Earlier bundle schemas are rejected; use a fresh schema-v5 database rather than migrating a legacy database.
 
+## Plugins
+
+The studio follows an *everything is a plugin* model (after DeepSeek Harness / Cordis). A plugin is
+`definePlugin({ name, apply(ctx) })`; everything it registers through `ctx` is removed when it is disposed.
+Code lives in `src/web/studio/plugins/`.
+
+| Extension point | Registers | Shown in |
+| --- | --- | --- |
+| `ctx.entityPanel()` | UI attached to an entity | an extra tab in the entity editor |
+| `ctx.propertyEditor()` | UI attached to a property | replaces the default value input |
+| `ctx.nodeType()` | a graph node: config in, core nodes out (`lower`) | story graph toolbar, context menu, inspector |
+| `ctx.on()` / `ctx.plugin()` | events, nested plugins | — |
+
+Plugin nodes exist only while authoring. On save, each is lowered into core nodes (for example Apply Command);
+the authored node is kept as `plugin` metadata on the lowered nodes, so reopening the storylet shows it again.
+The engine runs only core nodes.
+
+**Built-in: Vector Canvas.** Every entity has a **Map Canvas** tab: a layered vector editor (rooms, walls, text,
+gates, keys, items, facts, events, references to other entities), with undo/redo and a saved revision history you can
+restore. Gameplay shapes declare boolean entity properties (`map_<id>_present`, `map_<id>_open`). The **Modify Canvas**
+story node opens or closes gates and adds or removes keys, items, facts and events, with a before/after preview.
+Visual check: `bun run test:visual:canvas`.
+
 ## Model Context Protocol (MCP)
 
 DecisionNarrative exposes project data and deterministic playtest operations to local MCP agents. `workspace.context` identifies the active studio view and focused entity; the agent then works through MCP without UI automation. The MCP service shares the studio's local database. No generation or model-ranking tools are exposed:

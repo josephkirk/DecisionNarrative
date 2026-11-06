@@ -39,6 +39,7 @@ export type NodeType =
   | "add_entity_tag"
   | "remove_entity_tag"
   | "has_entity_tag"
+  | "plugin"
   | "end";
 
 export interface DialogueLineItem {
@@ -240,6 +241,11 @@ export interface NarrativeNode {
   operator?: AttributeOp;
   value?: unknown;
   // Entity membership predicates use Has Entity Tag dot-notation.
+  /** Contributed node type; only set when type is "plugin". */
+  plugin_type?: string;
+  plugin_config?: Record<string, unknown>;
+  /** Lowering metadata kept on core nodes generated from a plugin node. */
+  plugin?: unknown;
 }
 
 export function graphNodeValueType(node: NarrativeNode): GraphValueType | undefined {
@@ -426,7 +432,7 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
     "start", "dialog", "choice", "condition", "compare", "get_entity", "get_entity_property", "apply_command", "qbn_storylet_hub",
     "salience_selector", "waypoint_conversation", "waiter", "and", "or",
     "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "learn", "reveal", "knows", "graph_transform", "passion_mutation",
-    "add_entity_tag", "remove_entity_tag", "has_entity_tag", "end",
+    "add_entity_tag", "remove_entity_tag", "has_entity_tag", "plugin", "end",
   ]);
   if (graph.nodes.some((node) => !node || typeof node !== "object" || typeof node.id !== "string" || !node.id.trim() || !allowedTypes.has(node.type))) {
     return ["Graph nodes must have nonempty IDs and recognized types."];
