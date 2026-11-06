@@ -805,3 +805,7 @@ export function graphNodeTypes(mode: "story" | "preconditions"): NodeType[] {
   if (mode === "preconditions") return pure;
   return [...pure, "learn", "reveal", "dialog", "choice", "apply_command", "qbn_storylet_hub", "salience_selector", "waypoint_conversation", "waiter", "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "add_entity_tag", "remove_entity_tag"];
 }
+
+export function learnNodeDefaults(visibility: "private" | "co_located" | undefined): { kind: "evidence"; visibility: "private" | "co_located" } {
+  return { kind: "evidence", visibility: visibility ?? "private" };
+}

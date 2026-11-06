@@ -110,6 +110,8 @@ export interface StoryletRecord {
   location_tags: string[];
   /** Participant entity ids who play this storylet; empty = any human. */
   played_by?: string[];
+  window?: number[];
+  default_learn_visibility?: "private" | "co_located";
   group_tag?: string | null;
   cluster_type: "linear_progression" | "player_passage" | "wheel_deck" | "aftermath_accelerator";
   urgency_weight: number;
@@ -143,6 +145,8 @@ export interface LibrarySummaryItem {
   excerpt: string;
   location_tags: string[];
   role_tags: string[];
+  window?: number[];
+  played_by?: string[];
   choice_count: number;
   revision: number;
   approved_revision?: number | null;

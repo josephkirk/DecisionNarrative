@@ -162,6 +162,9 @@ pub struct StoryletDef {
     /// participant plays its storylets on its own at the start of a slot.
     #[serde(default)]
     pub played_by: Vec<crate::chrono_participants::PartIx>,
+    /// Eligible clock slots; empty means any time.
+    #[serde(default)]
+    pub window: Vec<u32>,
     /// Optional pure candidate gate compiled from the authored precondition graph.
     #[serde(default)]
     pub precondition_graph: Option<crate::chrono_runtime::FlowGraphAsset>,
@@ -423,6 +426,7 @@ impl UnifiedDispatcher {
 
     /// Describe the first missing hard requirement in reader-facing language.
     pub fn explain_ineligible(&self, def: &StoryletDef, table: &WorldStateTable, registry: &GameplayTagRegistry) -> Option<String> {
+        if !def.window.is_empty() && table.clock.as_ref().is_none_or(|clock| !def.window.contains(&clock.slot)) { return Some("outside its time window".into()); }
         for i in (0..registry.tag_count()).rev() {
             let i = i as u16;
             if def.required_tags.bit(i) && !table.global_tags.bit(i) {
@@ -445,6 +449,7 @@ impl UnifiedDispatcher {
         def: &StoryletDef,
         table: &WorldStateTable,
     ) -> Result<bool, DispatchError> {
+        if !def.window.is_empty() && table.clock.as_ref().is_none_or(|clock| !def.window.contains(&clock.slot)) { return Ok(false); }
         if !table.global_tags.contains_all(&def.required_tags) {
             return Ok(false);
         }

@@ -2984,10 +2984,11 @@ pub(crate) fn compile_run_content(store: &Store, scenario_id: Option<&str>, expe
     let resolved = resolve_scenario_start(scenario, &content.locations, &content.characters);
     if !resolved.issues.is_empty() { return Err(resolved.issues.join("; ")); }
     let mut compiled = compile_chrono_dispatch_with_world(&content.storylets, &content.locations, &content.characters, &content.world_objects, &content.world_tags, &content.entity_tag_seeds, &content.entity_game_ids)?;
-    let seed = initialize_chrono_world(&compiled, &content.storylets, &content.world, &content.entities, &content.locations, &content.characters, &content.world_objects, &content.world_tags, &content.entity_tag_seeds, Some(scenario), &resolved.player_start_location)?;
+    let mut seed = initialize_chrono_world(&compiled, &content.storylets, &content.world, &content.entities, &content.locations, &content.characters, &content.world_objects, &content.world_tags, &content.entity_tag_seeds, Some(scenario), &resolved.player_start_location)?;
     compiled.participant_indices = seed.state.participants.keys.iter().enumerate().map(|(i,k)| (k.clone(), i as u16)).collect();
     compiled.implicit_participant = seed.state.participants.entity.as_slice() == [u16::MAX];
     (compiled.connections, compiled.clock) = crate::chrono_adapter::compile_space(&content.world, &content.entities, &content.locations, &seed.entity_indices, &compiled.registry)?;
+    if let Some(clock) = &compiled.clock { seed.state.clock = Some(storylet_engine::chrono_space::ClockState::new(clock, seed.state.participants.len())); }
     compiled.chronicle = crate::chrono_adapter::compile_chronicle(&content.events, &compiled.registry, &seed.entity_indices)?;
     crate::chrono_adapter::bind_played_by(&mut compiled, &content.storylets)?;
     let mut graphs = compile_narrative_graphs(&meta.id, &content.storylets, &compiled, &seed.entity_indices)?;

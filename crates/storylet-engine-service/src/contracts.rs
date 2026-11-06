@@ -256,6 +256,11 @@ pub struct StoryletRecord {
     /// Participant entity ids who play this storylet; empty = any human.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub played_by: Vec<String>,
+    /// Eligible clock slots; empty means any slot.
+    #[serde(default)]
+    pub window: Vec<u32>,
+    #[serde(default = "default_learn_visibility")]
+    pub default_learn_visibility: String,
     #[serde(default)]
     pub location_tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -287,6 +292,7 @@ pub struct StoryletRecord {
     pub created_at: i64,
 }
 
+fn default_learn_visibility() -> String { "private".into() }
 fn default_storylet_origin() -> String { "human".into() }
 fn default_revision() -> u64 {
     1
@@ -408,6 +414,10 @@ pub struct LibrarySummaryItem {
     pub excerpt: String,
     pub location_tags: Vec<String>,
     pub role_tags: Vec<String>,
+    #[serde(default)]
+    pub window: Vec<u32>,
+    #[serde(default)]
+    pub played_by: Vec<String>,
     pub choice_count: usize,
     pub revision: u64,
     pub approved_revision: Option<u64>,

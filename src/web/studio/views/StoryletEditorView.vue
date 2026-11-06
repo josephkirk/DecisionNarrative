@@ -187,6 +187,7 @@ function deleteSelectedNode(nodeId: string) {
           class="graph-editor-canvas"
           :initial-graph="activeGraph"
           :graph-mode="activeGraphTab"
+          :default-learn-visibility="draft.default_learn_visibility"
           :selected-node-id="selectedNodeId"
           @update-graph="handleGraphUpdate"
           @select-node="handleSelectNode"
@@ -197,6 +198,7 @@ function deleteSelectedNode(nodeId: string) {
           :storylets="availableStorylets"
           :graph="activeGraph"
           :graph-mode="activeGraphTab"
+          :default-learn-visibility="draft.default_learn_visibility"
           :selected-node="selectedNode"
           @update-storylet="handleStoryletUpdate"
           @update-graph="handleGraphUpdate"
@@ -209,7 +211,7 @@ function deleteSelectedNode(nodeId: string) {
 
 <style scoped>
 .full-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; background: var(--bg-app); }
-.editor-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 8px 16px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
+.editor-toolbar { height: auto; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 8px 16px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
 .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .toolbar-right { margin-left: auto; flex-shrink: 0; }
 .storylet-title-input { font-size: 13px; font-weight: 600; width: min(220px, 40vw); min-width: 0; }

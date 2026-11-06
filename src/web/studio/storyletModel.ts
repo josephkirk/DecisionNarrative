@@ -21,3 +21,14 @@ export function togglePlayedBy(current: string[], id: string, checked: boolean):
 export function originBadge(storylet: { origin?: string; revision: number; approved_revision?: number | null }): string | null {
   return storylet.origin === "agent" && storylet.approved_revision !== storylet.revision ? "Agent draft" : null;
 }
+
+/** Human-readable slot list, preserving unknown slots instead of hiding them. */
+export function windowBadge(window: number[] | undefined, labels: string[]): string | null {
+  if (!window?.length) return null;
+  return window.map((slot) => labels[slot] ?? `Slot ${slot + 1}`).join(", ");
+}
+
+export function clockLabels(entities: Array<{ id: string; traits?: Array<{ template_id: string; values: Record<string, unknown> }> }>): string[] {
+  const value = entities.find((entity) => entity.id === "world")?.traits?.find((trait) => trait.template_id === "system.clock")?.values.slot_labels;
+  return Array.isArray(value) ? value.filter((label): label is string => typeof label === "string") : [];
+}

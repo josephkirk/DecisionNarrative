@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
-import { graphNodeTypes, graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, GRAPH_PIN_COLORS, type GraphValueType, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType } from "../narrativeGraphTypes.ts";
+import { learnNodeDefaults, graphNodeTypes, graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, GRAPH_PIN_COLORS, type GraphValueType, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType } from "../narrativeGraphTypes.ts";
 import { studioState, notify } from "../state.ts";
 
 const props = withDefaults(defineProps<{
   initialGraph: NarrativeGraph;
   selectedNodeId: string | null;
   graphMode?: "story" | "preconditions";
+  defaultLearnVisibility?: "private" | "co_located";
 }>(), { graphMode: "story" });
 
 const emit = defineEmits<{
@@ -401,7 +402,7 @@ function addNode(type: NodeType) {
     baseNode.height = 100;
   } else if (type === "learn" || type === "knows") {
     baseNode.fact_tag = "";
-    if (type === "learn") { baseNode.kind = "evidence"; baseNode.visibility = "private"; }
+    if (type === "learn") Object.assign(baseNode, learnNodeDefaults(props.defaultLearnVisibility));
     else { baseNode.holder = "acting"; baseNode.confirmed_only = false; }
   } else if (type === "reveal") {
     baseNode.event_id = "";

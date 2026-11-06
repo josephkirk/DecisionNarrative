@@ -404,3 +404,18 @@ fn rule_knowledge_has_a_source_step_when_triggered_by_wait() {
     let fact = inspect.knows.iter().find(|row| row.fact == "fact.a").unwrap();
     assert_eq!(fact.source_step, Some(1));
 }
+
+#[test]
+fn storylet_window_gates_eligibility() {
+    let dispatcher = UnifiedDispatcher::new(vec![]);
+    let def = StoryletDef { storylet_id: 7, window: vec![1, 3], ..Default::default() };
+    let fixture = content();
+    let mut world = fixture.initial_world;
+    world.clock = Some(ClockState::new(fixture.clock.as_ref().unwrap(), world.participants.len()));
+    assert!(!dispatcher.is_eligible(&def, &world));
+    world.clock.as_mut().unwrap().slot = 1;
+    assert!(dispatcher.is_eligible(&def, &world));
+    world.clock = None;
+    assert!(!dispatcher.is_eligible(&def, &world));
+    assert!(dispatcher.is_eligible(&StoryletDef { window: vec![], ..def }, &world));
+}

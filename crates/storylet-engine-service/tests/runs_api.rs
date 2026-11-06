@@ -719,3 +719,37 @@ async fn http_created_storylet_has_human_origin() {
     assert_eq!(status, StatusCode::CREATED, "{story}");
     assert_eq!(story["origin"], "human");
 }
+
+#[tokio::test]
+async fn storylet_window_is_compiled_and_used_at_start() {
+    let (path, mut story) = fixture();
+    let store = storylet_engine_service::store::Store::open(&path).unwrap();
+    let mut world = store.list_entities().unwrap().into_iter().find(|entity| entity.id == "world").unwrap();
+    world.traits.push(serde_json::from_value(json!({"template_id":"system.clock","values":{"slot_labels":["Dawn","Dusk"],"actions_per_slot":2}})).unwrap());
+    store.save_content("entities", "world", &serde_json::to_string(&world).unwrap(), 2, None).unwrap();
+    story["window"] = json!([0]);
+    store.save_content("storylets", "story", &story.to_string(), 2, None).unwrap();
+    let revision = store.get_project_metadata().unwrap().revision;
+    drop(store);
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, result) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"expectedRevision":revision,"idempotencyKey":"window-start"}))).await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["view"]["place"]["clockLabel"], "Dawn");
+    let store = storylet_engine_service::store::Store::open(&path).unwrap();
+    story["window"] = json!([1]);
+    store.save_content("storylets", "story", &story.to_string(), 3, None).unwrap();
+    let next_revision = store.get_project_metadata().unwrap().revision;
+    drop(store);
+    let (status, result) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"expectedRevision":next_revision,"idempotencyKey":"closed-window"}))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{result}");
+    let (status, library) = req(&app, "GET", "/api/v3/library?q=Story", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(library["items"][0]["window"], json!([1]));
+}
+
+#[tokio::test]
+async fn invalid_default_learn_visibility_is_rejected() {
+    let app = build_router(StudioService::open_in_memory(".").unwrap(), None);
+    let (status, _) = req(&app, "POST", "/api/v3/content/storylets", Some(json!({"id":"bad-visibility","title":"Bad","content":{"text_template":"x"},"created_at":1,"default_learn_visibility":"everyone"}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

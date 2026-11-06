@@ -470,6 +470,11 @@ impl StudioService {
             .to_string();
 
         if entity == "storylets" {
+            if let Some(value) = final_payload.get("default_learn_visibility") {
+                if !matches!(value.as_str(), Some("private" | "co_located")) {
+                    return Err("Default Learn visibility must be private or co_located".into());
+                }
+            }
             let settings = match final_payload.get("chrono") {
                 None | Some(Value::Null) => crate::contracts::ChronoStoryletSettings::default(),
                 Some(value) => serde_json::from_value(value.clone()).map_err(|error| {

@@ -546,6 +546,8 @@ impl Store {
                     excerpt,
                     location_tags: st.location_tags.clone(),
                     role_tags,
+                    window: st.window.clone(),
+                    played_by: st.played_by.clone(),
                     choice_count: st.choices.len(),
                     revision: st.revision,
                     approved_revision: st.approved_revision,

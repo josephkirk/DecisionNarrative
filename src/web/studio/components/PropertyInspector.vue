@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { sortChronicle } from "../chronicleModel.ts";
-import { participantOptions, togglePlayedBy } from "../storyletModel.ts";
+import { clockLabels, participantOptions, togglePlayedBy } from "../storyletModel.ts";
 import { ref, computed, watch } from "vue";
 import type { NarrativeNode, NarrativeGraph, DialogueSection, DialogueItem, GraphLayer, AttributeOp, AttributeValueType, AttributeValue, GraphBinding, VertexPattern } from "../narrativeGraphTypes.ts";
 import { applyCommandOperationsForType, isGraphTransformNode, isPassionMutationNode } from "../narrativeGraphTypes.ts";
@@ -176,6 +176,13 @@ watch(
     }
   },
 );
+const slotLabels = computed(() => clockLabels(studioState.entities));
+function setWindow(slot: number, checked: boolean) {
+  const selected = new Set(props.storylet.window ?? []);
+  if (checked) selected.add(slot); else selected.delete(slot);
+  props.storylet.window = [...selected].sort((a, b) => a - b);
+  emit("update-storylet");
+}
 const playerOptions = computed(() => participantOptions(studioState.entityTemplates));
 function setPlayedBy(id: string, checked: boolean) {
   props.storylet.played_by = togglePlayedBy(props.storylet.played_by ?? [], id, checked);
@@ -1065,6 +1072,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         <small class="field-sublabel">Eligible at any location sharing one of these tags; leave empty for any location.</small>
       </div>
 
+      <h3 class="field-label">Who &amp; when</h3>
       <fieldset class="form-group played-by">
         <legend class="field-label">Played by</legend>
         <p v-if="!playerOptions.length" class="field-sublabel">No participants yet. Add the Participant trait to a character.</p>
@@ -1101,6 +1109,20 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
       <div class="form-group">
         <label class="played-by__option"><input v-model="storylet.is_fallback" type="checkbox" @change="$emit('update-storylet')" /> Fallback storylet</label>
         <small class="field-sublabel">Mark filler so coverage can measure places with no progress storylets.</small>
+      </div>
+      <fieldset class="form-group played-by">
+        <legend class="field-label">Time window</legend>
+        <p v-if="!slotLabels.length" class="field-sublabel">Add a Clock to World to choose time slots.</p>
+        <label v-for="(label, slot) in slotLabels" :key="slot" class="played-by__option">
+          <input type="checkbox" :checked="(storylet.window ?? []).includes(slot)" @change="setWindow(slot, ($event.target as HTMLInputElement).checked)" /> {{ label }}
+        </label>
+        <small class="field-sublabel">Leave all slots unchecked to allow any time.</small>
+      </fieldset>
+      <div class="form-group">
+        <label class="field-label" for="default-learn-visibility">Default Learn visibility</label>
+        <select id="default-learn-visibility" v-model="storylet.default_learn_visibility" class="form-select" @change="$emit('update-storylet')">
+          <option value="private">Private</option><option value="co_located">Co-located witnesses</option>
+        </select>
       </div>
       <!-- ACTOR ROLES -->
       <div class="form-group">

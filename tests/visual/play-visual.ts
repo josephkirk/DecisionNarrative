@@ -341,6 +341,7 @@ try {
   const draftResult = await api("POST", "/mcp", { jsonrpc: "2.0", id: 42, method: "tools/call", params: { name: "narrative_platform", arguments: { operation: "content.save", entity: "storylets", payload: draftPayload } } });
   if (draftResult.result?.isError) throw new Error(JSON.stringify(draftResult));
   await page.goto(`${base}/#/storylets`);
+  await page.reload();
   const draftCard = page.locator(".storylet-card").filter({ hasText: "Agent draft example" });
   await draftCard.waitFor();
   check("agent draft is marked in the library", await draftCard.getByText("Agent draft", { exact: true }).isVisible());
@@ -350,18 +351,32 @@ try {
   check("agent draft is marked in the editor", await page.getByText("Agent draft", { exact: true }).isVisible());
   await shot(page, "20-agent-draft");
   await page.getByRole("checkbox", { name: "Fallback storylet" }).check();
-  await Promise.all([
-    page.waitForResponse((response) => response.url().includes("/api/v3/content/storylets/agent-draft") && response.request().method() === "PUT" && response.ok()),
+  await page.getByRole("checkbox", { name: "D2 morning" }).check();
+  await page.getByRole("checkbox", { name: "Mara" }).check();
+  await page.getByLabel("Default Learn visibility").selectOption("co_located");
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot(page, "21-inspector-before-save");
+  const [saveResponse] = await Promise.all([
+    page.waitForResponse((response) => response.url().includes("/api/v3/content/storylets/agent-draft") && response.request().method() === "PUT"),
     page.getByRole("button", { name: "Save draft" }).click(),
   ]);
+  if (!saveResponse.ok()) throw new Error(`Save failed: ${saveResponse.status()} ${await saveResponse.text()}`);
   const savedDraft = await api("GET", "/api/v3/content/storylets/agent-draft");
   check("fallback marker saves from the inspector", savedDraft.is_fallback === true);
+  check("who and when controls save their values", JSON.stringify(savedDraft.window) === "[1]" && savedDraft.played_by?.includes("mara") && savedDraft.default_learn_visibility === "co_located");
+  await page.getByRole("button", { name: "Learn", exact: true }).click();
+  check("new Learn nodes use the saved default visibility", await page.locator("#learn-visibility").inputValue() === "co_located");
   const draft = await api("GET", "/api/v3/content/storylets/agent-draft");
   await api("POST", "/api/v3/storylets/agent-draft/approve", { expectedRevision: draft.revision });
   await page.reload();
   await page.getByRole("textbox", { name: "Storylet title" }).waitFor();
   await page.waitForFunction(() => (document.querySelector('input[aria-label="Storylet title"]') as HTMLInputElement | null)?.value === "Agent draft example");
   check("agent badge disappears after approval", (await page.getByText("Agent draft", { exact: true }).count()) === 0);
+  await page.goto(`${base}/#/storylets`);
+  const approvedCard = page.locator(".storylet-card").filter({ hasText: "Agent draft example" });
+  await approvedCard.waitFor();
+  check("library shows the time window", await approvedCard.getByText("D2 morning", { exact: true }).isVisible());
+  check("library identifies the selected participant", await approvedCard.getByLabel("Played by Mara").isVisible());
   // 8. Narrow viewport keeps the layout usable.
   await page.setViewportSize({ width: 390, height: 780 });
   await shot(page, "09-narrow");

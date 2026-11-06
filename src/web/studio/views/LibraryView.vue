@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { inject, onMounted, watch } from "vue";
+import { computed, inject, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useLibraryViewModel } from "../view-models/library.ts";
 import { interactionContextKey } from "../interactionContext.ts";
-import { originBadge } from "../storyletModel.ts";
+import { clockLabels, originBadge, windowBadge } from "../storyletModel.ts";
 import { thumbnailUrl } from "../thumbnails.ts";
+import { studioState } from "../state.ts";
 const router = useRouter();
+const slots = computed(() => clockLabels(studioState.entities));
+const participantName = (id: string) => studioState.entityTemplates.find((entity) => entity.id === id)?.name ?? id;
 const {
   loading,
   result,
@@ -172,6 +175,8 @@ function onFilterChange() {
                 <h3 class="card-title">{{ item.title }}</h3>
                 <div style="display:flex; gap:4px;">
                   <span v-if="item.ending" class="badge ending">Ending</span>
+                  <span v-if="windowBadge(item.window, slots)" class="badge">{{ windowBadge(item.window, slots) }}</span>
+                  <span v-for="id in item.played_by ?? []" :key="id" class="badge" :aria-label="`Played by ${participantName(id)}`" :title="`Played by ${participantName(id)}`">{{ participantName(id).slice(0, 1).toUpperCase() }}</span>
                   <span v-if="originBadge(item)" class="badge">{{ originBadge(item) }}</span>
                   <span :class="['badge', item.approved_revision === item.revision ? 'approved' : '']">
                     {{ item.approved_revision === item.revision ? 'Approved' : 'Draft' }} · v{{ item.revision }}
