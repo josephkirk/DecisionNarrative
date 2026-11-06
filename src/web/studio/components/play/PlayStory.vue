@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import type { NearMiss, RunAction, RunEnvelope } from "../../contracts.ts";
-import { editLink, nearMissText, stepCountText } from "../../runModel.ts";
+import { alsoHereActions, editLink, nearMissText, stepCountText } from "../../runModel.ts";
 
 const props = defineProps<{
   envelope: RunEnvelope;
@@ -77,15 +77,9 @@ watch(() => props.envelope.view.scene?.storylet.title, (title) => {
         </li>
       </ol>
 
-      <section v-if="envelope.view.alsoHere.length" class="play-also" aria-label="Also here">
-        <h3 class="play-eyebrow">Also here</h3>
-        <ul>
-          <li v-for="s in envelope.view.alsoHere" :key="s.id">{{ s.title }}</li>
-        </ul>
-      </section>
     </template>
 
-    <template v-else>
+    <template v-else-if="envelope.view.nothingHere">
       <div class="play-nothing">
         <p class="play-title">Nothing happens here right now.</p>
         <button
@@ -104,5 +98,15 @@ watch(() => props.envelope.view.scene?.storylet.title, (title) => {
         </ul>
       </div>
     </template>
+    <section v-if="!envelope.view.ending && !envelope.stalled && alsoHereActions(envelope.view).length" class="play-also" aria-label="Also here">
+      <h3 class="play-eyebrow">Also here</h3>
+      <ul class="play-also__list">
+        <li v-for="item in alsoHereActions(envelope.view)" :key="item.storylet.id">
+          <button type="button" class="play-choice" :disabled="busy" @click="emit('act', item.action)">
+            <span class="play-choice__label">{{ item.storylet.title }}</span>
+          </button>
+        </li>
+      </ul>
+    </section>
   </article>
 </template>

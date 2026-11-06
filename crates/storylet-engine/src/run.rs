@@ -178,6 +178,10 @@ pub struct RunView {
     pub place: Option<PlaceView>,
     pub scene: Option<SceneView>,
     pub also_here: Vec<StoryletRef>,
+    /// The pending storylet hub's node: with a listed storylet it forms a
+    /// `PlayStorylet` action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hub: Option<u32>,
     pub nothing_here: bool,
     pub ending: Option<StoryletRef>,
     pub steps: Vec<RunStep>,
@@ -581,6 +585,7 @@ impl RunKernel {
             })
             .collect();
         let mut also_here = vec![];
+        let mut hub = None;
         let mut scene = None;
         if let Some(guid) = self.pending() {
             if let Some(owner) = Self::owner(&self.instance, guid) {
@@ -648,6 +653,7 @@ impl RunKernel {
                             });
                         }
                         NodeKind::QbnHub { .. } => {
+                            hub = Some(guid);
                             let mut copy = self.world.clone();
                             let ctx = RuntimeContext::with_registries(
                                 &mut copy,
@@ -687,6 +693,7 @@ impl RunKernel {
             place,
             scene,
             also_here,
+            hub,
             nothing_here,
             ending,
             steps: self.branches[self.branch].steps[..self.current_step as usize].to_vec(),

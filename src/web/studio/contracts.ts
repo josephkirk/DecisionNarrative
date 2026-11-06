@@ -336,6 +336,8 @@ export interface RunView {
   place: PlaceView | null;
   scene: SceneView | null;
   alsoHere: StoryletRef[];
+  /** The pending storylet hub; with a listed storylet it forms a play_storylet action. */
+  hub?: number;
   nothingHere: boolean;
   ending: StoryletRef | null;
   steps: RunStep[];

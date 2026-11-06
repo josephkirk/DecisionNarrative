@@ -1263,3 +1263,25 @@ fn inspect_chronicle_is_per_participant_and_empty_without_canon() {
     let run = RunKernel::start(&content, RunStart::Beginning, 3).unwrap();
     assert!(run.inspect(&content, 0).chronicle.is_empty());
 }
+
+#[test]
+fn view_exposes_the_hub_node_so_clients_can_play_also_here_storylets() {
+    let content = support::weirs_crossing::content();
+    let mut run = RunKernel::start(&content, RunStart::Beginning, 7).unwrap();
+    run.act(&content, 0, RunAction::Choose { node_guid: 1, output_pin: 0 }).unwrap();
+    let view = run.view(&content, 0);
+    assert!(!view.also_here.is_empty());
+    // The advertised hub plus a listed storylet is a valid action.
+    let hub = view.hub.expect("a hub is pending");
+    assert_eq!(hub, 10);
+    let first = view.also_here[0].id;
+    run.act(&content, 0, RunAction::PlayStorylet { node_guid: hub, storylet: first }).unwrap();
+    assert!(run.view(&content, 0).hub.is_none() || run.view(&content, 0).scene.is_some());
+}
+
+#[test]
+fn view_has_no_hub_when_a_plain_choice_is_pending() {
+    let content = fixture();
+    let run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
+    assert!(run.view(&content, 0).hub.is_none());
+}

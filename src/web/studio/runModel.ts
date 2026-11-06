@@ -128,3 +128,10 @@ export function noteLines(step: RunStep, participants: ParticipantView[]): strin
     ...(step.rulePlays ?? []).map((play) => `${names.get(play.participant) ?? "Someone"}: ${play.storylet.title}`),
   ];
 }
+
+/** Storylets listed under "Also here", as playable actions; empty unless a hub is pending. */
+export function alsoHereActions(view: RunView): Array<{ storylet: StoryletRef; action: RunAction }> {
+  const hub = view.hub;
+  if (hub === undefined) return [];
+  return view.alsoHere.map((storylet) => ({ storylet, action: { kind: "play_storylet", nodeGuid: hub, storylet: storylet.id } }));
+}

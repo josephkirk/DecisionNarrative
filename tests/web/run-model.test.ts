@@ -173,3 +173,14 @@ test("noteLines lists occupancy notes and rule plays for a step", () => {
   ]);
   expect(noteLines({ ...step, notes: undefined, rulePlays: undefined }, [])).toEqual([]);
 });
+
+import { alsoHereActions } from "../../src/web/studio/runModel.ts";
+
+test("alsoHereActions turns listed storylets into playable actions only when a hub is pending", () => {
+  const listed = view({ scene: null, alsoHere: [{ id: 3, title: "Ledger" }, { id: 4, title: "Tide table" }], hub: 10 });
+  expect(alsoHereActions(listed)).toEqual([
+    { storylet: { id: 3, title: "Ledger" }, action: { kind: "play_storylet", nodeGuid: 10, storylet: 3 } },
+    { storylet: { id: 4, title: "Tide table" }, action: { kind: "play_storylet", nodeGuid: 10, storylet: 4 } },
+  ]);
+  expect(alsoHereActions(view({ alsoHere: [{ id: 3, title: "Ledger" }] }))).toEqual([]);
+});
