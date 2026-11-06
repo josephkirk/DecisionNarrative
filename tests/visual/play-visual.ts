@@ -336,6 +336,25 @@ try {
   check("replay opens at the recorded step", await page.getByRole("button", { name: /Step 1:.*Waited/ }).getAttribute("aria-current") === "step");
   await shot(page, "18-coverage-replay");
   await page.unroute("**/api/v4/coverage");
+  // Agent origin remains visible until a person approves the current revision.
+  const draftPayload = { ...lantern(), id: "agent-draft", title: "Agent draft example" };
+  const draftResult = await api("POST", "/mcp", { jsonrpc: "2.0", id: 42, method: "tools/call", params: { name: "narrative_platform", arguments: { operation: "content.save", entity: "storylets", payload: draftPayload } } });
+  if (draftResult.result?.isError) throw new Error(JSON.stringify(draftResult));
+  await page.goto(`${base}/#/storylets`);
+  const draftCard = page.locator(".storylet-card").filter({ hasText: "Agent draft example" });
+  await draftCard.waitFor();
+  check("agent draft is marked in the library", await draftCard.getByText("Agent draft", { exact: true }).isVisible());
+  await draftCard.click();
+  await page.getByRole("textbox", { name: "Storylet title" }).waitFor();
+  await page.getByText("Agent draft", { exact: true }).waitFor();
+  check("agent draft is marked in the editor", await page.getByText("Agent draft", { exact: true }).isVisible());
+  await shot(page, "20-agent-draft");
+  const draft = await api("GET", "/api/v3/content/storylets/agent-draft");
+  await api("POST", "/api/v3/storylets/agent-draft/approve", { expectedRevision: draft.revision });
+  await page.reload();
+  await page.getByRole("textbox", { name: "Storylet title" }).waitFor();
+  await page.waitForFunction(() => (document.querySelector('input[aria-label="Storylet title"]') as HTMLInputElement | null)?.value === "Agent draft example");
+  check("agent badge disappears after approval", (await page.getByText("Agent draft", { exact: true }).count()) === 0);
   // 8. Narrow viewport keeps the layout usable.
   await page.setViewportSize({ width: 390, height: 780 });
   await shot(page, "09-narrow");
