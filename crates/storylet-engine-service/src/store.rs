@@ -120,6 +120,8 @@ impl Store {
                  last_result_json TEXT NOT NULL DEFAULT '{}',
                  mutation_revision INTEGER NOT NULL DEFAULT 0,
                  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS run_idempotency (run_id TEXT NOT NULL, key TEXT NOT NULL, request TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(run_id,key));
+             CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, project_revision INTEGER NOT NULL, seed INTEGER NOT NULL, start_json TEXT NOT NULL, actions_json TEXT NOT NULL, revision INTEGER NOT NULL, last_key TEXT NOT NULL, last_result TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS runtime_sessions (
                  session_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
                  revision INTEGER NOT NULL, turn INTEGER NOT NULL,
@@ -225,6 +227,7 @@ impl Store {
         approved_revision: Option<u64>,
     ) -> Result<(), rusqlite::Error> {
         let now = chrono_now_ms();
+        let tx = self.conn.unchecked_transaction()?;
         self.conn.execute(
             "INSERT INTO content_records (entity, id, data_json, revision, approved_revision, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -236,10 +239,12 @@ impl Store {
             params![entity, id, data_json, revision as i64, approved_revision.map(|r| r as i64), now],
         )?;
         self.bump_project_revision()?;
+        tx.commit()?;
         Ok(())
     }
 
     pub fn delete_content(&self, entity: &str, id: &str) -> Result<bool, rusqlite::Error> {
+        let tx = self.conn.unchecked_transaction()?;
         let count = self.conn.execute(
             "DELETE FROM content_records WHERE entity = ?1 AND id = ?2",
             params![entity, id],
@@ -247,6 +252,7 @@ impl Store {
         if count > 0 {
             self.bump_project_revision()?;
         }
+        tx.commit()?;
         Ok(count > 0)
     }
 
@@ -299,6 +305,7 @@ impl Store {
         id: &str,
         data_json: &str,
     ) -> Result<bool, rusqlite::Error> {
+        let tx = self.conn.unchecked_transaction()?;
         let count = self.conn.execute(
             "UPDATE content_records SET data_json = ?1, updated_at = ?2 WHERE entity = ?3 AND id = ?4",
             params![data_json, chrono_now_ms(), entity, id],
@@ -306,6 +313,7 @@ impl Store {
         if count > 0 {
             self.bump_project_revision()?;
         }
+        tx.commit()?;
         Ok(count > 0)
     }
 

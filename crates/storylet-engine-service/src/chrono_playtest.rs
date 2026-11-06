@@ -2967,3 +2967,67 @@ mod tests {
         assert_eq!(value[0]["graph_instance_id"], "8070450532247929000");
     }
 }
+
+/// Compile a deterministic Run API content snapshot from the authored workspace.
+pub(crate) fn compile_run_content(store: &Store, scenario_id: Option<&str>, expected_revision: Option<u64>) -> Result<(storylet_engine::run::RunContent, u64), String> {
+    let tx = store.conn.unchecked_transaction().map_err(|e|e.to_string())?;
+    let meta = store.get_project_metadata().map_err(|e| e.to_string())?;
+    if expected_revision.is_some_and(|expected| expected != meta.revision) { return Err("stale revision".into()); }
+    let content = read_content(store).map_err(|e| e.to_string())?;
+    let scenario = match scenario_id {
+        Some(id) => content.scenarios.iter().find(|s| s.id == id).ok_or_else(|| format!("Missing scenario '{id}'"))?,
+        None => content.scenarios.first().ok_or_else(|| "Missing scenario: the project has no scenarios".to_string())?,
+    };
+    let resolved = resolve_scenario_start(scenario, &content.locations, &content.characters);
+    if !resolved.issues.is_empty() { return Err(resolved.issues.join("; ")); }
+    let mut compiled = compile_chrono_dispatch_with_world(&content.storylets, &content.locations, &content.characters, &content.world_objects, &content.world_tags, &content.entity_tag_seeds, &content.entity_game_ids)?;
+    let seed = initialize_chrono_world(&compiled, &content.storylets, &content.world, &content.entities, &content.locations, &content.characters, &content.world_objects, &content.world_tags, &content.entity_tag_seeds, Some(scenario), &resolved.player_start_location)?;
+    compiled.participant_indices = seed.state.participants.keys.iter().enumerate().map(|(i,k)| (k.clone(), i as u16)).collect();
+    compiled.implicit_participant = seed.state.participants.entity.as_slice() == [u16::MAX];
+    let mut graphs = compile_narrative_graphs(&meta.id, &content.storylets, &compiled, &seed.entity_indices)?;
+    bind_precondition_graphs(&mut compiled, &content.storylets, &seed.entity_indices)?;
+    bind_storylet_start_nodes(&mut compiled, &graphs)?;
+    let mut evaluation_world=seed.state.clone();
+    let ctx=RuntimeContext::with_registries(&mut evaluation_world,&compiled.dispatcher,&compiled.registry,&compiled.passion_registry);
+    let current_tags=seed.state.active_location(0).and_then(|i| seed.state.entity_tags.get(i as usize));
+    let mut candidates=Vec::new();
+    for storylet in &content.storylets {
+        let Some(index)=compiled.storylet_index(&storylet.id) else {continue};
+        let Some(def)=compiled.dispatcher.storylet(index) else {continue};
+        if !graphs.storylet_start_nodes.contains_key(&storylet.id) || !compiled.dispatcher.is_eligible(def,&seed.state) {continue;}
+        if let Some(graph)=&def.precondition_graph {if !FlowGraphInstance::evaluate_precondition_graph_for(graph,&ctx,0).map_err(|e|e.to_string())? {continue;}}
+        let mask=compiled.storylet_location_tags.get(&index);
+        let matched=mask.is_some_and(|mask|!mask.is_empty() && current_tags.is_some_and(|tags|tags.intersects(mask)));
+        if mask.is_none_or(|mask|mask.is_empty()) || matched {candidates.push((!matched,storylet.id.as_str()));}
+    }
+    candidates.sort();
+    let start=candidates.first().map(|(_,id)|*id).ok_or("No eligible storylet at the starting location")?;
+    graphs.asset.start_node_guid = graphs.storylet_start_nodes[start];
+    compiled.start_storylet = compiled.storylet_index(start).ok_or("Missing starting storylet")?;
+    compiled.initial_world = seed.state;
+    compiled.content_revision = meta.revision;
+    compiled.root_asset = graphs.asset;
+    compiled.mission_assets = graphs.mission_assets;
+    tx.commit().map_err(|e|e.to_string())?;
+    Ok((compiled, resolved.seed))
+}
+
+#[cfg(test)]
+mod run_compile_revision_tests {
+    use super::compile_run_content;
+    use crate::store::Store;
+
+    #[test]
+    fn edit_between_precondition_and_compile_is_rejected_before_reading_content() {
+        let path=std::env::temp_dir().join(format!("run-compile-race-{}.db",uuid::Uuid::new_v4()));
+        let reader=Store::open(&path).unwrap();
+        let expected=reader.get_project_metadata().unwrap().revision;
+        // Simulate the start request's successful precondition, then commit a
+        // content write on a separate connection before compilation begins.
+        assert_eq!(reader.get_project_metadata().unwrap().revision,expected);
+        let writer=Store::open(&path).unwrap();
+        writer.save_content("storylets","new","{}",1,None).unwrap();
+        let error=compile_run_content(&reader,None,Some(expected)).unwrap_err();
+        assert_eq!(error,"stale revision");
+    }
+}

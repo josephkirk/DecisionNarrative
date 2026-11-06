@@ -144,6 +144,7 @@ fn get_tool_definitions() -> Vec<Value> {
                 "operation": {
                     "type": "string",
                     "enum": [
+                        "run.list", "run.start", "run.view", "run.act", "run.rewind", "run.why_not", "run.inspect", "run.reload", "run.delete",
                         "platform.health", "workspace.context", "workspace.inspect", "workspace.validate", "workspace.replace",
                         "content.list", "content.get", "content.save", "content.delete", "content.move", "content.references", "storylet.approve",
                         "scenarios.list", "scenarios.get", "scenarios.create", "scenarios.save", "scenarios.delete", "scenarios.preview",
@@ -161,6 +162,10 @@ fn get_tool_definitions() -> Vec<Value> {
                     "enum": crate::contracts::CONTENT_KINDS
                 },
                 "id": { "type": "string" },
+                "start": { "type": "object" },
+                "action": { "type": "object" },
+                "participant": { "type": "integer", "minimum": 0 },
+                "toStep": { "type": "integer", "minimum": 0 },
                 "payload": { "type": "object" },
                 "bundle": { "type": "object" },
                 "confirmReplace": { "type": "boolean" },
@@ -377,6 +382,21 @@ async fn dispatch_narrative_platform_op(
     args: &Value,
 ) -> Result<Value, String> {
     match op {
+        "run.list" => service.run_list().await.map_err(|e|e.to_string()),
+        "run.start" => service.run_start(serde_json::from_value(args.clone()).map_err(|e|e.to_string())?).await.map_err(|e|e.to_string()),
+        "run.view" | "run.why_not" | "run.inspect" => {
+            let id=args.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            let participant=args.get("participant").and_then(Value::as_u64).unwrap_or(0);
+            let participant=u16::try_from(participant).map_err(|e|e.to_string())?;
+            match op { "run.view"=>service.run_view(id,participant).await, "run.why_not"=>service.run_why_not(id,participant).await, _=>service.run_inspect(id,participant).await }.map_err(|e|e.to_string())
+        },
+        "run.act" | "run.rewind" | "run.reload" | "run.delete" => {
+            let id=args.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            match op { "run.act"=>service.run_act(id,serde_json::from_value(args.clone()).map_err(|e|e.to_string())?).await,
+                "run.rewind"=>service.run_rewind(id,serde_json::from_value(args.clone()).map_err(|e|e.to_string())?).await,
+                "run.reload"=>service.run_reload(id,serde_json::from_value(args.clone()).map_err(|e|e.to_string())?).await,
+                _=>service.run_delete(id,serde_json::from_value(args.clone()).map_err(|e|e.to_string())?).await }.map_err(|e|e.to_string())
+        },
         "platform.health" => {
             Ok(json!({ "status": "ok", "service": "decisionnarrative_studio_rust" }))
         }

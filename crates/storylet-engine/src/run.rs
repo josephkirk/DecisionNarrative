@@ -171,7 +171,6 @@ struct PendingSelection {
     participant: PartIx,
     hub_instance_id: u64,
 
-
     invocation: u64,
 }
 #[derive(Clone, Debug)]
@@ -181,6 +180,7 @@ struct Snapshot {
     commit: usize,
     storylet: u16,
     selections: Vec<PendingSelection>,
+    stalled: Option<RunError>,
 }
 #[derive(Clone, Debug)]
 pub struct RunKernel {
@@ -197,6 +197,8 @@ pub struct RunKernel {
     storylet: u16,
     selections: Vec<PendingSelection>,
     next_invocation: u64,
+    run_seed: u64,
+    stalled: Option<RunError>,
 }
 impl RunKernel {
     fn reference(content: &RunContent, id: u16) -> StoryletRef {
@@ -216,6 +218,7 @@ impl RunKernel {
             commit: self.instance.history.head,
             storylet: self.storylet,
             selections: self.selections.clone(),
+            stalled: self.stalled.clone(),
         }
     }
     fn pending_priority(instance: &FlowGraphInstance, hub: bool) -> Option<u32> {
@@ -260,10 +263,17 @@ impl RunKernel {
     }
     fn scene_busy(&self, selection: &PendingSelection) -> bool {
         fn owns_work(instance: &FlowGraphInstance, invocation: u64) -> bool {
-            instance.tokens.iter().any(|token| instance.token_invocations.get(&token.token_id) == Some(&invocation))
+            instance
+                .tokens
+                .iter()
+                .any(|token| instance.token_invocations.get(&token.token_id) == Some(&invocation))
                 || instance.nodes.iter().any(|node| {
-                    (node.state == NodeExecutionState::ActiveLatent && instance.node_invocations.get(&node.node_guid) == Some(&invocation))
-                        || node.sub_graph.as_deref().is_some_and(|child| owns_work(child, invocation))
+                    (node.state == NodeExecutionState::ActiveLatent
+                        && instance.node_invocations.get(&node.node_guid) == Some(&invocation))
+                        || node
+                            .sub_graph
+                            .as_deref()
+                            .is_some_and(|child| owns_work(child, invocation))
                 })
         }
         owns_work(&self.instance, selection.invocation)
@@ -277,7 +287,10 @@ impl RunKernel {
                 return Some(owner);
             }
         }
-        if instance.node(guid).is_some_and(|node| node.state == NodeExecutionState::ActiveLatent) {
+        if instance
+            .node(guid)
+            .is_some_and(|node| node.state == NodeExecutionState::ActiveLatent)
+        {
             Some(instance)
         } else {
             None
@@ -292,7 +305,10 @@ impl RunKernel {
         if let Some(i) = child_index {
             return Self::owner_mut(instance.nodes[i].sub_graph.as_deref_mut().unwrap(), guid);
         }
-        if instance.node(guid).is_some_and(|node| node.state == NodeExecutionState::ActiveLatent) {
+        if instance
+            .node(guid)
+            .is_some_and(|node| node.state == NodeExecutionState::ActiveLatent)
+        {
             Some(instance)
         } else {
             None
@@ -372,6 +388,18 @@ impl RunKernel {
         }
     }
     pub fn start(content: &RunContent, start: RunStart, seed: u64) -> Result<Self, RunError> {
+        let (run, stalled) = Self::start_preserving_stall(content, start, seed)?;
+        if let Some(error) = stalled {
+            Err(error)
+        } else {
+            Ok(run)
+        }
+    }
+    pub fn start_preserving_stall(
+        content: &RunContent,
+        start: RunStart,
+        seed: u64,
+    ) -> Result<(Self, Option<RunError>), RunError> {
         let mut instance = FlowGraphInstance::new(1, content.root_asset.clone(), seed)
             .map_err(|e| RunError::Engine(e.to_string()))?;
         instance
@@ -439,11 +467,18 @@ impl RunKernel {
             storylet,
             selections: Vec::new(),
             next_invocation: 1,
+            run_seed: seed,
+            stalled: None,
         };
-        run.auto_advance()?;
+        let stalled = match run.auto_advance() {
+            Ok(()) => None,
+            Err(e @ RunError::Stalled { .. }) => Some(e),
+            Err(e) => return Err(e),
+        };
+        run.stalled = stalled.clone();
         let initial = run.snapshot();
         run.snapshots[0].push(initial);
-        Ok(run)
+        Ok((run, stalled))
     }
     pub fn view(&self, content: &RunContent, participant: PartIx) -> RunView {
         let participants = self
@@ -603,6 +638,24 @@ impl RunKernel {
         participant: PartIx,
         action: RunAction,
     ) -> Result<u32, RunError> {
+        self.act_internal(content, participant, action, false)
+            .map(|(step, _)| step)
+    }
+    pub fn act_preserving_stall(
+        &mut self,
+        content: &RunContent,
+        participant: PartIx,
+        action: RunAction,
+    ) -> Result<(u32, Option<RunError>), RunError> {
+        self.act_internal(content, participant, action, true)
+    }
+    fn act_internal(
+        &mut self,
+        content: &RunContent,
+        participant: PartIx,
+        action: RunAction,
+        preserve_stall: bool,
+    ) -> Result<(u32, Option<RunError>), RunError> {
         if participant as usize >= self.world.participants.len() {
             return Err(RunError::InvalidAction("unknown participant".into()));
         }
@@ -674,7 +727,10 @@ impl RunKernel {
                             })?;
                     scene_owner.acting_participant = participant;
                     let invocation = self.next_invocation;
-                    self.next_invocation = self.next_invocation.checked_add(1).ok_or_else(|| RunError::Engine("invocation id exhausted".into()))?;
+                    self.next_invocation = self
+                        .next_invocation
+                        .checked_add(1)
+                        .ok_or_else(|| RunError::Engine("invocation id exhausted".into()))?;
                     scene_owner
                         .enter_storylet_invocation(entry, invocation)
                         .map_err(|e| RunError::Engine(e.to_string()))?;
@@ -742,10 +798,15 @@ impl RunKernel {
             self.auto_advance()?;
             Ok(())
         })();
-        if let Err(e) = result {
-            *self = backup;
-            return Err(e);
-        }
+        let stalled = match result {
+            Ok(()) => None,
+            Err(e @ RunError::Stalled { .. }) if preserve_stall => Some(e),
+            Err(e) => {
+                *self = backup;
+                return Err(e);
+            }
+        };
+        self.stalled = stalled.clone();
         if self.rewound {
             let steps = self.branches[self.branch].steps[..self.current_step as usize].to_vec();
             let snapshots = self.snapshots[self.branch][..=self.current_step as usize].to_vec();
@@ -767,7 +828,10 @@ impl RunKernel {
         let snapshot = self.snapshot();
         self.snapshots[self.branch].push(snapshot);
         let _ = content;
-        Ok(self.current_step)
+        Ok((self.current_step, stalled))
+    }
+    pub fn stalled(&self) -> Option<RunError> {
+        self.stalled.clone()
     }
     pub fn rewind(&mut self, to_step: u32) -> Result<(), RunError> {
         let snap = self.snapshots[self.branch]
@@ -787,6 +851,7 @@ impl RunKernel {
         self.instance = snap.instance;
         self.storylet = snap.storylet;
         self.selections = snap.selections;
+        self.stalled = snap.stalled;
         self.current_step = to_step;
         self.rewound = true;
         Ok(())
@@ -892,5 +957,101 @@ impl RunKernel {
             }
         }
         (Ok(run), None)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InspectView {
+    pub knows: Vec<KnowRowView>,
+    pub world_changes: Vec<ChangeView>,
+    pub chronicle: Vec<ChronicleRowView>,
+    pub advanced: AdvancedView,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowRowView {
+    pub fact: String,
+    pub kind: crate::chrono_participants::KnowKind,
+    pub confirmed: bool,
+    pub source_step: Option<u32>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeView {
+    pub key: String,
+    pub before: String,
+    pub after: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChronicleRowView {
+    pub key: String,
+    pub label: String,
+    pub place: Option<String>,
+    pub story_time: i64,
+    pub told: Option<u32>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvancedView {
+    pub run_seed: u64,
+    pub content_revision: u64,
+    pub node_guid: Option<u32>,
+    pub interaction: Option<String>,
+}
+impl RunKernel {
+    pub fn inspect(&self, content: &RunContent, participant: PartIx) -> InspectView {
+        let knows = self
+            .world
+            .knowledge
+            .rows_for(participant)
+            .iter()
+            .map(|r| KnowRowView {
+                fact: content
+                    .registry
+                    .tag(r.fact)
+                    .unwrap_or("unknown")
+                    .to_string(),
+                kind: r.kind,
+                confirmed: r.kind.is_confirmed(),
+                source_step: None,
+            })
+            .collect();
+        let mut world_changes = Vec::new();
+        if self.current_step > 0 {
+            if let Some(before) = self.snapshots[self.branch].get(self.current_step as usize - 1) {
+                let a = serde_json::to_value(&before.world).unwrap_or_default();
+                let b = serde_json::to_value(&self.world).unwrap_or_default();
+                if let (Some(a), Some(b)) = (a.as_object(), b.as_object()) {
+                    for (key, after) in b {
+                        if let Some(before) = a.get(key) {
+                            if before != after {
+                                world_changes.push(ChangeView {
+                                    key: key.clone(),
+                                    before: before.to_string(),
+                                    after: after.to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let node_guid = self.pending();
+        InspectView {
+            knows,
+            world_changes,
+            chronicle: Vec::new(),
+            advanced: AdvancedView {
+                run_seed: self.run_seed,
+                content_revision: content.content_revision,
+                node_guid,
+                interaction: node_guid
+                    .and_then(|n| Self::owner(&self.instance, n))
+                    .and_then(|i| i.asset.node(node_guid?))
+                    .map(|n| format!("{:?}", n.kind)),
+            },
+        }
     }
 }

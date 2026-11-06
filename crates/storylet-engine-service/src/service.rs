@@ -93,6 +93,7 @@ pub(crate) struct StudioInner {
     /// Live ChronoFlow v5 playtest sessions (REQ-CH-02). The persisted rows are
     /// the source of truth; these are the runtime instances rebuilt from them.
     pub(crate) chrono_sessions: BTreeMap<String, ChronoPlaytestSession>,
+    pub(crate) runs: BTreeMap<String, crate::runs::CachedRun>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -172,6 +173,7 @@ impl StudioService {
                 store,
                 runtime,
                 chrono_sessions: BTreeMap::new(),
+                runs: BTreeMap::new(),
             })),
             updates,
             resource_root: res_root,
