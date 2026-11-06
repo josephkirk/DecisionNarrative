@@ -4,7 +4,7 @@ import type { RunAction, RunEnvelope, RunView } from "../../src/web/studio/contr
 
 function runView(over: Partial<RunView> = {}): RunView {
   return {
-    participant: 0, participants: [{ id: 0, name: "Ada" }], place: null,
+    participant: 0, participants: [{ id: 0, name: "Ada", human: true }], place: null,
     scene: { storylet: { id: 1, title: "Arrival" }, lines: [], choices: [], nodeGuid: 7 },
     alsoHere: [], nothingHere: false, ending: null, steps: [], currentStep: 0, branches: [], ...over,
   };
@@ -110,7 +110,7 @@ test("nextParticipant wraps and onKey dispatches choices", async () => {
   const choice = { action: { kind: "choose", nodeGuid: 7, outputPin: 1 } as RunAction, label: "Go", enabled: true, requirement: null };
   const api = fakeApi({
     view: async () => env({}, {
-      participants: [{ id: 0, name: "A" }, { id: 1, name: "B" }],
+      participants: [{ id: 0, name: "A", human: true }, { id: 1, name: "B", human: true }],
       scene: { storylet: { id: 1, title: "t" }, lines: [], choices: [choice], nodeGuid: 7 },
     }),
   });
@@ -128,7 +128,7 @@ test("nextParticipant wraps and onKey dispatches choices", async () => {
 
 test("setParticipant selects a known participant and re-reads the view", async () => {
   const api = fakeApi({
-    view: async (_id, p) => { api.calls.push(`view:${p}`); return env({}, { participant: p, participants: [{ id: 0, name: "A" }, { id: 1, name: "B" }] }); },
+    view: async (_id, p) => { api.calls.push(`view:${p}`); return env({}, { participant: p, participants: [{ id: 0, name: "A", human: true }, { id: 1, name: "B", human: true }] }); },
   });
   const play = usePlay(api);
   await play.open("r1");
@@ -150,4 +150,49 @@ test("toggleInspect loads inspect data when it opens and Esc closes it", async (
   expect(play.state.inspect).not.toBeNull();
   await play.onKey({ key: "Escape", ctrlKey: false });
   expect(play.state.inspectOpen).toBe(false);
+});
+
+test("end_turn_sends_wait only when the project has a clock", async () => {
+  const withClock = fakeApi({ view: async () => env({}, { place: { id: 1, name: "Weir", clockLabel: "D1 evening", actionsLeft: 2 } }) });
+  const play = usePlay(withClock);
+  await play.open("r1");
+  await play.onKey({ key: "e", ctrlKey: false });
+  expect(withClock.calls).toContain("act");
+  const timeless = fakeApi();
+  const idle = usePlay(timeless);
+  await idle.open("r1");
+  await idle.onKey({ key: "e", ctrlKey: false });
+  expect(timeless.calls).not.toContain("act");
+});
+
+test("next_participant_skips_rule_participants", async () => {
+  const api = fakeApi({
+    view: async (_id, p) => env({}, {
+      participant: p,
+      participants: [{ id: 0, name: "A", human: true }, { id: 1, name: "Rosa", human: false }, { id: 2, name: "B", human: true }],
+    }),
+  });
+  const play = usePlay(api);
+  await play.open("r1");
+  play.nextParticipant(1);
+  expect(play.state.activeParticipant).toBe(2);
+  play.nextParticipant(1);
+  expect(play.state.activeParticipant).toBe(0);
+  play.nextParticipant(-1);
+  expect(play.state.activeParticipant).toBe(2);
+  await play.onKey({ key: "Tab", ctrlKey: false, shiftKey: true });
+  expect(play.state.activeParticipant).toBe(0);
+});
+
+test("G then a digit moves through the nth enabled connection", async () => {
+  const moves = [
+    { to: 4, name: "Harbor", enabled: false, block: { kind: "needs_fact" as const, fact: "tide table" } },
+    { to: 5, name: "Inn", enabled: true, block: null },
+  ];
+  const api = fakeApi({ view: async () => env({}, { place: { id: 1, name: "Weir", moves } }) });
+  const play = usePlay(api);
+  await play.open("r1");
+  await play.onKey({ key: "g", ctrlKey: false });
+  await play.onKey({ key: "1", ctrlKey: false });
+  expect(api.calls.filter((c) => c === "act").length).toBe(1);
 });

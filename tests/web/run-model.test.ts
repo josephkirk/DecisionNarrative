@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
 import {
-  choiceForKey, chronicleRows, hasClock, moveForKey, nearMissText, showParticipantTabs,
+  choiceForKey, chronicleRows, hasClock, moveBlockText, moveForKey, nearMissText, showParticipantTabs,
 } from "../../src/web/studio/runModel.ts";
-import type { ChoiceView, RunView } from "../../src/web/studio/contracts.ts";
+import type { ChoiceView, MoveOption, RunView } from "../../src/web/studio/contracts.ts";
 
 function view(over: Partial<RunView> = {}, choices: ChoiceView[] = []): RunView {
   return {
     participant: 0,
-    participants: [{ id: 0, name: "Ada" }],
+    participants: [{ id: 0, name: "Ada", human: true }],
     place: { id: 1, name: "Weir" },
     scene: { storylet: { id: 1, title: "Arrival" }, lines: [], choices, nodeGuid: 7 },
     alsoHere: [], nothingHere: false, ending: null, steps: [], currentStep: 0, branches: [],
@@ -32,23 +32,36 @@ test("disabled choice and missing scene give no action", () => {
   expect(choiceForKey(view({ scene: null }), "1")).toBeNull();
 });
 
-test("moveForKey picks the nth move choice", () => {
-  const mv = (to: number): ChoiceView => ({ action: { kind: "move", to }, label: `Go ${to}`, enabled: true, requirement: null });
-  const v = view({}, [choose(0), mv(4), mv(5)]);
+test("moveForKey picks the nth enabled move of the place", () => {
+  const moves: MoveOption[] = [
+    { to: 4, name: "Harbor", enabled: true, block: null },
+    { to: 9, name: "Rock", enabled: false, block: { kind: "closed_until", slotLabel: "D3 morning" } },
+    { to: 5, name: "Inn", enabled: true, block: null },
+  ];
+  const v = view({ place: { id: 1, name: "Weir", moves } });
   expect(moveForKey(v, 1)).toEqual({ kind: "move", to: 4 });
   expect(moveForKey(v, 2)).toEqual({ kind: "move", to: 5 });
   expect(moveForKey(v, 3)).toBeNull();
+  expect(moveForKey(view({ place: null }), 1)).toBeNull();
+});
+
+test("moveBlockText says why a move is blocked", () => {
+  expect(moveBlockText({ kind: "closed_until", slotLabel: "D3 morning" })).toBe("Closed until D3 morning");
+  expect(moveBlockText({ kind: "needs_fact", fact: "tide table" })).toBe("Needs: tide table");
+  expect(moveBlockText({ kind: "needs_fact", fact: "fact.tide_table" })).toBe("Needs: tide table");
 });
 
 test("timeless_project_hides_clock", () => {
   expect(hasClock(view())).toBe(false);
-  expect(hasClock(view({ place: { id: 1, name: "Weir", clock: "Dusk" } }))).toBe(true);
+  expect(hasClock(view({ place: { id: 1, name: "Weir", clockLabel: "Dusk" } }))).toBe(true);
   expect(hasClock(view({ place: null }))).toBe(false);
 });
 
 test("showParticipantTabs is true only for more than one human", () => {
   expect(showParticipantTabs(view())).toBe(false);
-  expect(showParticipantTabs(view({ participants: [{ id: 0, name: "A" }, { id: 1, name: "B" }] }))).toBe(true);
+  expect(showParticipantTabs(view({ participants: [{ id: 0, name: "A", human: true }, { id: 1, name: "B", human: true }] }))).toBe(true);
+  // Rule participants are not seats.
+  expect(showParticipantTabs(view({ participants: [{ id: 0, name: "A", human: true }, { id: 1, name: "Rosa", human: false }] }))).toBe(false);
 });
 
 test("nearMissText joins title and reason", () => {
@@ -137,4 +150,26 @@ test("chronicleRows renders untold entries with told null", () => {
     { key: "b", label: "B", place: null, storyTime: 2, told: 1 },
   ]);
   expect(rows.map((r) => r.told)).toEqual([null, 1]);
+});
+
+import { actionsLeftText, noteLines } from "../../src/web/studio/runModel.ts";
+
+test("actionsLeftText reads naturally and is empty without a clock", () => {
+  expect(actionsLeftText(undefined)).toBe("");
+  expect(actionsLeftText(0)).toBe("No actions left");
+  expect(actionsLeftText(1)).toBe("1 action left");
+  expect(actionsLeftText(2)).toBe("2 actions left");
+});
+
+test("noteLines lists occupancy notes and rule plays for a step", () => {
+  const step = {
+    index: 3, branch: 0, participant: 0, action: { kind: "wait" } as RunStep["action"], label: "x",
+    notes: ["player is driven from Rock back to Lighthouse"],
+    rulePlays: [{ participant: 1, storylet: { id: 4, title: "Rosa gossips" } }],
+  } satisfies RunStep;
+  expect(noteLines(step, [{ id: 0, name: "Mara", human: true }, { id: 1, name: "Rosa", human: false }])).toEqual([
+    "player is driven from Rock back to Lighthouse",
+    "Rosa: Rosa gossips",
+  ]);
+  expect(noteLines({ ...step, notes: undefined, rulePlays: undefined }, [])).toEqual([]);
 });

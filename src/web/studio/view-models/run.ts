@@ -3,7 +3,7 @@ import { StudioApi, type RunsApi } from "../api.ts";
 import type {
   InspectView, NearMiss, RunAction, RunEnvelope, RunStartInput,
 } from "../contracts.ts";
-import { choiceForKey, moveForKey } from "../runModel.ts";
+import { choiceForKey, hasClock, humanParticipants, moveForKey } from "../runModel.ts";
 
 export type { RunsApi };
 
@@ -160,12 +160,15 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
   }
 
   function nextParticipant(dir: 1 | -1): void {
-    const count = state.envelope?.view.participants.length ?? 0;
-    if (count < 2) return;
-    setParticipant((state.activeParticipant + dir + count) % count);
+    // Hot-seat: only people take turns; rule participants are skipped.
+    const humans = state.envelope ? humanParticipants(state.envelope.view) : [];
+    if (humans.length < 2) return;
+    const at = humans.findIndex((p) => p.id === state.activeParticipant);
+    const next = humans[(at + dir + humans.length) % humans.length];
+    setParticipant(next.id);
   }
 
-  async function onKey(e: { key: string; ctrlKey: boolean }): Promise<void> {
+  async function onKey(e: { key: string; ctrlKey: boolean; shiftKey?: boolean }): Promise<void> {
     const view = state.envelope?.view;
     if (e.ctrlKey) {
       if (e.key.toLowerCase() === "z") await undo();
@@ -185,6 +188,9 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
     } else if (key === "g") awaitingMove = true;
     else if (key === "?") await toggleWhy();
     else if (key === "i") toggleInspect();
+    else if (key === "e") {
+      if (hasClock(view)) await act({ kind: "wait" });
+    } else if (e.key === "Tab") nextParticipant(e.shiftKey ? -1 : 1);
     else if (key === "[") nextParticipant(-1);
     else if (key === "]") nextParticipant(1);
     else {

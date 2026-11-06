@@ -1,5 +1,5 @@
 // Pure helpers over a RunView. No Vue, no fetch: everything here is unit-testable.
-import type { ChangeView, ChronicleRowView, KnowKind, KnowRowView, NearMiss, RunAction, RunStep, RunView, StoryletRef } from "./contracts.ts";
+import type { ChangeView, ChronicleRowView, KnowKind, KnowRowView, MoveBlock, NearMiss, ParticipantView, RunAction, RunStep, RunView, StoryletRef } from "./contracts.ts";
 
 /** "1".."9" -> the nth choice's action. Disabled choices and any other key give null. */
 export function choiceForKey(view: RunView, key: string): RunAction | null {
@@ -8,20 +8,26 @@ export function choiceForKey(view: RunView, key: string): RunAction | null {
   return choice && choice.enabled ? choice.action : null;
 }
 
-/** After "G": the nth (1-based) enabled move choice. */
+/** After "G": the nth (1-based) enabled move out of the current place. */
 export function moveForKey(view: RunView, n: number): RunAction | null {
-  const moves = (view.scene?.choices ?? []).filter((c) => c.action.kind === "move" && c.enabled);
-  return moves[n - 1]?.action ?? null;
+  const moves = (view.place?.moves ?? []).filter((m) => m.enabled);
+  const move = moves[n - 1];
+  return move ? { kind: "move", to: move.to } : null;
 }
 
 /** The clock row appears only for projects that define a clock. */
 export function hasClock(view: RunView): boolean {
-  return view.place?.clock !== undefined && view.place.clock !== "";
+  return !!view.place?.clockLabel;
+}
+
+/** Seats: participants a person plays. Rule participants act on their own. */
+export function humanParticipants(view: RunView): ParticipantView[] {
+  return view.participants.filter((p) => p.human);
 }
 
 /** Tabs appear only when more than one human participant exists. */
 export function showParticipantTabs(view: RunView): boolean {
-  return view.participants.length > 1;
+  return humanParticipants(view).length > 1;
 }
 
 export function nearMissText(m: NearMiss): string {
@@ -100,4 +106,25 @@ const CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";
 export function toldMark(n: number | null): string {
   if (n === null) return "";
   return n >= 1 && n <= 20 ? CIRCLED[n - 1] : `(${n})`;
+}
+
+/** Why a move is unavailable, in plain words. */
+export function moveBlockText(block: MoveBlock): string {
+  if (block.kind === "closed_until") return `Closed until ${block.slotLabel}`;
+  return `Needs: ${block.fact.replace(/^fact\./, "").replace(/[_.]/g, " ")}`;
+}
+
+export function actionsLeftText(left: number | undefined): string {
+  if (left === undefined) return "";
+  if (left === 0) return "No actions left";
+  return `${left} ${left === 1 ? "action" : "actions"} left`;
+}
+
+/** What the world did because of a step: occupancy notes, then rule-participant plays. */
+export function noteLines(step: RunStep, participants: ParticipantView[]): string[] {
+  const names = new Map(participants.map((p) => [p.id, p.name]));
+  return [
+    ...(step.notes ?? []),
+    ...(step.rulePlays ?? []).map((play) => `${names.get(play.participant) ?? "Someone"}: ${play.storylet.title}`),
+  ];
 }

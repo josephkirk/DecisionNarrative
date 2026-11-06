@@ -245,6 +245,69 @@ try {
   await page.getByLabel("Event type").selectOption("world");
   check("switching to a world event shows the trigger editor again", (await page.getByText("Trigger condition (JSON)").count()) === 1);
 
+  // 7c. Space, clock and rule participants (Tasks 4.1-4.4), authored through system traits.
+  const world = await api("GET", "/api/v3/content/entities/world");
+  await api("PUT", "/api/v3/content/entities/world", {
+    ...world,
+    traits: [...(world.traits ?? []), { id: "clock", template_id: "system.clock", values: { slot_labels: ["D1 evening", "D2 morning", "D2 evening"], actions_per_slot: 2 } }],
+  });
+  await api("POST", "/api/v3/content/entity_templates", { id: "lighthouse", name: "Lighthouse", root_tag: "location", traits: [
+    { id: "c1", template_id: "system.connection", values: { to: "harbor" } },
+    { id: "c2", template_id: "system.connection", values: { to: "harbor", open_slots: [], on_close: "" } },
+    { id: "c3", template_id: "system.connection", values: { to: "rock", open_slots: [1], on_close: "return", return_to: "lighthouse" } },
+  ] });
+  await api("POST", "/api/v3/content/entity_templates", { id: "rock", name: "Rock", root_tag: "location", traits: [] });
+  const harbor = await api("GET", "/api/v3/content/entity_templates/harbor");
+  await api("PUT", "/api/v3/content/entity_templates/harbor", { ...harbor, traits: [{ id: "h1", template_id: "system.connection", values: { to: "lighthouse" } }] });
+  await api("POST", "/api/v3/content/entity_templates", { id: "mara", name: "Mara", root_tag: "character", traits: [
+    { id: "p1", template_id: "system.participant", values: { controller: "human", seat: 0, start_location: "harbor" } },
+    { id: "s1", template_id: "system.character_settings", values: { home_location: "harbor", current_location: "harbor" } },
+  ] });
+  await api("POST", "/api/v3/content/entity_templates", { id: "rosa", name: "Rosa", root_tag: "character", traits: [
+    { id: "p2", template_id: "system.participant", values: { controller: "rule", seat: 0, start_location: "harbor" } },
+    { id: "s2", template_id: "system.character_settings", values: { home_location: "harbor", current_location: "harbor" } },
+  ] });
+  await api("POST", "/api/v3/content/storylets", {
+    id: "gossip", title: "Rosa gossips", content: { text_template: "x" }, created_at: 3, played_by: ["rosa"],
+    graph: {
+      nodes: [node("start", "start", 0, { text: "Start" }), node("learn", "learn", 100, { fact_tag: "fact.clue", kind: "told", visibility: "co_located" }), node("end", "end", 200, { is_terminal: true })],
+      edges: [
+        { id: "g0", from_node: "start", from_port: "output", to_node: "learn", to_port: "input" },
+        { id: "g1", from_node: "learn", from_port: "output", to_node: "end", to_port: "input" },
+      ],
+    },
+  });
+  const spaceRun = await api("POST", "/api/v4/runs", {
+    start: { kind: "beginning" }, storyletId: "lantern", expectedRevision: (await api("GET", "/api/v3/project")).revision, idempotencyKey: "visual-space",
+  });
+  await page.goto(`${base}/#/play/${spaceRun.id}`);
+  await page.getByRole("heading", { name: "The Lantern on the Water" }).waitFor();
+  await shot(page, "13-space-start");
+  check("clock label and actions left are shown", await page.getByText("D1 evening").isVisible() && await page.getByText("2 actions left").isVisible());
+  check("rule participants are not offered as tabs", (await page.getByRole("tab", { name: "Rosa" }).count()) === 0);
+  check("Go to lists the lighthouse", await page.getByRole("button", { name: /Lighthouse/ }).isVisible());
+  await page.getByRole("button", { name: /Lighthouse/ }).click();
+  await page.getByText("1 action left").waitFor();
+  check("moving spends an action and changes the place", (await page.locator(".play-place__name").textContent()) === "Lighthouse");
+  const rockChip = page.getByRole("button", { name: /Rock/ });
+  check("the rock is blocked until its slot, with the reason on focus", (await rockChip.getAttribute("aria-disabled")) === "true");
+  await rockChip.focus();
+  check("blocked move explains why", await page.getByText("Closed until D2 morning").isVisible());
+  await shot(page, "14-space-blocked");
+  await page.keyboard.press("e");
+  await page.getByText("D2 morning").waitFor();
+  await shot(page, "15-space-end-turn");
+  check("End turn advances the clock and refills actions", await page.getByText("2 actions left").isVisible());
+  check("Rosa played her storylet at the slot start", await page.getByText("Rosa: Rosa gossips").isVisible());
+  check("the rock is open in D2 morning", (await page.getByRole("button", { name: /Rock/ }).getAttribute("aria-disabled")) === null);
+  await page.getByRole("button", { name: /Rock/ }).click();
+  await page.getByText("1 action left").waitFor();
+  await page.keyboard.press("e");
+  await page.getByText("D2 evening").waitFor();
+  await shot(page, "16-space-driven-back");
+  check("the closing tide drives the occupant back", await page.getByText(/is driven from Rock back to Lighthouse/).isVisible());
+  check("the occupant is back at the lighthouse", (await page.locator(".play-place__name").textContent()) === "Lighthouse");
+
   // 8. Narrow viewport keeps the layout usable.
   await page.setViewportSize({ width: 390, height: 780 });
   await shot(page, "09-narrow");

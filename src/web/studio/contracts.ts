@@ -299,12 +299,35 @@ export interface RunStartInput {
 }
 
 export interface StoryletRef { id: number; title: string; /** Authored storylet id; use for editor links. */ key?: string }
-export interface ParticipantView { id: number; name: string }
-export interface PlaceView { id: number; name: string; /** Present only when the project has a clock. */ clock?: string }
+export interface ParticipantView { id: number; name: string; /** false for rule participants, which are never a seat. */ human: boolean }
+export type MoveBlock =
+  | { kind: "closed_until"; slotLabel: string }
+  | { kind: "needs_fact"; fact: string };
+export interface MoveOption { to: number; name: string; enabled: boolean; block: MoveBlock | null }
+export interface PlaceView {
+  id: number;
+  name: string;
+  /** Present only when the project has a clock. */
+  clockLabel?: string;
+  /** Actions this participant has left in the current slot; present only with a clock. */
+  actionsLeft?: number;
+  moves?: MoveOption[];
+}
 export interface LineView { text: string }
 export interface ChoiceView { action: RunAction; label: string; enabled: boolean; requirement: string | null }
 export interface SceneView { storylet: StoryletRef; lines: LineView[]; choices: ChoiceView[]; nodeGuid: number }
-export interface RunStep { index: number; branch: number; participant: number; action: RunAction; label: string }
+export interface RulePlay { participant: number; storylet: StoryletRef }
+export interface RunStep {
+  index: number;
+  branch: number;
+  participant: number;
+  action: RunAction;
+  label: string;
+  /** What the world did because of this step (someone driven back, stranded...). */
+  notes?: string[];
+  /** Storylets rule participants played because of this step. */
+  rulePlays?: RulePlay[];
+}
 export interface BranchView { id: number; steps: RunStep[] }
 
 export interface RunView {

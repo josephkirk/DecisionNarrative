@@ -9,6 +9,7 @@ import PlayStory from "../components/play/PlayStory.vue";
 import PlayTimeline from "../components/play/PlayTimeline.vue";
 import PlayWhereWhen from "../components/play/PlayWhereWhen.vue";
 import PlayInspect from "../components/play/PlayInspect.vue";
+import { noteLines } from "../runModel.ts";
 
 const route = useRoute();
 const router = useRouter();
@@ -20,6 +21,11 @@ const recent = ref<RunSummary[]>([]);
 const scenarios = ref<Array<{ id: string; name?: string }>>([]);
 const loading = ref(true);
 const highlightStep = ref<number | null>(null);
+const worldNotes = computed(() => {
+  const view = state.envelope?.view;
+  const last = view?.steps[view.steps.length - 1];
+  return view && last ? noteLines(last, view.participants) : [];
+});
 
 async function loadStartData() {
   try {
@@ -47,7 +53,10 @@ function isTyping(target: EventTarget | null): boolean {
 function onKeydown(e: KeyboardEvent) {
   if (isTyping(e.target) || e.altKey || e.metaKey) return;
   if (e.ctrlKey && e.key.toLowerCase() === "z") e.preventDefault();
-  void play.onKey({ key: e.key, ctrlKey: e.ctrlKey });
+  // Tab only moves between participants when nothing is focused, so it never traps keyboard navigation.
+  if (e.key === "Tab" && e.target !== document.body) return;
+  if (e.key === "Tab") e.preventDefault();
+  void play.onKey({ key: e.key, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey });
 }
 
 onMounted(async () => {
@@ -80,7 +89,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
       <div class="play-layout" :class="{ 'has-inspect': state.inspectOpen }">
       <div class="play-main">
-      <PlayWhereWhen :view="state.envelope.view" :active="state.activeParticipant" @select-participant="play.setParticipant" />
+      <PlayWhereWhen :view="state.envelope.view" :active="state.activeParticipant" :busy="state.busy" @select-participant="play.setParticipant" @act="play.act" />
+      <ul v-if="worldNotes.length" class="play-world-notes" aria-live="polite" aria-label="What the world did">
+        <li v-for="(line, i) in worldNotes" :key="i">{{ line }}</li>
+      </ul>
       <PlayStory
         :envelope="state.envelope"
         :busy="state.busy"
