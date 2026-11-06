@@ -195,7 +195,12 @@ impl Store {
             "SELECT data_json FROM content_records WHERE entity = ?1 AND id = ?2",
             params![entity, id], |row| row.get(0),
         ).optional()?;
-        Ok(stored.or_else(|| (entity == "trait_templates" && id == "system.participant").then(participant_trait_json)))
+        Ok(stored.or_else(|| {
+            if entity != "trait_templates" {
+                return None;
+            }
+            id.strip_prefix("system.").filter(|key| crate::contracts::ADDITIVE_SYSTEM_TRAITS.contains(key)).map(system_trait_json)
+        }))
     }
 
     pub fn list_content_json(&self, entity: &str) -> Result<Vec<String>, rusqlite::Error> {
@@ -204,16 +209,25 @@ impl Store {
             .prepare("SELECT data_json FROM content_records WHERE entity = ?1 ORDER BY id")?;
         let rows = stmt.query_map(params![entity], |row| row.get::<_, String>(0))?;
         let mut records: Vec<String> = rows.collect::<Result<_, _>>()?;
-        // Provide the additive system trait to older v5 projects without rewriting
-        // their stored data or changing the project revision.
-        if entity == "trait_templates" && !records.iter().any(|row| {
-            serde_json::from_str::<Value>(row).ok().and_then(|value| value.get("id").and_then(Value::as_str).map(str::to_owned)).as_deref() == Some("system.participant")
-        }) {
-            records.push(participant_trait_json());
-            records.sort_by(|a,b| {
-                let id = |row: &str| serde_json::from_str::<Value>(row).ok().and_then(|v| v.get("id").and_then(Value::as_str).map(str::to_owned)).unwrap_or_default();
-                id(a).cmp(&id(b))
-            });
+        // Provide the additive system traits to older v5 projects without
+        // rewriting their stored data or changing the project revision.
+        if entity == "trait_templates" {
+            let id_of = |row: &str| {
+                serde_json::from_str::<Value>(row)
+                    .ok()
+                    .and_then(|value| value.get("id").and_then(Value::as_str).map(str::to_owned))
+                    .unwrap_or_default()
+            };
+            let mut added = false;
+            for key in crate::contracts::ADDITIVE_SYSTEM_TRAITS {
+                if !records.iter().any(|row| id_of(row) == format!("system.{key}")) {
+                    records.push(system_trait_json(key));
+                    added = true;
+                }
+            }
+            if added {
+                records.sort_by(|a, b| id_of(a).cmp(&id_of(b)));
+            }
         }
         Ok(records)
     }
@@ -989,15 +1003,15 @@ fn chrono_now_ms() -> i64 {
         .as_millis() as i64
 }
 
-fn participant_trait_json() -> String {
-    let spec = SYSTEM_TRAIT_TEMPLATES.iter().find(|spec| spec.key == "participant").expect("participant system trait exists");
+fn system_trait_json(key: &str) -> String {
+    let spec = SYSTEM_TRAIT_TEMPLATES.iter().find(|spec| spec.key == key).expect("system trait exists");
     let properties: Vec<Value> = spec.properties.iter().map(|property| json!({
         "key": property.key, "name": property.name, "type": property.property_type,
         "is_array": property.is_array, "default": serde_json::from_str::<Value>(property.default_json).expect("valid system trait default")
     })).collect();
-    json!({"id":"system.participant", "key":"participant", "key_auto":false,
+    json!({"id":format!("system.{key}"), "key":key, "key_auto":false,
         "name":spec.name, "description":"", "folder_id":null, "properties":properties,
-        "allow_multiple":false, "system":true, "created_at":0}).to_string()
+        "allow_multiple":spec.allow_multiple, "system":true, "created_at":0}).to_string()
 }
 
 fn seed_protected_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {

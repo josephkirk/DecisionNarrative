@@ -538,11 +538,26 @@ pub struct SystemTraitTemplateSpec {
     pub properties: &'static [SystemTraitPropertySpec],
 }
 
+/// System traits added after v5 shipped. Older projects get them virtually and
+/// bundles without them still validate.
+pub const ADDITIVE_SYSTEM_TRAITS: &[&str] = &["participant", "connection", "clock"];
+
 pub const SYSTEM_TRAIT_TEMPLATES: &[SystemTraitTemplateSpec] = &[
     SystemTraitTemplateSpec { key: "participant", name: "Participant", allow_multiple: false, properties: &[
         SystemTraitPropertySpec { key: "controller", name: "Controller", property_type: PropertyType::String, is_array: false, default_json: "\"human\"" },
         SystemTraitPropertySpec { key: "seat", name: "Seat", property_type: PropertyType::Int, is_array: false, default_json: "0" },
         SystemTraitPropertySpec { key: "start_location", name: "Start Location", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
+    ] },
+    SystemTraitTemplateSpec { key: "connection", name: "Connection", allow_multiple: true, properties: &[
+        SystemTraitPropertySpec { key: "to", name: "To", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
+        SystemTraitPropertySpec { key: "open_slots", name: "Open Slots", property_type: PropertyType::Int, is_array: true, default_json: "[]" },
+        SystemTraitPropertySpec { key: "requires_fact", name: "Requires Fact", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
+        SystemTraitPropertySpec { key: "on_close", name: "On Close", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
+        SystemTraitPropertySpec { key: "return_to", name: "Return To", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
+    ] },
+    SystemTraitTemplateSpec { key: "clock", name: "Clock", allow_multiple: false, properties: &[
+        SystemTraitPropertySpec { key: "slot_labels", name: "Slot Labels", property_type: PropertyType::String, is_array: true, default_json: "[]" },
+        SystemTraitPropertySpec { key: "actions_per_slot", name: "Actions Per Slot", property_type: PropertyType::Int, is_array: false, default_json: "2" },
     ] },
     SystemTraitTemplateSpec { key: "character_settings", name: "Character Settings", allow_multiple: false, properties: &[
         SystemTraitPropertySpec { key: "role", name: "Role", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },

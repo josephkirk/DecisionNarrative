@@ -1263,3 +1263,151 @@ mod chronicle_compile_tests {
         assert!(error.contains("fact.nope"), "{error}");
     }
 }
+
+/// Compiles scheduled connections and the clock from entity traits.
+/// `connected_zones` become always-open connections.
+pub fn compile_space(
+    world: &crate::contracts::EntityRecord,
+    entities: &[EntityTemplateRecord],
+    locations: &[crate::contracts::LocationRecord],
+    entity_indices: &BTreeMap<String, u16>,
+    registry: &storylet_engine::chrono_state::GameplayTagRegistry,
+) -> Result<(Vec<storylet_engine::chrono_space::Connection>, Option<storylet_engine::chrono_space::Clock>), String> {
+    use storylet_engine::chrono_space::{Clock, Connection, OnClose};
+    let clock = match world.traits.iter().find(|t| t.template_id == "system.clock") {
+        None => None,
+        Some(instance) => {
+            let labels: Vec<String> = instance
+                .values
+                .get("slot_labels")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+                .unwrap_or_default();
+            if labels.is_empty() {
+                return Err("Clock: slot_labels must not be empty".into());
+            }
+            let per_slot = match instance.values.get("actions_per_slot") {
+                None | Some(Value::Null) => 2,
+                Some(value) => value.as_u64().filter(|n| (1..=255).contains(n)).ok_or("Clock: actions_per_slot must be between 1 and 255")?,
+            };
+            Some(Clock { slot_labels: labels, actions_per_slot: per_slot as u8 })
+        }
+    };
+    let slot_count = clock.as_ref().map_or(0, |c| c.slot_labels.len());
+    let index_of = |id: &str, from: &str| entity_indices.get(id).copied().ok_or_else(|| format!("Connection \"{from}\": unknown location \"{id}\""));
+    let mut connections = Vec::new();
+    for location in locations {
+        let from = index_of(&location.id, &location.id)?;
+        for target in location.connected_zones.as_deref().unwrap_or_default() {
+            connections.push(Connection { from, to: index_of(target, &location.id)?, open_slots: None, requires_fact: None, on_close: None });
+        }
+        let Some(entity) = entities.iter().find(|e| e.id == location.id) else { continue };
+        for instance in entity.traits.iter().filter(|t| t.template_id == "system.connection") {
+            let text = |key: &str| instance.values.get(key).and_then(Value::as_str).filter(|v| !v.is_empty());
+            let to_id = text("to").ok_or_else(|| format!("Connection \"{}\": a connection must set to", location.id))?;
+            let to = index_of(to_id, &location.id)?;
+            let label = format!("Connection \"{}\" → \"{to_id}\"", location.id);
+            let mut mask = 0u64;
+            let slots: Vec<u64> = instance.values.get("open_slots").and_then(Value::as_array).map(|items| items.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+            for slot in &slots {
+                if *slot as usize >= slot_count || *slot >= 64 {
+                    return Err(format!("Clock: open_slots index {slot} is outside slot_labels (0..{slot_count})"));
+                }
+                mask |= 1u64 << slot;
+            }
+            let scheduled = !slots.is_empty();
+            let on_close = match text("on_close") {
+                None if scheduled => return Err(format!("{label}: a scheduled connection must set on_close (return or strand)")),
+                None => None,
+                Some("strand") => Some(OnClose::Strand),
+                Some("return") => {
+                    let back = text("return_to").ok_or_else(|| format!("{label}: on_close \"return\" needs return_to"))?;
+                    Some(OnClose::Return { to: index_of(back, &location.id)? })
+                }
+                Some(other) => return Err(format!("{label}: on_close \"{other}\" must be return or strand")),
+            };
+            let requires_fact = match text("requires_fact") {
+                None => None,
+                Some(tag) => Some(registry.id(tag).ok_or_else(|| format!("{label}: fact tag \"{tag}\" is not registered"))?),
+            };
+            connections.push(Connection { from, to, open_slots: scheduled.then_some(mask), requires_fact, on_close });
+        }
+    }
+    Ok((connections, clock))
+}
+
+#[cfg(test)]
+mod space_compile_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn location(id: &str, traits: Value, zones: Value) -> Value {
+        let mut all = traits.as_array().cloned().unwrap_or_default();
+        if zones.as_array().is_some_and(|z| !z.is_empty()) {
+            all.push(json!({"template_id": "system.location_settings", "values": {"connected_zones": zones}}));
+        }
+        json!({"id": id, "name": id, "root_tag": "location", "traits": all})
+    }
+
+    fn compile(entities: Value, world_traits: Value) -> Result<(Vec<storylet_engine::chrono_space::Connection>, Option<storylet_engine::chrono_space::Clock>), String> {
+        let world: EntityRecord = serde_json::from_value(json!({"id": "world", "name": "World", "root_tag": "world", "traits": world_traits})).unwrap();
+        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(entities).unwrap();
+        let templates = crate::store::Store::open_in_memory().unwrap().list_trait_templates().unwrap();
+        let records = crate::entities::runtime_records_with_world(&world, &entities, &templates);
+        let indices: BTreeMap<String, u16> = records.locations.iter().enumerate().map(|(i, l)| (l.id.clone(), i as u16)).collect();
+        compile_space(&world, &entities, &records.locations, &indices, &storylet_engine::chrono_state::GameplayTagRegistry::empty())
+    }
+
+    fn connection_trait(values: Value) -> Value {
+        json!([{"template_id": "system.connection", "values": values}])
+    }
+    fn clock_trait() -> Value {
+        json!([{"template_id": "system.clock", "values": {"slot_labels": ["a", "b", "c"], "actions_per_slot": 3}}])
+    }
+
+    #[test]
+    fn scheduled_connection_without_on_close_is_rejected() {
+        let entities = json!([location("lighthouse", json!([]), json!([])), location("rock", connection_trait(json!({"to": "lighthouse", "open_slots": [1], "on_close": ""})), json!([]))]);
+        let error = compile(entities, clock_trait()).unwrap_err();
+        assert_eq!(error, "Connection \"rock\" → \"lighthouse\": a scheduled connection must set on_close (return or strand)");
+    }
+
+    #[test]
+    fn return_without_return_to_is_rejected() {
+        let entities = json!([location("lighthouse", json!([]), json!([])), location("rock", connection_trait(json!({"to": "lighthouse", "open_slots": [1], "on_close": "return"})), json!([]))]);
+        let error = compile(entities, clock_trait()).unwrap_err();
+        assert_eq!(error, "Connection \"rock\" → \"lighthouse\": on_close \"return\" needs return_to");
+    }
+
+    #[test]
+    fn open_slot_out_of_range_is_rejected() {
+        let entities = json!([location("lighthouse", json!([]), json!([])), location("rock", connection_trait(json!({"to": "lighthouse", "open_slots": [1, 5], "on_close": "strand"})), json!([]))]);
+        let error = compile(entities, clock_trait()).unwrap_err();
+        assert_eq!(error, "Clock: open_slots index 5 is outside slot_labels (0..3)");
+    }
+
+    #[test]
+    fn connected_zones_compile_as_always_open() {
+        let entities = json!([location("lighthouse", json!([]), json!(["harbor"])), location("harbor", json!([]), json!([]))]);
+        let (connections, clock) = compile(entities, json!([])).unwrap();
+        assert!(clock.is_none());
+        assert_eq!(connections.len(), 1);
+        let c = &connections[0];
+        // Entity indices are alphabetical: harbor = 0, lighthouse = 1.
+        assert_eq!((c.from, c.to, c.open_slots, c.requires_fact, c.on_close), (1, 0, None, None, None));
+    }
+
+    #[test]
+    fn valid_scheduled_connection_and_clock_compile() {
+        let entities = json!([
+            location("lighthouse", json!([]), json!([])),
+            location("rock", connection_trait(json!({"to": "lighthouse", "open_slots": [0, 2], "on_close": "return", "return_to": "lighthouse"})), json!([])),
+        ]);
+        let (connections, clock) = compile(entities, clock_trait()).unwrap();
+        let clock = clock.unwrap();
+        assert_eq!((clock.slot_labels.len(), clock.actions_per_slot), (3, 3));
+        let c = &connections[0];
+        assert_eq!((c.from, c.to, c.open_slots), (1, 0, Some(0b101)));
+        assert_eq!(c.on_close, Some(storylet_engine::chrono_space::OnClose::Return { to: 0 }));
+    }
+}
