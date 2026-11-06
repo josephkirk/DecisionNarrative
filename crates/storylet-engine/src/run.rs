@@ -40,6 +40,13 @@ pub struct RunContent {
     /// Canon events in story-time order, for `Reveal` nodes and Inspect.
     #[serde(default)]
     pub chronicle: crate::chrono_chronicle::ChronicleTable,
+    /// Scheduled connections between places. Empty = use the `connected` edges
+    /// of the world graph (always open).
+    #[serde(default)]
+    pub connections: Vec<crate::chrono_space::Connection>,
+    /// The world clock; `None` = timeless.
+    #[serde(default)]
+    pub clock: Option<crate::chrono_space::Clock>,
 }
 impl RunContent {
     pub fn storylet_index(&self, id: &str) -> Option<u16> {
@@ -86,6 +93,9 @@ pub struct RunStep {
     pub participant: PartIx,
     pub action: RunAction,
     pub label: String,
+    /// What the world did because of this step (for example someone driven back).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,6 +117,14 @@ pub struct ParticipantView {
 pub struct PlaceView {
     pub id: u16,
     pub name: String,
+    /// Current slot label; absent in a timeless project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock_label: Option<String>,
+    /// Actions this participant has left in the current slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actions_left: Option<u8>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub moves: Vec<crate::chrono_space::MoveOption>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -414,6 +432,9 @@ impl RunKernel {
             .map_err(|e| RunError::Engine(e.to_string()))?;
         let mut world = content.initial_world.clone();
         world.ensure_participants();
+        if let (Some(clock), None) = (&content.clock, &world.clock) {
+            world.clock = Some(crate::chrono_space::ClockState::new(clock, world.participants.len()));
+        }
         let storylet = match start {
             RunStart::Beginning => content.start_storylet,
             RunStart::Storylet { storylet } => storylet,
@@ -506,6 +527,15 @@ impl RunKernel {
                 .get(&id)
                 .cloned()
                 .unwrap_or_else(|| id.to_string()),
+            clock_label: content.clock.as_ref().zip(self.world.clock.as_ref()).and_then(
+                |(clock, state)| clock.slot_labels.get(state.slot as usize).cloned(),
+            ),
+            actions_left: self
+                .world
+                .clock
+                .as_ref()
+                .and_then(|state| state.actions_left.get(participant as usize).copied()),
+            moves: crate::chrono_space::moves_for(&self.world, content, participant),
         });
         let lines: Vec<LineView> = self
             .instance
@@ -666,6 +696,16 @@ impl RunKernel {
         if participant as usize >= self.world.participants.len() {
             return Err(RunError::InvalidAction("unknown participant".into()));
         }
+        if content.clock.is_some()
+            && self
+                .world
+                .clock
+                .as_ref()
+                .and_then(|state| state.actions_left.get(participant as usize))
+                .is_some_and(|left| *left == 0)
+        {
+            return Err(RunError::InvalidAction("no actions left in this slot".into()));
+        }
         let backup = self.clone();
         self.instance.acting_participant = participant;
         let pending = self.pending();
@@ -773,6 +813,21 @@ impl RunKernel {
                         .divert_topic(&mut ctx, node_guid, &edge)
                         .map_err(|e| RunError::InvalidAction(e.to_string()))?;
                 }
+                RunAction::Move { to } if !content.connections.is_empty() => {
+                    let option = crate::chrono_space::moves_for(ctx.state, content, participant)
+                        .into_iter()
+                        .find(|m| m.to == to)
+                        .ok_or_else(|| {
+                            RunError::InvalidAction("destination is not a connected location".into())
+                        })?;
+                    if !option.enabled {
+                        return Err(RunError::InvalidAction(
+                            "that connection is closed right now".into(),
+                        ));
+                    }
+                    let mut delta = BijectiveDelta::default();
+                    ctx.state.apply_move(participant, Some(to), &mut delta);
+                }
                 RunAction::Move { to } => {
                     let current = ctx.state.active_location(participant).ok_or_else(|| {
                         RunError::InvalidAction("participant has no location".into())
@@ -814,6 +869,7 @@ impl RunKernel {
             }
         };
         self.stalled = stalled.clone();
+        let notes = self.spend_action(content, participant, &action);
         if self.rewound {
             let steps = self.branches[self.branch].steps[..self.current_step as usize].to_vec();
             let snapshots = self.snapshots[self.branch][..=self.current_step as usize].to_vec();
@@ -830,12 +886,45 @@ impl RunKernel {
             participant,
             action: action.clone(),
             label: format!("{action:?}"),
+            notes,
         };
         self.branches[self.branch].steps.push(step);
         let snapshot = self.snapshot();
         self.snapshots[self.branch].push(snapshot);
         let _ = content;
         Ok((self.current_step, stalled))
+    }
+    /// Spends the actor's action (all of them for `Wait`) and, once every human
+    /// is out of actions, advances the clock. Returns what the world did as a
+    /// result, as plain-language notes for the step.
+    fn spend_action(&mut self, content: &RunContent, participant: PartIx, action: &RunAction) -> Vec<String> {
+        let Some(state) = self.world.clock.as_mut() else {
+            return Vec::new();
+        };
+        if let Some(left) = state.actions_left.get_mut(participant as usize) {
+            *left = if matches!(action, RunAction::Wait) { 0 } else { left.saturating_sub(1) };
+        }
+        let all_done = self
+            .world
+            .participants
+            .humans()
+            .all(|h| state.actions_left.get(h as usize).copied().unwrap_or(0) == 0);
+        if !all_done {
+            return Vec::new();
+        }
+        let mut delta = BijectiveDelta::default();
+        let name = |id: u16| content.entity_names.get(&id).cloned().unwrap_or_else(|| id.to_string());
+        let events = crate::chrono_space::advance_slot(&mut self.world, content, &mut delta);
+        events
+            .into_iter()
+            .map(|event| {
+                let who = self.world.participants.keys.get(event.participant as usize).cloned().unwrap_or_default();
+                match event.to {
+                    Some(to) => format!("{who} is driven from {} back to {}", name(event.from), name(to)),
+                    None => format!("{who} is stranded at {}", name(event.from)),
+                }
+            })
+            .collect()
     }
     pub fn stalled(&self) -> Option<RunError> {
         self.stalled.clone()

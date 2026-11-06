@@ -715,6 +715,9 @@ pub struct WorldStateTable {
     /// Who was told which canon entry, in telling order.
     #[serde(default)]
     pub telling: TellingTable,
+    /// The world clock; `None` in a timeless project.
+    #[serde(default)]
+    pub clock: Option<crate::chrono_space::ClockState>,
 }
 
 impl WorldStateTable {
@@ -730,6 +733,7 @@ impl WorldStateTable {
             participants: ParticipantTable::default(),
             knowledge: KnowledgeTable::default(),
             telling: TellingTable::default(),
+            clock: None,
         }
     }
 
@@ -746,6 +750,7 @@ impl WorldStateTable {
             participants: ParticipantTable::default(),
             knowledge: KnowledgeTable::default(),
             telling: TellingTable::default(),
+            clock: None,
         }
     }
 
