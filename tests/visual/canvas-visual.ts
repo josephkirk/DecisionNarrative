@@ -174,6 +174,14 @@ try {
   const storyRefs = (await api("GET", "/api/v3/content/storylets/unlock/references")).references;
   check("storylet placed on the canvas is referenced by the canvas holder", storyRefs.some((r: { source_id: string }) => r.source_id === "crypt"), JSON.stringify(storyRefs));
 
+  await page.goto(`${base}/#/entity-templates/plain`);
+  await page.getByRole("button", { name: /^References/ }).click();
+  await page.getByText("Canvas reference").first().waitFor({ timeout: 5000 }).catch(() => {});
+  check("entity References tab lists the canvas holder", (await page.getByText("Canvas reference").count()) > 0);
+  await shot(page, "canvas-06-entity-references");
+  await page.goto(`${base}/#/entity-templates/crypt`);
+  await page.getByRole("button", { name: "Canvas", exact: true }).click();
+
   // 6. Property editor contributed by the plugin.
   await page.getByRole("button", { name: "Properties" }).click();
   check("canvas_doc property shows the plugin summary", await page.getByTestId("canvas-property-summary").isVisible());
