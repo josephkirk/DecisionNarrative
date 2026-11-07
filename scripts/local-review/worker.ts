@@ -323,7 +323,8 @@ async function main(): Promise<void> {
   const hooksDir = join(tempRoot, "empty-hooks");
   const emptyConfig = join(tempRoot, "empty.gitconfig");
   await mkdir(hooksDir);
-  await writeFile(emptyConfig, "", "utf8");
+  // Use gh's authenticated GitHub transport without loading arbitrary user Git configuration.
+  await writeFile(emptyConfig, '[credential "https://github.com"]\n\thelper = !gh auth git-credential\n', "utf8");
   const isolatedGitEnv = cleanEnv({ GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: emptyConfig, GIT_TERMINAL_PROMPT: "0" });
 
   try {
