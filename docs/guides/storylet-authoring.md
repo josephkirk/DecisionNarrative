@@ -4,8 +4,8 @@ Use this checklist for any nonlinear narrative project created with the studio. 
 
 ## Prepare a project
 
-- The global **World** is an intrinsic Entity under **Entities**, not an Entity Template. Create characters, locations, and other authored runtime objects as **Entity Templates**; each has exactly one registered root Gameplay Tag.
-- Keep Trait Templates small and composable: Character Settings holds role and location references; Location Settings holds zone connections; passion data uses focused repeatable traits. Add project-specific traits instead of growing a mandatory all-purpose schema.
+- The global **World** is an intrinsic Entity under **Entities**, not an Entity Template. Create authored runtime objects as **Entity Templates**. Characters, locations, and facts are identified by applied `system.character`, `system.location`, and `system.fact` trait instances; an entity may carry more than one of these traits. Items use the inventory plugin's Item trait. The intrinsic World is the entity whose ID is `world`.
+- Keep traits small and composable: Character Settings holds role and location references; Location Settings holds zone connections; passion data uses focused repeatable traits. Add project-specific traits instead of growing a mandatory all-purpose schema.
 - Give each character a registered `character.*` role tag, goals, boundaries, knowledge, relationships, and a distinct voice. Describe locations through observable details and registered `location.*` tags.
 - State a scene's purpose, role requirements, trigger conditions, and intended outcomes.
 - Keep trigger predicates and choice effects explicit, typed, and reviewable.
@@ -22,11 +22,11 @@ Execution-flow sockets and wires are white; value pins and wires use a color for
 
 The Story Graph toolbar and canvas context menu expose the Chrono `QBN Storylet Hub`, `Salience Selector`, and `Waypoint Conversation` nodes.
 
-Gameplay Tags are canonical, hierarchical identifiers. The intrinsic World owns the reserved `world` root under **Entities**. Authored Entity Templates use one registered non-`world` root (for example, `character`, `location`, `item`, `fact`, `other`, or a custom root); child tags stay within that root. Use **Tag Manager** to add, rename, or remove tags. Referenced or protected tags cannot be changed, and parents with children cannot be renamed or removed. The **Open** action follows a tag reference to its Entity, Entity Template, or storylet graph item.
+Gameplay Tags are canonical, hierarchical identifiers with independently registered namespaces. Their roots and child tags describe gameplay state or categories; they do not classify entities. Entity classification comes from trait instances and traits may coexist. The intrinsic World is the entity with ID `world`. Use **Tag Manager** to add, rename, or remove tags. Referenced or protected tags cannot be changed, and parents with children cannot be renamed or removed. The **Open** action follows a tag reference to its Entity, Entity Template, or storylet graph item.
 
 ## Review each storylet
 
-- Confirm each bound role uses a registered `character.*` tag and fits the scene. Character Settings supplies the role and location references; represent goals, needs, schedules, or other project-specific data with separate reusable Trait Templates.
+- Confirm each bound role uses a registered `character.*` tag and fits the scene. Character Settings supplies the role and location references; represent goals, needs, schedules, or other project-specific data with separate reusable traits.
 - Check that each choice is understandable and its conditions and effects match the intended outcome.
 - Check who can observe each event and which characters can learn from it.
 - Ensure the Story Graph has exactly one Start and one or more End nodes, with every node reachable from Start and able to reach an End. An End marked terminal closes the run; an End with a jump transitions to another storylet and the jump takes precedence. A storylet is a dedicated ending only when every End is terminal with no jump. The separate Preconditions graph must contain only read-only predicate/value nodes, typed property comparisons, And/Or expressions, and Condition Node switches, plus at least one valid-candidate End. Save validates both graphs before writing; approval validates the saved revision.

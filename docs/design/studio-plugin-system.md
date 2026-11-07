@@ -54,7 +54,7 @@ ctx.entityPanel({
   id: "example.details",
   label: "Details",
   order: 10,
-  appliesTo: (entity) => entity.root_tag === "location",
+  appliesTo: (entity) => entity.traits?.some((trait) => trait.template_id === "system.location") ?? false,
   component: DetailsPanel,
 });
 ```
@@ -134,7 +134,7 @@ Disabling a plugin does not erase lowered data, so the stored core graph remains
 
 `vectorCanvasPlugin` (`name: "vector-canvas"`) demonstrates all three main contribution types:
 
-1. On application and `workspace/loaded`, it checks for the Canvas trait template and attempts to create it if a project is loaded and it is absent. Errors are reported with a notification.
+1. On application and `workspace/loaded`, it checks for the Canvas trait and attempts to create it if a project is loaded and it is absent. Errors are reported with a notification.
 2. It adds the **Canvas** entity panel when the entity has the trait and a property summary editor matching `canvas_doc`.
 3. It registers `canvas.modify`, the **Modify Canvas** story node, with `ModifyCanvasInspector.vue` and a deletion callback.
 
@@ -153,7 +153,7 @@ These behaviors are part of the current uncommitted implementation and may chang
 
 ## Inventory plugin
 
-The built-in inventory plugin provisions `inventory_owner` (displayed as InventoryOwner) and `item` trait templates. The owner trait stores `rows`, `columns`, and an ordered array of entity references in `items`; the Item trait identifies eligible entities. An owner has an Inventory tab with a 1–20 row and column grid. Each item uses one slot; the panel prevents duplicates, overflow, and shrinking below the number of items. Changes belong to the entity draft until it is saved.
+The built-in inventory plugin provisions `inventory_owner` (displayed as InventoryOwner) and `item` traits. The owner trait stores `rows`, `columns`, and an ordered array of entity references in `items`; the Item trait identifies eligible entities. An owner has an Inventory tab with a 1–20 row and column grid. Each item uses one slot; the panel prevents duplicates, overflow, and shrinking below the number of items. Changes belong to the entity draft until it is saved.
 
 `inventory.add`, `inventory.remove`, and `inventory.has` require owner and item EntityRef inputs, each connected directly to a configured Get Entity node. Studio and service validation check the relevant traits. Add and remove lower to flow nodes; Has lowers to a pure boolean node usable by a Condition Node. During playtest the service projects trait data into runtime-only typed properties, including concrete inventory entities. The engine checks the Item marker, owner inventory, bounds, and capacity; add is idempotent and errors on full, remove is idempotent, and has returns membership. Mutations produce reversible graph diffs. The grid contains unique entity IDs, not stack counts or multi-cell items.
 

@@ -35,3 +35,5 @@ BTreeMap<entity_id, BTreeMap<property_key, serde_json::Value>>
 ## Contract boundaries
 
 The service contract deliberately contains no `QualityRecord`, quality content root, quality authoring option, `ChronoQualityPredicate`, `ChronoStoryletEffect`, variable definition, or legacy migration field. Chrono metadata that is unrelated to properties remains available, as do passion fields and ordinary storylet content/effects.
+
+The **Unique trait** toggle defaults to false. An entity may contain at most one trait instance whose trait is marked unique; this limit applies across unique traits and counts duplicate instances of the same trait. Traits not marked unique may coexist, while `allow_multiple` controls whether an entity may contain repeated instances of the same trait.
