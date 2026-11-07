@@ -160,6 +160,23 @@ async fn trait_uniqueness_is_enforced_on_save_and_definition_changes() {
     assert_eq!(service.get_content_item("trait_templates", "normal").await.unwrap()["unique"], false);
 }
 
+#[tokio::test]
+async fn disabling_multiple_rejects_existing_duplicate_traits() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    let mut trait_definition = service.save_content_item("trait_templates", &json!({
+        "id": "repeatable", "key": "repeatable", "name": "Repeatable", "allow_multiple": true, "properties": []
+    })).await.unwrap();
+    service.save_content_item("entity_templates", &json!({
+        "id": "owner", "name": "Owner", "traits": [
+            {"id": "first", "template_id": "repeatable", "values": {}},
+            {"id": "second", "template_id": "repeatable", "values": {}}
+        ]
+    })).await.unwrap();
+    trait_definition["allow_multiple"] = json!(false);
+    assert!(service.save_content_item("trait_templates", &trait_definition).await.unwrap_err().contains("does not allow multiple instances"));
+    assert_eq!(service.get_content_item("trait_templates", "repeatable").await.unwrap()["allow_multiple"], true);
+}
+
 
 fn reveal_storylet(event_id: &str) -> Value {
     json!({"id":"tell","title":"Tell","content":{"text_template":"x"},"created_at":1,

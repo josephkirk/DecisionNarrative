@@ -399,5 +399,7 @@ try {
 }
 if (failures.length) {
   console.error(`\n${failures.length} visual check(s) failed`);
+  process.exitCode = 1;
+} else {
+  console.log(`\nAll visual checks passed. Screenshots: ${out}`);
 }
-console.log(`\nAll visual checks passed. Screenshots: ${out}`);

@@ -432,7 +432,9 @@ impl StudioService {
                 }
                 let prepared =
                     entities::prepare_trait_template(payload, stored.as_ref(), &index)?;
-                if stored.as_ref().is_some_and(|previous| previous.unique != prepared.unique) {
+                if stored.as_ref().is_some_and(|previous|
+                    previous.unique != prepared.unique || previous.allow_multiple != prepared.allow_multiple
+                ) {
                     let mut templates = inner.store.list_trait_templates().map_err(|error| error.to_string())?;
                     templates.retain(|template| template.id != prepared.id);
                     templates.push(prepared.clone());
