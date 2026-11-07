@@ -97,13 +97,9 @@ pub fn entity_references(
         if source.id == target.id {
             continue;
         }
-        let direct_reference = source.properties.iter().any(|property| {
-            property.property_type == PropertyType::Entity
-                && value_has(&property.value, &target.id)
-        });
+        let direct_reference = direct_property_reference(source, PropertyType::Entity, &target.id);
         let trait_reference = typed_trait_reference(source, ctx, PropertyType::Entity, &target.id);
-        if direct_reference || trait_reference.is_some() {
-            let field = trait_reference.unwrap_or_else(|| "Entity property".into());
+        if let Some(field) = direct_reference.or(trait_reference) {
             record(
                 &mut out,
                 "entity_template",
@@ -137,6 +133,45 @@ pub fn entity_references(
                 "Start location".into(),
                 ReferenceVia::Id,
             );
+        }
+    }
+    sorted(out)
+}
+
+/// A direct entity property of `property_type` whose value contains `needle`;
+/// returns the property name as the reference field.
+fn direct_property_reference(
+    entity: &EntityTemplateRecord,
+    property_type: PropertyType,
+    needle: &str,
+) -> Option<String> {
+    entity
+        .properties
+        .iter()
+        .find(|property| property.property_type == property_type && value_has(&property.value, needle))
+        .map(|property| {
+            let name = property.name.trim();
+            if name.is_empty() { format!("{} property", type_label(&property_type)) } else { name.to_string() }
+        })
+}
+
+fn type_label(property_type: &PropertyType) -> &'static str {
+    match property_type {
+        PropertyType::Entity => "Entity",
+        PropertyType::Storylet => "Storylet",
+        PropertyType::Asset => "Asset",
+        _ => "Typed",
+    }
+}
+
+/// Where a storylet is linked from: entity storylet properties (direct or trait).
+pub fn storylet_references(storylet_id: &str, ctx: &ReferenceContext) -> Vec<ContentReference> {
+    let mut out = Vec::new();
+    for entity in ctx.entities {
+        let direct = direct_property_reference(entity, PropertyType::Storylet, storylet_id);
+        let via_trait = typed_trait_reference(entity, ctx, PropertyType::Storylet, storylet_id);
+        if let Some(field) = direct.or(via_trait) {
+            record(&mut out, "entity_template", &entity.id, &entity.name, None, field, ReferenceVia::Id);
         }
     }
     sorted(out)

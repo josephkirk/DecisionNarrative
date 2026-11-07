@@ -81,7 +81,7 @@ try {
     if (!canvasTrait) await sleep(200);
   }
   check("plugin creates the Canvas trait", !!canvasTrait);
-  await api("POST", "/api/v3/content/entity_templates", { id: "plain", name: "Plain", root_tag: "location" });
+  await api("POST", "/api/v3/content/entity_templates", { id: "plain", name: "Plain", root_tag: "location", thumbnail: "https://example.invalid/plain.png" });
   await api("POST", "/api/v3/content/entity_templates", { id: "crypt", name: "Crypt", root_tag: "location", thumbnail: "https://example.invalid/crypt.png",
     traits: [{ id: "ti_canvas", template_id: canvasTrait!.id, values: {} }] });
   await page.goto(`${base}/#/entity-templates/plain`);
@@ -119,7 +119,7 @@ try {
   await page.locator(".vc-field", { hasText: "Note" }).locator("textarea").blur();
   check("sticky note shows its text", (await page.locator(".vc-note-text").textContent())?.includes("gate needs the key") ?? false);
   await page.getByRole("button", { name: "Entity reference" }).click();
-  await page.getByLabel("Entity to place").selectOption("crypt");
+  await page.getByLabel("Entity to place").selectOption("plain");
   p = at(500, 120); await page.mouse.click(p.x, p.y);
   check("entity reference shows its thumbnail", (await page.locator('.vc-kind-entity image').count()) === 1);
   await page.getByRole("button", { name: "Storylet reference" }).click();
@@ -164,10 +164,15 @@ try {
   const saved = await api("GET", "/api/v3/content/entity_templates/crypt");
   const keys: string[] = saved.properties.map((x: { key: string }) => x.key);
   check("entity saves canvas_doc", keys.includes("canvas_doc"));
-  check("gameplay shapes declare state properties", keys.filter((k) => k.startsWith("map_")).length === 10, keys.join(","));
+  check("gameplay shapes declare state properties", keys.filter((k) => k.startsWith("map_")).length === 12, keys.join(","));
   const doc = JSON.parse(saved.properties.find((x: { key: string }) => x.key === "canvas_doc").value);
   const gate = doc.shapes.find((s: { label?: string }) => s.label === "Iron Gate");
   check("gate marker saved with icon and description", gate?.kind === "marker" && gate.icon === "door" && gate.description?.includes("rusted"));
+
+  const plainRefs = (await api("GET", "/api/v3/content/entity_templates/plain/references")).references;
+  check("entity placed on the canvas is referenced by the canvas holder", plainRefs.some((r: { source_id: string }) => r.source_id === "crypt"), JSON.stringify(plainRefs));
+  const storyRefs = (await api("GET", "/api/v3/content/storylets/unlock/references")).references;
+  check("storylet placed on the canvas is referenced by the canvas holder", storyRefs.some((r: { source_id: string }) => r.source_id === "crypt"), JSON.stringify(storyRefs));
 
   // 6. Property editor contributed by the plugin.
   await page.getByRole("button", { name: "Properties" }).click();
@@ -175,6 +180,12 @@ try {
 
   // 7. Modify Canvas node in the storylet graph.
   await page.goto(`${base}/#/storylets/unlock/edit`);
+  await page.getByTestId("storylet-references-tab").click();
+  const refPane = page.locator(".storylet-references");
+  await refPane.getByText("Crypt", { exact: true }).first().waitFor({ timeout: 5000 }).catch(() => {});
+  check("storylet References tab lists the canvas holder", (await refPane.getByText("Crypt", { exact: true }).count()) > 0);
+  await shot(page, "canvas-05-storylet-references");
+  await page.getByRole("button", { name: "Story graph" }).click();
   await page.getByRole("button", { name: "Modify Canvas" }).first().click();
   const pluginNode = page.locator(".graph-node.plugin");
   await pluginNode.waitFor();

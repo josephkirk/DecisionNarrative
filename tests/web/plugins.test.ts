@@ -3,7 +3,7 @@ import { Context, registry, nodeTypeContribution, entityPanelsFor, propertyEdito
 import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../../src/web/studio/plugins/graphLowering.ts";
 import { modifyCanvasNode } from "../../src/web/studio/plugins/canvas/modifyCanvasNode.ts";
 import {
-  CANVAS_PROPERTY_KEY, UndoStack, applyOps, emptyCanvas, iconKey, parseCanvas, presentKey, pushRevision, restoreRevision,
+  CANVAS_PROPERTY_KEY, UndoStack, applyOps, emptyCanvas, iconKey, parseCanvas, presentKey, pushRevision, refKey, restoreRevision,
   serializeCanvas, syncCanvasProperties, validateOps, type CanvasDoc, type CanvasShape,
 } from "../../src/web/studio/plugins/canvas/model.ts";
 import { validateNarrativeGraph, type NarrativeGraph } from "../../src/web/studio/narrativeGraphTypes.ts";
@@ -187,4 +187,21 @@ test("Canvas panel applies only to entities with the Canvas trait", async () => 
   expect(hasCanvasTrait(plain, templates)).toBe(false);
   expect(hasCanvasTrait(withTrait, templates)).toBe(true);
   expect(hasCanvasTrait(withTrait, [])).toBe(false);
+});
+
+test("canvas entity and storylet references become typed reference properties on the holder", () => {
+  const doc: CanvasDoc = { ...emptyCanvas(), shapes: [
+    shape("s_gem", "entity", { entity_id: "gem", label: "Gem" }),
+    shape("s_tale", "storylet", { storylet_id: "crypt_tale" }),
+    shape("s_blank", "entity"),
+  ] };
+  const props = syncCanvasProperties([], doc);
+  const gem = props.find((p) => p.key === refKey(doc.shapes[0]!))!;
+  expect(gem).toMatchObject({ type: "entity", value: "gem", name: "Canvas reference (Gem)" });
+  expect(props.find((p) => p.key === refKey(doc.shapes[1]!))!.name).toBe("Canvas reference");
+  expect(props.find((p) => p.key === refKey(doc.shapes[1]!))).toMatchObject({ type: "storylet", value: "crypt_tale" });
+  expect(props.find((p) => p.key === refKey(doc.shapes[2]!))).toBeUndefined();
+  // Removing the shape drops its reference property.
+  const after = syncCanvasProperties(props, { ...doc, shapes: [doc.shapes[1]!] });
+  expect(after.find((p) => p.key === refKey(doc.shapes[0]!))).toBeUndefined();
 });

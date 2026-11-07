@@ -93,7 +93,9 @@ The engine runs only core nodes.
 notes, icon markers, and entity and storylet references drawn with their thumbnails). New canvases start with one
 `Default` layer. Markers and references have a name shown on the canvas and a description shown on hover. Undo/redo
 and Restore do not add history entries. Markers and references declare entity properties (`map_<id>_present`, plus
-`map_<id>_icon` for markers). The **Modify Canvas** story node adds or removes markers and references and changes a
+`map_<id>_icon` for markers). An entity or storylet placed on a canvas counts as a reference from the entity that
+holds the canvas (typed `map_<id>_ref` property), so it shows in that entity's or storylet's **References** list;
+storylets now have a **References** tab in the editor. The **Modify Canvas** story node adds or removes markers and references and changes a
 marker's icon (for example a closed door to an open one), with a before/after preview.
 The **Plugins** tab lists installed plugins and turns them on or off.
 Visual check: `bun run test:visual:canvas`.

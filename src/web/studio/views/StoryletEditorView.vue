@@ -4,6 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 import { useStoryletEditorViewModel } from "../view-models/storyletEditor.ts";
 import NarrativeGraphCanvas from "../components/NarrativeGraphCanvas.vue";
 import PropertyInspector from "../components/PropertyInspector.vue";
+import ReferenceList from "../components/ReferenceList.vue";
+import type { ContentReference } from "../contracts.ts";
 import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../plugins/graphLowering.ts";
 import type { AnyEntity } from "../plugins/runtime.ts";
 import { buildGraphFromStorylet, compileGraphToStorylet, validateNarrativeGraph, validatePreconditionGraph, type NarrativeGraph } from "../narrativeGraphTypes.ts";
@@ -26,6 +28,17 @@ const defaultPreconditionGraph = (): NarrativeGraph => ({
   edges: [{ id: "precondition_start_end", kind: "flow", from_node: "precondition_start", from_port: "output", to_node: "precondition_end", to_port: "input" }],
 });
 const graphReady = ref(false);
+const showReferences = ref(false);
+const references = ref<ContentReference[]>([]);
+const referencesLoading = ref(false);
+async function loadReferences() {
+  if (!storyletId) { references.value = []; return; }
+  referencesLoading.value = true;
+  try { references.value = (await StudioApi.getReferences("storylets", storyletId)).references; }
+  catch { references.value = []; }
+  finally { referencesLoading.value = false; }
+}
+onMounted(() => { void loadReferences(); });
 const availableStorylets = computed(() => studioState.storylets);
 const activeGraphTab = ref<"preconditions" | "story">("story");
 const preconditionGraph = ref<NarrativeGraph>(defaultPreconditionGraph());
@@ -196,10 +209,14 @@ function deleteSelectedNode(nodeId: string) {
     <div v-if="loading || !graphReady" class="loading-state">Loading storylet…</div>
     <main v-else class="graph-editor-layout">
       <nav class="graph-tabs" aria-label="Storylet graph">
-        <button :class="{ active: activeGraphTab === 'preconditions' }" @click="activeGraphTab = 'preconditions'; selectedNodeId = null">Preconditions</button>
-        <button :class="{ active: activeGraphTab === 'story' }" @click="activeGraphTab = 'story'; selectedNodeId = null">Story graph</button>
+        <button :class="{ active: !showReferences && activeGraphTab === 'preconditions' }" @click="showReferences = false; activeGraphTab = 'preconditions'; selectedNodeId = null">Preconditions</button>
+        <button :class="{ active: !showReferences && activeGraphTab === 'story' }" @click="showReferences = false; activeGraphTab = 'story'; selectedNodeId = null">Story graph</button>
+        <button v-if="!isNew" :class="{ active: showReferences }" data-testid="storylet-references-tab" @click="showReferences = true; loadReferences()">References <span class="tab-count">{{ references.length }}</span></button>
       </nav>
-      <div class="graph-editor-workspace">
+      <div v-if="showReferences" class="storylet-references">
+        <ReferenceList :references="references" :loading="referencesLoading" :target-name="draft.title" />
+      </div>
+      <div v-else class="graph-editor-workspace">
         <NarrativeGraphCanvas
           :key="activeGraphTab"
           class="graph-editor-canvas"
@@ -241,6 +258,8 @@ function deleteSelectedNode(nodeId: string) {
 .graph-tabs button { border: 1px solid var(--border-subtle); border-radius: 6px; background: transparent; color: var(--text-muted); padding: 6px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
 .graph-tabs button.active { color: var(--text-main); background: var(--bg-app); border-color: var(--accent); }
 .graph-editor-canvas { flex: 1; min-width: 0; }
+.storylet-references { flex: 1; min-height: 0; overflow: auto; padding: 16px; }
+.tab-count { margin-left: 4px; padding: 0 6px; border-radius: 8px; background: var(--bg-app); font-size: 11px; }
 .loading-state { display: grid; flex: 1; place-items: center; color: var(--text-muted); }
 @media (max-width: 760px) {
   .editor-toolbar { align-items: flex-start; row-gap: 8px; }

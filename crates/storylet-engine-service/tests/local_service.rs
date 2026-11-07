@@ -186,3 +186,29 @@ async fn reveal_requires_canon_event_with_story_time() {
         );
     }
 }
+
+#[tokio::test]
+async fn canvas_reference_properties_are_tracked_as_references() {
+    let app = test_app();
+    let story = json!({"id":"crypt_tale","title":"Crypt Tale","content":{"text_template":"x"},"created_at":1});
+    let (status, body) = request(&app, "POST", "/api/v3/content/storylets", Some(story)).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let gem = json!({"id":"gem","name":"Gem","root_tag":"item"});
+    let crypt = json!({"id":"crypt","name":"Crypt","root_tag":"location","properties":[
+        {"id":"map_a_ref","key":"map_a_ref","name":"Canvas: Gem reference","type":"entity","value":"gem"},
+        {"id":"map_b_ref","key":"map_b_ref","name":"Canvas: Tale reference","type":"storylet","value":"crypt_tale"}]});
+    for entity in [gem, crypt] {
+        let (status, body) = request(&app, "POST", "/api/v3/content/entity_templates", Some(entity)).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+    }
+    let (status, body) = request(&app, "GET", "/api/v3/content/entity_templates/gem/references", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let refs = body["references"].as_array().unwrap();
+    assert!(refs.iter().any(|r| r["source_id"] == "crypt" && r["field"] == "Canvas: Gem reference"), "{body}");
+    let (status, body) = request(&app, "GET", "/api/v3/content/storylets/crypt_tale/references", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let refs = body["references"].as_array().unwrap();
+    assert!(refs.iter().any(|r| r["source_id"] == "crypt" && r["field"] == "Canvas: Tale reference"), "{body}");
+    let (status, _) = request(&app, "GET", "/api/v3/content/storylets/missing/references", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

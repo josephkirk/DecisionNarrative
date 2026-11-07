@@ -824,12 +824,12 @@ impl StudioService {
     ) -> Result<Vec<ContentReference>, String> {
         if !matches!(
             kind,
-            "entity_templates" | "gameplay_tags" | "assets" | "trait_templates"
+            "entity_templates" | "gameplay_tags" | "assets" | "trait_templates" | "storylets"
         ) {
             return Err("Unsupported reference kind".into());
         }
         let inner = self.inner.lock().await;
-        if inner
+        if kind != "storylets" && inner
             .store
             .get_content_json(kind, id)
             .map_err(|error| error.to_string())?
@@ -1629,10 +1629,10 @@ fn collect_references(
 ) -> Result<Vec<ContentReference>, String> {
     if !matches!(
         kind,
-        "entity_templates" | "gameplay_tags" | "assets" | "trait_templates"
+        "entity_templates" | "gameplay_tags" | "assets" | "trait_templates" | "storylets"
     ) {
         return Err(
-            "References are available for entity templates, gameplay tags, assets, and trait templates"
+            "References are available for entity templates, gameplay tags, assets, trait templates, and storylets"
                 .to_string(),
         );
     }
@@ -1684,6 +1684,12 @@ fn collect_references(
             Ok(references::gameplay_tag_references(target, &context))
         }
         "assets" => Ok(references::asset_references(id, &context)),
+        "storylets" => {
+            if !storylets.iter().any(|storylet| storylet.id == id) {
+                return Err(format!("storylets item '{id}' not found"));
+            }
+            Ok(references::storylet_references(id, &context))
+        }
         _ => Ok(references::trait_template_references(id, &context)),
     }
 }

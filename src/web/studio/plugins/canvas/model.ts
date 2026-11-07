@@ -162,6 +162,8 @@ export function isGameplay(shape: Pick<CanvasShape, "kind">): boolean { return G
 function slug(id: string): string { return id.toLowerCase().replace(/[^a-z0-9_]/g, "_"); }
 export function presentKey(shape: Pick<CanvasShape, "id">): string { return `${STATE_PREFIX}${slug(shape.id)}_present`; }
 export function iconKey(shape: Pick<CanvasShape, "id">): string { return `${STATE_PREFIX}${slug(shape.id)}_icon`; }
+/** Typed reference property: the canvas owner references the placed entity or storylet. */
+export function refKey(shape: Pick<CanvasShape, "id">): string { return `${STATE_PREFIX}${slug(shape.id)}_ref`; }
 
 /** Resolves the name of the entity or storylet a shape references. */
 export type RefName = (shape: CanvasShape) => string | undefined;
@@ -187,6 +189,13 @@ export function syncCanvasProperties(properties: EntityProperty[], doc: CanvasDo
     wanted.set(presentKey(shape), { id: presentKey(shape), key: presentKey(shape), name: `Canvas: ${name} present`, type: "bool", value: shape.present });
     if (shape.kind === "marker") {
       wanted.set(iconKey(shape), { id: iconKey(shape), key: iconKey(shape), name: `Canvas: ${name} icon`, type: "string", value: shape.icon ?? DEFAULT_MARKER_ICON });
+    }
+    const refLabel = shape.label?.trim() ? `Canvas reference (${shape.label.trim()})` : "Canvas reference";
+    if (shape.kind === "entity" && shape.entity_id) {
+      wanted.set(refKey(shape), { id: refKey(shape), key: refKey(shape), name: refLabel, type: "entity", value: shape.entity_id });
+    }
+    if (shape.kind === "storylet" && shape.storylet_id) {
+      wanted.set(refKey(shape), { id: refKey(shape), key: refKey(shape), name: refLabel, type: "storylet", value: shape.storylet_id });
     }
   }
   const rest = properties.filter((property) => property.key !== CANVAS_PROPERTY_KEY && !property.key.startsWith(STATE_PREFIX));
