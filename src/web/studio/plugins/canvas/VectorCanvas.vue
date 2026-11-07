@@ -76,8 +76,8 @@ function commit(label: string, before: ReturnType<typeof snapshotOf>, mutate?: (
   persist(pushRevision(next, label));
 }
 function change(label: string, mutate: (doc: CanvasDoc) => void) { commit(label, snapshotOf(doc.value), mutate); }
-function doUndo() { const prev = undo.undo(doc.value); if (prev) { undoVersion.value++; persist(pushRevision({ ...doc.value, ...prev }, "Undo")); } }
-function doRedo() { const next = undo.redo(doc.value); if (next) { undoVersion.value++; persist(pushRevision({ ...doc.value, ...next }, "Redo")); } }
+function doUndo() { const prev = undo.undo(doc.value); if (prev) { undoVersion.value++; persist({ ...doc.value, ...prev }); } }
+function doRedo() { const next = undo.redo(doc.value); if (next) { undoVersion.value++; persist({ ...doc.value, ...next }); } }
 function restore(index: number) { undo.record(doc.value); undoVersion.value++; persist(restoreRevision(doc.value, index)); }
 
 /* ---------- layers ---------- */

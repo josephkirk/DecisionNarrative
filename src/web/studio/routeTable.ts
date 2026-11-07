@@ -12,6 +12,7 @@ export const STUDIO_ROUTES: RouteRecordRaw[] = [
   { path: "/trait-templates/:id", name: "trait-template", component: () => import("./views/TraitTemplateView.vue") },
   { path: "/assets/:id", name: "asset", component: () => import("./views/AssetView.vue") },
   { path: "/codex", name: "codex", component: () => import("./views/CodexView.vue") },
+  { path: "/plugins", name: "plugins", component: () => import("./views/PluginsView.vue") },
   { path: "/project", name: "project", component: () => import("./views/ProjectView.vue") },
   { path: "/tags", name: "tags", component: () => import("./views/TagManagerView.vue") },
   { path: "/play", name: "play", component: () => import("./views/PlayView.vue") },

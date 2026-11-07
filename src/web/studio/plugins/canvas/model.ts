@@ -86,10 +86,11 @@ export function pushRevision(doc: CanvasDoc, label: string, at = Date.now()): Ca
   return { ...doc, revisions };
 }
 
+/** Load a saved revision. Does not add a revision: history stays unchanged. */
 export function restoreRevision(doc: CanvasDoc, index: number): CanvasDoc {
   const revision = doc.revisions[index];
   if (!revision) return doc;
-  return pushRevision({ ...doc, ...snapshotOf(revision.snapshot) }, `Restored "${revision.label}"`);
+  return { ...doc, ...snapshotOf(revision.snapshot) };
 }
 
 /** In-memory undo/redo over snapshots. */

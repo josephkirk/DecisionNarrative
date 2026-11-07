@@ -80,7 +80,8 @@ test("canvas history records revisions, restores them and caps length", () => {
   doc = pushRevision({ ...doc, shapes: [] }, "Clear");
   const restored = restoreRevision(doc, 0);
   expect(restored.shapes.length).toBe(3);
-  expect(restored.revisions.at(-1)!.label).toBe('Restored "Draw"');
+  expect(restored.revisions.length).toBe(2); // restore adds no history
+  expect(restored.revisions.at(-1)!.label).toBe("Clear");
   let many = emptyCanvas();
   for (let i = 0; i < 60; i++) many = pushRevision(many, `r${i}`);
   expect(many.revisions.length).toBe(40);
@@ -149,4 +150,21 @@ test("plugin nodes with missing plugins or bad config are reported", () => {
   (bad.nodes[1]!.plugin_config as { ops: unknown[] }).ops = [];
   expect(validatePluginNodes(bad, [location()])).toContain("Modify Canvas must apply at least one change.");
   ctx.dispose();
+});
+
+test("plugin manager disables and re-enables a plugin", async () => {
+  const { pluginManager } = await import("../../src/web/studio/plugins/manager.ts");
+  const demo = definePlugin({ name: "managed-demo", description: "d", apply(ctx) {
+    ctx.entityPanel({ id: "managed-panel", label: "M", appliesTo: () => true, component: Dummy });
+  } });
+  pluginManager.register(demo, { builtin: false });
+  expect(entityPanelsFor(location()).map((p) => p.id)).toContain("managed-panel");
+  expect(pluginManager.list().find((p) => p.name === "managed-demo")!.contributions.panels).toBe(1);
+  pluginManager.setEnabled("managed-demo", false);
+  expect(entityPanelsFor(location()).map((p) => p.id)).not.toContain("managed-panel");
+  expect(pluginManager.list().find((p) => p.name === "managed-demo")!.enabled).toBe(false);
+  pluginManager.setEnabled("managed-demo", true);
+  expect(entityPanelsFor(location()).map((p) => p.id)).toContain("managed-panel");
+  pluginManager.unregister("managed-demo");
+  expect(entityPanelsFor(location()).map((p) => p.id)).not.toContain("managed-panel");
 });

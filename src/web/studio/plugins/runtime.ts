@@ -18,6 +18,8 @@ export type AnyEntity = EntityRecord | EntityTemplateRecord;
 /** UI attached to a whole entity; shown as an extra tab in the entity editor. */
 export interface EntityPanelContribution {
   id: string;
+  /** Set by the runtime: name of the plugin that registered it. */
+  owner?: string;
   label: string;
   /** Return false to hide the panel for this entity. */
   appliesTo(entity: AnyEntity): boolean;
@@ -29,6 +31,8 @@ export interface EntityPanelContribution {
 /** UI attached to one property; replaces the default value editor. */
 export interface PropertyEditorContribution {
   id: string;
+  /** Set by the runtime: name of the plugin that registered it. */
+  owner?: string;
   matches(property: PropertyDefinition | EntityProperty, entity?: AnyEntity): boolean;
   /** Receives props `{ property, entity, modelValue, disabled }`, emits `update:modelValue`. */
   component: Component;
@@ -57,6 +61,8 @@ export interface LowerContext {
 export interface NodeTypeContribution<Config = Record<string, unknown>> {
   type: string;
   label: string;
+  /** Set by the runtime: name of the plugin that registered it. */
+  owner?: string;
   category?: string;
   color?: string;
   defaults(): Config;
@@ -75,6 +81,9 @@ export interface StudioEvents {
 
 export interface Plugin {
   name: string;
+  /** Shown in the Plugins manager. */
+  description?: string;
+  version?: string;
   apply(ctx: Context): void | Promise<void>;
 }
 
@@ -110,18 +119,18 @@ export class Context {
   }
 
   entityPanel(panel: EntityPanelContribution): Disposer {
-    return this.effect(addTo(registry.entityPanels, markRaw({ ...panel, component: markRaw(panel.component) })));
+    return this.effect(addTo(registry.entityPanels, markRaw({ ...panel, owner: this.name, component: markRaw(panel.component) })));
   }
 
   propertyEditor(editor: PropertyEditorContribution): Disposer {
-    return this.effect(addTo(registry.propertyEditors, markRaw({ ...editor, component: markRaw(editor.component) })));
+    return this.effect(addTo(registry.propertyEditors, markRaw({ ...editor, owner: this.name, component: markRaw(editor.component) })));
   }
 
   nodeType<C>(node: NodeTypeContribution<C>): Disposer {
     if (registry.nodeTypes.some((existing) => existing.type === node.type)) {
       throw new Error(`Plugin node type '${node.type}' is already registered.`);
     }
-    const entry = markRaw({ ...node, inspector: node.inspector ? markRaw(node.inspector) : undefined });
+    const entry = markRaw({ ...node, owner: this.name, inspector: node.inspector ? markRaw(node.inspector) : undefined });
     return this.effect(addTo(registry.nodeTypes, entry as NodeTypeContribution<any>));
   }
 

@@ -9,6 +9,8 @@ export { MODIFY_CANVAS } from "./modifyCanvasNode.ts";
 
 export const vectorCanvasPlugin = definePlugin({
   name: "vector-canvas",
+  version: "1.0.0",
+  description: "Layered vector map canvas on entities, with gates, keys and references, plus a Modify Canvas story node.",
   apply(ctx) {
     // UI attached to an entity.
     ctx.entityPanel({
