@@ -277,6 +277,32 @@ try {
   const acted = await api("POST", `/api/v4/runs/${run.id}/act`, { participant: run.view.participant, action: choice.action, expectedRevision: run.revision, idempotencyKey: "a1" })
     .catch((e) => ({ error: String(e) }));
   check("choosing executes Modify Canvas without stalling", !("error" in acted) && !acted.stalled, JSON.stringify(acted).slice(0, 300));
+
+  // Deleting the node removes its version from the entity's history.
+  const versionCount = async () => (await cryptDoc()).revisions.filter((r: { source?: unknown }) => r.source).length;
+  const revisionsBeforeDelete = (await cryptDoc()).revisions.length;
+  await page.goto(`${base}/#/storylets/unlock/edit`);
+  await page.locator(".graph-node.plugin").waitFor();
+  // Dragging the node moves it without opening the editor.
+  const header = (await page.locator(".graph-node.plugin .node-header").boundingBox())!;
+  await page.mouse.move(header.x + 40, header.y + header.height / 2); await page.mouse.down();
+  await page.mouse.move(header.x + 120, header.y + header.height / 2 + 60, { steps: 6 }); await page.mouse.up();
+  await sleep(300);
+  const moved = (await page.locator(".graph-node.plugin .node-header").boundingBox())!;
+  check("dragging the node moves it without opening the editor", (await page.getByTestId("modify-canvas-editor").count()) === 0 && moved.x > header.x + 40, `${header.x} -> ${moved.x}`);
+  await page.locator(".graph-editor-canvas").click({ position: { x: 600, y: 700 } });
+  await page.locator(".graph-node.plugin").getByRole("button", { name: "Delete node" }).click();
+  await page.locator(".graph-node.plugin").waitFor({ state: "detached" });
+  for (let i = 0; i < 25 && (await versionCount()) > 0; i++) await sleep(200);
+  const deletedDoc = await cryptDoc();
+  check("deleting the node removes its version", (await versionCount()) === 0 && deletedDoc.revisions.length === revisionsBeforeDelete - 1, `${revisionsBeforeDelete} -> ${deletedDoc.revisions.length}`);
+  const presentKeys = (await api("GET", "/api/v3/content/entity_templates/crypt")).properties.filter((x: { key: string }) => x.key.startsWith("map_") && x.key.endsWith("_present"));
+  check("properties only that version declared are removed", presentKeys.length === 6, String(presentKeys.length));
+  await page.goto(`${base}/#/entity-templates/crypt`);
+  await page.getByRole("button", { name: "Canvas", exact: true }).click();
+  await page.getByRole("button", { name: /^History/ }).click();
+  check("entity history no longer lists the storylet version", (await page.locator(".vc-history li.is-node-version").count()) === 0);
+  await shot(page, "canvas-08-history-after-delete");
   if (errors.length) console.log("console errors:\n" + errors.join("\n"));
   check("no console errors", errors.length === 0);
 } finally {

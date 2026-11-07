@@ -2,7 +2,7 @@
 import { ref, computed, watch } from "vue";
 import { learnNodeDefaults, graphNodeTypes, graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, GRAPH_PIN_COLORS, type GraphValueType, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType } from "../narrativeGraphTypes.ts";
 import { studioState, notify } from "../state.ts";
-import { registry, nodeTypeContribution } from "../plugins/runtime.ts";
+import { registry, nodeTypeContribution, pluginNodeDeleted } from "../plugins/runtime.ts";
 
 const props = withDefaults(defineProps<{
   initialGraph: NarrativeGraph;
@@ -316,6 +316,7 @@ function removeEdge(edgeId: string) {
 
 function removeNode(nodeId: string) {
   if (!window.confirm("Delete this node and its connections?")) return;
+  void pluginNodeDeleted(nodes.value.find((n) => n.id === nodeId));
   nodes.value = nodes.value.filter((n) => n.id !== nodeId);
   edges.value = edges.value.filter((e) => e.from_node !== nodeId && e.to_node !== nodeId);
   if (selectedNodeId.value === nodeId) {
@@ -657,7 +658,7 @@ const computedEdges = computed(() => {
             </span>
             <input v-model="node.title" class="node-title-input" @input="emitUpdate" />
           </div>
-          <button class="node-close-btn" title="Delete node" aria-label="Delete node" @click.stop="removeNode(node.id)">✕</button>
+          <button class="node-close-btn" title="Delete node" aria-label="Delete node" @mousedown.stop @click.stop="removeNode(node.id)">✕</button>
         </div>
 
         <!-- Node Body Content based on Type -->

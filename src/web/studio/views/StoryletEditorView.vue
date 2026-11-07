@@ -7,7 +7,7 @@ import PropertyInspector from "../components/PropertyInspector.vue";
 import ReferenceList from "../components/ReferenceList.vue";
 import type { ContentReference } from "../contracts.ts";
 import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../plugins/graphLowering.ts";
-import type { AnyEntity } from "../plugins/runtime.ts";
+import { pluginNodeDeleted, type AnyEntity } from "../plugins/runtime.ts";
 import { buildGraphFromStorylet, compileGraphToStorylet, validateNarrativeGraph, validatePreconditionGraph, type NarrativeGraph } from "../narrativeGraphTypes.ts";
 import { notify, studioState } from "../state.ts";
 import { originBadge } from "../storyletModel.ts";
@@ -174,6 +174,7 @@ async function handleApprove() {
 function deleteSelectedNode(nodeId: string) {
   if (!window.confirm("Delete this node and its connections?")) return;
   const graph = activeGraph.value;
+  void pluginNodeDeleted(graph.nodes.find((node) => node.id === nodeId));
   const updated = {
     ...graph,
     nodes: graph.nodes.filter((node) => node.id !== nodeId),

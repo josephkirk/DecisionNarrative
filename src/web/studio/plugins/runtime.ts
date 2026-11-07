@@ -70,6 +70,8 @@ export interface NodeTypeContribution<Config = Record<string, unknown>> {
   summary?(config: Config): string;
   validate?(config: Config, ctx: LowerContext): string[];
   lower(config: Config, ctx: LowerContext): LoweredFragment;
+  /** Called when the author deletes the node from a graph: clean up data it owns. */
+  onDelete?(config: Config, node: NarrativeNode): void | Promise<void>;
   /** Receives props `{ node, config, graph }`, emits `update:config`. */
   inspector?: Component;
 }
@@ -177,6 +179,17 @@ export function emit<K extends keyof StudioEvents>(event: K, ...args: Parameters
 
 export function nodeTypeContribution(type: string | undefined): NodeTypeContribution<any> | undefined {
   return type ? registry.nodeTypes.find((node) => node.type === type) : undefined;
+}
+
+/** Tell a plugin that the author deleted one of its nodes. Errors are reported, not thrown. */
+export async function pluginNodeDeleted(node: NarrativeNode | undefined): Promise<void> {
+  if (node?.type !== "plugin") return;
+  const contribution = nodeTypeContribution(node.plugin_type);
+  try {
+    await contribution?.onDelete?.(node.plugin_config ?? {}, node);
+  } catch (error) {
+    console.warn(`Plugin '${contribution?.owner}' failed to clean up node ${node.id}:`, error);
+  }
 }
 
 export function entityPanelsFor(entity: AnyEntity): EntityPanelContribution[] {

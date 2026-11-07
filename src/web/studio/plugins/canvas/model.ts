@@ -139,6 +139,11 @@ export function pushRevision(doc: CanvasDoc, label: string, at = Date.now()): Ca
   return { ...doc, revisions: trimRevisions([...doc.revisions, { at, label, snapshot: snapshotOf(doc) }]) };
 }
 
+/** Remove the version a deleted Modify Canvas node owned. */
+export function removeNodeVersion(doc: CanvasDoc, id: string): CanvasDoc {
+  return { ...doc, revisions: doc.revisions.filter((revision) => revision.id !== id) };
+}
+
 export function nodeVersion(doc: CanvasDoc, id: string | undefined): CanvasRevision | undefined {
   return id ? doc.revisions.find((revision) => revision.id === id) : undefined;
 }

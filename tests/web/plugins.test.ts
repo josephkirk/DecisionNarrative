@@ -3,7 +3,7 @@ import { Context, registry, nodeTypeContribution, entityPanelsFor, propertyEdito
 import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../../src/web/studio/plugins/graphLowering.ts";
 import { modifyCanvasNode } from "../../src/web/studio/plugins/canvas/modifyCanvasNode.ts";
 import {
-  CANVAS_PROPERTY_KEY, CANVAS_VERSION_KEY, UndoStack, emptyCanvas, iconKey, nodeVersion, parseCanvas, presentKey, pushRevision, refKey,
+  CANVAS_PROPERTY_KEY, CANVAS_VERSION_KEY, UndoStack, emptyCanvas, iconKey, nodeVersion, parseCanvas, presentKey, pushRevision, refKey, removeNodeVersion,
   restoreRevision, serializeCanvas, snapshotOf, syncCanvasProperties, upsertNodeVersion, validateModifyCanvas, versionChanges,
   type CanvasDoc, type CanvasShape,
 } from "../../src/web/studio/plugins/canvas/model.ts";
@@ -237,4 +237,18 @@ test("canvas entity and storylet references become typed reference properties on
   // Removing the shape drops its reference property.
   const after = syncCanvasProperties(props, { ...doc, shapes: [doc.shapes[1]!] });
   expect(after.find((p) => p.key === refKey(doc.shapes[0]!))).toBeUndefined();
+});
+
+test("deleting a plugin node calls its onDelete; removeNodeVersion drops the version", async () => {
+  const { pluginNodeDeleted } = await import("../../src/web/studio/plugins/runtime.ts");
+  const ctx = new Context("delete-test");
+  const seen: unknown[] = [];
+  ctx.nodeType({ type: "test.owner", label: "Owner", defaults: () => ({}), lower: () => ({ nodes: [], edges: [], entry: "", exit: "" }), onDelete: (config) => { seen.push(config); } });
+  await pluginNodeDeleted({ id: "n1", type: "plugin", title: "Owner", x: 0, y: 0, width: 1, height: 1, plugin_type: "test.owner", plugin_config: { version_id: "v1" } });
+  await pluginNodeDeleted({ id: "n2", type: "start", title: "Start", x: 0, y: 0, width: 1, height: 1 });
+  expect(seen).toEqual([{ version_id: "v1" }]);
+  ctx.dispose();
+  const doc = removeNodeVersion(versionedDoc(), "cv_unlock");
+  expect(doc.revisions.length).toBe(0);
+  expect(syncCanvasProperties([], doc).some((p) => p.key === "map_s_ghost_present")).toBe(false);
 });

@@ -1,18 +1,25 @@
+<script lang="ts">
+/** Shared pointer state, so the inspector can tell a click from a drag. */
+const pointer = { down: false, at: { x: 0, y: 0 } };
+if (typeof window !== "undefined") {
+  window.addEventListener("mousedown", (event) => { pointer.down = true; pointer.at = { x: event.clientX, y: event.clientY }; }, true);
+  window.addEventListener("mouseup", () => { pointer.down = false; }, true);
+}
+</script>
+
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { StudioApi } from "../../api.ts";
 import { notify, studioState } from "../../state.ts";
-import { refreshWorkspace } from "../../view-models/workspace.ts";
 import type { NarrativeNode } from "../../narrativeGraphTypes.ts";
-import type { AnyEntity } from "../runtime.ts";
 import {
-  CANVAS_PROPERTY_KEY, emptyCanvas, newId, nodeVersion, snapshotOf, syncCanvasProperties, upsertNodeVersion, versionChanges,
+  CANVAS_PROPERTY_KEY, emptyCanvas, newId, nodeVersion, removeNodeVersion, snapshotOf, upsertNodeVersion, versionChanges,
   type CanvasDoc, type ModifyCanvasConfig,
 } from "./model.ts";
 import { canvasOf } from "./modifyCanvasNode.ts";
 import { allEntities, refName } from "./refs.ts";
 import { hasCanvasTrait } from "./trait.ts";
+import { updateEntityCanvas } from "./versionStore.ts";
 import CanvasShapeView from "./CanvasShapeView.vue";
 import VectorCanvas from "./VectorCanvas.vue";
 
@@ -55,26 +62,39 @@ function openEditor() { open.value = true; startEditing(); }
 function closeEditor() { open.value = false; working.value = null; }
 function pickEntity(id: string) { pickedEntity.value = id; startEditing(); }
 
-onMounted(openEditor);
-watch(() => props.node.id, () => { pickedEntity.value = props.config.canvas_entity; openEditor(); });
+/**
+ * Open on a click, not on mouse-down: the graph selects a node on mouse-down,
+ * so wait for the release and skip it if the node was dragged.
+ */
+function openOnClick() {
+  if (!pointer.down) { openEditor(); return; }
+  const start = { ...pointer.at };
+  window.addEventListener("mouseup", (event) => {
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 5) openEditor();
+  }, { once: true });
+}
+onMounted(openOnClick);
+watch(() => props.node.id, () => { pickedEntity.value = props.config.canvas_entity; openOnClick(); });
 
 async function saveVersion() {
   const entity = target.value;
   if (!entity || !working.value) return;
   saving.value = true;
   try {
-    const kind = studioState.entities.some((row) => row.id === entity.id) ? "entities" : "entity_templates";
-    const fresh = await StudioApi.getContent<AnyEntity>(kind, entity.id);
-    const doc = canvasOf(fresh) ?? emptyCanvas();
+    const snapshot = working.value;
     const reuse = pickedEntity.value === props.config.canvas_entity && props.config.version_id;
     const id = reuse ? props.config.version_id : newId("cv_");
-    const next = upsertNodeVersion(doc, {
+    const version = {
       id, label: `Modify Canvas · ${storyletTitle.value}`,
       source: { storylet_id: storyletId.value, storylet_title: storyletTitle.value, node_id: props.node.id },
-      snapshot: working.value,
-    });
-    await StudioApi.saveContent(kind, { ...fresh, properties: syncCanvasProperties(fresh.properties, next) });
-    await refreshWorkspace([kind]);
+      snapshot,
+    };
+    await updateEntityCanvas(entity.id, (doc) => upsertNodeVersion(doc, version));
+    // Moving the node to another entity: its old version goes away.
+    const previous = props.config;
+    if (!reuse && previous.canvas_entity && previous.version_id) {
+      await updateEntityCanvas(previous.canvas_entity, (doc) => removeNodeVersion(doc, previous.version_id));
+    }
     emit("update:config", { canvas_entity: entity.id, version_id: id });
     notify(`Canvas version saved to ${entity.name}. Save the storylet draft to apply it.`, "success");
     closeEditor();

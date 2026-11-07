@@ -5,7 +5,8 @@ import { refreshWorkspace } from "../../view-models/workspace.ts";
 import VectorCanvas from "./VectorCanvas.vue";
 import ModifyCanvasInspector from "./ModifyCanvasInspector.vue";
 import CanvasPropertySummary from "./CanvasPropertySummary.vue";
-import { CANVAS_PROPERTY_KEY } from "./model.ts";
+import { CANVAS_PROPERTY_KEY, removeNodeVersion } from "./model.ts";
+import { updateEntityCanvas } from "./versionStore.ts";
 import { modifyCanvasNode } from "./modifyCanvasNode.ts";
 import { canvasTraitTemplate, findCanvasTrait, hasCanvasTrait } from "./trait.ts";
 
@@ -51,6 +52,19 @@ export const vectorCanvasPlugin = definePlugin({
     });
 
     // Graph node that modifies its input and returns core nodes as output.
-    ctx.nodeType({ ...modifyCanvasNode, inspector: ModifyCanvasInspector });
+    // Deleting the node removes the one version it owns from the entity's canvas history.
+    ctx.nodeType({
+      ...modifyCanvasNode,
+      inspector: ModifyCanvasInspector,
+      async onDelete(config) {
+        if (!config.canvas_entity || !config.version_id) return;
+        try {
+          await updateEntityCanvas(config.canvas_entity, (doc) => removeNodeVersion(doc, config.version_id));
+          notify("Removed the node's canvas version from the entity's history.", "success");
+        } catch (error) {
+          notify(`Could not remove the canvas version: ${error instanceof Error ? error.message : String(error)}`, "error");
+        }
+      },
+    });
   },
 });
