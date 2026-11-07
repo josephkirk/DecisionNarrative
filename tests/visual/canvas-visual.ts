@@ -52,7 +52,7 @@ const n = (id: string, type: string, x: number, extra: Record<string, unknown> =
 let browser;
 try {
   for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { /* starting */ } await sleep(200); }
-  await api("POST", "/api/v3/content/entity_templates", { id: "crypt", name: "Crypt", root_tag: "location" });
+  await api("POST", "/api/v3/content/entity_templates", { id: "crypt", name: "Crypt", root_tag: "location", thumbnail: "https://example.invalid/crypt.png" });
   await api("POST", "/api/v3/content/scenarios", { id: "scenario", name: "Scenario", seed: 7, start_location_policy: { mode: "fixed", location_id: "crypt" } });
   await api("POST", "/api/v3/content/storylets", {
     id: "unlock", title: "Unlock the crypt", content: { text_template: "x" }, created_at: 1,
@@ -76,69 +76,83 @@ try {
 
   // 1. Entity panel contributed by the plugin.
   await page.goto(`${base}/#/entity-templates/crypt`);
-  await page.getByRole("button", { name: "Map Canvas" }).click();
+  await page.getByRole("button", { name: "Canvas", exact: true }).click();
   const stage = page.locator(".vc-stage");
   await stage.waitFor();
-  check("Map Canvas tab renders the vector canvas", await stage.isVisible());
+  check("Canvas tab renders the vector canvas", await stage.isVisible());
+  check("new canvas has one Default layer", (await page.locator(".vc-layer-name").count()) === 1 && (await page.locator(".vc-layer-name").inputValue()) === "Default");
   const box = (await stage.boundingBox())!;
   const at = (x: number, y: number) => ({ x: box.x + x, y: box.y + y });
 
-  // 2. Draw a room on the Ground layer, a wall on Walls, and gameplay shapes on Gates & Keys.
-  await page.locator(".vc-layer", { has: page.locator('input[value="Ground"]') }).click();
+  // 2. Room on Default, a wall on a second layer, then markers, a sticky note and references on Default.
   await page.getByRole("button", { name: "Room / Rectangle (R)" }).click();
   let p = at(80, 80); await page.mouse.move(p.x, p.y); await page.mouse.down();
   p = at(560, 420); await page.mouse.move(p.x, p.y, { steps: 5 }); await page.mouse.up();
-  await page.locator(".vc-layer", { has: page.locator('input[value="Walls"]') }).click();
+  await page.getByRole("button", { name: "+ Add layer" }).click();
   await page.getByRole("button", { name: /Wall \/ Polyline/ }).click();
   for (const [x, y] of [[80, 250], [300, 250]]) { p = at(x, y); await page.mouse.click(p.x, p.y); }
   p = at(300, 380); await page.mouse.dblclick(p.x, p.y);
-  await page.locator(".vc-layer", { has: page.locator('input[value="Gates & Keys"]') }).click();
-  for (const [tool, x, y] of [["Gate", 400, 250], ["Key", 150, 150], ["Item", 450, 350], ["Fact", 200, 350]] as const) {
-    await page.getByRole("button", { name: tool, exact: true }).click();
+  await page.locator(".vc-layer", { has: page.locator('input[value="Default"]') }).click();
+  await page.getByRole("button", { name: "Marker (M)" }).click();
+  for (const [icon, x, y] of [["door", 400, 250], ["key", 150, 150], ["gem", 450, 350], ["scroll", 200, 350]] as const) {
+    await page.getByLabel("Icon for new markers").selectOption(icon);
     p = at(x, y); await page.mouse.click(p.x, p.y);
   }
-  // Entity reference.
+  await page.getByRole("button", { name: "Sticky note (N)" }).click();
+  p = at(420, 60); await page.mouse.click(p.x, p.y);
+  await page.locator(".vc-field", { hasText: "Note" }).locator("textarea").fill("Remember: the gate needs the key.");
+  await page.locator(".vc-field", { hasText: "Note" }).locator("textarea").blur();
+  check("sticky note shows its text", (await page.locator(".vc-note-text").textContent())?.includes("gate needs the key") ?? false);
   await page.getByRole("button", { name: "Entity reference" }).click();
   await page.getByLabel("Entity to place").selectOption("crypt");
   p = at(500, 120); await page.mouse.click(p.x, p.y);
-  check("shapes created", (await page.locator(".vc-shape").count()) === 7, String(await page.locator(".vc-shape").count()));
+  check("entity reference shows its thumbnail", (await page.locator('.vc-kind-entity image').count()) === 1);
+  await page.getByRole("button", { name: "Storylet reference" }).click();
+  await page.getByLabel("Storylet to place").selectOption("unlock");
+  p = at(520, 220); await page.mouse.click(p.x, p.y);
+  check("storylet reference placed", (await page.locator('.vc-kind-storylet').count()) === 1);
+  check("shapes created", (await page.locator(".vc-shape").count()) === 9, String(await page.locator(".vc-shape").count()));
 
-  // 3. Undo / redo + persisted history.
+  // 3. Undo / redo do not add history.
+  const historyCount = async () => Number((await page.getByRole("button", { name: /^History/ }).textContent())!.replace(/\D+/g, ""));
+  const beforeUndo = await historyCount();
   await page.keyboard.press("Control+z");
-  check("undo removes the last shape", (await page.locator(".vc-shape").count()) === 6);
+  check("undo removes the last shape", (await page.locator(".vc-shape").count()) === 8);
   await page.keyboard.press("Control+y");
-  check("redo restores it", (await page.locator(".vc-shape").count()) === 7);
+  check("redo restores it", (await page.locator(".vc-shape").count()) === 9);
+  check("undo/redo add no history", (await historyCount()) === beforeUndo, `${beforeUndo} -> ${await historyCount()}`);
 
-  // 4. Name the gate and bind the key.
+  // 4. Name the gate marker and give it a hover description.
   await page.getByRole("button", { name: "Select (V)" }).click();
-  p = at(400, 250); await page.mouse.click(p.x, p.y);
-  const label = page.locator(".vc-field", { hasText: "Label" }).locator("input");
+  const gateShape = page.locator('.vc-shape[data-kind="marker"]', { hasText: "Door (closed)" });
+  await gateShape.click();
+  const label = page.locator(".vc-field", { hasText: "Name on canvas" }).locator("input");
   await label.fill("Iron Gate"); await label.press("Enter");
-  await page.locator(".vc-field", { hasText: "Opened by key" }).locator("select").selectOption({ index: 1 });
+  const description = page.locator(".vc-field", { hasText: "Description" }).locator("textarea");
+  await description.fill("A rusted iron gate. It only opens with the crypt key."); await description.blur();
+  await page.locator('.vc-shape[data-kind="marker"]', { hasText: "Iron Gate" }).hover();
+  check("hover shows the description", (await page.getByRole("tooltip").textContent())?.includes("rusted iron gate") ?? false);
   await page.getByLabel("Show runtime state").check();
   await shot(page, "canvas-01-editor");
   await page.getByRole("button", { name: /^History/ }).click();
-  check("history lists revisions", (await page.locator(".vc-history li").count()) >= 8);
+  check("history lists revisions", (await page.locator(".vc-history li").count()) >= 10);
   await shot(page, "canvas-02-history");
 
-  // 5. Layer hide / lock.
+  // 5. Layer hide.
   await page.getByRole("button", { name: "Layers" }).click();
-  await page.locator(".vc-layer", { has: page.locator('input[value="Walls"]') }).getByRole("button", { name: "Hide layer" }).click();
-  await shot(page, "canvas-hidden");
-  check("hiding a layer hides its shapes", (await page.locator(".vc-shape").count()) === 6);
-  await page.locator(".vc-layer", { has: page.locator('input[value="Walls"]') }).getByRole("button", { name: "Show layer" }).click();
-
+  await page.locator(".vc-layer", { has: page.locator('input[value="Layer 2"]') }).getByRole("button", { name: "Hide layer" }).click();
+  check("hiding a layer hides its shapes", (await page.locator(".vc-shape").count()) === 8);
+  await page.locator(".vc-layer", { has: page.locator('input[value="Layer 2"]') }).getByRole("button", { name: "Show layer" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await sleep(800);
   console.log("toast:", (await page.locator(".toast, [role=status], [role=alert]").allTextContents()).join(" | "));
   const saved = await api("GET", "/api/v3/content/entity_templates/crypt");
   const keys: string[] = saved.properties.map((x: { key: string }) => x.key);
   check("entity saves canvas_doc", keys.includes("canvas_doc"));
-  check("gameplay shapes declare state properties", keys.filter((k) => k.startsWith("map_")).length === 6, keys.join(","));
+  check("gameplay shapes declare state properties", keys.filter((k) => k.startsWith("map_")).length === 10, keys.join(","));
   const doc = JSON.parse(saved.properties.find((x: { key: string }) => x.key === "canvas_doc").value);
-  const gate = doc.shapes.find((s: { kind: string }) => s.kind === "gate");
-  const key = doc.shapes.find((s: { kind: string }) => s.kind === "key");
-  check("gate is bound to key", gate.key_id === key.id && gate.label === "Iron Gate");
+  const gate = doc.shapes.find((s: { label?: string }) => s.label === "Iron Gate");
+  check("gate marker saved with icon and description", gate?.kind === "marker" && gate.icon === "door" && gate.description?.includes("rusted"));
 
   // 6. Property editor contributed by the plugin.
   await page.getByRole("button", { name: "Properties" }).click();
@@ -153,9 +167,10 @@ try {
   const inspector = page.getByTestId("modify-canvas-inspector");
   await inspector.waitFor();
   await inspector.locator("select").first().selectOption("crypt");
-  for (const [shapeLabel, action] of [["Iron Gate", "Open gate"], [/key/, "Remove key"], [/item/, "Remove item"], [/fact/, "Add fact"]] as const) {
-    await inspector.getByLabel("Map element").selectOption({ label: typeof shapeLabel === "string" ? `${shapeLabel} (gate)` : (await inspector.getByLabel("Map element").locator("option").allTextContents()).find((t) => shapeLabel.test(t))! });
+  for (const [element, action] of [["Iron Gate (marker)", "Change icon"], ["Key (marker)", "Remove marker"], ["Item (marker)", "Remove marker"], ["Unlock the crypt (storylet)", "Remove reference"]] as const) {
+    await inspector.getByLabel("Canvas element").selectOption({ label: element });
     await inspector.getByLabel("Change", { exact: true }).selectOption({ label: action });
+    if (action === "Change icon") await inspector.getByLabel("New icon").selectOption("door-open");
     await inspector.getByRole("button", { name: "Add", exact: true }).click();
   }
   check("inspector lists four changes", (await inspector.locator(".mc-ops li").count()) === 4);

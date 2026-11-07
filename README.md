@@ -89,10 +89,13 @@ Plugin nodes exist only while authoring. On save, each is lowered into core node
 the authored node is kept as `plugin` metadata on the lowered nodes, so reopening the storylet shows it again.
 The engine runs only core nodes.
 
-**Built-in: Vector Canvas.** Every entity has a **Map Canvas** tab: a layered vector editor (rooms, walls, text,
-gates, keys, items, facts, events, references to other entities), with undo/redo and a saved revision history you can
-restore. Gameplay shapes declare boolean entity properties (`map_<id>_present`, `map_<id>_open`). The **Modify Canvas**
-story node opens or closes gates and adds or removes keys, items, facts and events, with a before/after preview.
+**Built-in: Vector Canvas.** Every entity has a **Canvas** tab: a layered vector editor (rooms, walls, text, sticky
+notes, icon markers, and entity and storylet references drawn with their thumbnails). New canvases start with one
+`Default` layer. Markers and references have a name shown on the canvas and a description shown on hover. Undo/redo
+and Restore do not add history entries. Markers and references declare entity properties (`map_<id>_present`, plus
+`map_<id>_icon` for markers). The **Modify Canvas** story node adds or removes markers and references and changes a
+marker's icon (for example a closed door to an open one), with a before/after preview.
+The **Plugins** tab lists installed plugins and turns them on or off.
 Visual check: `bun run test:visual:canvas`.
 
 ## Model Context Protocol (MCP)

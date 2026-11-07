@@ -1,16 +1,50 @@
 /**
  * Vector canvas document: layered shapes stored as JSON in an entity
- * property. Gameplay shapes (gate, key, item, fact, event, entity reference)
- * also declare boolean entity properties so storylets can change the map at
- * runtime through ordinary Apply Command nodes.
+ * property. Gameplay shapes (markers, entity references, storylet
+ * references) also declare entity properties so storylets can change the
+ * canvas at runtime through ordinary Apply Command nodes.
  */
 import type { EntityProperty } from "../../contracts.ts";
 
 export const CANVAS_PROPERTY_KEY = "canvas_doc";
 export const STATE_PREFIX = "map_";
 
-export type ShapeKind = "rect" | "ellipse" | "line" | "path" | "text" | "entity" | "gate" | "key" | "item" | "fact" | "event";
-export const GAMEPLAY_KINDS: ShapeKind[] = ["entity", "gate", "key", "item", "fact", "event"];
+export type ShapeKind = "rect" | "ellipse" | "line" | "path" | "text" | "note" | "marker" | "entity" | "storylet";
+export const GAMEPLAY_KINDS: ShapeKind[] = ["marker", "entity", "storylet"];
+
+/** Sticky note paper colours. */
+export const NOTE_COLORS = ["#ffe066", "#ffadad", "#a0e7a0", "#a0d8ff", "#e0bbff"];
+
+/** Icons a marker can use. `id` is what gets stored; `glyph` is drawn. */
+export const MARKER_ICONS: Array<{ id: string; glyph: string; label: string }> = [
+  { id: "pin", glyph: "📍", label: "Pin" },
+  { id: "door", glyph: "🚪", label: "Door (closed)" },
+  { id: "door-open", glyph: "🔓", label: "Door (open)" },
+  { id: "lock", glyph: "🔒", label: "Lock" },
+  { id: "key", glyph: "🔑", label: "Key" },
+  { id: "chest", glyph: "📦", label: "Chest" },
+  { id: "gem", glyph: "💎", label: "Item" },
+  { id: "coin", glyph: "🪙", label: "Coin" },
+  { id: "scroll", glyph: "📜", label: "Fact / note" },
+  { id: "event", glyph: "⚡", label: "Event" },
+  { id: "info", glyph: "ℹ️", label: "Info" },
+  { id: "question", glyph: "❓", label: "Question" },
+  { id: "alert", glyph: "❗", label: "Alert" },
+  { id: "flag", glyph: "🚩", label: "Flag" },
+  { id: "star", glyph: "⭐", label: "Star" },
+  { id: "fire", glyph: "🔥", label: "Fire" },
+  { id: "skull", glyph: "💀", label: "Danger" },
+  { id: "person", glyph: "🧍", label: "Person" },
+  { id: "eye", glyph: "👁️", label: "Watch" },
+  { id: "trap", glyph: "🪤", label: "Trap" },
+];
+export const DEFAULT_MARKER_ICON = "pin";
+export function markerGlyph(icon: string | undefined): string {
+  return MARKER_ICONS.find((entry) => entry.id === icon)?.glyph ?? icon ?? "📍";
+}
+export function markerIconLabel(icon: string | undefined): string {
+  return MARKER_ICONS.find((entry) => entry.id === icon)?.label ?? icon ?? "";
+}
 
 export interface CanvasLayer { id: string; name: string; visible: boolean; locked: boolean; opacity: number }
 
@@ -21,16 +55,21 @@ export interface CanvasShape {
   x: number; y: number; w: number; h: number;
   /** Polyline points relative to (x, y): [x0, y0, x1, y1, ...]. */
   points?: number[];
+  /** Text shapes and sticky notes. */
   text?: string;
+  /** Name shown on the canvas. */
   label?: string;
+  /** Long text shown when hovering the shape. */
+  description?: string;
   stroke: string; fill: string; strokeWidth: number;
+  /** Marker only: icon id from MARKER_ICONS. */
+  icon?: string;
   /** Entity this shape references (any entity, e.g. an item or character). */
   entity_id?: string;
-  /** Gate only: key shape that opens it. */
-  key_id?: string;
+  /** Storylet this shape references. */
+  storylet_id?: string;
   /** Initial runtime state. */
   present: boolean;
-  open?: boolean;
 }
 
 export interface CanvasSnapshot { layers: CanvasLayer[]; shapes: CanvasShape[] }
@@ -54,11 +93,7 @@ export function newId(prefix: string): string {
 export function emptyCanvas(): CanvasDoc {
   return {
     version: 1, width: 1600, height: 1000,
-    layers: [
-      { id: "ly_ground", name: "Ground", visible: true, locked: false, opacity: 1 },
-      { id: "ly_walls", name: "Walls", visible: true, locked: false, opacity: 1 },
-      { id: "ly_logic", name: "Gates & Keys", visible: true, locked: false, opacity: 1 },
-    ],
+    layers: [{ id: "ly_default", name: "Default", visible: true, locked: false, opacity: 1 }],
     shapes: [],
     revisions: [],
   };
@@ -69,7 +104,11 @@ export function parseCanvas(raw: unknown): CanvasDoc {
   try {
     const doc = JSON.parse(raw) as Partial<CanvasDoc>;
     if (!Array.isArray(doc.layers) || !Array.isArray(doc.shapes)) return emptyCanvas();
-    return { ...emptyCanvas(), ...doc, revisions: Array.isArray(doc.revisions) ? doc.revisions : [] } as CanvasDoc;
+    return {
+      ...emptyCanvas(), ...doc,
+      layers: doc.layers.length ? doc.layers : emptyCanvas().layers,
+      revisions: Array.isArray(doc.revisions) ? doc.revisions : [],
+    } as CanvasDoc;
   } catch {
     return emptyCanvas();
   }
@@ -118,66 +157,76 @@ export class UndoStack {
   get canRedo() { return this.future.length > 0; }
 }
 
-export function isGameplay(shape: CanvasShape): boolean { return GAMEPLAY_KINDS.includes(shape.kind); }
+export function isGameplay(shape: Pick<CanvasShape, "kind">): boolean { return GAMEPLAY_KINDS.includes(shape.kind); }
 
 function slug(id: string): string { return id.toLowerCase().replace(/[^a-z0-9_]/g, "_"); }
 export function presentKey(shape: Pick<CanvasShape, "id">): string { return `${STATE_PREFIX}${slug(shape.id)}_present`; }
-export function openKey(shape: Pick<CanvasShape, "id">): string { return `${STATE_PREFIX}${slug(shape.id)}_open`; }
+export function iconKey(shape: Pick<CanvasShape, "id">): string { return `${STATE_PREFIX}${slug(shape.id)}_icon`; }
 
-export function shapeDisplayName(shape: CanvasShape, entityName?: (id: string) => string | undefined): string {
+/** Resolves the name of the entity or storylet a shape references. */
+export type RefName = (shape: CanvasShape) => string | undefined;
+
+export function shapeDisplayName(shape: CanvasShape, refName?: RefName): string {
   if (shape.label?.trim()) return shape.label.trim();
-  if (shape.entity_id) return entityName?.(shape.entity_id) ?? shape.entity_id;
-  return `${shape.kind} ${shape.id.slice(-4)}`;
+  const ref = refName?.(shape);
+  if (ref) return ref;
+  if (shape.kind === "marker") return markerIconLabel(shape.icon) || "Marker";
+  if (shape.kind === "note") return (shape.text ?? "").split("\n")[0]!.slice(0, 24) || "Note";
+  return shape.entity_id ?? shape.storylet_id ?? `${shape.kind} ${shape.id.slice(-4)}`;
 }
 
 /**
- * Rebuild the entity properties for a canvas: the document itself plus one
- * boolean per gameplay shape state. Unrelated properties are kept; state
+ * Rebuild the entity properties for a canvas: the document itself plus the
+ * runtime state of each gameplay shape. Unrelated properties are kept; state
  * properties for deleted shapes are removed.
  */
 export function syncCanvasProperties(properties: EntityProperty[], doc: CanvasDoc): EntityProperty[] {
   const wanted = new Map<string, EntityProperty>();
   for (const shape of doc.shapes.filter(isGameplay)) {
     const name = shape.label?.trim() || shape.id;
-    wanted.set(presentKey(shape), { id: presentKey(shape), key: presentKey(shape), name: `Map: ${name} present`, type: "bool", value: shape.present });
-    if (shape.kind === "gate") {
-      wanted.set(openKey(shape), { id: openKey(shape), key: openKey(shape), name: `Map: ${name} open`, type: "bool", value: !!shape.open });
+    wanted.set(presentKey(shape), { id: presentKey(shape), key: presentKey(shape), name: `Canvas: ${name} present`, type: "bool", value: shape.present });
+    if (shape.kind === "marker") {
+      wanted.set(iconKey(shape), { id: iconKey(shape), key: iconKey(shape), name: `Canvas: ${name} icon`, type: "string", value: shape.icon ?? DEFAULT_MARKER_ICON });
     }
   }
   const rest = properties.filter((property) => property.key !== CANVAS_PROPERTY_KEY && !property.key.startsWith(STATE_PREFIX));
-  const docProperty: EntityProperty = { id: CANVAS_PROPERTY_KEY, key: CANVAS_PROPERTY_KEY, name: "Map Canvas", type: "string", multiline: true, value: serializeCanvas(doc) };
+  const docProperty: EntityProperty = { id: CANVAS_PROPERTY_KEY, key: CANVAS_PROPERTY_KEY, name: "Canvas", type: "string", multiline: true, value: serializeCanvas(doc) };
   return [...rest, docProperty, ...wanted.values()];
 }
 
 /* ---------- Modify Canvas operations ---------- */
 
-export type CanvasAction = "remove" | "add" | "open" | "close";
-export interface CanvasOp { shape_id: string; action: CanvasAction }
+export type CanvasAction = "remove" | "add" | "set_icon";
+export interface CanvasOp { shape_id: string; action: CanvasAction; /** set_icon only. */ icon?: string }
 export interface ModifyCanvasConfig { canvas_entity: string; ops: CanvasOp[] }
 
 /** Author-facing verbs for each gameplay kind. */
 export function actionsFor(kind: ShapeKind): Array<{ action: CanvasAction; label: string }> {
-  const noun = kind === "entity" ? "reference" : kind;
-  const base = kind === "fact" || kind === "event"
-    ? [{ action: "add" as const, label: `Add ${noun}` }, { action: "remove" as const, label: `Remove ${noun}` }]
-    : [{ action: "remove" as const, label: `Remove ${noun}` }, { action: "add" as const, label: `Add ${noun}` }];
-  return kind === "gate" ? [{ action: "open", label: "Open gate" }, { action: "close", label: "Close gate" }, ...base] : base;
+  const noun = kind === "marker" ? "marker" : "reference";
+  const base = [{ action: "remove" as const, label: `Remove ${noun}` }, { action: "add" as const, label: `Add ${noun}` }];
+  return kind === "marker" ? [...base, { action: "set_icon", label: "Change icon" }] : base;
 }
 
-export function opProperty(op: CanvasOp, shape: CanvasShape): { key: string; value: boolean } {
-  if (op.action === "open" || op.action === "close") return { key: openKey(shape), value: op.action === "open" };
-  return { key: presentKey(shape), value: op.action === "add" };
+export function opLabelText(op: CanvasOp, shape: CanvasShape): string {
+  if (op.action === "set_icon") return `Change icon to ${markerGlyph(op.icon)} ${markerIconLabel(op.icon)}`;
+  return actionsFor(shape.kind).find((entry) => entry.action === op.action)?.label ?? op.action;
+}
+
+export function opProperty(op: CanvasOp, shape: CanvasShape): { key: string; value: boolean | string; type: "bool" | "string" } {
+  if (op.action === "set_icon") return { key: iconKey(shape), value: op.icon ?? DEFAULT_MARKER_ICON, type: "string" };
+  return { key: presentKey(shape), value: op.action === "add", type: "bool" };
 }
 
 export function validateOps(config: ModifyCanvasConfig, doc: CanvasDoc | null): string[] {
   const issues: string[] = [];
-  if (!config.canvas_entity) return ["Modify Canvas must choose an entity with a map canvas."];
-  if (!doc) return ["Modify Canvas entity has no map canvas."];
+  if (!config.canvas_entity) return ["Modify Canvas must choose an entity with a canvas."];
+  if (!doc) return ["Modify Canvas entity has no canvas."];
   if (!config.ops.length) issues.push("Modify Canvas must apply at least one change.");
   for (const op of config.ops) {
     const shape = doc.shapes.find((candidate) => candidate.id === op.shape_id);
-    if (!shape || !isGameplay(shape)) { issues.push(`Modify Canvas targets a missing map element (${op.shape_id}).`); continue; }
-    if (!actionsFor(shape.kind).some((entry) => entry.action === op.action)) issues.push(`Map element ${shape.id} does not support '${op.action}'.`);
+    if (!shape || !isGameplay(shape)) { issues.push(`Modify Canvas targets a missing canvas element (${op.shape_id}).`); continue; }
+    if (!actionsFor(shape.kind).some((entry) => entry.action === op.action)) issues.push(`Canvas element ${shape.id} does not support '${op.action}'.`);
+    if (op.action === "set_icon" && !op.icon) issues.push(`Change icon on ${shape.id} must choose an icon.`);
   }
   return issues;
 }
@@ -187,7 +236,7 @@ export function applyOps(doc: CanvasDoc, ops: CanvasOp[]): CanvasDoc {
   const shapes = doc.shapes.map((shape) => {
     let next = shape;
     for (const op of ops.filter((candidate) => candidate.shape_id === shape.id)) {
-      if (op.action === "open" || op.action === "close") next = { ...next, open: op.action === "open" };
+      if (op.action === "set_icon") next = { ...next, icon: op.icon ?? next.icon };
       else next = { ...next, present: op.action === "add" };
     }
     return next;
@@ -202,7 +251,7 @@ export function applyState(doc: CanvasDoc, values: Record<string, unknown>): Can
     shapes: doc.shapes.map((shape) => ({
       ...shape,
       present: typeof values[presentKey(shape)] === "boolean" ? values[presentKey(shape)] as boolean : shape.present,
-      open: typeof values[openKey(shape)] === "boolean" ? values[openKey(shape)] as boolean : shape.open,
+      icon: shape.kind === "marker" && typeof values[iconKey(shape)] === "string" ? values[iconKey(shape)] as string : shape.icon,
     })),
   };
 }

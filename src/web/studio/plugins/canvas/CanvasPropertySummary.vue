@@ -9,8 +9,8 @@ const doc = computed(() => parseCanvas(props.modelValue));
 
 <template>
   <div class="cps" data-testid="canvas-property-summary">
-    <span>🗺 {{ doc.layers.length }} layers · {{ doc.shapes.length }} shapes · {{ doc.shapes.filter(isGameplay).length }} map logic · {{ doc.revisions.length }} revisions</span>
-    <small>Edit in the <strong>Map Canvas</strong> tab.</small>
+    <span>{{ doc.layers.length }} layers · {{ doc.shapes.length }} shapes · {{ doc.shapes.filter(isGameplay).length }} markers &amp; references · {{ doc.revisions.length }} revisions</span>
+    <small>Edit in the <strong>Canvas</strong> tab.</small>
   </div>
 </template>
 

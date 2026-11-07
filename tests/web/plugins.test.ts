@@ -3,7 +3,7 @@ import { Context, registry, nodeTypeContribution, entityPanelsFor, propertyEdito
 import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../../src/web/studio/plugins/graphLowering.ts";
 import { modifyCanvasNode } from "../../src/web/studio/plugins/canvas/modifyCanvasNode.ts";
 import {
-  CANVAS_PROPERTY_KEY, UndoStack, applyOps, emptyCanvas, openKey, parseCanvas, presentKey, pushRevision, restoreRevision,
+  CANVAS_PROPERTY_KEY, UndoStack, applyOps, emptyCanvas, iconKey, parseCanvas, presentKey, pushRevision, restoreRevision,
   serializeCanvas, syncCanvasProperties, validateOps, type CanvasDoc, type CanvasShape,
 } from "../../src/web/studio/plugins/canvas/model.ts";
 import { validateNarrativeGraph, type NarrativeGraph } from "../../src/web/studio/narrativeGraphTypes.ts";
@@ -12,10 +12,10 @@ import type { EntityRecord } from "../../src/web/studio/contracts.ts";
 const Dummy = { render: () => null };
 
 function shape(id: string, kind: CanvasShape["kind"], extra: Partial<CanvasShape> = {}): CanvasShape {
-  return { id, layer: "ly_logic", kind, x: 0, y: 0, w: 10, h: 10, stroke: "#000", fill: "none", strokeWidth: 1, present: true, ...extra };
+  return { id, layer: "ly_default", kind, x: 0, y: 0, w: 10, h: 10, stroke: "#000", fill: "none", strokeWidth: 1, present: true, ...extra };
 }
 function mapDoc(): CanvasDoc {
-  return { ...emptyCanvas(), shapes: [shape("s_gate", "gate", { open: false, key_id: "s_key" }), shape("s_key", "key"), shape("s_wall", "line", { points: [0, 0, 10, 0] })] };
+  return { ...emptyCanvas(), shapes: [shape("s_gate", "marker", { icon: "door", label: "Iron Gate" }), shape("s_key", "marker", { icon: "key" }), shape("s_wall", "line", { points: [0, 0, 10, 0] })] };
 }
 function location(doc = mapDoc()): EntityRecord {
   return { id: "loc_crypt", name: "Crypt", root_tag: "location", tags: [], traits: [], properties: syncCanvasProperties([], doc) };
@@ -68,7 +68,8 @@ test("canvas sync declares one boolean per gameplay state and drops stale ones",
   expect(keys).toContain("hp");
   expect(keys).toContain(CANVAS_PROPERTY_KEY);
   expect(keys).toContain(presentKey(doc.shapes[0]!));
-  expect(keys).toContain(openKey(doc.shapes[0]!));
+  expect(keys).toContain(iconKey(doc.shapes[0]!));
+  expect(props.find((p) => p.key === iconKey(doc.shapes[0]!))!.value).toBe("door");
   expect(keys).toContain(presentKey(doc.shapes[1]!));
   expect(keys).not.toContain("map_old_present");
   expect(keys).not.toContain(presentKey(doc.shapes[2]!));
@@ -96,12 +97,12 @@ test("canvas history records revisions, restores them and caps length", () => {
 
 test("modify canvas ops validate and preview", () => {
   const doc = mapDoc();
-  expect(validateOps({ canvas_entity: "loc_crypt", ops: [{ shape_id: "s_gate", action: "open" }] }, doc)).toEqual([]);
-  expect(validateOps({ canvas_entity: "loc_crypt", ops: [{ shape_id: "s_key", action: "open" }] }, doc).length).toBe(1);
+  expect(validateOps({ canvas_entity: "loc_crypt", ops: [{ shape_id: "s_gate", action: "set_icon", icon: "door-open" }] }, doc)).toEqual([]);
+  expect(validateOps({ canvas_entity: "loc_crypt", ops: [{ shape_id: "s_key", action: "set_icon" }] }, doc).length).toBe(1);
   expect(validateOps({ canvas_entity: "loc_crypt", ops: [{ shape_id: "s_wall", action: "remove" }] }, doc).length).toBe(1);
   expect(validateOps({ canvas_entity: "", ops: [] }, doc).length).toBe(1);
-  const after = applyOps(doc, [{ shape_id: "s_gate", action: "open" }, { shape_id: "s_key", action: "remove" }]);
-  expect(after.shapes.find((s) => s.id === "s_gate")!.open).toBe(true);
+  const after = applyOps(doc, [{ shape_id: "s_gate", action: "set_icon", icon: "door-open" }, { shape_id: "s_key", action: "remove" }]);
+  expect(after.shapes.find((s) => s.id === "s_gate")!.icon).toBe("door-open");
   expect(after.shapes.find((s) => s.id === "s_key")!.present).toBe(false);
 });
 
@@ -110,7 +111,7 @@ function storyGraph(): NarrativeGraph {
     nodes: [
       { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80, text: "Go" },
       { id: "mc", type: "plugin", title: "Unlock", x: 200, y: 0, width: 200, height: 100, plugin_type: "canvas.modify",
-        plugin_config: { canvas_entity: "loc_crypt", ops: [{ shape_id: "s_key", action: "remove" }, { shape_id: "s_gate", action: "open" }] } },
+        plugin_config: { canvas_entity: "loc_crypt", ops: [{ shape_id: "s_key", action: "remove" }, { shape_id: "s_gate", action: "set_icon", icon: "door-open" }] } },
       { id: "end", type: "end", title: "End", x: 400, y: 0, width: 100, height: 80, is_terminal: true },
     ],
     edges: [
@@ -129,7 +130,7 @@ test("Modify Canvas lowers to valid core Apply Command nodes and raises back", (
   const lowered = lowerPluginGraph(graph, entities);
   expect(lowered.nodes.some((n) => n.type === "plugin")).toBe(false);
   const commands = lowered.nodes.filter((n) => n.type === "apply_command");
-  expect(commands.map((n) => [n.property_key, n.value])).toEqual([["map_s_key_present", false], ["map_s_gate_open", true]]);
+  expect(commands.map((n) => [n.property_key, n.value_type, n.value])).toEqual([["map_s_key_present", "bool", false], ["map_s_gate_icon", "string", "door-open"]]);
   expect(lowered.nodes.find((n) => n.type === "get_entity")!.entity_path).toBe("loc_crypt");
   expect(validateNarrativeGraph(lowered)).toEqual([]);
   // Survives a JSON round trip through storage, as the service returns it.
@@ -167,4 +168,13 @@ test("plugin manager disables and re-enables a plugin", async () => {
   expect(entityPanelsFor(location()).map((p) => p.id)).toContain("managed-panel");
   pluginManager.unregister("managed-demo");
   expect(entityPanelsFor(location()).map((p) => p.id)).not.toContain("managed-panel");
+});
+
+test("new canvases start with one Default layer; notes are not runtime state", () => {
+  const doc = emptyCanvas();
+  expect(doc.layers.map((l) => l.name)).toEqual(["Default"]);
+  const withNote: CanvasDoc = { ...doc, shapes: [shape("s_note", "note", { text: "todo", fill: "#ffe066" }), shape("s_ref", "storylet", { storylet_id: "unlock" })] };
+  const keys = syncCanvasProperties([], withNote).map((p) => p.key);
+  expect(keys).not.toContain(presentKey({ id: "s_note" }));
+  expect(keys).toContain(presentKey({ id: "s_ref" }));
 });
