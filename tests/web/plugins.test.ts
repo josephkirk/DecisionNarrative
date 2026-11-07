@@ -178,3 +178,13 @@ test("new canvases start with one Default layer; notes are not runtime state", (
   expect(keys).not.toContain(presentKey({ id: "s_note" }));
   expect(keys).toContain(presentKey({ id: "s_ref" }));
 });
+
+test("Canvas panel applies only to entities with the Canvas trait", async () => {
+  const { canvasTraitTemplate, hasCanvasTrait } = await import("../../src/web/studio/plugins/canvas/trait.ts");
+  const templates = [{ ...canvasTraitTemplate(), id: "tt_canvas" }];
+  const plain = location();
+  const withTrait = { ...location(), traits: [{ id: "ti1", template_id: "tt_canvas", values: {} }] };
+  expect(hasCanvasTrait(plain, templates)).toBe(false);
+  expect(hasCanvasTrait(withTrait, templates)).toBe(true);
+  expect(hasCanvasTrait(withTrait, [])).toBe(false);
+});

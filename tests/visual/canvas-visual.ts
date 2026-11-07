@@ -52,7 +52,6 @@ const n = (id: string, type: string, x: number, extra: Record<string, unknown> =
 let browser;
 try {
   for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { /* starting */ } await sleep(200); }
-  await api("POST", "/api/v3/content/entity_templates", { id: "crypt", name: "Crypt", root_tag: "location", thumbnail: "https://example.invalid/crypt.png" });
   await api("POST", "/api/v3/content/scenarios", { id: "scenario", name: "Scenario", seed: 7, start_location_policy: { mode: "fixed", location_id: "crypt" } });
   await api("POST", "/api/v3/content/storylets", {
     id: "unlock", title: "Unlock the crypt", content: { text_template: "x" }, created_at: 1,
@@ -74,8 +73,24 @@ try {
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("dialog", (d) => void d.accept());
 
+  // 0. The plugin creates the "Canvas" trait on load; only entities with it get the Canvas tab.
+  await page.goto(`${base}/#/storylets`);
+  let canvasTrait: { id: string } | undefined;
+  for (let i = 0; i < 50 && !canvasTrait; i++) {
+    canvasTrait = (await api("GET", "/api/v3/content/trait_templates")).find((t: { key: string }) => t.key === "canvas");
+    if (!canvasTrait) await sleep(200);
+  }
+  check("plugin creates the Canvas trait", !!canvasTrait);
+  await api("POST", "/api/v3/content/entity_templates", { id: "plain", name: "Plain", root_tag: "location" });
+  await api("POST", "/api/v3/content/entity_templates", { id: "crypt", name: "Crypt", root_tag: "location", thumbnail: "https://example.invalid/crypt.png",
+    traits: [{ id: "ti_canvas", template_id: canvasTrait!.id, values: {} }] });
+  await page.goto(`${base}/#/entity-templates/plain`);
+  await page.getByRole("button", { name: "Properties" }).waitFor();
+  check("entity without the trait has no Canvas tab", (await page.getByRole("button", { name: "Canvas", exact: true }).count()) === 0);
+
   // 1. Entity panel contributed by the plugin.
   await page.goto(`${base}/#/entity-templates/crypt`);
+  await page.reload();
   await page.getByRole("button", { name: "Canvas", exact: true }).click();
   const stage = page.locator(".vc-stage");
   await stage.waitFor();

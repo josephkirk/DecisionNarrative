@@ -89,7 +89,7 @@ Plugin nodes exist only while authoring. On save, each is lowered into core node
 the authored node is kept as `plugin` metadata on the lowered nodes, so reopening the storylet shows it again.
 The engine runs only core nodes.
 
-**Built-in: Vector Canvas.** Every entity has a **Canvas** tab: a layered vector editor (rooms, walls, text, sticky
+**Built-in: Vector Canvas.** The plugin adds a `Canvas` trait (created on first load). Entities with that trait get a **Canvas** tab: a layered vector editor (rooms, walls, text, sticky
 notes, icon markers, and entity and storylet references drawn with their thumbnails). New canvases start with one
 `Default` layer. Markers and references have a name shown on the canvas and a description shown on hover. Undo/redo
 and Restore do not add history entries. Markers and references declare entity properties (`map_<id>_present`, plus

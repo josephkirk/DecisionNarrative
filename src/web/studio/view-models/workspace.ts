@@ -1,5 +1,6 @@
 import { StudioApi } from "../api.ts";
 import { notify, setEntities, setEntityTemplates, studioState } from "../state.ts";
+import { emit } from "../plugins/runtime.ts";
 import type {
   AssetRecord,
   EntityRecord,
@@ -99,6 +100,7 @@ export async function refreshWorkspace(
     ]);
     studioState.project = project;
     kinds.forEach((kind, index) => assign(kind, rows[index] ?? []));
+    emit("workspace/loaded");
   } catch (error) {
     notify(error instanceof Error ? error.message : String(error), "error");
   }

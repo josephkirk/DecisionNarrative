@@ -64,7 +64,7 @@ function quickAdd(shapeId: string, action: CanvasAction) { update({ ops: [...pro
         <option value="">Choose an entity with a canvas…</option>
         <option v-for="entity in withCanvas" :key="entity.id" :value="entity.id">{{ entity.name }}</option>
       </select>
-      <small v-if="!withCanvas.length" class="field-sublabel">Draw on an entity's <strong>Canvas</strong> tab first.</small>
+      <small v-if="!withCanvas.length" class="field-sublabel">Give an entity the <strong>Canvas</strong> trait and draw on its Canvas tab first.</small>
     </div>
 
     <template v-if="doc">

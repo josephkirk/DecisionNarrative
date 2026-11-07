@@ -77,6 +77,8 @@ export interface NodeTypeContribution<Config = Record<string, unknown>> {
 export interface StudioEvents {
   "entity/saved": (entity: AnyEntity) => void;
   "graph/lowered": (graph: NarrativeGraph) => void;
+  /** Workspace rows were (re)loaded from the service. */
+  "workspace/loaded": () => void;
 }
 
 export interface Plugin {
