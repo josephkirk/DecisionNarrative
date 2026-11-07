@@ -8,6 +8,7 @@ pub mod contracts;
 pub mod entities;
 pub mod files;
 pub mod http;
+pub mod inventory;
 pub mod mcp;
 pub mod projection;
 pub mod references;

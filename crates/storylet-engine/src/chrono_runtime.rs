@@ -297,6 +297,9 @@ pub enum NodeKind {
     GetEntity { entity_id: String },
     GetEntityProperty { property_key: String, value_type: String },
     ApplyCommand { property_key: String, operation: PropertyOperation, value: DataValue },
+    InventoryAdd,
+    InventoryRemove,
+    InventoryHas,
     HasEntityTag { entity_id: String, tag: String, match_mode: String },
     Compare { operator: PredicateOperator, literal: DataValue },
     Condition { operator: PredicateOperator, literal: Option<DataValue> },
@@ -719,6 +722,7 @@ impl FlowGraphAsset {
                     | NodeKind::GetEntity { .. }
                     | NodeKind::GetEntityProperty { .. }
                     | NodeKind::HasEntityTag { .. }
+                    | NodeKind::InventoryHas
                     | NodeKind::Compare { .. }
                     | NodeKind::And
                     | NodeKind::Or
@@ -1324,6 +1328,7 @@ pub enum GraphError {
         node_guid: u32,
         category: NodeCategory,
     },
+    Inventory { node_guid: u32, message: String },
     State(ChronoStateError),
     Dispatch(DispatchError),
 }
@@ -1331,6 +1336,7 @@ pub enum GraphError {
 impl fmt::Display for GraphError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            GraphError::Inventory { node_guid, message } => write!(f, "inventory node {node_guid}: {message}"),
             GraphError::DataPinTypeMismatch { source_node_guid, source_pin, target_node_guid, target_pin } => write!(
                 f,
                 "data pin {source_node_guid}:{source_pin} is incompatible with {target_node_guid}:{target_pin}"
@@ -2183,6 +2189,7 @@ impl FlowGraphInstance {
             | NodeKind::GetEntity { .. }
             | NodeKind::GetEntityProperty { .. }
             | NodeKind::HasEntityTag { .. }
+            | NodeKind::InventoryHas
             | NodeKind::Compare { .. }
             | NodeKind::And
             | NodeKind::Or => {
@@ -2270,6 +2277,31 @@ impl FlowGraphInstance {
                 let diff = ctx.state.apply_property_command(
                     &entity, &format!("prop.{property_key}"), op, attribute
                 ).map_err(GraphError::State)?;
+                plan.delta.graph_diffs.push(diff);
+                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.completed = true;
+                plan.record = true;
+                plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
+            }
+            NodeKind::InventoryAdd | NodeKind::InventoryRemove => {
+                let DataValue::EntityRef(owner) = resolve_data_input(self, ctx, node_guid, "entity", &mut BTreeSet::new())? else {
+                    return Err(GraphError::Inventory { node_guid, message: "owner must be an entity".into() });
+                };
+                let DataValue::EntityRef(item) = resolve_data_input(self, ctx, node_guid, "item", &mut BTreeSet::new())? else {
+                    return Err(GraphError::Inventory { node_guid, message: "item must be an entity".into() });
+                };
+                let (current, capacity) = inventory_state(ctx.state, &owner, &item, node_guid)?;
+                let mut next = current.to_vec();
+                let item_value = AttributeValue::EntityRef(item);
+                if matches!(&def.kind, NodeKind::InventoryAdd) {
+                    if !next.contains(&item_value) {
+                        if next.len() >= capacity { return Err(GraphError::Inventory { node_guid, message: "inventory is full".into() }); }
+                        next.push(item_value);
+                    }
+                } else {
+                    next.retain(|value| value != &item_value);
+                }
+                let diff = ctx.state.apply_property_command(&owner, "prop.__inventory_items", "set", AttributeValue::Array(next)).map_err(GraphError::State)?;
                 plan.delta.graph_diffs.push(diff);
                 plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
                 plan.completed = true;
@@ -3080,6 +3112,12 @@ impl FlowGraphInstance {
                     DataValue::Bool(ctx.state.knowledge.knows(participant, *fact).is_some_and(|row| !confirmed_only || row.kind.is_confirmed()))
                 }
                 NodeKind::GetEntity { entity_id } => DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() { node.entity_path.clone() } else { entity_id.clone() }),
+                NodeKind::InventoryHas => {
+                    let DataValue::EntityRef(owner) = input("entity")? else { return Err(GraphError::Inventory { node_guid: guid, message: "owner must be an entity".into() }); };
+                    let DataValue::EntityRef(item) = input("item")? else { return Err(GraphError::Inventory { node_guid: guid, message: "item must be an entity".into() }); };
+                    let (items, _) = inventory_state(ctx.state, &owner, &item, guid)?;
+                    DataValue::Bool(items.iter().any(|value| matches!(value, AttributeValue::EntityRef(id) if id == &item)))
+                }
                 NodeKind::HasEntityTag { entity_id, tag, match_mode } => {
                     let registry = ctx.registry.ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
                     let id = registry.id(tag).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
@@ -3196,6 +3234,12 @@ fn resolve_data_node(instance: &FlowGraphInstance, ctx: &RuntimeContext, guid: u
         }
 
         NodeKind::GetEntity { entity_id } => DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() { node.entity_path.clone() } else { entity_id.clone() }),
+        NodeKind::InventoryHas => {
+            let DataValue::EntityRef(owner) = resolve_data_input(instance, ctx, guid, "entity", seen)? else { return Err(GraphError::Inventory { node_guid: guid, message: "owner must be an entity".into() }); };
+            let DataValue::EntityRef(item) = resolve_data_input(instance, ctx, guid, "item", seen)? else { return Err(GraphError::Inventory { node_guid: guid, message: "item must be an entity".into() }); };
+            let (items, _) = inventory_state(ctx.state, &owner, &item, guid)?;
+            DataValue::Bool(items.iter().any(|value| matches!(value, AttributeValue::EntityRef(id) if id == &item)))
+        }
         NodeKind::HasEntityTag { entity_id, tag, match_mode } => {
             let registry = ctx.registry.ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
             let id = registry.id(tag).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
@@ -3240,6 +3284,28 @@ fn resolve_data_node(instance: &FlowGraphInstance, ctx: &RuntimeContext, guid: u
     };
     seen.remove(&guid);
     Ok(result)
+}
+
+fn inventory_state<'a>(state: &'a WorldStateTable, owner: &str, item: &str, node_guid: u32) -> Result<(&'a [AttributeValue], usize), GraphError> {
+    let invalid = |message: &str| GraphError::Inventory { node_guid, message: message.into() };
+    let item_vertex = state.vertex(item).ok_or_else(|| invalid("item entity does not exist"))?;
+    if item_vertex.attributes.get("prop.__inventory_item") != Some(&AttributeValue::Bool(true)) {
+        return Err(invalid("item entity does not have the Item trait"));
+    }
+    let vertex = state.vertex(owner).ok_or_else(|| invalid("inventory owner does not exist"))?;
+    let Some(AttributeValue::Array(items)) = vertex.attributes.get("prop.__inventory_items") else {
+        return Err(invalid("entity does not have the InventoryOwner trait"));
+    };
+    let (Some(AttributeValue::Int(columns)), Some(AttributeValue::Int(rows))) =
+        (vertex.attributes.get("prop.__inventory_columns"), vertex.attributes.get("prop.__inventory_rows")) else {
+            return Err(invalid("inventory dimensions are missing"));
+        };
+    if !(1..=20).contains(columns) || !(1..=20).contains(rows) || items.iter().any(|v| !matches!(v, AttributeValue::EntityRef(_))) {
+        return Err(invalid("invalid inventory dimensions or item references"));
+    }
+    let capacity = (*columns as usize) * (*rows as usize);
+    if items.len() > capacity { return Err(invalid("inventory exceeds its capacity")); }
+    Ok((items, capacity))
 }
 
 

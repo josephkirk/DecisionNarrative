@@ -381,6 +381,9 @@ fn compile_node_kind(
             },
             NodeCategory::Mutator,
         ),
+        NarrativeNodeData::InventoryAdd {} => (NodeKind::InventoryAdd, NodeCategory::Mutator),
+        NarrativeNodeData::InventoryRemove {} => (NodeKind::InventoryRemove, NodeCategory::Mutator),
+        NarrativeNodeData::InventoryHas {} => (NodeKind::InventoryHas, NodeCategory::LogicGate),
         NarrativeNodeData::And {} => (NodeKind::And, NodeCategory::LogicGate),
         NarrativeNodeData::Or {} => (NodeKind::Or, NodeCategory::LogicGate),
         NarrativeNodeData::Condition {} => (NodeKind::Condition { operator: PredicateOperator::Eq, literal: None }, NodeCategory::LogicGate),
@@ -676,6 +679,10 @@ fn compile_data_input_pins(node: &NarrativeNode) -> Vec<DataPinDefinition> {
         NarrativeNodeData::ApplyCommand { .. } => vec![
             DataPinDefinition { pin_name: "entity".into(), value_type: "entity_ref".into(), is_input: true },
         ],
+        NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {} => vec![
+            DataPinDefinition { pin_name: "entity".into(), value_type: "entity_ref".into(), is_input: true },
+            DataPinDefinition { pin_name: "item".into(), value_type: "entity_ref".into(), is_input: true },
+        ],
         NarrativeNodeData::AddEntityTag { .. } | NarrativeNodeData::RemoveEntityTag { .. } | NarrativeNodeData::HasEntityTag { .. } =>
             vec![DataPinDefinition { pin_name: "target".into(), value_type: "entity_ref".into(), is_input: true }],
         NarrativeNodeData::Condition {} | NarrativeNodeData::And {} | NarrativeNodeData::Or {} =>
@@ -693,7 +700,7 @@ fn compile_data_output_pins(node: &NarrativeNode) -> Vec<DataPinDefinition> {
             value_type: if value_type == "entity" { "entity_ref".into() } else { value_type.clone() },
             is_input: false,
         }],
-        NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } =>
+        NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::InventoryHas {} =>
             vec![DataPinDefinition { pin_name: "output".into(), value_type: "bool".into(), is_input: false }],
         NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. } =>
             vec![DataPinDefinition { pin_name: "output".into(), value_type: "bool".into(), is_input: false }],
@@ -702,7 +709,7 @@ fn compile_data_output_pins(node: &NarrativeNode) -> Vec<DataPinDefinition> {
 }
 
 fn compile_input_pins(node: &NarrativeNode, graph: &NarrativeGraph) -> Vec<PinDefinition> {
-    if matches!(node.data, NarrativeNodeData::GetEntity { .. } | NarrativeNodeData::GetEntityProperty { .. } | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. }) {
+    if matches!(node.data, NarrativeNodeData::GetEntity { .. } | NarrativeNodeData::GetEntityProperty { .. } | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::InventoryHas {} | NarrativeNodeData::Knows { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. }) {
         return Vec::new();
     }
     let mut edges: Vec<&crate::narrative_graph::NarrativeEdge> = graph.edges.iter()
@@ -721,7 +728,7 @@ fn compile_output_pins(node: &NarrativeNode) -> Vec<PinDefinition> {
             .map(|index| format!("choice_{index}"))
             .collect(),
         NarrativeNodeData::Condition {} => vec!["true".into(), "false".into()],
-        NarrativeNodeData::GetEntity { .. } | NarrativeNodeData::GetEntityProperty { .. } | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. } => Vec::new(),
+        NarrativeNodeData::GetEntity { .. } | NarrativeNodeData::GetEntityProperty { .. } | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::InventoryHas {} | NarrativeNodeData::Knows { .. } | NarrativeNodeData::And {} | NarrativeNodeData::Or {} | NarrativeNodeData::Compare { .. } => Vec::new(),
         NarrativeNodeData::WaypointConversation { topic_nodes, .. } => {
             let mut pins = BTreeSet::new();
             for topic in topic_nodes {
@@ -856,6 +863,9 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::GetEntity { .. } => "GetEntity",
         NarrativeNodeData::GetEntityProperty { .. } => "GetEntityProperty",
         NarrativeNodeData::ApplyCommand { .. } => "ApplyCommand",
+        NarrativeNodeData::InventoryAdd {} => "InventoryAdd",
+        NarrativeNodeData::InventoryRemove {} => "InventoryRemove",
+        NarrativeNodeData::InventoryHas {} => "InventoryHas",
         NarrativeNodeData::QbnStoryletHub { .. } => "QbnStoryletHub",
         NarrativeNodeData::SalienceSelector { .. } => "SalienceSelector",
         NarrativeNodeData::WaypointConversation { .. } => "WaypointConversation",

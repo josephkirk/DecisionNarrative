@@ -1,5 +1,7 @@
 # DecisionNarrative
 
+**Version 0.1.0-alpha.1** — alpha prerelease. APIs, bundle schemas, and databases may change without migration.
+
 DecisionNarrative is a local authoring and playtest studio for nonlinear, storylet-driven narrative games. It is designed to scale from a compact detective scenario to a large systemic RPG without imposing a built-in setting, cast, or linear plot structure.
 
 The platform couples a host-independent Rust decision core with a unified local Rust service and a modern Vue 3 MVVM authoring studio styled after quiet macOS creative tools.
@@ -28,7 +30,7 @@ bun run build
 bun run play
 ```
 
-On Windows you can run `run.bat` (or `run.bat fresh`) instead, which installs dependencies if needed, then builds and starts the service.
+On Windows you can run `run.bat` (or `run.bat fresh`) instead, which stops any previous server, installs dependencies if needed, then builds and starts the service.
 
 Open `http://127.0.0.1:3000` in your browser (e.g. Microsoft Edge, Chrome, Safari). `bun run play` uses `data/storylet_studio_v5.db`; set `STORYLET_STUDIO_DB_PATH` to select a different file or `:memory:` for isolated testing.
 
@@ -76,7 +78,7 @@ cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 
 The studio follows an *everything is a plugin* model (after DeepSeek Harness / Cordis). A plugin is
 `definePlugin({ name, apply(ctx) })`; everything it registers through `ctx` is removed when it is disposed.
-Code lives in `src/web/studio/plugins/`.
+Code lives in `src/web/studio/plugins/`; see [docs/design/studio-plugin-system.md](docs/design/studio-plugin-system.md) for the extension contracts and lifecycle.
 
 | Extension point | Registers | Shown in |
 | --- | --- | --- |
@@ -95,12 +97,18 @@ notes, icon markers, and entity and storylet references drawn with their thumbna
 and Restore do not add history entries. Markers and references declare entity properties (`map_<id>_present`, plus
 `map_<id>_icon` for markers). An entity or storylet placed on a canvas counts as a reference from the entity that
 holds the canvas (typed `map_<id>_ref` property), so it shows in that entity's or storylet's **References** list;
-storylets now have a **References** tab in the editor. Selecting a **Modify Canvas** story node opens the full
-canvas editor on a working copy of the entity's canvas (undo only, no history): draw, move, delete, add markers and
-references, change icons. **Save version** stores the result as one version in the entity's canvas history (marked
-*storylet version*); saving again replaces that version instead of adding more. When the node runs it sets the
+storylets now have a **References** tab in the editor. Connect a configured **Get Entity** node to the **Modify Canvas**
+node's Entity input, then open the canvas editor on that entity's working copy (undo only, no history): draw, move,
+delete, add markers and references, or change icons. **Save version** stages the result in the entity's canvas history
+until the storylet is saved; saving the version again replaces it. When the node runs it sets the
 entity's `canvas_version` to that version and applies the gameplay differences (marker/reference presence, marker
-icons) as Apply Command nodes, so several nodes on one canvas compose.
+icons) as Apply Command nodes, so several nodes on one canvas compose. Node changes are temp history until the storylet
+is saved: a new or edited version is marked *storylet not saved* and a deleted node's version *removal pending*;
+**Save draft** commits them, and closing or reopening the storylet without saving discards them.
+
+**Built-in: Inventory.** The plugin creates the `InventoryOwner` and `Item` trait templates on workspace load. Add the `InventoryOwner` trait to an entity to get an **Inventory** tab. Set rows and columns (1–20 each, default 4×4, capacity = rows × columns), then add entities carrying the `Item` trait; each item occupies one slot, must be unique, and displays its entity thumbnail when present. Save the entity to persist the layout and initial contents. A grid cannot be shrunk below its current item count.
+
+In a story graph, connect configured **Get Entity** nodes to the owner and item inputs of **Add Item**, **Remove Item**, or **Has Item**. Add/remove are flow nodes; Has Item outputs a boolean for a Condition Node. Inputs are checked for the required traits. Adding an item already present and removing an absent item are no-ops; adding to a full inventory fails. Runtime changes are part of the playtest state, not edits to the authored inventory.
 The **Plugins** tab lists installed plugins and turns them on or off.
 Visual check: `bun run test:visual:canvas`.
 
@@ -117,6 +125,10 @@ Tools exposed:
 - `narrative_platform`: Read active workspace context, inspect/validate project content, manage entities, and exercise deterministic Rust playtests. Run operations are `run.start`, `run.view`, `run.act`, `run.rewind`, `run.reload`, `run.inspect`, `run.why_not`, `run.list`, and `run.delete`; `workspace.coverage` explores content coverage.
 
 The same runs are available over HTTP under `/api/v4/runs` (list/start, `/{id}` view/delete, `/{id}/act`, `/{id}/rewind`, `/{id}/reload`, `/{id}/inspect`, `/{id}/why-not`) with optimistic locking and idempotent actions, plus `/api/v4/coverage`.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## License
 

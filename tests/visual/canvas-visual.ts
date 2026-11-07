@@ -1,7 +1,7 @@
 // Visual interaction test for the plugin system's vector canvas + Modify Canvas node.
 // Run: bun run build && node tests/visual/canvas-visual.ts  (Node: Playwright cannot drive Chromium from Bun).
 // Needs a built storylet-engine-service binary (STORYLET_SERVICE_BIN or target/*/debug).
-import { chromium, type Page } from "playwright-core";
+import { chromium, type Locator, type Page } from "playwright-core";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -195,13 +195,25 @@ try {
   await shot(page, "canvas-05-storylet-references");
   await page.getByRole("button", { name: "Story graph" }).click();
   const historyBefore = JSON.parse((await api("GET", "/api/v3/content/entity_templates/crypt")).properties.find((x: { key: string }) => x.key === "canvas_doc").value).revisions.length;
+  async function connect(from: Locator, to: Locator) {
+    const a = (await from.boundingBox())!; const b = (await to.boundingBox())!;
+    await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2); await page.mouse.down();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 8 }); await page.mouse.up();
+  }
+  await page.getByRole("button", { name: "Get entity", exact: true }).click();
+  await page.locator(".property-inspector-panel select").selectOption("crypt");
   await page.getByRole("button", { name: "Modify Canvas" }).first().click();
   const pluginNode = page.locator(".graph-node.plugin");
   await pluginNode.waitFor();
   const editor = page.getByTestId("modify-canvas-editor");
+  check("disconnected node requires an entity input", await page.getByTestId("open-modify-canvas").isDisabled());
+  const sourceHeader = (await page.locator(".graph-node.get_entity .node-header").boundingBox())!;
+  await page.mouse.move(sourceHeader.x + 30, sourceHeader.y + 15); await page.mouse.down();
+  await page.mouse.move(sourceHeader.x - 180, sourceHeader.y + 120, { steps: 8 }); await page.mouse.up();
+  await connect(page.locator(".graph-node.get_entity .output-socket"), pluginNode.locator('[title="Entity data input"]'));
+  await pluginNode.locator(".node-body").click();
   await editor.waitFor();
-  check("adding Modify Canvas opens the full canvas editor", await editor.isVisible());
-  await editor.getByLabel("Canvas entity").selectOption("crypt");
+  check("connected node opens the entity canvas without a selector", await editor.isVisible() && await editor.getByLabel("Canvas entity").count() === 0);
   const nodeStage = editor.locator(".vc-stage");
   await nodeStage.waitFor();
   check("node editor starts from the entity canvas", (await editor.locator(".vc-shape").count()) === 9, String(await editor.locator(".vc-shape").count()));
@@ -228,6 +240,7 @@ try {
   let afterDoc = await cryptDoc();
   check("saving adds exactly one version to the entity history", afterDoc.revisions.length === historyBefore + 1 && afterDoc.revisions.filter((r: { source?: unknown }) => r.source).length === 1, `${historyBefore} -> ${afterDoc.revisions.length}`);
   check("the entity canvas itself is unchanged", afterDoc.shapes.length === 9);
+  check("the new version is temp until the storylet is saved", afterDoc.revisions.at(-1)?.uncommitted === true);
   // Edit again: the node keeps its one version.
   // Deselect, then click the node: the editor opens again.
   await page.locator(".graph-editor-canvas").click({ position: { x: 600, y: 700 } });
@@ -241,12 +254,7 @@ try {
   check("saving again still leaves one version", afterDoc.revisions.length === historyBefore + 1, String(afterDoc.revisions.length));
   await shot(page, "canvas-03-modify-node");
   // Wire choice -> Modify Canvas -> End by dragging sockets.
-  async function connect(from: ReturnType<Page["locator"]>, to: ReturnType<Page["locator"]>) {
-    const a = (await from.boundingBox())!; const b = (await to.boundingBox())!;
-    await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2); await page.mouse.down();
-    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 8 }); await page.mouse.up();
-  }
-  await connect(page.locator(".graph-node.choice .output-socket").first(), page.locator(".graph-node.plugin .input-socket"));
+  await connect(page.locator(".graph-node.choice .output-socket").first(), page.locator('.graph-node.plugin [title="Flow input"]'));
   await connect(page.locator(".graph-node.plugin .output-socket"), page.locator(".graph-node.end .input-socket"));
   await shot(page, "canvas-wired");
   await page.getByRole("button", { name: "Save draft" }).click();
@@ -258,6 +266,10 @@ try {
   const commands = stored.graph.nodes.filter((x: { type: string }) => x.type === "apply_command");
   check("lowered to version switch + four Apply Command nodes", commands.length === 5 && commands[0].property_key === "canvas_version", commands.map((c: { property_key: string }) => c.property_key).join(","));
   check("plugin metadata survives storage", stored.graph.nodes.some((x: { plugin?: { source?: unknown } }) => x.plugin?.source));
+  const committedVersion = async () => (await cryptDoc()).revisions.find((r: { source?: unknown }) => r.source);
+  for (let i = 0; i < 25 && (await committedVersion())?.uncommitted; i++) await sleep(200);
+  const committed = await committedVersion();
+  check("saving the storylet commits the version", !!committed && !committed.uncommitted && !committed.draft, JSON.stringify(committed ?? {}).slice(0, 120));
   await page.reload();
   await page.locator(".graph-node.plugin").waitFor();
   check("reload raises one Modify Canvas node", (await page.locator(".graph-node.plugin").count()) === 1 && (await page.locator(".graph-node.apply_command").count()) === 0);
@@ -291,11 +303,32 @@ try {
   const moved = (await page.locator(".graph-node.plugin .node-header").boundingBox())!;
   check("dragging the node moves it without opening the editor", (await page.getByTestId("modify-canvas-editor").count()) === 0 && moved.x > header.x + 40, `${header.x} -> ${moved.x}`);
   await page.locator(".graph-editor-canvas").click({ position: { x: 600, y: 700 } });
-  await page.locator(".graph-node.plugin").getByRole("button", { name: "Delete node" }).click();
-  await page.locator(".graph-node.plugin").waitFor({ state: "detached" });
+  const deleteNode = async () => {
+    await page.locator(".graph-node.plugin").getByRole("button", { name: "Delete node" }).click();
+    await page.locator(".graph-node.plugin").waitFor({ state: "detached" });
+  };
+  const nodeVersionNow = async () => (await cryptDoc()).revisions.find((r: { source?: unknown }) => r.source);
+  await deleteNode();
+  for (let i = 0; i < 25 && !(await nodeVersionNow())?.pending_delete; i++) await sleep(200);
+  check("deleting the node marks its version removal pending", (await nodeVersionNow())?.pending_delete === true);
+  await page.goto(`${base}/#/entity-templates/crypt`);
+  await page.getByRole("button", { name: "Canvas", exact: true }).click();
+  await page.getByRole("button", { name: /^History/ }).click();
+  await shot(page, "canvas-08-history-pending");
+  for (let i = 0; i < 25 && (await nodeVersionNow())?.pending_delete; i++) await sleep(200);
+  const restoredVersion = await nodeVersionNow();
+  check("leaving the storylet unsaved keeps the version", !!restoredVersion && !restoredVersion.pending_delete);
+  // Delete again and save: now the version goes away.
+  await page.goto(`${base}/#/storylets/unlock/edit`);
+  await page.locator(".graph-node.plugin").waitFor();
+  await deleteNode();
+  // The Get Entity that fed the node is now unused.
+  await page.locator(".graph-node.get_entity").getByRole("button", { name: "Delete node" }).click();
+  await connect(page.locator(".graph-node.choice .output-socket").first(), page.locator(".graph-node.end .input-socket"));
+  await page.getByRole("button", { name: "Save draft" }).click();
   for (let i = 0; i < 25 && (await versionCount()) > 0; i++) await sleep(200);
   const deletedDoc = await cryptDoc();
-  check("deleting the node removes its version", (await versionCount()) === 0 && deletedDoc.revisions.length === revisionsBeforeDelete - 1, `${revisionsBeforeDelete} -> ${deletedDoc.revisions.length}`);
+  check("saving after the delete removes the version", (await versionCount()) === 0 && deletedDoc.revisions.length === revisionsBeforeDelete - 1, `${revisionsBeforeDelete} -> ${deletedDoc.revisions.length}`);
   const presentKeys = (await api("GET", "/api/v3/content/entity_templates/crypt")).properties.filter((x: { key: string }) => x.key.startsWith("map_") && x.key.endsWith("_present"));
   check("properties only that version declared are removed", presentKeys.length === 6, String(presentKeys.length));
   await page.goto(`${base}/#/entity-templates/crypt`);

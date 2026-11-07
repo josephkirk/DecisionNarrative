@@ -96,6 +96,9 @@ pub enum NarrativeNodeData {
         #[serde(default)]
         value: Value,
     },
+    InventoryAdd {},
+    InventoryRemove {},
+    InventoryHas {},
     QbnStoryletHub {
         #[serde(default)]
         deck_storylet_ids: Vec<String>,
@@ -459,6 +462,9 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::GetEntity { .. } => "Get Entity",
         NarrativeNodeData::GetEntityProperty { .. } => "Get Entity Property",
         NarrativeNodeData::ApplyCommand { .. } => "Apply Command",
+        NarrativeNodeData::InventoryAdd {} => "Add Item",
+        NarrativeNodeData::InventoryRemove {} => "Remove Item",
+        NarrativeNodeData::InventoryHas {} => "Has Item",
         NarrativeNodeData::End { .. } => "End",
     }
 }
@@ -622,7 +628,7 @@ impl NarrativeGraph {
                         &target.data,
                         NarrativeNodeData::GetEntity { .. }
                             | NarrativeNodeData::GetEntityProperty { .. }
-                            | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
+                            | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::InventoryHas {}
                             | NarrativeNodeData::And {}
                             | NarrativeNodeData::Or {}
                             | NarrativeNodeData::Compare { .. }
@@ -630,7 +636,7 @@ impl NarrativeGraph {
                     let valid_source = match &source.data {
                         NarrativeNodeData::GetEntity { .. }
                         | NarrativeNodeData::GetEntityProperty { .. }
-                        | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
+                        | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::InventoryHas {}
                         | NarrativeNodeData::And {}
                         | NarrativeNodeData::Or {}
                         | NarrativeNodeData::Compare { .. } => false,
@@ -662,7 +668,7 @@ impl NarrativeGraph {
                             "output",
                             if value_type == "entity" { "entity_ref" } else { value_type.as_str() },
                         )),
-                        NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
+                        NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::InventoryHas {}
                         | NarrativeNodeData::And {}
                         | NarrativeNodeData::Or {}
                         | NarrativeNodeData::Compare { .. } => Some(("output", "bool")),
@@ -672,6 +678,11 @@ impl NarrativeGraph {
                         NarrativeNodeData::GetEntityProperty { .. } => Some(("entity", "entity_ref")),
                         NarrativeNodeData::ApplyCommand { .. } => match edge.to_port.as_str() {
                             "entity" => Some(("entity", "entity_ref")),
+                            _ => None,
+                        },
+                        NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {} => match edge.to_port.as_str() {
+                            "entity" => Some(("entity", "entity_ref")),
+                            "item" => Some(("item", "entity_ref")),
                             _ => None,
                         },
                         NarrativeNodeData::AddEntityTag { .. }
@@ -754,6 +765,7 @@ impl NarrativeGraph {
                             | NarrativeNodeData::Or {}
                             | NarrativeNodeData::Compare { .. }
                             | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
+                            | NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {}
                     )
                 });
                 if consumes_data {
@@ -783,6 +795,7 @@ impl NarrativeGraph {
                         | NarrativeNodeData::Or {}
                         | NarrativeNodeData::Compare { .. }
                         | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
+                        | NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {}
                 )
             });
             if consumes_data {
@@ -1026,6 +1039,18 @@ impl NarrativeGraph {
                         issues.push(format!("Apply Command node {} must have exactly one Entity data input.", node.title));
                     }
                     require_default_output(&mut issues, &node.title, &edges);
+                }
+                NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {} => {
+                    for port in ["entity", "item"] {
+                        let inputs = self.edges.iter().filter(|edge| edge.to_node == node.id && edge.to_port == port && edge.kind == NarrativeEdgeKind::Data).count();
+                        if inputs != 1 { issues.push(format!("Inventory node {} must have exactly one {port} entity input.", node.title)); }
+                    }
+                    if matches!(&node.data, NarrativeNodeData::InventoryHas {}) {
+                        let outputs = self.edges.iter().filter(|edge| edge.from_node == node.id && edge.kind == NarrativeEdgeKind::Data && edge.from_port == "output").count();
+                        if outputs != 1 || !edges.is_empty() { issues.push(format!("Has Item node {} must have exactly one boolean output and no flow output.", node.title)); }
+                    } else {
+                        require_default_output(&mut issues, &node.title, &edges);
+                    }
                 }
                 NarrativeNodeData::Compare {
                     operator,

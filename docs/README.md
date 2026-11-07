@@ -5,6 +5,7 @@
 - [Chrono decision engine](design/chrono-decision-engine.md) — deterministic runtime architecture, dense contracts, implementation status, and known limitations.
 - [Entity, trait, and quality model](design/entity-trait-quality.md) — entities, traits, qualities, metadata and asset links, quality effect commands, subscriptions, and the traversable entity graph.
 - [Storylet studio design](design/storylet-studio.md) — product scope, runtime and authoring architecture, data contracts, playtesting, and acceptance criteria.
+- [Studio plugin system](design/studio-plugin-system.md) — extension contracts, graph lowering, lifecycle, and the built-in canvas plugin.
 - [Social simulation design](design/social-simulation.md) — setting-neutral principles for actors, relationships, knowledge, institutions, causality, and authored narrative.
 - [Proposal: human-first, LLM-assisted non-linear narrative](design/proposal-human-first-nonlinear-narrative.md) — proposal (not approved) for non-linearity in space, time, and participants, with the *Weir's Crossing* example and prototype evidence.
 - [Play (playtest UI) spec](design/playtest-ui.md) — the reader-first playtest surface: one-click Play, auto-advance, why-not, rewind and branch, inspect, coverage report.

@@ -516,18 +516,21 @@ struct WorkspaceContent {
 }
 
 fn read_content(store: &Store) -> Result<WorkspaceContent, ChronoPlaytestError> {
-    let world = store.list_entities().map_err(persistence_error)?
-        .into_iter().find(|entity| entity.id == "world")
+    let instances = store.list_entities().map_err(persistence_error)?;
+    let world = instances.iter().find(|entity| entity.id == "world").cloned()
         .ok_or_else(|| compile_error("missing intrinsic world entity".to_string()))?;
-    let entities = store.list_entity_templates().map_err(persistence_error)?;
+    let mut entities = store.list_entity_templates().map_err(persistence_error)?;
     let templates = store.list_trait_templates().map_err(persistence_error)?;
+    crate::inventory::project_inventory_entities(&mut entities, &instances, &templates).map_err(compile_error)?;
     let runtime = runtime_records_with_world(&world, &entities, &templates);
     let storylets = store.list_storylets().map_err(persistence_error)?;
     for storylet in &storylets {
         let graph = storylet.graph.clone().unwrap_or_else(|| crate::narrative_graph::NarrativeGraph::from_storylet(storylet));
         validate_entity_property_graph(&graph, &entities).map_err(compile_error)?;
+        crate::inventory::validate_inventory_graph(&graph, &entities).map_err(compile_error)?;
         if let Some(precondition) = storylet.precondition_graph.as_ref() {
             validate_entity_property_graph(precondition, &entities).map_err(compile_error)?;
+            crate::inventory::validate_inventory_graph(precondition, &entities).map_err(compile_error)?;
         }
     }
     Ok(WorkspaceContent {

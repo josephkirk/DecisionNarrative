@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useStoryletEditorViewModel } from "../view-models/storyletEditor.ts";
 import NarrativeGraphCanvas from "../components/NarrativeGraphCanvas.vue";
@@ -7,7 +7,7 @@ import PropertyInspector from "../components/PropertyInspector.vue";
 import ReferenceList from "../components/ReferenceList.vue";
 import type { ContentReference } from "../contracts.ts";
 import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../plugins/graphLowering.ts";
-import { pluginNodeDeleted, type AnyEntity } from "../plugins/runtime.ts";
+import { emit as emitPluginEvent, pluginNodeDeleted, type AnyEntity } from "../plugins/runtime.ts";
 import { buildGraphFromStorylet, compileGraphToStorylet, validateNarrativeGraph, validatePreconditionGraph, type NarrativeGraph } from "../narrativeGraphTypes.ts";
 import { notify, studioState } from "../state.ts";
 import { originBadge } from "../storyletModel.ts";
@@ -84,6 +84,8 @@ onMounted(async () => {
   preconditionGraph.value = draft.precondition_graph?.nodes.length ? draft.precondition_graph : defaultPreconditionGraph();
   draft.precondition_graph = preconditionGraph.value;
   lastSavedSnapshot.value = JSON.stringify(draft);
+  // The editor now shows the stored storylet: plugins drop temp changes left by an unsaved session.
+  emitPluginEvent("storylet/opened", isNew.value ? "" : String(draft.id));
   const requestedNode = route.query.node;
   if (typeof requestedNode === "string" && currentGraph.value.nodes.some((node) => node.id === requestedNode)) selectedNodeId.value = requestedNode;
   graphReady.value = true;
@@ -157,6 +159,7 @@ async function handleSave() {
   draft.graph = currentGraph.value;
   if (saved) {
     lastSavedSnapshot.value = JSON.stringify(draft);
+    emitPluginEvent("storylet/saved", String(draft.id), currentGraph.value);
     if (wasNew) router.replace("/storylets/" + draft.id + "/edit");
   }
 }
@@ -168,8 +171,13 @@ async function handleApprove() {
   draft.precondition_graph = preconditionGraph.value;
   const approved = await approveStorylet();
   draft.graph = currentGraph.value;
-  if (approved) lastSavedSnapshot.value = JSON.stringify(draft);
+  if (approved) {
+    lastSavedSnapshot.value = JSON.stringify(draft);
+    emitPluginEvent("storylet/saved", String(draft.id), currentGraph.value);
+  }
 }
+
+onBeforeUnmount(() => emitPluginEvent("storylet/closed", isNew.value ? "" : String(draft.id)));
 
 function deleteSelectedNode(nodeId: string) {
   if (!window.confirm("Delete this node and its connections?")) return;

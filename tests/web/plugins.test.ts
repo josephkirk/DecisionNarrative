@@ -3,7 +3,8 @@ import { Context, registry, nodeTypeContribution, entityPanelsFor, propertyEdito
 import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../../src/web/studio/plugins/graphLowering.ts";
 import { modifyCanvasNode } from "../../src/web/studio/plugins/canvas/modifyCanvasNode.ts";
 import {
-  CANVAS_PROPERTY_KEY, CANVAS_VERSION_KEY, UndoStack, emptyCanvas, iconKey, nodeVersion, parseCanvas, presentKey, pushRevision, refKey, removeNodeVersion,
+  CANVAS_PROPERTY_KEY, CANVAS_VERSION_KEY, UndoStack, commitStoryletVersions, discardStoryletVersions, emptyCanvas, hasTempVersions, iconKey, nodeVersion,
+  parseCanvas, presentKey, pushRevision, refKey, removeNodeVersion, stageNodeVersion, stageNodeVersionRemoval, versionSnapshot, versionTempState,
   restoreRevision, serializeCanvas, snapshotOf, syncCanvasProperties, upsertNodeVersion, validateModifyCanvas, versionChanges,
   type CanvasDoc, type CanvasShape,
 } from "../../src/web/studio/plugins/canvas/model.ts";
@@ -144,11 +145,13 @@ function storyGraph(): NarrativeGraph {
       { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80, text: "Go" },
       { id: "mc", type: "plugin", title: "Unlock", x: 200, y: 0, width: 200, height: 100, plugin_type: "canvas.modify",
         plugin_config: { canvas_entity: "loc_crypt", version_id: "cv_unlock" } },
+      { id: "entity", type: "get_entity", title: "Crypt", x: 0, y: 150, width: 100, height: 80, entity_path: "loc_crypt" },
       { id: "end", type: "end", title: "End", x: 400, y: 0, width: 100, height: 80, is_terminal: true },
     ],
     edges: [
       { id: "e1", kind: "flow", from_node: "start", from_port: "output", to_node: "mc", to_port: "input" },
       { id: "e2", kind: "flow", from_node: "mc", from_port: "output", to_node: "end", to_port: "input" },
+      { id: "entity-edge", kind: "data", from_node: "entity", from_port: "output", to_node: "mc", to_port: "entity" },
     ],
   };
 }
@@ -167,12 +170,31 @@ test("Modify Canvas lowers to valid core Apply Command nodes and raises back", (
     ["map_s_gate_icon", "string", "door-open"], ["map_s_key_present", "bool", false], ["map_s_ghost_present", "bool", true],
   ]);
   expect(lowered.nodes.find((n) => n.type === "get_entity")!.entity_path).toBe("loc_crypt");
+  expect(lowered.edges.filter((edge) => edge.kind === "data" && edge.from_node === "entity").map((edge) => edge.to_node).sort()).toEqual(commands.map((node) => node.id).sort());
   expect(validateNarrativeGraph(lowered)).toEqual([]);
   // Survives a JSON round trip through storage, as the service returns it.
   const raised = raisePluginGraph(JSON.parse(JSON.stringify(lowered)));
-  expect(raised.nodes.map((n) => n.id).sort()).toEqual(["end", "mc", "start"]);
+  expect(raised.nodes.map((n) => n.id).sort()).toEqual(["end", "entity", "mc", "start"]);
   expect(raised.nodes.find((n) => n.id === "mc")!.plugin_config).toEqual(graph.nodes[1]!.plugin_config);
-  expect(raised.edges.map((e) => [e.from_node, e.to_node]).sort()).toEqual([["mc", "end"], ["start", "mc"]]);
+  expect(raised.edges.map((e) => [e.from_node, e.to_node, e.to_port]).sort()).toEqual([["entity", "mc", "entity"], ["mc", "end", "input"], ["start", "mc", "input"]]);
+  ctx.dispose();
+});
+
+test("older canvas fragments expose their implicit entity on reopening", () => {
+  const ctx = new Context("legacy-canvas-test");
+  ctx.nodeType(modifyCanvasNode);
+  const lowered = lowerPluginGraph(storyGraph(), [location(versionedDoc())]);
+  const source = lowered.nodes.find((node) => node.id === "entity")!;
+  source.plugin = { group: "mc" };
+  const entry = lowered.nodes.find((node) => node.id === "mc__op0")!;
+  const metadata = entry.plugin as { inputs?: unknown };
+  delete metadata.inputs;
+  const raised = raisePluginGraph(JSON.parse(JSON.stringify(lowered)));
+  expect(raised.nodes.find((node) => node.id === "entity")?.plugin).toBeUndefined();
+  expect(raised.edges.filter((edge) => edge.kind === "data")).toEqual([
+    expect.objectContaining({ from_node: "entity", to_node: "mc", to_port: "entity" }),
+  ]);
+  expect(validatePluginNodes(raised, [location(versionedDoc())])).toEqual([]);
   ctx.dispose();
 });
 
@@ -183,6 +205,12 @@ test("plugin nodes with missing plugins or bad config are reported", () => {
   const ctx = new Context("canvas-test-2");
   if (!nodeTypeContribution("canvas.modify")) ctx.nodeType(modifyCanvasNode);
   expect(validatePluginNodes(storyGraph(), [location()])[0]).toContain("missing from the entity's canvas history");
+  const disconnected = storyGraph();
+  disconnected.edges = disconnected.edges.filter((edge) => edge.kind !== "data");
+  expect(validatePluginNodes(disconnected, [location(versionedDoc())])[0]).toContain("requires an Entity input");
+  const changed = storyGraph();
+  changed.nodes.find((node) => node.id === "entity")!.entity_path = "other";
+  expect(validatePluginNodes(changed, [location(versionedDoc())])[0]).toContain("entity input changed");
   ctx.dispose();
 });
 
@@ -251,4 +279,38 @@ test("deleting a plugin node calls its onDelete; removeNodeVersion drops the ver
   const doc = removeNodeVersion(versionedDoc(), "cv_unlock");
   expect(doc.revisions.length).toBe(0);
   expect(syncCanvasProperties([], doc).some((p) => p.key === "map_s_ghost_present")).toBe(false);
+});
+
+test("temp history: node edits are staged until the storylet is saved", () => {
+  const SRC = { storylet_id: "unlock", storylet_title: "Unlock", node_id: "mc" };
+  const base = mapDoc();
+  const v1 = unlockVersion(base);
+  // New version: uncommitted until saved; discarding removes it.
+  let doc = stageNodeVersion(base, { id: "cv_1", label: "MC", source: SRC, snapshot: v1 });
+  expect(versionTempState(doc.revisions[0]!)).toBe("new, storylet not saved");
+  expect(discardStoryletVersions(doc, "unlock").revisions.length).toBe(0);
+  // Saving the storylet commits it.
+  doc = commitStoryletVersions(doc, "unlock", new Set(["mc"]));
+  expect(versionTempState(doc.revisions[0]!)).toBe("");
+  // Editing again keeps the committed snapshot and stages a draft.
+  doc = stageNodeVersion(doc, { id: "cv_1", label: "MC", source: SRC, snapshot: base });
+  expect(doc.revisions.length).toBe(1);
+  expect(versionTempState(doc.revisions[0]!)).toBe("edited, storylet not saved");
+  expect(versionSnapshot(doc.revisions[0]!).shapes.length).toBe(base.shapes.length);
+  const discarded = discardStoryletVersions(doc, "unlock");
+  expect(discarded.revisions[0]!.draft).toBeUndefined();
+  expect(discarded.revisions[0]!.snapshot.shapes.some((s) => s.id === "s_ghost")).toBe(true);
+  // Removal is pending until saved; discarding restores the version.
+  doc = stageNodeVersionRemoval(discarded, "cv_1");
+  expect(versionTempState(doc.revisions[0]!)).toBe("removal pending");
+  expect(discardStoryletVersions(doc, "unlock").revisions[0]!.pending_delete).toBeUndefined();
+  expect(commitStoryletVersions(doc, "unlock", new Set(["mc"])).revisions.length).toBe(0);
+  // Saved without the node: its version goes; other storylets' versions stay.
+  const other = stageNodeVersion(discarded, { id: "cv_2", label: "Other", source: { ...SRC, storylet_id: "other", node_id: "x" }, snapshot: base });
+  const committed = commitStoryletVersions(commitStoryletVersions(other, "other", new Set(["x"])), "unlock", new Set());
+  expect(committed.revisions.map((r) => r.id)).toEqual(["cv_2"]);
+  // A first save of a new storylet claims versions staged without an id.
+  const fresh = stageNodeVersion(base, { id: "cv_3", label: "New", source: { ...SRC, storylet_id: "" }, snapshot: v1 });
+  expect(commitStoryletVersions(fresh, "stl_new", new Set(["mc"])).revisions[0]!.source!.storylet_id).toBe("stl_new");
+  expect(hasTempVersions(fresh, "")).toBe(true);
 });

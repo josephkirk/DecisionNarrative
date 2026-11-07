@@ -46,12 +46,16 @@ export interface LoweredFragment {
   entry: string;
   /** Node whose `output` port carries the plugin node's outgoing flow. */
   exit: string;
+  /** Destinations for an external data input, keyed by authoring port. */
+  inputs?: Record<string, Array<{ node: string; port: string }>>;
 }
 
 export interface LowerContext {
   /** Unique, deterministic ID for a lowered node. */
   id(suffix: string): string;
   entity(id: string): AnyEntity | undefined;
+  graph: NarrativeGraph;
+  node: NarrativeNode;
 }
 
 /**
@@ -65,6 +69,12 @@ export interface NodeTypeContribution<Config = Record<string, unknown>> {
   owner?: string;
   category?: string;
   color?: string;
+  /** Exposes an EntityRef input in the story graph. */
+  entityInput?: boolean;
+  /** Exposes an additional Item EntityRef input. */
+  itemInput?: boolean;
+  /** A pure boolean data node has no flow input. */
+  booleanOutput?: boolean;
   defaults(): Config;
   /** Short summary rendered on the node body. */
   summary?(config: Config): string;
@@ -81,6 +91,12 @@ export interface StudioEvents {
   "graph/lowered": (graph: NarrativeGraph) => void;
   /** Workspace rows were (re)loaded from the service. */
   "workspace/loaded": () => void;
+  /** A storylet editor opened the stored storylet ("" for a new one). */
+  "storylet/opened": (storyletId: string) => void;
+  /** The storylet was saved; `graph` is the authoring graph (plugin nodes not lowered). */
+  "storylet/saved": (storyletId: string, graph: NarrativeGraph) => void;
+  /** The storylet editor closed; unsaved edits are gone. */
+  "storylet/closed": (storyletId: string) => void;
 }
 
 export interface Plugin {

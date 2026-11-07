@@ -82,6 +82,29 @@ export interface CanvasRevision {
   /** Set on versions written by a Modify Canvas node. */
   id?: string;
   source?: CanvasVersionSource;
+  /*
+   * Temp history: node edits are staged until the storylet is saved.
+   * Saving the storylet commits them; closing or reopening it unsaved discards them.
+   */
+  /** Edited in the node; the storylet that owns the node is not saved yet. */
+  draft?: CanvasSnapshot;
+  /** New version; not committed until the storylet is saved. */
+  uncommitted?: boolean;
+  /** Node deleted; removed when the storylet is saved. */
+  pending_delete?: boolean;
+}
+
+/** The snapshot a node version applies: the staged edit if there is one. */
+export function versionSnapshot(revision: CanvasRevision): CanvasSnapshot {
+  return revision.draft ?? revision.snapshot;
+}
+
+/** Human-readable temp state of a node version, or "" when committed. */
+export function versionTempState(revision: CanvasRevision): string {
+  if (revision.pending_delete) return "removal pending";
+  if (revision.uncommitted) return "new, storylet not saved";
+  if (revision.draft) return "edited, storylet not saved";
+  return "";
 }
 
 export interface CanvasDoc extends CanvasSnapshot {
@@ -142,6 +165,67 @@ export function pushRevision(doc: CanvasDoc, label: string, at = Date.now()): Ca
 /** Remove the version a deleted Modify Canvas node owned. */
 export function removeNodeVersion(doc: CanvasDoc, id: string): CanvasDoc {
   return { ...doc, revisions: doc.revisions.filter((revision) => revision.id !== id) };
+}
+
+/**
+ * Stage a node's canvas edit (temp history). A committed version keeps its
+ * snapshot and gets a draft; a new version is added as uncommitted.
+ */
+export function stageNodeVersion(doc: CanvasDoc, version: { id: string; label: string; source: CanvasVersionSource; snapshot: CanvasSnapshot }, at = Date.now()): CanvasDoc {
+  const existing = nodeVersion(doc, version.id);
+  const snapshot = snapshotOf(version.snapshot);
+  const entry: CanvasRevision = existing && !existing.uncommitted
+    ? { ...existing, at, label: version.label, source: version.source, draft: snapshot, pending_delete: undefined }
+    : { at, label: version.label, snapshot, id: version.id, source: version.source, uncommitted: true };
+  return { ...doc, revisions: trimRevisions([...doc.revisions.filter((revision) => revision.id !== version.id), entry]) };
+}
+
+/** Stage removal of a deleted node's version; an uncommitted one goes away at once. */
+export function stageNodeVersionRemoval(doc: CanvasDoc, id: string): CanvasDoc {
+  const existing = nodeVersion(doc, id);
+  if (!existing) return doc;
+  if (existing.uncommitted) return removeNodeVersion(doc, id);
+  return { ...doc, revisions: doc.revisions.map((revision) => revision.id === id ? { ...revision, pending_delete: true } : revision) };
+}
+
+function ownedBy(revision: CanvasRevision, storyletId: string, nodeIds?: Set<string>): boolean {
+  const source = revision.source;
+  if (!source) return false;
+  if (source.storylet_id === storyletId) return true;
+  // A storylet saved for the first time: its versions were staged without an id.
+  return source.storylet_id === "" && (!nodeIds || nodeIds.has(source.node_id));
+}
+
+/**
+ * The storylet was saved with these Modify Canvas nodes: commit their staged
+ * versions and drop versions whose node is gone.
+ */
+export function commitStoryletVersions(doc: CanvasDoc, storyletId: string, nodeIds: Set<string>): CanvasDoc {
+  const revisions: CanvasRevision[] = [];
+  for (const revision of doc.revisions) {
+    if (!ownedBy(revision, storyletId, nodeIds)) { revisions.push(revision); continue; }
+    if (revision.pending_delete || !nodeIds.has(revision.source!.node_id)) continue;
+    const { draft, uncommitted: _new, pending_delete: _gone, ...rest } = revision;
+    revisions.push({ ...rest, snapshot: draft ?? revision.snapshot, source: { ...revision.source!, storylet_id: storyletId } });
+  }
+  return { ...doc, revisions };
+}
+
+/** The storylet was closed or reopened unsaved: throw its staged changes away. */
+export function discardStoryletVersions(doc: CanvasDoc, storyletId: string): CanvasDoc {
+  const revisions: CanvasRevision[] = [];
+  for (const revision of doc.revisions) {
+    if (!ownedBy(revision, storyletId)) { revisions.push(revision); continue; }
+    if (revision.uncommitted) continue;
+    const { draft: _draft, pending_delete: _gone, ...rest } = revision;
+    revisions.push(rest);
+  }
+  return { ...doc, revisions };
+}
+
+/** True when the storylet has staged (temp) versions on this canvas. */
+export function hasTempVersions(doc: CanvasDoc, storyletId: string): boolean {
+  return doc.revisions.some((revision) => ownedBy(revision, storyletId) && !!versionTempState(revision));
 }
 
 export function nodeVersion(doc: CanvasDoc, id: string | undefined): CanvasRevision | undefined {
@@ -217,7 +301,7 @@ export function gameplayUniverse(doc: CanvasDoc): CanvasShape[] {
   const byId = new Map<string, CanvasShape>();
   for (const shape of doc.shapes.filter(isGameplay)) byId.set(shape.id, shape);
   for (const revision of doc.revisions.filter((entry) => entry.source)) {
-    for (const shape of revision.snapshot.shapes.filter(isGameplay)) {
+    for (const shape of [...revision.snapshot.shapes, ...(revision.draft?.shapes ?? [])].filter(isGameplay)) {
       if (!byId.has(shape.id)) byId.set(shape.id, { ...shape, present: false });
     }
   }
@@ -255,7 +339,12 @@ export function syncCanvasProperties(properties: EntityProperty[], doc: CanvasDo
 /* ---------- Modify Canvas node ---------- */
 
 /** The node points at the one canvas version it owns in the entity's history. */
-export interface ModifyCanvasConfig { canvas_entity: string; version_id: string }
+export interface ModifyCanvasConfig {
+  canvas_entity: string;
+  version_id: string;
+  /** Bumped on every Save version so the storylet becomes dirty and gets saved. */
+  saved_at?: number;
+}
 
 export interface StateChange { shape: CanvasShape; key: string; value: boolean | string; type: "bool" | "string"; text: string }
 
@@ -291,7 +380,9 @@ export function validateModifyCanvas(config: ModifyCanvasConfig, doc: CanvasDoc 
   if (!config.canvas_entity) return ["Modify Canvas must choose an entity with a canvas."];
   if (!doc) return ["Modify Canvas entity has no canvas."];
   if (!config.version_id) return ["Modify Canvas has no canvas version yet: open the node and save the canvas."];
-  if (!nodeVersion(doc, config.version_id)) return [`Modify Canvas version ${config.version_id} is missing from the entity's canvas history.`];
+  const version = nodeVersion(doc, config.version_id);
+  if (!version) return [`Modify Canvas version ${config.version_id} is missing from the entity's canvas history.`];
+  if (version.pending_delete) return [`Modify Canvas version ${config.version_id} is marked for removal.`];
   return [];
 }
 

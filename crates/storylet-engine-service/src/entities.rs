@@ -347,7 +347,12 @@ fn property_value_matches(property_type: PropertyType, is_array: bool, value: &V
 pub fn runtime_attributes(entity: &EntityTemplateRecord, templates: &[TraitTemplateRecord]) -> Value {
     let mut properties = Map::new();
     let mut traits = Map::new();
+    let has_inventory_trait = entity.traits.iter().any(|instance| templates.iter().any(|template|
+        template.id == instance.template_id && matches!(template.key.as_str(), "inventory_owner" | "item")));
     for property in &entity.properties {
+        // Inventory's typed runtime projection is inserted separately; flattening
+        // its array into indexed JSON attributes would leave stale entries after mutation.
+        if has_inventory_trait && ["__inventory_items", "__inventory_rows", "__inventory_columns", "__inventory_item"].contains(&property.key.as_str()) { continue; }
         let value = if property.value.is_null() {
             default_value(property.property_type, property.is_array)
         } else {
@@ -357,6 +362,8 @@ pub fn runtime_attributes(entity: &EntityTemplateRecord, templates: &[TraitTempl
     }
     for instance in &entity.traits {
         let Some(template) = templates.iter().find(|t| t.id == instance.template_id) else { continue };
+        // The mutable inventory state lives in the typed runtime projection.
+        if template.key == "inventory_owner" { continue; }
         let mut all_properties = Vec::new();
         collect_template_properties(template, templates, &mut BTreeSet::new(), &mut all_properties);
         let trait_values = traits.entry(template.key.clone()).or_insert_with(|| Value::Object(Map::new()));
@@ -419,7 +426,11 @@ pub fn runtime_records_with_world(
         if let Some(location) = location_record(entity, templates, attributes.clone()) {
             records.locations.push(location);
         }
-        if let Some(object) = world_object(entity, attributes) {
+        if ["__inventory_items", "__inventory_item"].iter().any(|key| entity.properties.iter().any(|property| property.key == *key))
+            && !["character", "location", "item", "fact", "other"].iter().any(|root| entity.root_tag.eq_ignore_ascii_case(root))
+        {
+            records.world_objects.push(WorldObjectRecord { id: entity.id.clone(), name: entity.name.clone(), layer: WorldObjectLayer::Fact, attributes });
+        } else if let Some(object) = world_object(entity, attributes) {
             records.world_objects.push(object);
         }
     }
@@ -1073,8 +1084,32 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
                 issues.push(format!("intrinsic entity '{}': {error}", entity.name));
             }
         }
-        if !entity.traits.is_empty() {
+        if entity.id == WORLD_ENTITY_ID && !entity.traits.is_empty() {
             issues.push(format!("intrinsic entity '{}': trait instances are not supported", entity.name));
+        } else if entity.id != WORLD_ENTITY_ID {
+            let mut seen = BTreeSet::new();
+            for instance in &entity.traits {
+                let Some(template) = index.templates.iter().find(|template| template.id == instance.template_id) else {
+                    issues.push(format!("entity '{}': unknown trait '{}'", entity.name, instance.template_id));
+                    continue;
+                };
+                if !seen.insert(&instance.template_id) && !template.allow_multiple {
+                    issues.push(format!("entity '{}': trait '{}' does not allow multiple instances", entity.name, instance.template_id));
+                }
+                let mut properties = Vec::new();
+                collect_template_properties(template, &index.templates, &mut BTreeSet::new(), &mut properties);
+                for (key, value) in &instance.values {
+                    let Some(property) = properties.iter().find(|property| property.key() == key) else {
+                        issues.push(format!("entity '{}': trait '{}' property '{}' is not declared", entity.name, template.key, key));
+                        continue;
+                    };
+                    if !value_shape_matches(property.property.property_type, property.property.is_array, value) {
+                        issues.push(format!("entity '{}': trait '{}' property '{}' value does not match its type", entity.name, template.key, key));
+                    } else if let Err(error) = validate_property_refs(property.property.property_type, property.property.is_array, value, &index, "reference") {
+                        issues.push(format!("entity '{}': trait '{}' {error}", entity.name, template.key));
+                    }
+                }
+            }
         }
     }
 

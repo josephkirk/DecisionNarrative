@@ -552,6 +552,17 @@ impl StudioService {
             graph.validate().map_err(|issues| {
                 format!("Storylet graph validation failed: {}", issues.join("; "))
             })?;
+            if graph.nodes.iter().any(|node| matches!(&node.data,
+                crate::narrative_graph::NarrativeNodeData::InventoryAdd {}
+                | crate::narrative_graph::NarrativeNodeData::InventoryRemove {}
+                | crate::narrative_graph::NarrativeNodeData::InventoryHas {}))
+            {
+                let mut runtime_entities = index.entity_templates.clone();
+                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.entities, &index.templates)
+                    .map_err(|error| format!("Inventory validation failed: {error}"))?;
+                crate::inventory::validate_inventory_graph(&graph, &runtime_entities)
+                    .map_err(|error| format!("Inventory validation failed: {error}"))?;
+            }
             storylet.ending = graph.ending_from_graph();
             entities::normalize_optional_id(&mut storylet.folder_id);
             entities::validate_folder_ref("storylets", storylet.folder_id.as_deref(), &index)

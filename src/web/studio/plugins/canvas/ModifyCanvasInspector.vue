@@ -11,12 +11,12 @@ if (typeof window !== "undefined") {
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { notify, studioState } from "../../state.ts";
-import type { NarrativeNode } from "../../narrativeGraphTypes.ts";
+import type { NarrativeGraph, NarrativeNode } from "../../narrativeGraphTypes.ts";
 import {
-  CANVAS_PROPERTY_KEY, emptyCanvas, newId, nodeVersion, removeNodeVersion, snapshotOf, upsertNodeVersion, versionChanges,
+  CANVAS_PROPERTY_KEY, emptyCanvas, newId, nodeVersion, snapshotOf, stageNodeVersion, stageNodeVersionRemoval, versionChanges, versionSnapshot, versionTempState,
   type CanvasDoc, type ModifyCanvasConfig,
 } from "./model.ts";
-import { canvasOf } from "./modifyCanvasNode.ts";
+import { canvasInputEntityId, canvasOf } from "./modifyCanvasNode.ts";
 import { allEntities, refName } from "./refs.ts";
 import { hasCanvasTrait } from "./trait.ts";
 import { updateEntityCanvas } from "./versionStore.ts";
@@ -28,18 +28,17 @@ import VectorCanvas from "./VectorCanvas.vue";
  * a working copy (undo only, no history). Saving writes the result as the
  * node's single version in the entity's canvas history.
  */
-const props = defineProps<{ node: NarrativeNode; config: ModifyCanvasConfig }>();
+const props = defineProps<{ node: NarrativeNode; config: ModifyCanvasConfig; graph: NarrativeGraph }>();
 const emit = defineEmits<{ (e: "update:config", value: ModifyCanvasConfig): void }>();
 const route = useRoute();
 
 const entities = computed(() => allEntities());
-const withCanvas = computed(() => entities.value.filter((entity) =>
-  hasCanvasTrait(entity, studioState.traitTemplates) || entity.properties.some((property) => property.key === CANVAS_PROPERTY_KEY)));
-const pickedEntity = ref(props.config.canvas_entity);
-const target = computed(() => entities.value.find((entity) => entity.id === pickedEntity.value));
+const pickedEntity = computed(() => canvasInputEntityId(props.graph, props.node.id));
+const target = computed(() => entities.value.find((entity) => entity.id === pickedEntity.value &&
+  (hasCanvasTrait(entity, studioState.traitTemplates) || entity.properties.some((property) => property.key === CANVAS_PROPERTY_KEY))));
 const baseDoc = computed<CanvasDoc | null>(() => target.value ? canvasOf(target.value) ?? emptyCanvas() : null);
 const version = computed(() => baseDoc.value && pickedEntity.value === props.config.canvas_entity ? nodeVersion(baseDoc.value, props.config.version_id) : undefined);
-const changes = computed(() => baseDoc.value && version.value ? versionChanges(baseDoc.value, version.value.snapshot, refName) : []);
+const changes = computed(() => baseDoc.value && version.value ? versionChanges(baseDoc.value, versionSnapshot(version.value), refName) : []);
 
 const storyletId = computed(() => typeof route.params.id === "string" ? route.params.id : "");
 const storyletTitle = computed(() => studioState.storylets.find((storylet) => storylet.id === storyletId.value)?.title ?? (storyletId.value || "storylet"));
@@ -54,19 +53,19 @@ const uid = newId("mc");
 function startEditing() {
   const base = baseDoc.value;
   if (!base) { working.value = null; return; }
-  const snapshot = version.value?.snapshot ?? snapshotOf(base);
+  const snapshot = version.value ? versionSnapshot(version.value) : snapshotOf(base);
   working.value = { ...base, ...snapshotOf(snapshot), revisions: [] };
   editorKey.value++;
 }
 function openEditor() { open.value = true; startEditing(); }
 function closeEditor() { open.value = false; working.value = null; }
-function pickEntity(id: string) { pickedEntity.value = id; startEditing(); }
 
 /**
  * Open on a click, not on mouse-down: the graph selects a node on mouse-down,
  * so wait for the release and skip it if the node was dragged.
  */
 function openOnClick() {
+  if (!target.value) return;
   if (!pointer.down) { openEditor(); return; }
   const start = { ...pointer.at };
   window.addEventListener("mouseup", (event) => {
@@ -74,7 +73,7 @@ function openOnClick() {
   }, { once: true });
 }
 onMounted(openOnClick);
-watch(() => props.node.id, () => { pickedEntity.value = props.config.canvas_entity; openOnClick(); });
+watch(() => props.node.id, openOnClick);
 
 async function saveVersion() {
   const entity = target.value;
@@ -89,13 +88,13 @@ async function saveVersion() {
       source: { storylet_id: storyletId.value, storylet_title: storyletTitle.value, node_id: props.node.id },
       snapshot,
     };
-    await updateEntityCanvas(entity.id, (doc) => upsertNodeVersion(doc, version));
+    await updateEntityCanvas(entity.id, (doc) => stageNodeVersion(doc, version));
     // Moving the node to another entity: its old version goes away.
     const previous = props.config;
     if (!reuse && previous.canvas_entity && previous.version_id) {
-      await updateEntityCanvas(previous.canvas_entity, (doc) => removeNodeVersion(doc, previous.version_id));
+      await updateEntityCanvas(previous.canvas_entity, (doc) => stageNodeVersionRemoval(doc, previous.version_id));
     }
-    emit("update:config", { canvas_entity: entity.id, version_id: id });
+    emit("update:config", { canvas_entity: entity.id, version_id: id, saved_at: Date.now() });
     notify(`Canvas version saved to ${entity.name}. Save the storylet draft to apply it.`, "success");
     closeEditor();
   } catch (error) {
@@ -105,7 +104,7 @@ async function saveVersion() {
   }
 }
 
-const preview = computed(() => version.value?.snapshot ?? null);
+const preview = computed(() => version.value ? versionSnapshot(version.value) : null);
 const viewBox = computed(() => {
   const shapes = preview.value?.shapes ?? [];
   if (!shapes.length) return "0 0 400 240";
@@ -119,9 +118,9 @@ const viewBox = computed(() => {
   <div class="mc-root" data-testid="modify-canvas-inspector">
     <p class="field-sublabel">
       <template v-if="target">Canvas: <strong>{{ target.name }}</strong></template>
-      <template v-else>No canvas chosen.</template>
+      <template v-else>Connect a Get Entity node for an entity with a Canvas trait.</template>
     </p>
-    <button class="btn btn-primary" data-testid="open-modify-canvas" @click="openEditor">Open canvas</button>
+    <button class="btn btn-primary" data-testid="open-modify-canvas" :disabled="!target" @click="openEditor">Open canvas</button>
 
     <template v-if="version">
       <div class="form-group">
@@ -150,10 +149,7 @@ const viewBox = computed(() => {
         <header class="mc-overlay-head">
           <div class="mc-overlay-title">
             <strong>Modify Canvas</strong>
-            <select class="form-select" :value="pickedEntity" aria-label="Canvas entity" @change="pickEntity(($event.target as HTMLSelectElement).value)">
-              <option value="">Choose an entity with a canvas…</option>
-              <option v-for="entity in withCanvas" :key="entity.id" :value="entity.id">{{ entity.name }}</option>
-            </select>
+            <span class="field-sublabel">Canvas: {{ target?.name }}</span>
             <small class="field-sublabel">Edits here have no history. Saving adds one version to the entity's canvas history; this node applies it when it runs.</small>
           </div>
           <div class="mc-overlay-actions">
@@ -163,8 +159,7 @@ const viewBox = computed(() => {
         </header>
         <div class="mc-overlay-body">
           <VectorCanvas v-if="working && target" :key="editorKey" mode="node" :entity="target" :initial-doc="working" @change="working = $event" />
-          <p v-else-if="!withCanvas.length" class="field-sublabel">Give an entity the <strong>Canvas</strong> trait and draw on its Canvas tab first.</p>
-          <p v-else class="field-sublabel">Choose the entity whose canvas this node changes.</p>
+          <p v-else class="field-sublabel">Connect an entity with a Canvas trait to this node.</p>
         </div>
       </div>
     </Teleport>

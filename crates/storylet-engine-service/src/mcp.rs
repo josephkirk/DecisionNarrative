@@ -62,7 +62,7 @@ pub async fn handle_mcp_message(service: &StudioService, msg: &Value) -> Option<
                 },
                 "serverInfo": {
                     "name": "decisionnarrative",
-                    "version": "1.0.0"
+                    "version": env!("CARGO_PKG_VERSION")
                 }
             }
         }));

@@ -5,9 +5,9 @@ import { refreshWorkspace } from "../../view-models/workspace.ts";
 import VectorCanvas from "./VectorCanvas.vue";
 import ModifyCanvasInspector from "./ModifyCanvasInspector.vue";
 import CanvasPropertySummary from "./CanvasPropertySummary.vue";
-import { CANVAS_PROPERTY_KEY, removeNodeVersion } from "./model.ts";
-import { updateEntityCanvas } from "./versionStore.ts";
-import { modifyCanvasNode } from "./modifyCanvasNode.ts";
+import { CANVAS_PROPERTY_KEY, commitStoryletVersions, discardStoryletVersions, hasTempVersions, stageNodeVersionRemoval } from "./model.ts";
+import { updateCanvases, updateEntityCanvas } from "./versionStore.ts";
+import { MODIFY_CANVAS, modifyCanvasNode } from "./modifyCanvasNode.ts";
 import { canvasTraitTemplate, findCanvasTrait, hasCanvasTrait } from "./trait.ts";
 
 export { MODIFY_CANVAS } from "./modifyCanvasNode.ts";
@@ -52,19 +52,37 @@ export const vectorCanvasPlugin = definePlugin({
     });
 
     // Graph node that modifies its input and returns core nodes as output.
-    // Deleting the node removes the one version it owns from the entity's canvas history.
+    // Deleting the node stages removal of the version it owns (temp history).
     ctx.nodeType({
       ...modifyCanvasNode,
       inspector: ModifyCanvasInspector,
       async onDelete(config) {
         if (!config.canvas_entity || !config.version_id) return;
         try {
-          await updateEntityCanvas(config.canvas_entity, (doc) => removeNodeVersion(doc, config.version_id));
-          notify("Removed the node's canvas version from the entity's history.", "success");
+          await updateEntityCanvas(config.canvas_entity, (doc) => stageNodeVersionRemoval(doc, config.version_id));
+          notify("The node's canvas version will be removed when you save the storylet.", "success");
         } catch (error) {
-          notify(`Could not remove the canvas version: ${error instanceof Error ? error.message : String(error)}`, "error");
+          notify(`Could not stage the canvas version removal: ${error instanceof Error ? error.message : String(error)}`, "error");
         }
       },
     });
+
+    // Temp history: commit staged canvas versions when the storylet is saved,
+    // discard them when the storylet is closed or reopened unsaved.
+    const report = (what: string) => (error: unknown) =>
+      notify(`Canvas plugin could not ${what}: ${error instanceof Error ? error.message : String(error)}`, "error");
+    ctx.on("storylet/saved", (storyletId, graph) => {
+      const nodeIds = new Set(graph.nodes.filter((node) => node.type === "plugin" && node.plugin_type === MODIFY_CANVAS).map((node) => node.id));
+      void updateCanvases(
+        (doc) => doc.revisions.some((revision) => revision.source && (revision.source.storylet_id === storyletId || revision.source.storylet_id === "")),
+        (doc) => commitStoryletVersions(doc, storyletId, nodeIds),
+      ).catch(report("commit canvas versions"));
+    });
+    const discard = (storyletId: string) => void updateCanvases(
+      (doc) => hasTempVersions(doc, storyletId),
+      (doc) => discardStoryletVersions(doc, storyletId),
+    ).catch(report("discard unsaved canvas versions"));
+    ctx.on("storylet/opened", discard);
+    ctx.on("storylet/closed", discard);
   },
 });

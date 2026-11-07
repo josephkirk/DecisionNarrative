@@ -5,7 +5,7 @@ import { studioState } from "../../state.ts";
 import type { AnyEntity } from "../runtime.ts";
 import {
   CANVAS_PROPERTY_KEY, DEFAULT_MARKER_ICON, MARKER_ICONS, NOTE_COLORS, UndoStack, isGameplay, newId, parseCanvas,
-  pushRevision, restoreRevision, shapeDisplayName, snapshotOf, syncCanvasProperties,
+  pushRevision, restoreRevision, shapeDisplayName, snapshotOf, syncCanvasProperties, versionTempState,
   type CanvasDoc, type CanvasLayer, type CanvasShape, type ShapeKind,
 } from "./model.ts";
 import { allEntities as listEntities, refInfo, refName, STORYLET_COLOR } from "./refs.ts";
@@ -415,7 +415,7 @@ const gameplayCount = computed(() => doc.value.shapes.filter(isGameplay).length)
           <p v-if="!doc.revisions.length" class="form-hint">No changes yet. Every edit is recorded here and saved with the entity.</p>
           <ol class="vc-history">
             <li v-for="(revision, index) in [...doc.revisions].reverse()" :key="revision.at + '-' + index" :class="revision.source && 'is-node-version'">
-              <span>{{ revision.label }} <span v-if="revision.source" class="badge vc-version-badge">storylet version</span></span>
+              <span>{{ revision.label }} <span v-if="revision.source" class="badge vc-version-badge">{{ versionTempState(revision) || "storylet version" }}</span></span>
               <small>{{ formatTime(revision.at) }}</small>
               <button class="btn btn-secondary btn-small" :disabled="readonly || index === 0" @click="restore(doc.revisions.length - 1 - index)">Restore</button>
             </li>
