@@ -1164,6 +1164,8 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
         let name = tag.name.trim();
         if name.is_empty() {
             issues.push("gameplay tag: name is required".into());
+        } else if name.split('.').any(|segment| !is_identifier(segment)) {
+            issues.push(format!("gameplay tag '{name}': name must be a dot-separated identifier path"));
         }
         if !registered_tags.insert(name.to_ascii_lowercase()) {
             issues.push(format!("gameplay tag '{name}': duplicate tag name"));
@@ -1407,6 +1409,18 @@ mod tests {
         assert!(!projected.world_tags.iter().any(|tag| tag == "world"));
         assert_eq!(projected.world_objects.iter().find(|row| row.id == "generic").unwrap().layer, WorldObjectLayer::Generic);
         assert_eq!(projected.world_objects.iter().find(|row| row.id == "key").unwrap().layer, WorldObjectLayer::Item);
+    }
+    #[test]
+    fn bundle_rejects_malformed_gameplay_tag_paths() {
+        let mut content = ProjectBundleContent::default();
+        content.gameplay_tags = [".quest", "quest.", "quest..secret", "quest.secret"]
+            .into_iter()
+            .map(|name| serde_json::from_value(json!({"id": name, "name": name})).unwrap())
+            .collect();
+        let issues = validate_bundle_content(&content);
+        let tag_issues: Vec<_> = issues.iter().filter(|issue| issue.contains("dot-separated identifier path")).collect();
+        assert_eq!(tag_issues.len(), 3);
+        assert!(tag_issues.iter().all(|issue| !issue.contains("'quest.secret'")));
     }
     #[test]
     fn generic_projection_reports_unrepresentable_entity_properties() {
