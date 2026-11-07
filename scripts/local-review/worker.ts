@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 type Task = {
   repoRoot: string;
@@ -189,14 +189,15 @@ async function gitChecked(args: string[], cwd: string, env: NodeJS.ProcessEnv): 
 }
 
 async function codexExecutable(cwd: string): Promise<{ command: string; prefix: string[] }> {
-  // Resolve the installed Windows PowerShell shim with fixed code, then pass
-  // each Codex argument separately; no review content is interpreted by a shell.
+  // Resolve the npm shim without passing stdin through PowerShell's argument parser.
   const powershell = process.env.SystemRoot ? join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
   const result = await run(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "(Get-Command codex -ErrorAction Stop).Source"], { cwd, env: cleanEnv(), timeoutMs: 30_000 });
   if (result.code !== 0) throw new Error(`could not locate Codex CLI: ${result.stderr.trim().slice(-2000)}`);
   const path = result.stdout.trim().split(/\r?\n/).at(-1)?.trim();
   if (!path) throw new Error("PowerShell did not return the Codex CLI path");
-  if (/\.ps1$/i.test(path)) return { command: powershell, prefix: ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path] };
+  if (/\.ps1$/i.test(path)) {
+    return { command: "node", prefix: [join(dirname(path), "node_modules", "@openai", "codex", "bin", "codex.js")] };
+  }
   if (/\.exe$/i.test(path)) return { command: path, prefix: [] };
   throw new Error(`unsupported Codex CLI launcher: ${path}; expected a .ps1 shim or .exe`);
 }
