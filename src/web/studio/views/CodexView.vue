@@ -6,6 +6,7 @@ import { CODEX_CATEGORIES } from "../definitions.ts";
 import TagEditor from "../components/TagEditor.vue";
 import { isChronicleEntry } from "../chronicleModel.ts";
 import { studioState } from "../state.ts";
+import { hasTraitKey } from "../entityModel.ts";
 import { interactionContextKey } from "../interactionContext.ts";
 
 const {
@@ -87,7 +88,7 @@ function itemDetail(item: CodexRecord): string {
   return isChronicleEntry(item) ? `canon · time ${item.story_time}` : item.event_type;
 }
 
-const locationOptions = computed(() => studioState.entityTemplates.filter((entity) => entity.root_tag === "location"));
+const locationOptions = computed(() => studioState.entityTemplates.filter((entity) => hasTraitKey(entity, studioState.traitTemplates, "location")));
 const factOptions = computed(() => studioState.gameplayTags.map((tag) => tag.name).filter((name) => name.startsWith("fact.")));
 const isCanon = computed(() => editingItem.value?.event_type === "canon");
 function setStoryTime(event: Event) {

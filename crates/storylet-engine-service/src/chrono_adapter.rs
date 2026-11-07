@@ -40,6 +40,21 @@ pub fn compile_chrono_dispatch_for_storylet_validation(
     compile_chrono_dispatch(storylets, locations, characters)
 }
 
+fn runtime_entity_indices(
+    locations: &[LocationRecord],
+    characters: &[CharacterRecord],
+    world_objects: &[WorldObjectRecord],
+) -> Result<BTreeMap<String, u16>, String> {
+    let mut ids = BTreeSet::new();
+    ids.extend(locations.iter().map(|row| row.id.as_str()));
+    ids.extend(characters.iter().map(|row| row.id.as_str()));
+    ids.extend(world_objects.iter().map(|row| row.id.as_str()));
+    if ids.len() > MAX_ENTITIES {
+        return Err(format!("ChronoFlow supports at most {MAX_ENTITIES} runtime entities; got {}", ids.len()));
+    }
+    Ok(ids.into_iter().enumerate().map(|(index, id)| (id.to_owned(), index as u16)).collect())
+}
+
 pub fn compile_chrono_dispatch_with_world(
     storylets: &[StoryletRecord], locations: &[LocationRecord], characters: &[CharacterRecord],
     world_objects: &[WorldObjectRecord], world_tags: &[String],
@@ -55,12 +70,10 @@ pub fn compile_chrono_dispatch_with_world(
     let mut entity_game_ids = custom_entity_game_ids.clone(); entity_game_ids.insert("world".into(), "world".into());
     for l in locations {
         entity_game_ids.entry(l.id.clone()).or_insert_with(|| l.id.clone());
-        names.insert(format!("location.{}", l.id));
         names.extend(l.tags.iter().cloned());
     }
     for c in characters {
         entity_game_ids.entry(c.id.clone()).or_insert_with(|| c.id.clone());
-        names.insert(format!("character.{}", c.id));
         if !c.role.trim().is_empty() { names.insert(c.role.clone()); }
         names.extend(c.thresholds.iter().enumerate().map(|(i,t)| passion_threshold_tag(c,t,i)));
     }
@@ -83,7 +96,8 @@ pub fn compile_chrono_dispatch_with_world(
     }
     names.retain(|n|!n.trim().is_empty());
     let registry=GameplayTagRegistry::compile(names.into_iter()).map_err(|e|e.to_string())?;
-    let (passion_registry,passion_indices)=compile_passion_registry(characters,locations,&registry)?;
+    let entity_indices = runtime_entity_indices(locations, characters, world_objects)?;
+    let (passion_registry,passion_indices)=compile_passion_registry(characters,&entity_indices,&registry)?;
     let mut defs=Vec::with_capacity(ordered.len());
     for(i,s)in ordered.iter().enumerate(){let set=s.chrono.as_ref();let mut d=StoryletDef{storylet_id:i as u16,is_ending:s.ending,is_fallback:s.is_fallback,window:s.window.clone(),display_priority:set.map_or(0,|x|x.display_priority),urgency_tag:set.map_or("Standard".into(),|x|x.urgency_color_tag.clone()),cluster_type:map_cluster_type(&s.cluster_type)?,payload_node_guid:i as u32,is_repeatable:s.repeatability!="once_ever"&&set.map_or(true,|x|x.is_repeatable),cooldown_ms:set.map_or(0,|x|i64::try_from(x.cooldown_ms).unwrap_or(i64::MAX)),cooldown_turns:if s.repeatability=="cooldown"{s.cooldown_turns as u64}else{0},required_roles:s.parameters.iter().filter_map(|p|crate::projection::parse_role_query(&p.query).map(|r|RoleRequirement{role_tag:r,location_tag:(p.location_policy.trim()!="any").then(||"location.current".into()),..Default::default()})).collect(),..StoryletDef::default()};if let Some(set)=set{add_tags(&registry,&mut d.required_tags,&set.required_tags,&s.id,"required_tags")?;add_any_tags(&registry,&mut d.required_any_tags,&set.required_any_tags,&s.id,"required_any_tags")?;add_any_tags(&registry,&mut d.forbidden_tags,&set.forbidden_tags,&s.id,"forbidden_tags")?;add_any_tags(&registry,&mut d.required_arc_phases,&set.required_arc_phases,&s.id,"required_arc_phases")?;for tag in &set.salience_bonus_tags{let id=registry.id(tag).ok_or_else(||format!("unknown salience tag {tag}"))?;registry.add_hierarchical(&mut d.salience_bonus_tags,id).map_err(|e|e.to_string())?;}}defs.push(d);}
     let mut dispatcher=UnifiedDispatcher::new(defs);dispatcher.resolve(&registry).map_err(|e|e.to_string())?;
@@ -114,21 +128,11 @@ fn passion_threshold_tag(
 
 fn compile_passion_registry(
     characters: &[CharacterRecord],
-    locations: &[LocationRecord],
+    npc_indices: &BTreeMap<String, u16>,
     tags: &GameplayTagRegistry,
 ) -> Result<(PassionRegistry, BTreeMap<(String, String), u16>), String> {
     let mut ordered: Vec<&CharacterRecord> = characters.iter().collect();
     ordered.sort_by(|left, right| left.id.cmp(&right.id));
-    let mut npc_indices = BTreeMap::new();
-    for (index, character) in ordered.iter().enumerate() {
-        let npc_id = locations
-            .len()
-            .checked_add(index)
-            .and_then(|value| u16::try_from(value).ok())
-            .filter(|value| (*value as usize) < MAX_ENTITIES)
-            .ok_or_else(|| "ChronoFlow passion NPC index exceeds the entity limit".to_string())?;
-        npc_indices.insert(character.id.clone(), npc_id);
-    }
 
     let mut passion_indices = BTreeMap::new();
     let mut next_passion_id = 0usize;
@@ -478,31 +482,12 @@ pub fn initialize_chrono_world(
     ordered_characters.sort_by_key(|character| character.id.as_str());
     let mut ordered_world_objects: Vec<&WorldObjectRecord> = world_objects.iter().collect();
     ordered_world_objects.sort_by_key(|object| object.id.as_str());
-    let entity_count = ordered_locations.len() + ordered_characters.len() + ordered_world_objects.len();
-    if entity_count > MAX_ENTITIES {
-        return Err(format!(
-            "ChronoFlow supports at most {MAX_ENTITIES} location/character/tool entities; got {entity_count}"
-        ));
-    }
-    let location_indices: BTreeMap<String, u16> = ordered_locations
-        .iter()
-        .enumerate()
-        .map(|(index, location)| (location.id.clone(), index as u16))
-        .collect();
-    let mut entity_indices = BTreeMap::new();
-    for (index, location) in ordered_locations.iter().enumerate() {
-        entity_indices.insert(location.id.clone(), index as u16);
-    }
-    let mut character_indices = BTreeMap::new();
-    for (offset, character) in ordered_characters.iter().enumerate() {
-        let index = (ordered_locations.len() + offset) as u16;
-        entity_indices.insert(character.id.clone(), index);
-        character_indices.insert(character.id.clone(), index);
-    }
-    for (offset, object) in ordered_world_objects.iter().enumerate() {
-        let index = (ordered_locations.len() + ordered_characters.len() + offset) as u16;
-        entity_indices.insert(object.id.clone(), index);
-    }
+    let entity_indices = runtime_entity_indices(locations, characters, world_objects)?;
+    let entity_count = entity_indices.len();
+    let location_indices: BTreeMap<String, u16> = ordered_locations.iter()
+        .map(|row| (row.id.clone(), entity_indices[&row.id])).collect();
+    let character_indices: BTreeMap<String, u16> = ordered_characters.iter()
+        .map(|row| (row.id.clone(), entity_indices[&row.id])).collect();
     let current_location_entity = location_indices
         .get(start_location_id)
         .copied()
@@ -558,25 +543,23 @@ pub fn initialize_chrono_world(
         .iter()
         .map(|entity| (entity.id.as_str(), entity))
         .collect();
-    let mut vertices = Vec::with_capacity(entity_count + storylets.len() + 1);
+    let mut vertices = vec![WorldVertex::default(); entity_count];
+    for (id, &index) in &entity_indices {
+        vertices[index as usize].vertex_id = id.clone();
+        vertices[index as usize].entity_index = Some(index);
+    }
     let mut world_attributes = BTreeMap::new();
     world_attributes.insert("name".into(), AttributeValue::String(world.name.clone()));
     insert_entity_properties(&world.properties, &mut world_attributes)?;
     vertices.push(WorldVertex {
         vertex_id: "world".into(),
-        layer: GraphLayer::Fact,
+        layers: GraphLayer::Fact.into(),
         entity_index: None,
         attributes: world_attributes,
     });
     let mut edges = Vec::new();
     for location in &ordered_locations {
         let entity_index = location_indices[&location.id];
-        add_entity_tag(
-            &compiled.registry,
-            &mut state,
-            entity_index,
-            &format!("location.{}", location.id),
-        )?;
         for tag in &location.tags {
             add_entity_tag(&compiled.registry, &mut state, entity_index, tag)?;
         }
@@ -590,7 +573,6 @@ pub fn initialize_chrono_world(
         insert_json_attributes(&location.attributes, "", &mut attributes);
         if let Some(entity) = runtime_entities.get(location.id.as_str()) {
             insert_entity_properties(&entity.properties, &mut attributes)?;
-            add_entity_tag(&compiled.registry, &mut state, entity_index, &entity.root_tag)?;
             for tag in &entity.tags {
                 let resolved = tag.trim();
                 if compiled.registry.id(resolved).is_some() {
@@ -598,12 +580,9 @@ pub fn initialize_chrono_world(
                 }
             }
         }
-        vertices.push(WorldVertex {
-            vertex_id: location.id.clone(),
-            layer: GraphLayer::Location,
-            entity_index: Some(entity_index),
-            attributes,
-        });
+        let vertex = &mut vertices[entity_index as usize];
+        vertex.layers.insert(GraphLayer::Location);
+        vertex.attributes.extend(attributes);
         for target_id in location.connected_zones.as_deref().unwrap_or_default() {
             if !location_indices.contains_key(target_id) {
                 return Err(format!(
@@ -625,14 +604,7 @@ pub fn initialize_chrono_world(
 
     for character in &ordered_characters {
         let entity_index = character_indices[&character.id];
-        add_entity_tag(
-            &compiled.registry,
-            &mut state,
-            entity_index,
-            &format!("character.{}", character.id),
-        )?;
         if let Some(entity) = runtime_entities.get(character.id.as_str()) {
-            add_entity_tag(&compiled.registry, &mut state, entity_index, &entity.root_tag)?;
             for tag in &entity.tags {
                 let resolved = tag.trim();
                 if compiled.registry.id(resolved).is_some() {
@@ -662,12 +634,9 @@ pub fn initialize_chrono_world(
         if let Some(entity) = runtime_entities.get(character.id.as_str()) {
             insert_entity_properties(&entity.properties, &mut attributes)?;
         }
-        vertices.push(WorldVertex {
-            vertex_id: character.id.clone(),
-            layer: GraphLayer::Character,
-            entity_index: Some(entity_index),
-            attributes,
-        });
+        let vertex = &mut vertices[entity_index as usize];
+        vertex.layers.insert(GraphLayer::Character);
+        vertex.attributes.extend(attributes);
         let actor_location = scenario
             .and_then(|scenario| scenario.actor_locations.get(&character.id))
             .map(String::as_str)
@@ -716,8 +685,9 @@ pub fn initialize_chrono_world(
     )?;
     for object in ordered_world_objects {
         let layer = match object.layer {
-            WorldObjectLayer::Item => GraphLayer::Item,
-            WorldObjectLayer::Fact => GraphLayer::Fact,
+            WorldObjectLayer::Item => Some(GraphLayer::Item),
+            WorldObjectLayer::Fact => Some(GraphLayer::Fact),
+            WorldObjectLayer::Generic => None,
         };
         let mut attributes = BTreeMap::new();
         attributes.insert("name".into(), AttributeValue::String(object.name.clone()));
@@ -726,12 +696,9 @@ pub fn initialize_chrono_world(
             insert_entity_properties(&entity.properties, &mut attributes)?;
         }
         let entity_index = entity_indices[&object.id];
-        vertices.push(WorldVertex {
-            vertex_id: object.id.clone(),
-            layer,
-            entity_index: Some(entity_index),
-            attributes,
-        });
+        let vertex = &mut vertices[entity_index as usize];
+        if let Some(layer) = layer { vertex.layers.insert(layer); }
+        vertex.attributes.extend(attributes);
     }
     vertices.sort_by(|left, right| left.vertex_id.cmp(&right.vertex_id));
     edges.sort_by(|left, right| left.edge_id.cmp(&right.edge_id));
@@ -762,11 +729,12 @@ pub fn initialize_chrono_world(
     for storylet in storylets {
         state.vertices.push(WorldVertex {
             vertex_id: format!("storylet:{}", storylet.id),
-            layer: GraphLayer::Fact,
+            layers: GraphLayer::Fact.into(),
             entity_index: None,
             attributes: BTreeMap::new(),
         });
     }
+    state.vertices.sort_by(|left, right| left.vertex_id.cmp(&right.vertex_id));
     Ok(ChronoWorldSeed {
         state,
         entity_indices,
@@ -998,7 +966,6 @@ mod world_object_vertex_tests {
         let world: EntityRecord = serde_json::from_value(json!({
             "id": "world",
             "name": "World",
-            "root_tag": "world",
             "tags": [],
             "properties": [{
                 "id": "mood",
@@ -1059,16 +1026,16 @@ mod world_object_vertex_tests {
     #[test]
     fn entity_property_types_survive_every_runtime_entity_seed_and_scenario_overrides() {
         let world: EntityRecord = serde_json::from_value(json!({
-            "id": "world", "name": "World", "root_tag": "world", "tags": [],
+            "id": "world", "name": "World", "tags": [],
             "properties": [{ "id": "mood", "key": "mood", "name": "Mood", "type": "float", "value": 3 }]
         })).expect("valid World fixture");
         let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
             {
-                "id": "square", "name": "Square", "root_tag": "location", "tags": [],
+                "id": "square", "name": "Square", "tags": [], "traits": [{"template_id":"system.location"}],
                 "properties": [{ "id": "visited", "key": "visited", "name": "Visited", "type": "bool", "value": false }]
             },
             {
-                "id": "guard", "name": "Guard", "root_tag": "character", "tags": [],
+                "id": "guard", "name": "Guard", "tags": [], "traits": [{"template_id":"system.character"}],
                 "properties": [
                     { "id": "score", "key": "score", "name": "Score", "type": "float", "value": 3 },
                     { "id": "owner", "key": "owner", "name": "Owner", "type": "entity", "value": "square" },
@@ -1078,7 +1045,7 @@ mod world_object_vertex_tests {
                 ]
             },
             {
-                "id": "lantern", "name": "Lantern", "root_tag": "item", "tags": [],
+                "id": "lantern", "name": "Lantern", "tags": [], "traits": [{"template_id":"inventory.item"}],
                 "properties": [
                     { "id": "heat", "key": "heat", "name": "Heat", "type": "float", "value": 5 },
                     { "id": "art", "key": "art", "name": "Art", "type": "asset", "value": { "asset_id": "asset-lantern", "version": "v1" } },
@@ -1087,15 +1054,13 @@ mod world_object_vertex_tests {
                 ]
             },
             {
-                "id": "rumor", "name": "Rumor", "root_tag": "fact", "tags": [],
+                "id": "rumor", "name": "Rumor", "tags": [], "traits": [{"template_id":"system.fact"}],
                 "properties": [{ "id": "verified", "key": "verified", "name": "Verified", "type": "bool", "value": true }]
             }
         ])).expect("valid Entity fixtures");
-        let records = crate::entities::runtime_records_with_world(
-            &world,
-            &entities,
-            &[],
-        );
+        let mut templates = crate::store::Store::open_in_memory().unwrap().list_trait_templates().unwrap();
+        templates.push(serde_json::from_value(json!({"id":"inventory.item","key":"item","name":"Inventory Item","properties":[]})).unwrap());
+        let records = crate::entities::runtime_records_with_world(&world, &entities, &templates);
         let compiled = compile_chrono_dispatch_with_world(
             &[],
             &records.locations,
@@ -1180,14 +1145,58 @@ mod participant_seed_tests {
     use super::*;
     use serde_json::json;
     #[test]
-    fn participant_trait_compiles_rows_in_seat_order() {
-        let world: EntityRecord = serde_json::from_value(json!({"id":"world","name":"World","root_tag":"world"})).unwrap();
-        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
-            {"id":"square","name":"Square","root_tag":"location"},
-            {"id":"player","name":"A","root_tag":"character","traits":[{"template_id":"system.participant","values":{"controller":"human","seat":1,"start_location":"square"}}]},
-            {"id":"b","name":"B","root_tag":"character","traits":[{"template_id":"system.participant","values":{"controller":"human","seat":0}}]}
+    fn passion_registry_uses_the_same_entity_rows_as_world_seed() {
+        let characters: Vec<CharacterRecord> = serde_json::from_value(json!([{
+            "id":"a-character", "name":"A", "role":"", "home_location":"",
+            "current_location":"", "status_axes":null, "needs":null, "agenda":"", "red_line":"",
+            "passion_pool":[{"passion_id":"hope","current_value":10.0,"weight":1.0,"is_hidden":false}],
+            "active_passions":["hope"], "trust_inertia":0.0
+        }])).unwrap();
+        let locations: Vec<LocationRecord> = serde_json::from_value(json!([
+            {"id":"z-location", "name":"Z", "description":"", "tags":[]}
         ])).unwrap();
-        let records = crate::entities::runtime_records_with_world(&world, &entities, &[]);
+        let objects: Vec<WorldObjectRecord> = serde_json::from_value(json!([
+            {"id":"b-object", "name":"B", "layer":"fact", "attributes":null}
+        ])).unwrap();
+        let indices = runtime_entity_indices(&locations, &characters, &objects).unwrap();
+        let compiled = compile_chrono_dispatch_with_world(&[], &locations, &characters, &objects, &[], &[], &BTreeMap::new()).unwrap();
+        assert_eq!(indices["a-character"], 0);
+        assert!(compiled.passion_registry.npc(indices["a-character"]).is_some());
+        assert!(compiled.passion_registry.npc(indices["z-location"]).is_none());
+    }
+
+    #[test]
+    fn overlapping_capabilities_share_one_runtime_entity_row() {
+        let world: EntityRecord = serde_json::from_value(json!({"id":"world","name":"World"})).unwrap();
+        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([{
+            "id":"dual","name":"Dual","traits":[
+                {"template_id":"system.character"},{"template_id":"system.location"}]
+        }])).unwrap();
+        let templates = crate::store::Store::open_in_memory().unwrap().list_trait_templates().unwrap();
+        let records = crate::entities::runtime_records_with_world(&world, &entities, &templates);
+        assert_eq!(records.characters.len(), 1);
+        assert_eq!(records.locations.len(), 1);
+        let compiled = compile_chrono_dispatch_with_world(&[], &records.locations, &records.characters,
+            &records.world_objects, &records.world_tags, &records.entity_tag_seeds, &records.entity_game_ids).unwrap();
+        let seed = initialize_chrono_world(&compiled, &[], &world, &entities, &records.locations,
+            &records.characters, &records.world_objects, &[], &records.entity_tag_seeds, None, "dual").unwrap();
+        assert_eq!(seed.state.vertices.iter().filter(|vertex| vertex.vertex_id == "dual").count(), 1);
+        let vertex = seed.state.vertex("dual").unwrap();
+        assert_eq!(vertex.entity_index, Some(seed.entity_indices["dual"]));
+        assert!(vertex.layers.contains(&GraphLayer::Character));
+        assert!(vertex.layers.contains(&GraphLayer::Location));
+        assert_eq!(seed.state.entity_tags.len(), 1);
+    }
+    #[test]
+    fn participant_trait_compiles_rows_in_seat_order() {
+        let world: EntityRecord = serde_json::from_value(json!({"id":"world","name":"World",})).unwrap();
+        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
+            {"id":"square","name":"Square","traits":[{"template_id":"system.location"}],},
+            {"id":"player","name":"A","traits":[{"template_id":"system.character"},{"template_id":"system.participant","values":{"controller":"human","seat":1,"start_location":"square"}}]},
+            {"id":"b","name":"B","traits":[{"template_id":"system.character"},{"template_id":"system.participant","values":{"controller":"human","seat":0}}]}
+        ])).unwrap();
+        let templates = crate::store::Store::open_in_memory().unwrap().list_trait_templates().unwrap();
+        let records = crate::entities::runtime_records_with_world(&world, &entities, &templates);
         let compiled = compile_chrono_dispatch_with_world(&[], &records.locations, &records.characters, &records.world_objects, &records.world_tags, &records.entity_tag_seeds, &records.entity_game_ids).unwrap();
         let seed = initialize_chrono_world(&compiled, &[], &world, &entities, &records.locations, &records.characters, &records.world_objects, &[], &records.entity_tag_seeds, None, "square").unwrap();
         assert_eq!(seed.state.participants.keys, vec!["b", "player"]);
@@ -1343,14 +1352,15 @@ mod space_compile_tests {
 
     fn location(id: &str, traits: Value, zones: Value) -> Value {
         let mut all = traits.as_array().cloned().unwrap_or_default();
+        all.push(json!({"template_id": "system.location", "values": {}}));
         if zones.as_array().is_some_and(|z| !z.is_empty()) {
             all.push(json!({"template_id": "system.location_settings", "values": {"connected_zones": zones}}));
         }
-        json!({"id": id, "name": id, "root_tag": "location", "traits": all})
+        json!({"id": id, "name": id, "traits": all})
     }
 
     fn compile(entities: Value, world_traits: Value) -> Result<(Vec<storylet_engine::chrono_space::Connection>, Option<storylet_engine::chrono_space::Clock>), String> {
-        let world: EntityRecord = serde_json::from_value(json!({"id": "world", "name": "World", "root_tag": "world", "traits": world_traits})).unwrap();
+        let world: EntityRecord = serde_json::from_value(json!({"id": "world", "name": "World", "traits": world_traits})).unwrap();
         let entities: Vec<EntityTemplateRecord> = serde_json::from_value(entities).unwrap();
         let templates = crate::store::Store::open_in_memory().unwrap().list_trait_templates().unwrap();
         let records = crate::entities::runtime_records_with_world(&world, &entities, &templates);

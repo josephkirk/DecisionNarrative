@@ -45,7 +45,7 @@ cargo test --manifest-path crates/storylet-engine/Cargo.toml
 cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 ```
 
-`bun run play` uses `data/storylet_studio_v5.db` and shares it with the default MCP server. `bun run play:fresh` opens the separate `data/storylet_studio_v5_clean.db` workspace. Earlier schema versions are rejected without migration; use temporary or in-memory databases for isolated checks.
+`bun run play` uses `data/storylet_studio_v6.db` and shares it with the default MCP server. `bun run play:fresh` opens the separate `data/storylet_studio_v6_clean.db` workspace. Earlier schema versions are rejected without migration; use temporary or in-memory databases for isolated checks.
 
 ## Workspace safety
 

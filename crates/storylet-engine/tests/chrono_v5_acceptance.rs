@@ -789,7 +789,7 @@ fn graph_transform_assets_and_world_attributes_round_trip() {
     let mut state = WorldStateTable::new();
     state.vertices.push(WorldVertex {
         vertex_id: "v.attribute".to_owned(),
-        layer: GraphLayer::Location,
+        layers: GraphLayer::Location.into(),
         entity_index: None,
         attributes: BTreeMap::from([
             ("count".to_owned(), AttributeValue::Int(3)),
@@ -1682,13 +1682,13 @@ fn pattern_matching_backtracks_to_a_valid_assignment() {
     let mut state = WorldStateTable::new();
     state.vertices.push(WorldVertex {
         vertex_id: "v.a".to_owned(),
-        layer: GraphLayer::Location,
+        layers: GraphLayer::Location.into(),
         entity_index: None,
         attributes: BTreeMap::new(),
     });
     state.vertices.push(WorldVertex {
         vertex_id: "v.b".to_owned(),
-        layer: GraphLayer::Location,
+        layers: GraphLayer::Location.into(),
         entity_index: None,
         attributes: BTreeMap::new(),
     });
@@ -1731,7 +1731,7 @@ fn pattern_matching_backtracks_across_a_chain() {
     for id in ["v.a", "v.b", "v.c"] {
         state.vertices.push(WorldVertex {
             vertex_id: id.to_owned(),
-            layer: GraphLayer::Location,
+            layers: GraphLayer::Location.into(),
             entity_index: None,
             attributes: BTreeMap::new(),
         });

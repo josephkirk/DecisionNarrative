@@ -1,6 +1,6 @@
 /** Resolves what a canvas reference shape points at: name, thumbnail, colour and route. */
 import { studioState } from "../../state.ts";
-import { rootTagColor } from "../../entityModel.ts";
+import { traitLabels } from "../../entityModel.ts";
 import { thumbnailUrl } from "../../thumbnails.ts";
 import type { AnyEntity } from "../runtime.ts";
 import type { CanvasShape } from "./model.ts";
@@ -22,11 +22,11 @@ export function allEntities(): AnyEntity[] {
 export function refInfo(shape: CanvasShape): RefInfo | null {
   if (shape.kind === "entity" && shape.entity_id) {
     const entity = allEntities().find((entry) => entry.id === shape.entity_id);
-    if (!entity) return { name: shape.entity_id, thumb: null, color: rootTagColor("other") };
+    if (!entity) return { name: shape.entity_id, thumb: null, color: "var(--text-muted)" };
     const isTemplate = studioState.entityTemplates.some((template) => template.id === entity.id);
     return {
-      name: entity.name, thumb: thumbnailUrl(entity.thumbnail), color: rootTagColor(entity.root_tag),
-      description: entity.description, route: isTemplate ? `/entity-templates/${entity.id}` : `/entities/${entity.id}`,
+      name: entity.name, thumb: thumbnailUrl(entity.thumbnail), color: "var(--accent)",
+      description: [entity.description, traitLabels(entity, studioState.traitTemplates).join(" · ")].filter(Boolean).join(" — "), route: isTemplate ? `/entity-templates/${entity.id}` : `/entities/${entity.id}`,
     };
   }
   if (shape.kind === "storylet" && shape.storylet_id) {

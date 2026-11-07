@@ -31,7 +31,7 @@ pub fn project_inventory_entities(
         if entities.iter().any(|other| other.id == entity.id) { return Err(format!("inventory entity '{}' has a duplicate ID", entity.id)); }
         entities.push(EntityTemplateRecord {
             id: entity.id.clone(), object_id: entity.object_id.clone().unwrap_or_default(), game_id: entity.game_id.clone().unwrap_or_default(), game_id_auto: false,
-            name: entity.name.clone(), root_tag: entity.root_tag.clone(), description: entity.description.clone(), tags: entity.tags.clone(),
+            name: entity.name.clone(), description: entity.description.clone(), tags: entity.tags.clone(),
             thumbnail: entity.thumbnail.clone(), folder_id: entity.folder_id.clone(), properties: entity.properties.clone(), traits: entity.traits.clone(), created_at: entity.created_at,
         });
     }
@@ -96,8 +96,8 @@ mod tests {
             { "id": "item-trait", "key": "item", "name": "Item", "properties": [] }
         ])).unwrap();
         let original: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
-            { "id": "bag", "name": "Bag", "root_tag": "item", "traits": [{ "id": "bag-trait", "template_id": "owner-trait", "values": { "rows": 1, "columns": 1, "items": ["key"] } }] },
-            { "id": "key", "name": "Key", "root_tag": "item", "traits": [{ "id": "key-trait", "template_id": "item-trait", "values": {} }] }
+            { "id": "bag", "name": "Bag", "traits": [{ "id": "bag-trait", "template_id": "owner-trait", "values": { "rows": 1, "columns": 1, "items": ["key"] } }] },
+            { "id": "key", "name": "Key", "traits": [{ "id": "key-trait", "template_id": "item-trait", "values": {} }] }
         ])).unwrap();
         let mut projected = original.clone();
         project_inventory_entities(&mut projected, &[], &templates).unwrap();
@@ -167,12 +167,12 @@ mod tests {
         let graphs = compile_narrative_graphs("project", std::slice::from_ref(&storylet), &dispatch, &ids).unwrap();
         bind_storylet_start_nodes(&mut dispatch, &graphs).unwrap();
         let mut state = WorldStateTable::new();
-        state.vertices.push(WorldVertex { vertex_id: "bag".into(), layer: GraphLayer::Item, entity_index: None, attributes: BTreeMap::from([
+        state.vertices.push(WorldVertex { vertex_id: "bag".into(), layers: GraphLayer::Item.into(), entity_index: None, attributes: BTreeMap::from([
             ("prop.__inventory_items".into(), AttributeValue::Array(vec![])),
             ("prop.__inventory_rows".into(), AttributeValue::Int(1)),
             ("prop.__inventory_columns".into(), AttributeValue::Int(1)),
         ]) });
-        state.vertices.push(WorldVertex { vertex_id: "key".into(), layer: GraphLayer::Item, entity_index: None, attributes: BTreeMap::from([
+        state.vertices.push(WorldVertex { vertex_id: "key".into(), layers: GraphLayer::Item.into(), entity_index: None, attributes: BTreeMap::from([
             ("prop.__inventory_item".into(), AttributeValue::Bool(true)),
         ]) });
         let mut instance = FlowGraphInstance::new(1, graphs.asset, 7).unwrap();

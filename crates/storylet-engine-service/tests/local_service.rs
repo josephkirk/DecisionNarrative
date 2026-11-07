@@ -132,25 +132,34 @@ async fn v3_project_and_content_routes_remain_available() {
 }
 
 #[tokio::test]
-async fn old_v5_virtual_participant_trait_is_directly_readable_and_protected() {
-    use storylet_engine_service::store::Store;
-    let path = std::env::temp_dir().join(format!("dn-participant-{}.db", uuid::Uuid::new_v4()));
-    drop(Store::open(&path).unwrap());
-    let conn = Connection::open(&path).unwrap();
-    conn.execute("DELETE FROM content_records WHERE entity='trait_templates' AND id='system.participant'", []).unwrap();
-    drop(conn);
-    let service = StudioService::open(&path, ".").unwrap();
-    let item = service.get_content_item("trait_templates", "system.participant").await.unwrap();
-    assert_eq!(item["id"], "system.participant");
-    assert!(service.save_content_item("trait_templates", &item).await.is_err());
-    assert!(service.delete_content_item("trait_templates", "system.participant").await.is_err());
-    drop(service);
-    let conn = Connection::open(&path).unwrap();
-    let count: i64 = conn.query_row("SELECT count(*) FROM content_records WHERE entity='trait_templates' AND id='system.participant'", [], |row| row.get(0)).unwrap();
-    assert_eq!(count, 0);
-    drop(conn);
-    std::fs::remove_file(path).unwrap();
+async fn trait_uniqueness_is_enforced_on_save_and_definition_changes() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    let unique = service.save_content_item("trait_templates", &json!({
+        "id": "unique-a", "key": "unique_a", "name": "Unique A", "unique": true, "properties": []
+    })).await.unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id": "unique-b", "key": "unique_b", "name": "Unique B", "unique": true, "properties": []
+    })).await.unwrap();
+    let normal = service.save_content_item("trait_templates", &json!({
+        "id": "normal", "key": "normal", "name": "Normal", "properties": []
+    })).await.unwrap();
+    assert_eq!(normal["unique"], false);
+    let entity = json!({
+        "id": "owner", "name": "Owner", "traits": [
+            {"id":"a", "template_id":unique["id"], "values":{}},
+            {"id":"n", "template_id":normal["id"], "values":{}}
+        ]
+    });
+    service.save_content_item("entity_templates", &entity).await.unwrap();
+    let mut invalid = entity.clone();
+    invalid["traits"].as_array_mut().unwrap().push(json!({"id":"b","template_id":"unique-b","values":{}}));
+    assert!(service.save_content_item("entity_templates", &invalid).await.unwrap_err().contains("only one unique trait"));
+    let mut toggle = normal.clone();
+    toggle["unique"] = json!(true);
+    assert!(service.save_content_item("trait_templates", &toggle).await.unwrap_err().contains("only one unique trait"));
+    assert_eq!(service.get_content_item("trait_templates", "normal").await.unwrap()["unique"], false);
 }
+
 
 fn reveal_storylet(event_id: &str) -> Value {
     json!({"id":"tell","title":"Tell","content":{"text_template":"x"},"created_at":1,
@@ -190,11 +199,15 @@ async fn reveal_requires_canon_event_with_story_time() {
 #[tokio::test]
 async fn canvas_reference_properties_are_tracked_as_references() {
     let app = test_app();
+    let (status, body) = request(&app, "POST", "/api/v3/content/trait_templates", Some(json!({
+        "id":"inventory.item", "key":"item", "name":"Item", "properties":[]
+    }))).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
     let story = json!({"id":"crypt_tale","title":"Crypt Tale","content":{"text_template":"x"},"created_at":1});
     let (status, body) = request(&app, "POST", "/api/v3/content/storylets", Some(story)).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let gem = json!({"id":"gem","name":"Gem","root_tag":"item"});
-    let crypt = json!({"id":"crypt","name":"Crypt","root_tag":"location","properties":[
+    let gem = json!({"id":"gem","name":"Gem","traits":[{"id":"item","template_id":"inventory.item","values":{}}]});
+    let crypt = json!({"id":"crypt","name":"Crypt","traits":[{"id":"location","template_id":"system.location","values":{}}],"properties":[
         {"id":"map_a_ref","key":"map_a_ref","name":"Canvas: Gem reference","type":"entity","value":"gem"},
         {"id":"map_b_ref","key":"map_b_ref","name":"Canvas: Tale reference","type":"storylet","value":"crypt_tale"}]});
     for entity in [gem, crypt] {

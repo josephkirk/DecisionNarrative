@@ -11,16 +11,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let fresh_database = args.iter().any(|arg| arg == "--fresh-database");
     let default_db_path = if fresh_database {
-        "data/storylet_studio_v5_clean.db"
+        "data/storylet_studio_v6_clean.db"
     } else {
-        "data/storylet_studio_v5.db"
+        "data/storylet_studio_v6.db"
     };
     let db_path = env::var("STORYLET_STUDIO_DB_PATH")
         .unwrap_or_else(|_| default_db_path.into());
 
     let resource_root = env::var("STORYLET_RESOURCE_ROOT").unwrap_or_else(|_| ".".into());
 
-    // Schema v5 is a clean cutover; earlier databases are rejected without migration.
+    // Schema v6 is a clean cutover; earlier databases are rejected without migration.
     if db_path != ":memory:" {
         if let Some(parent) = PathBuf::from(&db_path).parent() {
             if !parent.as_os_str().is_empty() {

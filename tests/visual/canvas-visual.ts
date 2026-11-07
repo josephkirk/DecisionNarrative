@@ -81,9 +81,9 @@ try {
     if (!canvasTrait) await sleep(200);
   }
   check("plugin creates the Canvas trait", !!canvasTrait);
-  await api("POST", "/api/v3/content/entity_templates", { id: "plain", name: "Plain", root_tag: "location", thumbnail: "https://example.invalid/plain.png" });
-  await api("POST", "/api/v3/content/entity_templates", { id: "crypt", name: "Crypt", root_tag: "location", thumbnail: "https://example.invalid/crypt.png",
-    traits: [{ id: "ti_canvas", template_id: canvasTrait!.id, values: {} }] });
+  const locationTraitId = "system.location";
+  await api("POST", "/api/v3/content/entity_templates", { id: "plain", name: "Plain", traits: [{ id: "location", template_id: locationTraitId, values: {} }], thumbnail: "https://example.invalid/plain.png" });
+  await api("POST", "/api/v3/content/entity_templates", { id: "crypt", name: "Crypt", traits: [{ id: "location", template_id: locationTraitId, values: {} }, { id: "ti_canvas", template_id: canvasTrait!.id, values: {} }], thumbnail: "https://example.invalid/crypt.png" });
   await page.goto(`${base}/#/entity-templates/plain`);
   await page.getByRole("button", { name: "Properties" }).waitFor();
   check("entity without the trait has no Canvas tab", (await page.getByRole("button", { name: "Canvas", exact: true }).count()) === 0);

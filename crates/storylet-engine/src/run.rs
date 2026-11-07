@@ -896,11 +896,11 @@ impl RunKernel {
                         RunError::InvalidAction("participant has no location".into())
                     })?;
                     let source = ctx.state.vertices.iter().find(|v| {
-                        v.layer == crate::chrono_state::GraphLayer::Location
+                        v.layers.contains(&crate::chrono_state::GraphLayer::Location)
                             && v.entity_index == Some(current)
                     });
                     let destination = ctx.state.vertices.iter().find(|v| {
-                        v.layer == crate::chrono_state::GraphLayer::Location
+                        v.layers.contains(&crate::chrono_state::GraphLayer::Location)
                             && v.entity_index == Some(to)
                     });
                     let connected = source.zip(destination).is_some_and(|(a, b)| {
@@ -1369,3 +1369,4 @@ impl RunKernel {
         }
     }
 }
+

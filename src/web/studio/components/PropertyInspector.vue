@@ -9,6 +9,7 @@ import TagEditor from "./TagEditor.vue";
 import ThumbnailPicker from "./ThumbnailPicker.vue";
 import { normalizeTagName, uniqueTagNames, buildTagIndex } from "../tagData.ts";
 import { studioState, notify } from "../state.ts";
+import { hasTraitKey, traitLabels } from "../entityModel.ts";
 import { nodeTypeContribution } from "../plugins/runtime.ts";
 const props = defineProps<{
   storylet: StoryletRecord;
@@ -53,8 +54,8 @@ const tagIndex = computed(() => buildTagIndex({
 }));
 
 const runtimeEntityOptions = computed(() => [
-  ...studioState.entities.map((entity) => ({ path: entity.id, label: `${entity.name} (${entity.root_tag})` })),
-  ...studioState.entityTemplates.map((entity) => ({ path: entity.id, label: `${entity.name} (${entity.root_tag})` })),
+  ...studioState.entities.map((entity) => ({ path: entity.id, label: `${entity.name}${traitLabels(entity, studioState.traitTemplates).length ? ` (${traitLabels(entity, studioState.traitTemplates).join(" · ")})` : ""}` })),
+  ...studioState.entityTemplates.map((entity) => ({ path: entity.id, label: `${entity.name}${traitLabels(entity, studioState.traitTemplates).length ? ` (${traitLabels(entity, studioState.traitTemplates).join(" · ")})` : ""}` })),
 ]);
 type GraphPropertyType = Exclude<PropertyType, "json" | "storylet" | "tag">;
 type GraphPropertyOption = { key: string; name: string; type: GraphPropertyType };
@@ -197,11 +198,7 @@ const targetRoles = computed(() => uniqueTagNames(["player", ...roleTagOptions.v
 const emotionTagOptions = computed(() => catalogTagNames.value.filter((name) => name === "emotion" || name.startsWith("emotion.")));
 const actionTagOptions = computed(() => catalogTagNames.value.filter((name) => name === "action" || name.startsWith("action.")));
 const locationTagOptions = computed(() => catalogTagNames.value.filter((name) => name === "location" || name.startsWith("location.")));
-const targetGameplayTagOptions = computed(() => {
-  const target = studioState.entityTemplates.find((entity) => entity.id === props.selectedNode?.target_entity_id);
-  const root = target?.root_tag;
-  return catalogTagNames.value.filter((name) => !root || name === root || name.startsWith(`${root}.`));
-});
+const targetGameplayTagOptions = computed(() => catalogTagNames.value);
 const requiredRoleNames = computed({
   get: () => uniqueTagNames(props.storylet.parameters.map((parameter) => parameter.param_name)),
   set: (values: string[]) => {
@@ -215,7 +212,7 @@ const locationTags = computed({
   get: () => uniqueTagNames(props.storylet.location_tags ?? []),
   set: (values: string[]) => { props.storylet.location_tags = uniqueTagNames(values); emit("update-storylet"); },
 });
-const locationOptions = computed(() => studioState.entityTemplates.filter((entity) => entity.root_tag === "location").sort((a, b) => a.name.localeCompare(b.name)));
+const locationOptions = computed(() => studioState.entityTemplates.filter((entity) => hasTraitKey(entity, studioState.traitTemplates, "location")).sort((a, b) => a.name.localeCompare(b.name)));
 
 
 // Dialogue Sections & Items
@@ -921,7 +918,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
           <select v-model="selectedNode.target_entity_id" class="form-select" @change="emitGraphUpdate()">
             <option value="world">World (Global)</option>
             <option v-for="e in studioState.entityTemplates.filter(item => item.id !== 'world')" :key="e.id" :value="e.id">
-              {{ e.name }} ({{ e.root_tag }})
+              {{ e.name }} ({{ e.id }}) {{ traitLabels(e, studioState.traitTemplates).join(" · ") }}
             </option>
           </select>
           <small class="field-sublabel">Tags are applied to this entity's gameplay tags container.</small>
@@ -1000,7 +997,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
           <select v-model="selectedNode.target_entity_id" class="form-select" @change="emitGraphUpdate()">
             <option value="world">World (Global)</option>
             <option v-for="e in studioState.entityTemplates.filter(item => item.id !== 'world')" :key="e.id" :value="e.id">
-              {{ e.name }} ({{ e.root_tag }})
+              {{ e.name }} ({{ e.id }}) {{ traitLabels(e, studioState.traitTemplates).join(" · ") }}
             </option>
           </select>
         </div>

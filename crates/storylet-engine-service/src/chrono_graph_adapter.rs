@@ -914,8 +914,7 @@ mod tests {
 
     fn entity(key: &str, property_type: &str) -> crate::contracts::EntityTemplateRecord {
         serde_json::from_value(json!({
-            "id": "world", "name": "World", "root_tag": "world",
-            "properties": [{ "key": key, "name": key, "type": property_type, "value": null }]
+            "id": "world", "name": "World", "properties": [{ "key": key, "name": key, "type": property_type, "value": null }]
         })).expect("entity fixture")
     }
 
@@ -960,21 +959,18 @@ mod tests {
         assert!(validate_entity_property_graph(&property_graph(direct.clone(), NarrativeNodeData::GetEntityProperty { property_key: "missing".into(), value_type: "string".into() }), &[entity("mood", "string")]).is_err());
         assert!(validate_entity_property_graph(&property_graph(direct.clone(), NarrativeNodeData::GetEntityProperty { property_key: "mood".into(), value_type: "int".into() }), &[entity("mood", "string")]).is_err());
         let array_entity: crate::contracts::EntityTemplateRecord = serde_json::from_value(json!({
-            "id": "world", "name": "World", "root_tag": "world",
-            "properties": [{ "key": "mood", "name": "Mood", "type": "string", "is_array": true, "value": [] }]
+            "id": "world", "name": "World", "properties": [{ "key": "mood", "name": "Mood", "type": "string", "is_array": true, "value": [] }]
         })).expect("array entity fixture");
         assert!(validate_entity_property_graph(&property_graph(direct.clone(), get()), &[array_entity]).is_err());
         let world: crate::contracts::EntityTemplateRecord = serde_json::from_value(json!({
-            "id": "world", "name": "World", "root_tag": "world",
-            "properties": [
+            "id": "world", "name": "World", "properties": [
                 { "key": "ref", "name": "ref", "type": "entity", "value": null },
                 { "key": "mood", "name": "Mood", "type": "string", "value": null }
             ]
         })).expect("world fixture");
         let get_mood = NarrativeNodeData::GetEntityProperty { property_key: "mood".into(), value_type: "string".into() };
         let complete = |property_type: &str| serde_json::from_value(json!({
-            "id": "target", "name": "Target", "root_tag": "fact",
-            "properties": [
+            "id": "target", "name": "Target", "properties": [
                 { "key": "ref", "name": "ref", "type": "entity", "value": null },
                 { "key": "mood", "name": "mood", "type": property_type, "value": null }
             ]
@@ -1163,7 +1159,7 @@ mod tests {
             let mut state = WorldStateTable::with_capacity(2);
             state.vertices.push(WorldVertex {
                 vertex_id: "actor".into(),
-                layer: GraphLayer::Character,
+                layers: GraphLayer::Character.into(),
                 entity_index: Some(1),
                 attributes: std::collections::BTreeMap::new(),
             });
@@ -1273,7 +1269,7 @@ mod tests {
         let mut state = WorldStateTable::new();
         state.vertices.push(WorldVertex {
             vertex_id: "world".into(),
-            layer: GraphLayer::Fact,
+            layers: GraphLayer::Fact.into(),
             entity_index: None,
             attributes: std::collections::BTreeMap::from([
                 ("prop.owner".into(), AttributeValue::EntityRef("world".into())),
@@ -1328,7 +1324,7 @@ mod tests {
         bind_storylet_start_nodes(&mut dispatch, &graphs).expect("start node binds");
         let mut state = WorldStateTable::new();
         state.vertices.push(WorldVertex {
-            vertex_id: "world".into(), layer: GraphLayer::Fact, entity_index: None,
+            vertex_id: "world".into(), layers: GraphLayer::Fact.into(), entity_index: None,
             attributes: std::collections::BTreeMap::from([
                 ("prop.map_s_key_present".into(), AttributeValue::Bool(true)),
                 ("prop.map_s_gate_open".into(), AttributeValue::Bool(false)),
@@ -1972,7 +1968,7 @@ mod tests {
             let mut state = WorldStateTable::with_capacity(2);
             state.vertices.push(WorldVertex {
                 vertex_id: "actor".into(),
-                layer: GraphLayer::Character,
+                layers: GraphLayer::Character.into(),
                 entity_index: Some(1),
                 attributes: std::collections::BTreeMap::new(),
             });

@@ -1,7 +1,7 @@
-//! Entity templates, trait templates, and asset authoring rules.
+//! Entity templates, traits, and asset authoring rules.
 //!
 //! Entities are authored as generic [`EntityTemplateRecord`] values. Runtime
-//! records are projections selected by the entity's gameplay root tag and
+//! records are projections selected by the entity's gameplay tags and
 //! populated from flattened typed properties.
 
 use serde_json::{Map, Value};
@@ -26,16 +26,16 @@ pub fn parse_project_bundle(value: &Value) -> Result<ProjectBundle, String> {
     let schema_version = object
         .get("schema_version")
         .and_then(Value::as_u64)
-        .ok_or_else(|| "Project bundle schema_version must be 5".to_string())?;
-    if schema_version != 5 {
+        .ok_or_else(|| "Project bundle schema_version must be 6".to_string())?;
+    if schema_version != 6 {
         return Err(format!(
-            "Unsupported project bundle schema_version {schema_version}; expected 5"
+            "Unsupported project bundle schema_version {schema_version}; expected 6"
         ));
     }
     serde_json::from_value(value.clone()).map_err(|error| error.to_string())
 }
 
-/// Entities, trait templates, assets, folders, and storylet ids used to validate
+/// Entities, traits, assets, folders, and storylet ids used to validate
 /// Authored records and references used to validate a workspace.
 #[derive(Clone, Debug, Default)]
 pub struct WorkspaceIndex {
@@ -107,13 +107,6 @@ fn dedupe_suffix(base: &str, used: &BTreeSet<String>) -> String {
     }
 }
 
-fn type_prefix(root_tag: &str) -> &'static str {
-    match root_tag.to_ascii_lowercase().as_str() {
-        "character" => "Chr", "location" => "Loc", "item" => "Itm",
-        "fact" => "Fct", "world" => "World", _ => "Ent",
-    }
-}
-
 pub const WORLD_ENTITY_ID: &str = "world";
 
 pub fn default_world_entity() -> EntityRecord {
@@ -123,7 +116,6 @@ pub fn default_world_entity() -> EntityRecord {
         game_id: Some("world".into()),
         template_id: None,
         name: "World".into(),
-        root_tag: "world".into(),
         tags: Vec::new(),
         description: String::new(),
         thumbnail: None,
@@ -135,10 +127,10 @@ pub fn default_world_entity() -> EntityRecord {
 }
  
 
-pub fn default_game_id(root_tag: &str, name: &str, used: &BTreeSet<String>) -> String {
+pub fn default_game_id(name: &str, used: &BTreeSet<String>) -> String {
     let pascal = pascal_case(name);
     let pascal = if pascal.is_empty() { "Entity" } else { &pascal };
-    dedupe_suffix(&format!("{}_{}", type_prefix(root_tag), pascal), used)
+    dedupe_suffix(&format!("{}_{}", "Ent", pascal), used)
 }
 
 pub fn default_template_key(name: &str, used: &BTreeSet<String>) -> String {
@@ -263,7 +255,7 @@ pub fn character_record(
     templates: &[TraitTemplateRecord],
     attributes: Value,
 ) -> Option<CharacterRecord> {
-    if !entity.root_tag.eq_ignore_ascii_case("character") {
+    if !entity.traits.iter().any(|instance| templates.iter().any(|template| template.id == instance.template_id && template.key == "character")) {
         return None;
     }
     let settings = trait_values(entity, templates, "character_settings");
@@ -295,7 +287,7 @@ pub fn location_record(
     templates: &[TraitTemplateRecord],
     attributes: Value,
 ) -> Option<LocationRecord> {
-    if !entity.root_tag.eq_ignore_ascii_case("location") {
+    if !entity.traits.iter().any(|instance| templates.iter().any(|template| template.id == instance.template_id && template.key == "location")) {
         return None;
     }
     let settings = trait_values(entity, templates, "location_settings");
@@ -312,14 +304,6 @@ pub fn location_record(
         attributes,
     })
 }
-pub fn world_object(entity: &EntityTemplateRecord, attributes: Value) -> Option<WorldObjectRecord> {
-    let layer = match entity.root_tag.to_ascii_lowercase().as_str() {
-        "item" => WorldObjectLayer::Item, "fact" | "other" => WorldObjectLayer::Fact, _ => return None
-    };
-    Some(WorldObjectRecord { id: entity.id.clone(), name: entity.name.clone(), layer, attributes })
-}
-
-
 /// Recursively collect typed properties from a template and its included templates.
 pub fn collect_template_properties(
     template: &TraitTemplateRecord,
@@ -397,13 +381,9 @@ pub fn runtime_records_with_world(
 ) -> RuntimeRecords {
     let mut records = RuntimeRecords::default();
     records.entity_game_ids.insert(WORLD_ENTITY_ID.into(), WORLD_ENTITY_ID.into());
-    let mut world_tags = world.tags.clone();
-    if !world.root_tag.trim().is_empty() && !world_tags.iter().any(|tag| tag == &world.root_tag) {
-        world_tags.insert(0, world.root_tag.clone());
-    }
-    records.world_tags.extend(world_tags.clone());
-    if !world_tags.is_empty() {
-        records.entity_tag_seeds.push((WORLD_ENTITY_ID.into(), world_tags));
+    if !world.tags.is_empty() {
+        records.world_tags.clone_from(&world.tags);
+        records.entity_tag_seeds.push((WORLD_ENTITY_ID.into(), world.tags.clone()));
     }
     for entity in entities {
         let gid = if entity.game_id.trim().is_empty() {
@@ -411,27 +391,35 @@ pub fn runtime_records_with_world(
         } else {
             entity.game_id.clone()
         };
-        records.entity_game_ids.insert(entity.id.clone(), gid.clone());
-        let mut seed_tags = entity.tags.clone();
-        if !entity.root_tag.trim().is_empty() && !seed_tags.iter().any(|tag| tag == &entity.root_tag) {
-            seed_tags.insert(0, entity.root_tag.clone());
+        records.entity_game_ids.insert(entity.id.clone(), gid);
+        if !entity.tags.is_empty() {
+            records.entity_tag_seeds.push((entity.id.clone(), entity.tags.clone()));
         }
-        if !seed_tags.is_empty() {
-            records.entity_tag_seeds.push((entity.id.clone(), seed_tags.clone()));
-        }
-        let attributes = runtime_attributes(entity, templates);
-        if let Some(character) = character_record(entity, templates, attributes.clone()) {
-            records.characters.push(character);
-        }
-        if let Some(location) = location_record(entity, templates, attributes.clone()) {
-            records.locations.push(location);
-        }
-        if ["__inventory_items", "__inventory_item"].iter().any(|key| entity.properties.iter().any(|property| property.key == *key))
-            && !["character", "location", "item", "fact", "other"].iter().any(|root| entity.root_tag.eq_ignore_ascii_case(root))
-        {
-            records.world_objects.push(WorldObjectRecord { id: entity.id.clone(), name: entity.name.clone(), layer: WorldObjectLayer::Fact, attributes });
-        } else if let Some(object) = world_object(entity, attributes) {
-            records.world_objects.push(object);
+        let mut character = character_record(entity, templates, Value::Null);
+        let mut location = location_record(entity, templates, Value::Null);
+        let has_trait = |key: &str| entity.traits.iter().any(|instance| {
+            templates.iter().any(|template| template.id == instance.template_id && template.key == key)
+        });
+        let item = has_trait("item");
+        let fact = has_trait("fact");
+        let generic = character.is_none() && location.is_none() && !item && !fact;
+        let mut remaining = usize::from(character.is_some()) + usize::from(location.is_some())
+            + usize::from(item) + usize::from(fact) + usize::from(generic);
+        let mut attributes = runtime_attributes(entity, templates);
+        let mut next_attributes = || {
+            remaining -= 1;
+            if remaining == 0 { std::mem::take(&mut attributes) } else { attributes.clone() }
+        };
+        if let Some(row) = character.as_mut() { row.attributes = next_attributes(); }
+        if let Some(row) = location.as_mut() { row.attributes = next_attributes(); }
+        if let Some(row) = character { records.characters.push(row); }
+        if let Some(row) = location { records.locations.push(row); }
+        for (present, layer) in [(item, WorldObjectLayer::Item), (fact, WorldObjectLayer::Fact), (generic, WorldObjectLayer::Generic)] {
+            if present {
+                records.world_objects.push(WorldObjectRecord {
+                    id: entity.id.clone(), name: entity.name.clone(), layer, attributes: next_attributes(),
+                });
+            }
         }
     }
     records.characters.sort_by(|a, b| a.id.cmp(&b.id));
@@ -547,36 +535,25 @@ pub fn prepare_entity(
     if entity.id.trim().is_empty() {
         entity.id = new_object_id();
     }
-    if entity.id.eq_ignore_ascii_case(WORLD_ENTITY_ID)
-        || entity.root_tag.eq_ignore_ascii_case(WORLD_ENTITY_ID)
-    {
-        return Err(format!("{PREFIX}: root tag 'world' is reserved for the intrinsic world entity"));
-    }
+    if entity.id.eq_ignore_ascii_case(WORLD_ENTITY_ID) { return Err(format!("{PREFIX}: entity id world is reserved for the intrinsic world entity")); }
     entity.name = entity.name.trim().into();
     if entity.name.is_empty() { return Err(format!("{PREFIX}: name cannot be empty")); }
-    entity.root_tag = entity.root_tag.trim().into();
-    if entity.root_tag.is_empty() || !is_identifier(&entity.root_tag) {
-        return Err(format!("{PREFIX}: root_tag must be a non-empty identifier"));
-    }
-    if let Err(error) = entity.validate_tags(&index.gameplay_tags) {
-        return Err(format!("{PREFIX}: {error}"));
+    entity.tags = trim_tags(&entity.tags);
+    validate_unique_traits(&entity.traits, &index.templates, "Entity validation failed")?;
+    for tag in &entity.tags {
+        if !index.gameplay_tags.iter().any(|registered| registered.name == *tag) {
+            return Err(format!("{PREFIX}: gameplay tag '{tag}' is not registered"));
+        }
     }
     let used: BTreeSet<String> = index.entity_templates.iter().filter(|e| e.id != entity.id).map(|e| e.game_id.clone()).collect();
     if entity.game_id.trim().is_empty() {
-        entity.game_id = default_game_id(&entity.root_tag, &entity.name, &used);
+        entity.game_id = default_game_id(&entity.name, &used);
         entity.game_id_auto = true;
     } else if !is_identifier(&entity.game_id) {
         return Err(format!("{PREFIX}: invalid game ID '{}'", entity.game_id));
     }
     if entity.object_id.trim().is_empty() { entity.object_id = new_object_id(); }
     normalize_optional_id(&mut entity.folder_id);
-    for instance in &entity.traits {
-        if let Some(template) = index.templates.iter().find(|template| template.id == instance.template_id) {
-            let incompatible = (template.key == "character_settings" || template.key == "passion" || template.key == "passion_threshold" || template.key == "passion_link") && !entity.root_tag.eq_ignore_ascii_case("character")
-                || template.key == "location_settings" && !entity.root_tag.eq_ignore_ascii_case("location");
-            if incompatible { return Err(format!("{PREFIX}: trait '{}' is incompatible with root '{}'", template.key, entity.root_tag)); }
-        }
-    }
     entity.created_at = Some(stored.and_then(|s| s.created_at).or(entity.created_at).unwrap_or_else(now_ms));
     entity.description = entity.description.trim().into();
     Ok(entity)
@@ -585,7 +562,7 @@ pub fn prepare_entity(
 pub fn prepare_entity_record(
     payload: &Value,
     stored: Option<&EntityRecord>,
-    _index: &WorkspaceIndex,
+    index: &WorkspaceIndex,
 ) -> Result<EntityRecord, String> {
     const PREFIX: &str = "Entity validation failed";
     let mut entity: EntityRecord = serde_json::from_value(payload.clone())
@@ -595,34 +572,55 @@ pub fn prepare_entity_record(
     }
     if entity.id.eq_ignore_ascii_case(WORLD_ENTITY_ID) {
         entity.name = "World".into();
-        entity.root_tag = "world".into();
     } else {
         entity.name = entity.name.trim().into();
         if entity.name.is_empty() {
             return Err(format!("{PREFIX}: name cannot be empty"));
-        }
-        entity.root_tag = entity.root_tag.trim().into();
-        if entity.root_tag.is_empty() || !is_identifier(&entity.root_tag) {
-            return Err(format!("{PREFIX}: root_tag must be a non-empty identifier"));
         }
     }
     if entity.object_id.as_deref().unwrap_or("").trim().is_empty() {
         entity.object_id = Some(new_object_id());
     }
     if entity.game_id.as_deref().unwrap_or("").trim().is_empty() && entity.id != WORLD_ENTITY_ID {
-        let used: BTreeSet<String> = _index.entities.iter().filter_map(|e| e.game_id.clone()).collect();
-        entity.game_id = Some(default_game_id(&entity.root_tag, &entity.name, &used));
+        let used: BTreeSet<String> = index.entities.iter().filter_map(|e| e.game_id.clone()).collect();
+        entity.game_id = Some(default_game_id(&entity.name, &used));
     }
     normalize_optional_id(&mut entity.folder_id);
     normalize_optional_id(&mut entity.template_id);
     entity.created_at = Some(stored.and_then(|s| s.created_at).or(entity.created_at).unwrap_or_else(now_ms));
     entity.description = entity.description.trim().into();
+    entity.tags = trim_tags(&entity.tags);
+    validate_unique_traits(&entity.traits, &index.templates, "Entity validation failed")?;
+    for tag in &entity.tags {
+        if !index.gameplay_tags.iter().any(|registered| registered.name == *tag) {
+            return Err(format!("{PREFIX}: gameplay tag '{tag}' is not registered"));
+        }
+    }
     Ok(entity)
 }
+
+pub fn validate_unique_traits(traits: &[crate::contracts::TraitInstance], templates: &[TraitTemplateRecord], owner: &str) -> Result<(), String> {
+    let mut has_unique = false;
+    for (index, instance) in traits.iter().enumerate() {
+        let template = templates.iter().find(|template| template.id == instance.template_id)
+            .ok_or_else(|| format!("{owner}: unknown trait '{}'", instance.template_id))?;
+        if template.unique {
+            if has_unique {
+                return Err(format!("{owner}: only one unique trait may be applied"));
+            }
+            has_unique = true;
+        }
+        if !template.allow_multiple && traits[..index].iter().any(|previous| previous.template_id == instance.template_id) {
+            return Err(format!("{owner}: trait '{}' does not allow multiple instances", template.name));
+        }
+    }
+    Ok(())
+}
+
 pub fn validate_trait_properties(
     properties: &mut [TraitPropertyDefinition],
     prefix: &str,
-    _index: &WorkspaceIndex,
+    index: &WorkspaceIndex,
 ) -> Result<(), String> {
     let mut seen = BTreeSet::new();
     for definition in properties {
@@ -640,13 +638,13 @@ pub fn prepare_trait_template(
     stored: Option<&TraitTemplateRecord>,
     index: &WorkspaceIndex,
 ) -> Result<TraitTemplateRecord, String> {
-    const PREFIX: &str = "Trait template validation failed";
+    const PREFIX: &str = "Trait validation failed";
     let mut template: TraitTemplateRecord = serde_json::from_value(payload.clone())
         .map_err(|error| format!("{PREFIX}: {error}"))?;
     if let Some(previous) = stored {
         if previous.system && (template.id != previous.id || template.key != previous.key || !template.system
-            || template.allow_multiple != previous.allow_multiple || template.properties != previous.properties) {
-            return Err(format!("{PREFIX}: system trait templates are immutable"));
+            || template.allow_multiple != previous.allow_multiple || template.unique != previous.unique || template.properties != previous.properties) {
+            return Err(format!("{PREFIX}: system traits are immutable"));
         }
     } else {
         template.system = false;
@@ -1011,17 +1009,6 @@ fn check_item_folder(
 /// identity uniqueness, and cross-references.
 pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
     let mut issues = Vec::new();
-    for root in ["character", "location", "item", "fact", "other", "world"] {
-        if !content
-            .gameplay_tags
-            .iter()
-            .any(|tag| tag.name == root && tag.protected)
-        {
-            issues.push(format!(
-                "required protected root gameplay tag '{root}' is missing"
-            ));
-        }
-    }
     for spec in SYSTEM_TRAIT_TEMPLATES {
         let valid = content.trait_templates.iter().any(|template| {
             template.id == format!("system.{}", spec.key)
@@ -1029,6 +1016,7 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
                 && template.name == spec.name
                 && template.system
                 && template.allow_multiple == spec.allow_multiple
+                && !template.unique
                 && spec.properties.iter().all(|expected| {
                     template.properties.iter().any(|property| {
                         property.key() == expected.key
@@ -1037,9 +1025,9 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
                     })
                 })
         });
-        if !valid && (!crate::contracts::ADDITIVE_SYSTEM_TRAITS.contains(&spec.key) || content.trait_templates.iter().any(|template| template.id == format!("system.{}", spec.key))) {
+        if !valid {
             issues.push(format!(
-                "required system trait template '{}' is missing or incompatible",
+                "required system trait '{}' is missing or incompatible",
                 spec.key
             ));
         }
@@ -1047,10 +1035,7 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
     let world_entities: Vec<&EntityRecord> = content.entities.iter()
         .filter(|entity| entity.id == WORLD_ENTITY_ID).collect();
     if world_entities.len() != 1
-        || world_entities[0].root_tag != WORLD_ENTITY_ID
-        || world_entities[0].tags.iter().any(|tag| tag.eq_ignore_ascii_case(WORLD_ENTITY_ID))
-        || content.entity_templates.iter().any(|entity| entity.id == WORLD_ENTITY_ID
-            || entity.root_tag.eq_ignore_ascii_case(WORLD_ENTITY_ID))
+        || content.entity_templates.iter().any(|entity| entity.id == WORLD_ENTITY_ID)
     {
         issues.push("exactly one intrinsic world entity is required and world templates are forbidden".into());
     }
@@ -1064,6 +1049,7 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
         storylet_ids: content.storylets.iter().map(|storylet| storylet.id.clone()).collect(),
     };
     for entity in &content.entities {
+        if let Err(error) = validate_unique_traits(&entity.traits, &index.templates, &format!("entity '{}'", entity.name)) { issues.push(error); }
         let mut property_ids = BTreeSet::new();
         let mut property_keys = BTreeSet::new();
         for property in &entity.properties {
@@ -1157,7 +1143,7 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
         check_item_folder("entity template", "entity_templates", &entity.name, entity.folder_id.as_deref(), &index, &mut issues);
     }
     for template in &content.trait_templates {
-        check_item_folder("trait template", "trait_templates", &template.name, template.folder_id.as_deref(), &index, &mut issues);
+        check_item_folder("trait", "trait_templates", &template.name, template.folder_id.as_deref(), &index, &mut issues);
     }
     for asset in &content.assets {
         check_item_folder("asset", "assets", &asset.name, asset.folder_id.as_deref(), &index, &mut issues);
@@ -1173,42 +1159,31 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
     let mut object_ids = BTreeSet::new();
     let mut game_ids = BTreeSet::new();
     let mut registered_tags = BTreeSet::new();
-    let mut registered_roots = BTreeSet::new();
+
     for tag in &content.gameplay_tags {
         let name = tag.name.trim();
-        let valid_path = !name.is_empty()
-            && name.split('.').all(|segment| is_identifier(segment));
-        if !valid_path {
-            issues.push(format!("gameplay tag '{name}': name must be a dot-separated identifier path"));
+        if name.is_empty() {
+            issues.push("gameplay tag: name is required".into());
         }
         if !registered_tags.insert(name.to_ascii_lowercase()) {
             issues.push(format!("gameplay tag '{name}': duplicate tag name"));
         }
-        let root = name.split('.').next().unwrap_or_default();
-        if name == root && !root.is_empty() && !is_identifier(root) {
-            issues.push(format!("gameplay tag '{name}': root must be a valid identifier"));
-        }
-        if !name.contains('.') && !root.is_empty() && !registered_roots.insert(root.to_ascii_lowercase()) {
-            issues.push(format!("gameplay tag '{name}': duplicate root tag"));
-        }
     }
-    for tag in &content.gameplay_tags {
-        let name = tag.name.trim();
-        if let Some((root, _)) = name.split_once('.')
-            && !registered_roots.contains(&root.to_ascii_lowercase())
-        {
-            issues.push(format!("gameplay tag '{name}': root '{root}' is not registered"));
+    for entity in &content.entities {
+        for tag in &entity.tags {
+            if !content.gameplay_tags.iter().any(|registered| registered.name == *tag) {
+                issues.push(format!("intrinsic entity '{}': gameplay tag '{}' is not registered", entity.name, tag));
+            }
         }
     }
     for entity in &content.entity_templates {
         if !ids.insert(entity.id.clone()) {
             issues.push(format!("entity template '{}': duplicate entity id", entity.name));
         }
-        if entity.root_tag.trim().is_empty() || !is_identifier(&entity.root_tag) {
-            issues.push(format!("entity template '{}': root_tag must be a valid identifier", entity.name));
-        }
-        if let Err(error) = entity.validate_tags(&content.gameplay_tags) {
-            issues.push(format!("entity template '{}': {error}", entity.name));
+        for tag in &entity.tags {
+            if !content.gameplay_tags.iter().any(|registered| registered.name == *tag) {
+                issues.push(format!("entity template '{}': gameplay tag '{}' is not registered", entity.name, tag));
+            }
         }
         if entity.object_id.is_empty() {
             issues.push(format!("entity template '{}': object_id is required", entity.name));
@@ -1223,6 +1198,7 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
     }
 
     for entity in &content.entity_templates {
+        if let Err(error) = validate_unique_traits(&entity.traits, &index.templates, &format!("entity template '{}'", entity.name)) { issues.push(error); }
         let mut property_ids = BTreeSet::new();
         let mut property_keys = BTreeSet::new();
         for property in &entity.properties {
@@ -1268,11 +1244,6 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
             let Some(template) = index.templates.iter().find(|template| template.id == instance.template_id) else {
                 continue;
             };
-            let incompatible = (template.key == "character_settings" || template.key == "passion" || template.key == "passion_threshold" || template.key == "passion_link") && !entity.root_tag.eq_ignore_ascii_case("character")
-                || template.key == "location_settings" && !entity.root_tag.eq_ignore_ascii_case("location");
-            if incompatible {
-                issues.push(format!("entity '{}': trait '{}' is incompatible with root '{}'", entity.name, template.key, entity.root_tag));
-            }
             let mut properties = Vec::new();
             collect_template_properties(template, &index.templates, &mut BTreeSet::new(), &mut properties);
             for (key, value) in &instance.values {
@@ -1301,11 +1272,11 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
     }
     for template in &content.trait_templates {
         if template.name.trim().is_empty() {
-            issues.push("trait template: name is required".to_string());
+            issues.push("trait: name is required".to_string());
         }
         let mut candidate = template.clone();
-        if let Err(error) = validate_trait_properties(&mut candidate.properties, "trait template", &index) {
-            issues.push(format!("trait template '{}': {error}", template.name));
+        if let Err(error) = validate_trait_properties(&mut candidate.properties, "trait", &index) {
+            issues.push(format!("trait '{}': {error}", template.name));
         }
     }
 
@@ -1314,18 +1285,18 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
     for template in &content.trait_templates {
         if template.id.trim().is_empty() || !template_ids.insert(template.id.clone()) {
             issues.push(format!(
-                "trait template '{}': missing or duplicate template id",
+                "trait '{}': missing or duplicate template id",
                 template.name
             ));
         }
         if !is_identifier(&template.key) {
             issues.push(format!(
-                "trait template '{}': key '{}' must be an identifier",
+                "trait '{}': key '{}' must be an identifier",
                 template.name, template.key
             ));
         } else if !template_keys.insert(template.key.clone()) {
             issues.push(format!(
-                "trait template '{}': duplicate key '{}'",
+                "trait '{}': duplicate key '{}'",
                 template.name, template.key
             ));
         }
@@ -1341,14 +1312,40 @@ mod tests {
     use crate::contracts::TraitInstance;
 
     #[test]
+    fn unique_traits_are_limited_across_entity_kinds_and_repeated_instances() {
+        let templates: Vec<TraitTemplateRecord> = vec![
+            serde_json::from_value(json!({"id":"u","key":"unique","name":"Unique","unique":true,"allow_multiple":true,"properties":[]})).unwrap(),
+            serde_json::from_value(json!({"id":"n","key":"normal","name":"Normal","unique":false,"allow_multiple":true,"properties":[]})).unwrap(),
+        ];
+        let index = WorkspaceIndex { templates: templates.clone(), ..WorkspaceIndex::default() };
+        let payload = json!({"name":"Sample","traits":[{"template_id":"u"},{"template_id":"n"}]});
+        assert!(prepare_entity(&payload, None, &index).is_ok());
+        assert!(prepare_entity_record(&payload, None, &index).is_ok());
+        let duplicate = json!({"name":"Sample","traits":[{"template_id":"u"},{"template_id":"u"}]});
+        assert!(prepare_entity(&duplicate, None, &index).unwrap_err().contains("only one unique trait"));
+        assert!(prepare_entity_record(&duplicate, None, &index).unwrap_err().contains("only one unique trait"));
+        let repeated_non_unique = json!({"name":"Sample","traits":[{"template_id":"n"},{"template_id":"n"}]});
+        assert!(prepare_entity(&repeated_non_unique, None, &index).is_ok());
+        assert!(prepare_entity_record(&repeated_non_unique, None, &index).is_ok());
+
+        let mut toggled = templates.clone();
+        toggled.iter_mut().find(|template| template.id == "n").unwrap().unique = true;
+        let repeated_existing: Vec<TraitInstance> = serde_json::from_value(json!([
+            {"template_id":"n"},{"template_id":"n"}
+        ])).unwrap();
+        assert!(validate_unique_traits(&repeated_existing, &templates, "entity").is_ok());
+        assert!(validate_unique_traits(&repeated_existing, &toggled, "entity").unwrap_err().contains("only one unique trait"));
+    }
+
+    #[test]
     fn default_game_id_uses_pascal_case_and_deduplicates() {
         let empty = BTreeSet::new();
-        assert_eq!(default_game_id("character", "guard captain", &empty), "Chr_GuardCaptain");
-        assert_eq!(default_game_id("character", "  ", &empty), "Chr_Entity");
+        assert_eq!(default_game_id("guard captain", &empty), "Ent_GuardCaptain");
+        assert_eq!(default_game_id("  ", &empty), "Ent_Entity");
         let mut used = BTreeSet::new();
-        used.insert("Chr_Guard".to_string());
-        used.insert("Chr_Guard_2".to_string());
-        assert_eq!(default_game_id("character", "Guard", &used), "Chr_Guard_3");
+        used.insert("Ent_Guard".to_string());
+        used.insert("Ent_Guard_2".to_string());
+        assert_eq!(default_game_id("Guard", &used), "Ent_Guard_3");
     }
 
     #[test]
@@ -1368,8 +1365,7 @@ mod tests {
         let mut entity: EntityTemplateRecord = serde_json::from_value(json!({
             "id": "guard",
             "name": "Guard",
-            "root_tag": "character"
-        }))
+                    }))
         .unwrap();
         entity.traits.push(TraitInstance {
             id: "trait-instance".into(),
@@ -1383,12 +1379,41 @@ mod tests {
     }
 
     #[test]
+    fn trait_capabilities_overlap_without_adding_gameplay_tags_and_generic_entities_project() {
+        let templates: Vec<TraitTemplateRecord> = ["character", "location", "fact"]
+            .into_iter()
+            .map(|key| serde_json::from_value(json!({
+                "id": format!("system.{key}"), "key": key, "name": key,
+                "system": true, "allow_multiple": false, "properties": []
+            })).unwrap())
+            .chain(std::iter::once(serde_json::from_value(json!({
+                "id": "inventory.item", "key": "item", "name": "Inventory Item",
+                "allow_multiple": false, "properties": []
+            })).unwrap()))
+            .collect();
+        let world = default_world_entity();
+        let entities: Vec<EntityTemplateRecord> = vec![
+            json!({"id":"dual","name":"Dual","tags":["story.secret"],"traits":[
+                {"template_id":"system.character"},{"template_id":"system.location"}]}),
+            json!({"id":"generic","name":"Generic","tags":["quest.marker"]}),
+            json!({"id":"key","name":"Key","traits":[{"template_id":"inventory.item"}]}),
+        ].into_iter().map(|value| serde_json::from_value(value).unwrap()).collect();
+
+        let projected = runtime_records_with_world(&world, &entities, &templates);
+        let dual_character = projected.characters.iter().find(|row| row.id == "dual").unwrap();
+        let dual_location = projected.locations.iter().find(|row| row.id == "dual").unwrap();
+        assert_eq!(dual_character.id, dual_location.id);
+        assert_eq!(projected.entity_tag_seeds.iter().find(|(id, _)| id == "dual").unwrap().1, vec!["story.secret"]);
+        assert!(!projected.world_tags.iter().any(|tag| tag == "world"));
+        assert_eq!(projected.world_objects.iter().find(|row| row.id == "generic").unwrap().layer, WorldObjectLayer::Generic);
+        assert_eq!(projected.world_objects.iter().find(|row| row.id == "key").unwrap().layer, WorldObjectLayer::Item);
+    }
+    #[test]
     fn generic_projection_reports_unrepresentable_entity_properties() {
         let entity: EntityTemplateRecord = serde_json::from_value(json!({
             "id": "guard",
             "name": "Guard",
-            "root_tag": "character",
-            "properties": [{
+                        "properties": [{
                 "id": "trust",
                 "key": "trust",
                 "name": "Trust",

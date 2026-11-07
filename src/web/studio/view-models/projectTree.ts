@@ -2,7 +2,7 @@ import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { StudioApi } from "../api.ts";
 import type { AssetRecord, ContentRoot, EntityRecord, EntityTemplateRecord, FolderRecord, TraitTemplateRecord } from "../contracts.ts";
-import { newEntityTemplateDraft } from "../entityModel.ts";
+import { newEntityTemplateDraft, traitLabels } from "../entityModel.ts";
 import {
   buildTreeItems,
   CONTENT_ROOTS,
@@ -187,7 +187,7 @@ export function useProjectTree() {
           if (templates.length > 0) {
             const promptOptions = [
               "0. Empty Entity (no template)",
-              ...templates.map((t, i) => `${i + 1}. ${t.name} (${t.root_tag})`)
+              ...templates.map((t, i) => `${i + 1}. ${t.name} (${t.id}) ${traitLabels(t, studioState.traitTemplates).join(" · ")}`)
             ].join("\n");
             const choice = window.prompt(
               `Create an Entity:\nSelect an Entity Template to base it on, or 0 for an empty entity:\n${promptOptions}`,
@@ -206,7 +206,6 @@ export function useProjectTree() {
               id: "",
               template_id: chosenTemplate.id,
               name: `New ${chosenTemplate.name}`,
-              root_tag: chosenTemplate.root_tag,
               description: chosenTemplate.description || "",
               folder_id: folderId,
               thumbnail: chosenTemplate.thumbnail || null,
@@ -225,7 +224,6 @@ export function useProjectTree() {
               id: "",
               template_id: null,
               name: "New Entity",
-              root_tag: "character",
               description: "",
               folder_id: folderId,
               thumbnail: null,
@@ -241,7 +239,7 @@ export function useProjectTree() {
           return;
         }
         case "entity_templates": {
-          const saved = await StudioApi.saveContent<EntityTemplateRecord>("entity_templates", newEntityTemplateDraft(folderId, "character"));
+          const saved = await StudioApi.saveContent<EntityTemplateRecord>("entity_templates", newEntityTemplateDraft(folderId));
           if (!saved.id?.trim()) throw new Error("The server did not return an ID for the new entity template.");
           await refreshWorkspace(["entity_templates"]);
           router.push(`/entity-templates/${encodeURIComponent(saved.id)}`);
@@ -251,10 +249,11 @@ export function useProjectTree() {
           const saved = await StudioApi.saveContent<TraitTemplateRecord>("trait_templates", {
             id: "",
             key: "",
-            name: "New Trait Template",
+            name: "New Trait",
             description: "",
             folder_id: folderId,
             properties: [],
+            unique: false,
           });
           await refreshWorkspace(["trait_templates"]);
           router.push(`/trait-templates/${saved.id}`);
@@ -349,7 +348,6 @@ export function useProjectTree() {
       const world = studioState.entities.find((entity) => entity.id === "world") ?? {
         id: "world",
         name: "World",
-        root_tag: "world",
         description: "",
         tags: [],
         properties: [],
@@ -357,7 +355,7 @@ export function useProjectTree() {
       };
       const bundle = {
         format: "decision-narrative-project",
-        schema_version: 5,
+        schema_version: 6,
         project: {
           id: `project-${Date.now()}`,
           name: chosenName.trim(),

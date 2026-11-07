@@ -13,10 +13,16 @@ export function buildTagIndex(input: TagIndexInput): TagEntry[] {
   const map = new Map<string, TagEntry>();
   for (const tag of input.gameplayTags) { const name = tag.name.trim(); if (name && !name.includes("..") && !name.startsWith(".") && !name.endsWith(".")) map.set(normalizeTagName(name), { kind: "gameplay", name, references: [], registered: true, protected: tag.protected }); }
   const add = (raw: unknown, ref: TagReference) => { if (typeof raw !== "string") return; const name = raw.trim(); if (!name || name.includes("..") || name.startsWith(".") || name.endsWith(".")) return; const key = normalizeTagName(name); const entry = map.get(key) ?? { kind: "gameplay" as const, name, references: [], registered: false, protected: false }; map.set(key, entry); const rk = `${ref.entityType}:${ref.entityId}`; if (!entry.references.some((r) => `${r.entityType}:${r.entityId}` === rk)) entry.references.push(ref); };
-  for (const entity of input.entities) { const ref = { entityId: entity.id, entityType: "entity" as const, entityLabel: entity.name || entity.id, detail: "Intrinsic entity" }; add(entity.root_tag, { ...ref, detail: "Root tag" }); for (const tag of uniqueTagNames(entity.tags)) add(tag, { ...ref, detail: "Entity tag" }); }
+  for (const entity of input.entities) {
+    const ref = { entityId: entity.id, entityType: "entity" as const, entityLabel: entity.name || entity.id, detail: "Entity" };
+    for (const tag of uniqueTagNames(entity.tags)) add(tag, { ...ref, detail: "Entity tag" });
+    for (const trait of entity.traits ?? []) {
+      const value = object(trait.values)?.role;
+      if (typeof value === "string") add(value, { ...ref, detail: "Character role" });
+    }
+  }
   for (const entity of input.entityTemplates) {
     const ref = { entityId: entity.id, entityType: "entity_template" as const, entityLabel: entity.name || entity.id, detail: "Entity Template" };
-    add(entity.root_tag, { ...ref, detail: "Root tag" });
     for (const tag of uniqueTagNames(entity.tags)) add(tag, { ...ref, detail: "Entity tag" });
     for (const trait of entity.traits ?? []) {
       const value = object(trait.values)?.role;

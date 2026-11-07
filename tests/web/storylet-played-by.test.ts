@@ -3,7 +3,7 @@ import { participantOptions, togglePlayedBy } from "../../src/web/studio/storyle
 import type { EntityTemplateRecord } from "../../src/web/studio/contracts.ts";
 
 const entity = (id: string, traits: string[] = []) =>
-  ({ id, name: id.toUpperCase(), root_tag: "character", traits: traits.map((template_id) => ({ id: "t", template_id, values: {} })) }) as unknown as EntityTemplateRecord;
+  ({ id, name: id.toUpperCase(), traits: traits.map((template_id) => ({ id: "t", template_id, values: {} })) }) as unknown as EntityTemplateRecord;
 
 test("participantOptions lists only entities with the participant trait, by name", () => {
   const options = participantOptions([entity("rosa", ["system.participant"]), entity("crate"), entity("anna", ["system.participant"])]);

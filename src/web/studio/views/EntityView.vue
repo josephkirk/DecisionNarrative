@@ -2,8 +2,8 @@
 import { computed, onMounted, ref } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import type { EntityProperty, PropertyDefinition, TraitInstance } from "../contracts.ts";
-import { rootTagColor, rootTagLabel } from "../entityModel.ts";
-import { studioState } from "../state.ts";
+import { traitEditProblem, traitLabels } from "../entityModel.ts";
+import { notify, studioState } from "../state.ts";
 import { useEntityEditor } from "../view-models/entityEditor.ts";
 import PropertyValueInput from "../components/PropertyValueInput.vue";
 import PropertyListEditor from "../components/PropertyListEditor.vue";
@@ -22,17 +22,21 @@ const parentTemplate = computed(() => {
   return tid ? studioState.entityTemplates.find((t) => t.id === tid) : undefined;
 });
 const pendingTraitId = ref("");
-const availableTemplates = computed(() => studioState.traitTemplates.filter((t) => t.allow_multiple || !(draft.value?.traits ?? []).some((i) => i.template_id === t.id)));
+const availableTemplates = computed(() => studioState.traitTemplates.filter((t) => {
+  const traits = draft.value?.traits ?? [];
+  if (!t.allow_multiple && traits.some((instance) => instance.template_id === t.id)) return false;
+  return !t.unique || !traits.some((instance) => studioState.traitTemplates.some((applied) => applied.id === instance.template_id && applied.unique));
+}));
 const appliedTraits = computed(() => (draft.value?.traits ?? []).map((instance: TraitInstance) => ({ instance, template: studioState.traitTemplates.find((t) => t.id === instance.template_id) })).filter((e) => e.template));
-const rootOptions = computed(() => studioState.gameplayTags.filter((tag) => !tag.name.includes(".") && tag.name.toLowerCase() !== "world").map((tag) => tag.name));
-function selectRoot(value: string) { if (draft.value && value !== draft.value.root_tag) patch({ root_tag: value }); }
+const hasAppliedUniqueTrait = computed(() => appliedTraits.value.some((entry) => entry.template?.unique));
+const appliedTraitLabels = computed(() => draft.value ? traitLabels(draft.value, studioState.traitTemplates) : []);
 const characterRoleOptions = computed<string[]>(() => studioState.gameplayTags.filter((tag) => tag.name.startsWith("character.")).map((tag) => tag.name));
 function roleTagOptions(templateKey: string | undefined, propertyKey: string): string[] | undefined {
   return templateKey === "character_settings" && propertyKey === "role" ? characterRoleOptions.value : undefined;
 }
 function updateProperties(rows: Array<EntityProperty | PropertyDefinition>) { patch({ properties: rows as EntityProperty[] }); }
 function updateTags(value: string | string[]) { patch({ tags: Array.isArray(value) ? value : value ? [value] : [] }); }
-function addSelectedTrait() { const template = studioState.traitTemplates.find((t) => t.id === pendingTraitId.value); if (!template) return; addTrait(template); pendingTraitId.value = ""; }
+function addSelectedTrait() { const template = studioState.traitTemplates.find((t) => t.id === pendingTraitId.value); if (!template) return; if (addTrait(template)) pendingTraitId.value = ""; }
 async function onDelete() {
   const targetLabel = isEntityRoute ? "entity" : "entity template";
   if (draft.value?.id === "world" || !window.confirm(`Delete this ${targetLabel}?`)) return;
@@ -67,22 +71,27 @@ function onTemplateChange(newTemplateId: string) {
     }
   }
 
-  const existingTraits = new Map((draft.value.traits ?? []).map((t) => [t.template_id, t]));
+  const existingTraits = [...(draft.value.traits ?? [])];
+  const consumed = new Set<number>();
   const mergedTraits = template.traits.map((tt) => {
-    const existing = existingTraits.get(tt.template_id);
-    return existing
-      ? { ...tt, id: existing.id || crypto.randomUUID(), values: { ...tt.values, ...existing.values } }
-      : { ...JSON.parse(JSON.stringify(tt)), id: crypto.randomUUID() };
-  });
-  for (const [tid, tr] of existingTraits.entries()) {
-    if (!template.traits.some((tt) => tt.template_id === tid)) {
-      mergedTraits.push(tr);
+    const existingIndex = existingTraits.findIndex((trait, index) => !consumed.has(index) && trait.template_id === tt.template_id);
+    if (existingIndex >= 0) {
+      consumed.add(existingIndex);
+      const existing = existingTraits[existingIndex];
+      return { ...tt, id: existing.id || crypto.randomUUID(), values: { ...tt.values, ...existing.values } };
     }
+    return { ...JSON.parse(JSON.stringify(tt)), id: crypto.randomUUID() };
+  });
+  existingTraits.forEach((trait, index) => { if (!consumed.has(index)) mergedTraits.push(trait); });
+
+  const traitProblem = traitEditProblem(mergedTraits, studioState.traitTemplates);
+  if (traitProblem) {
+    notify(`${traitProblem} The template was not applied.`, "error");
+    return;
   }
 
   patch({
     template_id: template.id,
-    root_tag: template.root_tag,
     tags: mergedTags,
     properties: mergedProps as EntityProperty[],
     traits: mergedTraits,
@@ -125,10 +134,8 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
           </div>
 
           <div class="entity-subtitle-row">
-            <span class="entity-type-label" :style="{ color: rootTagColor(draft.root_tag) }">
-              <span class="entity-status-dot" :style="{ backgroundColor: rootTagColor(draft.root_tag) }"></span>
-              {{ rootTagLabel(draft.root_tag) }}
-            </span>
+            <span v-if="appliedTraitLabels.length" class="entity-type-label">{{ appliedTraitLabels.join(" · ") }}</span>
+            <span v-else class="entity-standalone-text">No traits</span>
             <span class="entity-bullet-sep">•</span>
             <span v-if="parentTemplate" class="entity-parent-link">
               Template: <router-link :to="`/entity-templates/${parentTemplate.id}`">{{ parentTemplate.name }}</router-link>
@@ -158,7 +165,7 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
     <!-- Tab Navigation matching Image #2 -->
     <nav class="entity-tabs" aria-label="Entity sections">
       <button :class="['entity-tab', activeTab === 'properties' && 'is-active']" @click="activeTab = 'properties'">
-        <svg class="tab-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg aria-hidden="true" class="tab-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="3" y1="6" x2="21" y2="6"/>
           <line x1="3" y1="12" x2="21" y2="12"/>
           <line x1="3" y1="18" x2="21" y2="18"/>
@@ -197,6 +204,7 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
         </div>
         <div class="archetype-control-row">
           <select
+            aria-label="Entity template"
             class="form-select archetype-select"
             :value="templateId ?? ''"
             @change="onTemplateChange(($event.target as HTMLSelectElement).value)"
@@ -207,22 +215,12 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
               :key="template.id"
               :value="template.id"
             >
-              {{ template.name }} ({{ template.root_tag }})
+              {{ template.name }}
             </option>
           </select>
           <span class="archetype-hint">
-            {{ parentTemplate ? `Subclassing archetype '${parentTemplate.name}'. Copies root tag, properties, and trait schemas.` : 'Choose an Entity Template to seed traits and properties.' }}
+            {{ parentTemplate ? `Subclassing archetype '${parentTemplate.name}'. Copies properties and trait schemas.` : 'Choose an Entity Template to seed traits and properties.' }}
           </span>
-        </div>
-      </div>
-
-      <!-- Root category if standalone or template -->
-      <div v-if="!parentTemplate && !intrinsic" class="content-block" style="padding: 12px 16px;">
-        <div style="display:flex; align-items:center; gap:12px;">
-          <span class="block-title" style="margin:0;">Root entity type</span>
-          <select class="form-select" style="max-width:220px; height:32px;" :value="draft.root_tag" :disabled="!rootOptions.length" @change="selectRoot(($event.target as HTMLSelectElement).value)">
-            <option v-for="tag in rootOptions" :key="tag" :value="tag">{{ rootTagLabel(tag) }} ({{ tag }})</option>
-          </select>
         </div>
       </div>
 
@@ -276,13 +274,14 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
 
     <section v-else-if="activeTab === 'traits'" class="editor-column">
       <div v-if="!intrinsic" class="trait-add">
-        <select v-model="pendingTraitId" class="form-select">
-          <option value="">Choose trait template…</option>
+        <select v-model="pendingTraitId" class="form-select" aria-label="Trait to add">
+          <option value="">Choose trait…</option>
           <option v-for="template in availableTemplates" :key="template.id" :value="template.id">{{ template.name }}</option>
         </select>
         <button class="btn btn-secondary" :disabled="!pendingTraitId" @click="addSelectedTrait">Add</button>
       </div>
-      <div v-else-if="!appliedTraits.length" class="form-hint" style="color:var(--text-muted); margin-bottom:12px;">
+      <p v-if="hasAppliedUniqueTrait" class="form-hint" style="margin:0 0 12px;">This entity already has a unique trait. Remove it before adding another unique trait.</p>
+      <div v-if="intrinsic && !appliedTraits.length" class="form-hint" style="color:var(--text-muted); margin-bottom:12px;">
         No traits applied to intrinsic entity.
       </div>
       <details v-for="entry in appliedTraits" :key="entry.instance.id" class="trait-card" open>
@@ -294,9 +293,9 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
               :model-value="traitPropertyDisplayValue(entry.instance, property)"
               :type="property.type"
               :is-array="property.is_array"
-              :tag-options="roleTagOptions(entry.template?.key, property.key)"
+              :tag-options="roleTagOptions(entry.template?.key ?? entry.template?.id, property.key)"
               :selection-only="entry.template?.key === 'character_settings' && property.key === 'role'"
-              :root-filter="entry.template?.key === 'character_settings' && (property.key === 'home_location' || property.key === 'current_location') ? 'location' : undefined"
+              :trait-key-filter="entry.template?.key === 'character_settings' && (property.key === 'home_location' || property.key === 'current_location') ? 'location' : undefined"
               :disabled="intrinsic"
               @update:model-value="setTraitValue(entry.instance.id, property.key, $event)"
             />
@@ -385,7 +384,6 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
   border: 1px solid transparent;
   border-radius: var(--radius-sm, 4px);
   padding: 2px 6px;
-  outline: none;
   letter-spacing: -0.01em;
   max-width: 380px;
   width: 100%;
@@ -397,7 +395,7 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
   background: var(--bg-input);
 }
 
-.entity-hero-input:focus {
+.entity-hero-input:focus-visible {
   border-color: var(--accent);
   background: var(--bg-input);
   box-shadow: 0 0 0 1px var(--accent-subtle);
@@ -631,12 +629,11 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
   width: 100%;
   max-width: 75ch;
   min-height: 84px;
-  outline: none;
   resize: vertical;
   transition: border-color 0.15s ease;
 }
 
-.lore-textarea:focus {
+.lore-textarea:focus-visible {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent-subtle);
 }

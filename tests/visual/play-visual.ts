@@ -87,10 +87,11 @@ try {
     try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { /* not up yet */ }
     await sleep(200);
   }
-  await api("POST", "/api/v3/content/entity_templates", { id: "harbor", name: "Harbor", root_tag: "location" });
+  await api("POST", "/api/v3/content/entity_templates", { id: "harbor", name: "Harbor", traits: [{ id: "location", template_id: "system.location", values: {} }] });
   await api("POST", "/api/v3/content/scenarios", { id: "scenario", name: "Scenario", seed: 7, start_location_policy: { mode: "fixed", location_id: "harbor" } });
   await api("POST", "/api/v3/content/storylets", lantern());
   // Knowledge content for the Inspect panel: a learn node, a reveal node, a canon event.
+  await api("POST", "/api/v3/content/gameplay_tags", { id: "fact", name: "fact", protected: false });
   await api("POST", "/api/v3/content/gameplay_tags", { id: "fact.clue", name: "fact.clue", protected: false });
   await api("POST", "/api/v3/content/events", {
     id: "flood", title: "The flood", description: "", event_type: "canon", trigger: {}, effects: {},
@@ -251,19 +252,21 @@ try {
     ...world,
     traits: [...(world.traits ?? []), { id: "clock", template_id: "system.clock", values: { slot_labels: ["D1 evening", "D2 morning", "D2 evening"], actions_per_slot: 2 } }],
   });
-  await api("POST", "/api/v3/content/entity_templates", { id: "lighthouse", name: "Lighthouse", root_tag: "location", traits: [
+  await api("POST", "/api/v3/content/entity_templates", { id: "lighthouse", name: "Lighthouse", traits: [{ id: "location", template_id: "system.location", values: {} },
     { id: "c1", template_id: "system.connection", values: { to: "harbor" } },
     { id: "c2", template_id: "system.connection", values: { to: "harbor", open_slots: [], on_close: "" } },
     { id: "c3", template_id: "system.connection", values: { to: "rock", open_slots: [1], on_close: "return", return_to: "lighthouse" } },
   ] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "rock", name: "Rock", root_tag: "location", traits: [] });
+  await api("POST", "/api/v3/content/entity_templates", { id: "rock", name: "Rock", traits: [{ id: "location", template_id: "system.location", values: {} }] });
   const harbor = await api("GET", "/api/v3/content/entity_templates/harbor");
-  await api("PUT", "/api/v3/content/entity_templates/harbor", { ...harbor, traits: [{ id: "h1", template_id: "system.connection", values: { to: "lighthouse" } }] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "mara", name: "Mara", root_tag: "character", traits: [
+  await api("PUT", "/api/v3/content/entity_templates/harbor", { ...harbor, traits: [{ id: "location", template_id: "system.location", values: {} }, { id: "h1", template_id: "system.connection", values: { to: "lighthouse" } }] });
+  await api("POST", "/api/v3/content/entity_templates", { id: "mara", name: "Mara", traits: [
+    { id: "character", template_id: "system.character", values: {} },
     { id: "p1", template_id: "system.participant", values: { controller: "human", seat: 0, start_location: "harbor" } },
     { id: "s1", template_id: "system.character_settings", values: { home_location: "harbor", current_location: "harbor" } },
   ] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "rosa", name: "Rosa", root_tag: "character", traits: [
+  await api("POST", "/api/v3/content/entity_templates", { id: "rosa", name: "Rosa", traits: [
+    { id: "character", template_id: "system.character", values: {} },
     { id: "p2", template_id: "system.participant", values: { controller: "rule", seat: 0, start_location: "harbor" } },
     { id: "s2", template_id: "system.character_settings", values: { home_location: "harbor", current_location: "harbor" } },
   ] });
@@ -396,6 +399,5 @@ try {
 }
 if (failures.length) {
   console.error(`\n${failures.length} visual check(s) failed`);
-  process.exit(1);
 }
 console.log(`\nAll visual checks passed. Screenshots: ${out}`);

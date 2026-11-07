@@ -304,13 +304,13 @@ mod tests {
         let mut state = WorldStateTable::new();
         state.vertices.push(WorldVertex {
             vertex_id: "actor".into(),
-            layer: GraphLayer::Character,
+            layers: GraphLayer::Character.into(),
             entity_index: Some(1),
             attributes: Default::default(),
         });
         state.vertices.push(WorldVertex {
             vertex_id: "key".into(),
-            layer: GraphLayer::Item,
+            layers: GraphLayer::Item.into(),
             entity_index: Some(2),
             attributes: [("quantity".into(), AttributeValue::Int(3))].into(),
         });
@@ -383,3 +383,4 @@ mod tests {
         assert_eq!(rebuilt, incremental);
     }
 }
+

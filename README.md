@@ -32,16 +32,16 @@ bun run play
 
 On Windows you can run `run.bat` (or `run.bat fresh`) instead, which stops any previous server, installs dependencies if needed, then builds and starts the service.
 
-Open `http://127.0.0.1:3000` in your browser (e.g. Microsoft Edge, Chrome, Safari). `bun run play` uses `data/storylet_studio_v5.db`; set `STORYLET_STUDIO_DB_PATH` to select a different file or `:memory:` for isolated testing.
+Open `http://127.0.0.1:3000` in your browser (e.g. Microsoft Edge, Chrome, Safari). `bun run play` uses `data/storylet_studio_v6.db`; set `STORYLET_STUDIO_DB_PATH` to select a different file or `:memory:` for isolated testing.
 
-`bun run play:fresh` opens the separate `data/storylet_studio_v5_clean.db` workspace and binds on port 3001; it does not modify the default database. Earlier schema versions are rejected without migration. The MCP process inherits `STORYLET_STUDIO_DB_PATH` when the agent client passes it through.
+`bun run play:fresh` opens the separate `data/storylet_studio_v6_clean.db` workspace and binds on port 3001; it does not modify the default database. Earlier schema versions are rejected without migration. The MCP process inherits `STORYLET_STUDIO_DB_PATH` when the agent client passes it through.
 
 ## Environment configuration
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
 | `STORYLET_STUDIO_ADDR` | `127.0.0.1:3000` | HTTP service bind address (`play:fresh` defaults to port 3001) |
-| `STORYLET_STUDIO_DB_PATH` | `data/storylet_studio_v5.db` | Unified SQLite database file path |
+| `STORYLET_STUDIO_DB_PATH` | `data/storylet_studio_v6.db` | Unified SQLite database file path |
 
 No AI service or model-provider environment variables are required.
 
@@ -60,6 +60,12 @@ cargo test --manifest-path crates/storylet-engine/Cargo.toml
 cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 ```
 
+### Local pull-request reviews
+
+On this Windows workstation, install the optional review hook with `cp .githooks/pre-push .git/hooks/pre-push`. Preserve or merge any existing `pre-push` hook first. The hook requires Bun, Node.js, Git, an authenticated `gh` CLI, and Codex CLI signed in with ChatGPT; it does not use `OPENAI_API_KEY`.
+
+Each push queues a detached review of the pushed commit for its open GitHub pull request. Reviews run in an isolated temporary checkout and are posted as PR comments. Pushes are not blocked if review fails; inspect `%LOCALAPPDATA%\DecisionNarrative\local-review\review.log` for failures. Bypassing Git hooks skips the review.
+
 ## Authoring and Starting Scenarios
 
 - **Storylet Library**: Browsable card grid with responsive columns (60 cards per page), search by title/text/group tag, status filters (Approved/Draft), location-tag filters, and ending badges. Storylets may target location tags; with no location tags they are not location-gated. With tags, they are eligible anywhere the current location shares at least one tag. Clicking any card opens the full-width graph editor.
@@ -73,7 +79,7 @@ cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 - **Coverage Explorer**: `workspace.coverage` / `/api/v4/coverage` deterministically explores the compiled project by replaying runs, so unreachable content can be found without hand-playing.
 - **Participants & Knowledge**: Characters act through storylets on the world clock. Knowledge is tracked per participant with provenance, co-presence witnesses what happens, and `Reveal` nodes tell canon chronicle events to chosen participants.
 - **Project Authoring Aids**: Storylets can carry time windows and participant badges; world connections and the clock are authored as system traits and validated.
-- **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v5) containing entities, entity templates, folders, traits, assets, storylets, and scenarios, with transactional validation. Earlier bundle schemas are rejected; use a fresh schema-v5 database rather than migrating a legacy database.
+- **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v6) containing entities, entity templates, folders, traits, assets, storylets, and scenarios, with transactional validation. Earlier bundle schemas are rejected; use a fresh schema-v6 database rather than migrating a legacy database.
 
 ## Plugins
 

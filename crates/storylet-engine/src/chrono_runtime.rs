@@ -5766,13 +5766,13 @@ mod tests {
         let mut state = WorldStateTable::with_capacity(1);
         state.vertices.push(WorldVertex {
             vertex_id: "fact.old".into(),
-            layer: GraphLayer::Fact,
+            layers: GraphLayer::Fact.into(),
             entity_index: None,
             attributes: BTreeMap::new(),
         });
         state.vertices.push(WorldVertex {
             vertex_id: "fact.obsolete".into(),
-            layer: GraphLayer::Fact,
+            layers: GraphLayer::Fact.into(),
             entity_index: None,
             attributes: BTreeMap::new(),
         });
@@ -6120,3 +6120,6 @@ mod tests {
         assert!(context.state.global_tags.is_empty());
     }
 }
+
+
+

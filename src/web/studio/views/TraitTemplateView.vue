@@ -34,7 +34,7 @@ const propertiesProblem = computed(() => {
 const usedBy = computed(() =>
   studioState.entityTemplates.filter((entity) => entity.traits.some((trait) => trait.template_id === templateId)),
 );
-// Included trait templates
+// Included traits
 const includedTemplates = computed(() => {
   const ids = draft.value?.includes ?? [];
   return ids
@@ -121,6 +121,7 @@ async function load() {
   try {
     const template = await StudioApi.getContent<TraitTemplateRecord>("trait_templates", templateId);
     if (!template.properties) template.properties = [];
+    if (template.unique === undefined) template.unique = false;
     if (!template.includes) {
       template.includes = [];
     }
@@ -143,7 +144,7 @@ async function save() {
     draft.value = saved;
     savedJson.value = JSON.stringify(saved);
     await refreshWorkspace(["trait_templates", "entity_templates"]);
-    notify(`Trait template '${saved.name}' saved`, "success");
+    notify(`Trait '${saved.name}' saved`, "success");
   } catch (error) {
     notify(error instanceof Error ? error.message : String(error), "error");
   } finally {
@@ -153,11 +154,11 @@ async function save() {
 
 async function remove() {
   if (!draft.value) return;
-  if (!window.confirm(`Delete trait template '${draft.value.name}'?`)) return;
+  if (!window.confirm(`Delete trait '${draft.value.name}'?`)) return;
   try {
     await StudioApi.deleteContent("trait_templates", templateId);
     await refreshWorkspace(["trait_templates"]);
-    notify("Trait template deleted", "success");
+    notify("Trait deleted", "success");
     const folderId = draft.value.folder_id ?? null;
     router.push(folderId ? `/browse/trait_templates/${folderId}` : "/browse/trait_templates");
   } catch (error) {
@@ -179,7 +180,7 @@ onBeforeRouteUpdate(confirmDiscard);
 <template>
   <div style="display:flex; flex-direction:column; height:100%;">
     <header class="view-header">
-      <h1 class="view-title">{{ draft?.name ?? "Trait Template" }}</h1>
+      <h1 class="view-title">{{ draft?.name ?? "Trait" }}</h1>
       <div style="display:flex; gap:8px;">
         <button class="btn btn-secondary" :disabled="saving || !dirty || !!propertiesProblem" :title="propertiesProblem ?? 'Save'" @click="save">Save</button>
         <button class="btn btn-danger" :disabled="saving || !draft" @click="remove">Delete</button>
@@ -187,7 +188,7 @@ onBeforeRouteUpdate(confirmDiscard);
     </header>
 
     <div v-if="!draft" class="view-content" style="padding:40px; color:var(--text-muted);">
-      Loading trait template…
+      Loading trait…
     </div>
 
     <div v-else class="view-content editor-surface">
@@ -197,8 +198,8 @@ onBeforeRouteUpdate(confirmDiscard);
           <input class="form-input" :value="draft.name" @input="patch({ name: ($event.target as HTMLInputElement).value })" />
         </div>
         <div class="form-group">
-          <label class="form-label">Key</label>
-          <input class="form-input" :value="draft.key" placeholder="Generated from the name" @input="patch({ key: ($event.target as HTMLInputElement).value })" />
+          <label class="form-label" for="trait-key">Key</label>
+          <input id="trait-key" class="form-input" aria-label="Key" :value="draft.key" placeholder="Generated from the name" @input="patch({ key: ($event.target as HTMLInputElement).value })" />
           <span class="form-hint">Runtime attribute prefix: trait.&lt;Key&gt;.&lt;property_key&gt;. A generated key follows the template name until you edit it.</span>
         </div>
         <div class="form-group">
@@ -210,18 +211,25 @@ onBeforeRouteUpdate(confirmDiscard);
             @input="patch({ description: ($event.target as HTMLTextAreaElement).value })"
           ></textarea>
         </div>
+        <div class="form-group">
+          <label class="form-label" for="trait-unique">Unique trait</label>
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input id="trait-unique" type="checkbox" :checked="draft.unique ?? false" @change="patch({ unique: ($event.target as HTMLInputElement).checked })" />
+            <span>Only one unique trait may be applied to an entity</span>
+          </label>
+        </div>
 
-        <!-- INCLUDED TRAIT TEMPLATES -->
+        <!-- INCLUDED TRAITS -->
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:24px; margin-bottom:8px;">
-          <h3 class="editor-heading" style="margin:0;">Included Trait Templates</h3>
+          <h3 class="editor-heading" style="margin:0;">Included Traits</h3>
         </div>
         <div class="form-hint" style="margin-bottom:8px;">
-          Compose other trait templates into this template. Inherits their typed properties automatically without cyclic dependencies.
+          Compose other traits into this trait. Inherits their typed properties automatically without cyclic dependencies.
         </div>
 
         <div style="display:flex; gap:8px; margin-bottom:12px;">
-          <select v-model="pendingIncludeId" class="form-select" style="flex:1;">
-            <option value="">Choose a trait template to include…</option>
+          <select v-model="pendingIncludeId" class="form-select" style="flex:1;" aria-label="Trait to include">
+            <option value="">Choose a trait to include…</option>
             <option v-for="t in availableIncludes" :key="t.id" :value="t.id">
               {{ t.name }} ({{ t.properties.length }} properties)
             </option>
@@ -232,7 +240,7 @@ onBeforeRouteUpdate(confirmDiscard);
         </div>
 
         <div v-if="!includedTemplates.length" class="form-hint" style="margin-bottom:16px;">
-          No other trait templates included yet.
+          No other traits included yet.
         </div>
         <div v-else style="display:flex; flex-direction:column; gap:6px; margin-bottom:16px;">
           <div
@@ -245,8 +253,8 @@ onBeforeRouteUpdate(confirmDiscard);
               <span class="badge" style="font-size:10px;">{{ inc.properties.length }} properties</span>
               <router-link :to="`/trait-templates/${inc.id}`" style="font-size:12px; color:var(--accent);">View</router-link>
             </div>
-            <button class="btn btn-danger" type="button" style="padding:2px 6px; font-size:11px;" @click="removeInclude(inc.id)">
-              ✕
+            <button class="btn btn-danger" type="button" style="padding:2px 6px; font-size:11px;" :aria-label="`Remove ${inc.name}`" @click="removeInclude(inc.id)">
+              Remove
             </button>
           </div>
         </div>

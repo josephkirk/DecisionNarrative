@@ -1,8 +1,8 @@
 @echo off
 setlocal
 rem Build the studio frontend and run the local service.
-rem   run.bat          -> default database (data\storylet_studio_v5.db), http://127.0.0.1:3000
-rem   run.bat fresh    -> clean database (data\storylet_studio_v5_clean.db), port 3001
+rem   run.bat          -> default database (data\storylet_studio_v6.db), http://127.0.0.1:3000
+rem   run.bat fresh    -> clean database (data\storylet_studio_v6_clean.db), port 3001
 rem Stops any active server from a previous run before starting.
 cd /d "%~dp0"
 

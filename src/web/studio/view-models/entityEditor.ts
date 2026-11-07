@@ -2,8 +2,8 @@ import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
 import { StudioApi } from "../api.ts";
 import type { ContentReference, EntityRecord, EntityTemplateRecord, PropertyValue, TraitInstance, TraitPropertyDefinition, TraitTemplateRecord } from "../contracts.ts";
-import { newTraitInstance } from "../entityModel.ts";
-import { notify } from "../state.ts";
+import { newTraitInstance, uniqueTraitProblem } from "../entityModel.ts";
+import { notify, studioState } from "../state.ts";
 import { refreshWorkspace, currentFolderId } from "./workspace.ts";
 /** Built-in tabs, or `plugin:<panel id>` for an entity panel contributed by a plugin. */
 export type EntityTab = "properties" | "traits" | "references" | `plugin:${string}`;
@@ -16,11 +16,20 @@ export function useEntityEditor(entityId: string) {
   async function load() { loading.value = true; try { if (isEntityRoute) await refreshWorkspace(["entity_templates"]); draft.value = await StudioApi.getContent<EntityTemplateRecord | EntityRecord>(isEntityRoute ? "entities" : "entity_templates", entityId); savedJson.value = JSON.stringify(draft.value); await loadReferences(); } catch (error) { notify(error instanceof Error ? error.message : "Unable to load entity", "error"); } finally { loading.value = false; } }
   function patch(changes: Partial<EntityTemplateRecord & EntityRecord>) { if (draft.value) draft.value = { ...draft.value, ...changes } as EntityTemplateRecord | EntityRecord; }
   function addTrait(template: TraitTemplateRecord) {
-    if (!draft.value || (!template.allow_multiple && draft.value.traits.some((trait) => trait.template_id === template.id))) return;
+    if (!draft.value) return false;
+    if (!template.allow_multiple && draft.value.traits.some((trait) => trait.template_id === template.id)) {
+      notify(`The ${template.name} trait is already applied.`, "error");
+      return false;
+    }
+    if (template.unique && uniqueTraitProblem([...draft.value.traits, { id: "", template_id: template.id, values: {} }], [...studioState.traitTemplates.filter((item) => item.id !== template.id), template])) {
+      notify("An entity can have only one unique trait. Remove the existing unique trait before adding another.", "error");
+      return false;
+    }
     const existingIds = new Set(draft.value.traits.map((trait) => trait.id));
     let instance = newTraitInstance(template);
     while (existingIds.has(instance.id)) instance = newTraitInstance(template);
     draft.value = { ...draft.value, traits: [...draft.value.traits, instance] };
+    return true;
   }
   function removeTrait(instanceId: string) { if (draft.value) draft.value = { ...draft.value, traits: draft.value.traits.filter((t) => t.id !== instanceId) }; }
   function setTraitValue(instanceId: string, key: string, value: PropertyValue) { if (!draft.value) return; draft.value = { ...draft.value, traits: draft.value.traits.map((t) => t.id === instanceId ? { ...t, values: { ...t.values, [key]: value } } : t) }; }

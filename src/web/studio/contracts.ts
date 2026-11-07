@@ -198,7 +198,7 @@ export interface TraitPropertyDefinition extends PropertyDefinition { min?: numb
 export interface TraitTemplateRecord {
   id: string; key: string; key_auto?: boolean; name: string; description?: string;
   folder_id?: string | null; includes?: string[]; properties: TraitPropertyDefinition[];
-  allow_multiple?: boolean; system?: boolean; created_at?: number;
+  allow_multiple?: boolean; unique?: boolean; system?: boolean; created_at?: number;
 }
 export interface GameplayTagRecord {
   id: string;
@@ -213,7 +213,6 @@ export interface EntityTemplateRecord {
   game_id: string;
   game_id_auto?: boolean;
   name: string;
-  root_tag: string;
   description?: string;
   thumbnail?: string | null;
   folder_id?: string | null;
@@ -230,7 +229,6 @@ export interface EntityRecord {
   game_id?: string;
   game_id_auto?: boolean;
   name: string;
-  root_tag: string;
   description?: string;
   thumbnail?: string | null;
   folder_id?: string | null;

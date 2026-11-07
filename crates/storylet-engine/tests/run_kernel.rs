@@ -398,25 +398,25 @@ fn movement_requires_a_connected_location() {
     w.vertices = vec![
         WorldVertex {
             vertex_id: "a".into(),
-            layer: GraphLayer::Location,
+            layers: GraphLayer::Location.into(),
             entity_index: Some(0),
             ..Default::default()
         },
         WorldVertex {
             vertex_id: "b".into(),
-            layer: GraphLayer::Location,
+            layers: GraphLayer::Location.into(),
             entity_index: Some(1),
             ..Default::default()
         },
         WorldVertex {
             vertex_id: "c".into(),
-            layer: GraphLayer::Location,
+            layers: GraphLayer::Location.into(),
             entity_index: Some(2),
             ..Default::default()
         },
         WorldVertex {
             vertex_id: "actor".into(),
-            layer: GraphLayer::Character,
+            layers: GraphLayer::Character.into(),
             entity_index: Some(3),
             ..Default::default()
         },

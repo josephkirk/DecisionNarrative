@@ -224,7 +224,7 @@ fn mutation_move_player_syncs_participant_zero_and_reverts() {
     for (id, entity) in [("loc.a", 1), ("loc.b", 2)] {
         world.vertices.push(WorldVertex {
             vertex_id: id.to_string(),
-            layer: GraphLayer::Location,
+            layers: GraphLayer::Location.into(),
             entity_index: Some(entity),
             attributes: Default::default(),
         });
