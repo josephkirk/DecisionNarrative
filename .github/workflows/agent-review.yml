@@ -17,6 +17,14 @@ jobs:
     outputs:
       feedback: ${{ steps.codex.outputs.final-message }}
     steps:
+      - name: Check review credentials
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::Set the OPENAI_API_KEY repository Actions secret to enable agent reviews."
+            exit 1
+          fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
@@ -52,4 +60,5 @@ jobs:
           FEEDBACK: ${{ needs.review.outputs.feedback }}
         run: |
           gh api --method POST "repos/$REPOSITORY/pulls/$PR_NUMBER/reviews" \
-            -f event=COMMENT -f commit_id="$HEAD_SHA" -f body="$FEEDBACK"
+            -f event=COMMENT -f commit_id="$HEAD_SHA" \
+            -f body="$(printf 'Review of commit `%s`:\n\n%s' "$HEAD_SHA" "$FEEDBACK")"
