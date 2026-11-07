@@ -95,8 +95,12 @@ notes, icon markers, and entity and storylet references drawn with their thumbna
 and Restore do not add history entries. Markers and references declare entity properties (`map_<id>_present`, plus
 `map_<id>_icon` for markers). An entity or storylet placed on a canvas counts as a reference from the entity that
 holds the canvas (typed `map_<id>_ref` property), so it shows in that entity's or storylet's **References** list;
-storylets now have a **References** tab in the editor. The **Modify Canvas** story node adds or removes markers and references and changes a
-marker's icon (for example a closed door to an open one), with a before/after preview.
+storylets now have a **References** tab in the editor. Selecting a **Modify Canvas** story node opens the full
+canvas editor on a working copy of the entity's canvas (undo only, no history): draw, move, delete, add markers and
+references, change icons. **Save version** stores the result as one version in the entity's canvas history (marked
+*storylet version*); saving again replaces that version instead of adding more. When the node runs it sets the
+entity's `canvas_version` to that version and applies the gameplay differences (marker/reference presence, marker
+icons) as Apply Command nodes, so several nodes on one canvas compose.
 The **Plugins** tab lists installed plugins and turns them on or off.
 Visual check: `bun run test:visual:canvas`.
 

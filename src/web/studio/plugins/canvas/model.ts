@@ -7,6 +7,8 @@
 import type { EntityProperty } from "../../contracts.ts";
 
 export const CANVAS_PROPERTY_KEY = "canvas_doc";
+/** Runtime property: id of the canvas version the last Modify Canvas node applied ("" = the entity's canvas). */
+export const CANVAS_VERSION_KEY = "canvas_version";
 export const STATE_PREFIX = "map_";
 
 export type ShapeKind = "rect" | "ellipse" | "line" | "path" | "text" | "note" | "marker" | "entity" | "storylet";
@@ -73,7 +75,14 @@ export interface CanvasShape {
 }
 
 export interface CanvasSnapshot { layers: CanvasLayer[]; shapes: CanvasShape[] }
-export interface CanvasRevision { at: number; label: string; snapshot: CanvasSnapshot }
+/** A Modify Canvas node that owns a canvas version. */
+export interface CanvasVersionSource { storylet_id: string; storylet_title?: string; node_id: string }
+export interface CanvasRevision {
+  at: number; label: string; snapshot: CanvasSnapshot;
+  /** Set on versions written by a Modify Canvas node. */
+  id?: string;
+  source?: CanvasVersionSource;
+}
 
 export interface CanvasDoc extends CanvasSnapshot {
   version: 1;
@@ -120,9 +129,27 @@ export function snapshotOf(doc: CanvasSnapshot): CanvasSnapshot {
   return JSON.parse(JSON.stringify({ layers: doc.layers, shapes: doc.shapes }));
 }
 
+/** Trim old edit revisions; versions owned by Modify Canvas nodes are always kept. */
+function trimRevisions(revisions: CanvasRevision[]): CanvasRevision[] {
+  let extra = revisions.filter((revision) => !revision.source).length - MAX_REVISIONS;
+  return revisions.filter((revision) => revision.source || extra-- <= 0);
+}
+
 export function pushRevision(doc: CanvasDoc, label: string, at = Date.now()): CanvasDoc {
-  const revisions = [...doc.revisions, { at, label, snapshot: snapshotOf(doc) }].slice(-MAX_REVISIONS);
-  return { ...doc, revisions };
+  return { ...doc, revisions: trimRevisions([...doc.revisions, { at, label, snapshot: snapshotOf(doc) }]) };
+}
+
+export function nodeVersion(doc: CanvasDoc, id: string | undefined): CanvasRevision | undefined {
+  return id ? doc.revisions.find((revision) => revision.id === id) : undefined;
+}
+
+/**
+ * Write the canvas version owned by a Modify Canvas node. A node owns exactly
+ * one version: saving again replaces it (moved to newest) instead of adding.
+ */
+export function upsertNodeVersion(doc: CanvasDoc, version: { id: string; label: string; source: CanvasVersionSource; snapshot: CanvasSnapshot }, at = Date.now()): CanvasDoc {
+  const entry: CanvasRevision = { at, label: version.label, snapshot: snapshotOf(version.snapshot), id: version.id, source: version.source };
+  return { ...doc, revisions: trimRevisions([...doc.revisions.filter((revision) => revision.id !== version.id), entry]) };
 }
 
 /** Load a saved revision. Does not add a revision: history stays unchanged. */
@@ -178,13 +205,29 @@ export function shapeDisplayName(shape: CanvasShape, refName?: RefName): string 
 }
 
 /**
- * Rebuild the entity properties for a canvas: the document itself plus the
- * runtime state of each gameplay shape. Unrelated properties are kept; state
+ * Gameplay shapes across the canvas and every node version. Shapes that exist
+ * only in a node version start absent (they appear when that node runs).
+ */
+export function gameplayUniverse(doc: CanvasDoc): CanvasShape[] {
+  const byId = new Map<string, CanvasShape>();
+  for (const shape of doc.shapes.filter(isGameplay)) byId.set(shape.id, shape);
+  for (const revision of doc.revisions.filter((entry) => entry.source)) {
+    for (const shape of revision.snapshot.shapes.filter(isGameplay)) {
+      if (!byId.has(shape.id)) byId.set(shape.id, { ...shape, present: false });
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * Rebuild the entity properties for a canvas: the document itself, the active
+ * version, and the runtime state of each gameplay shape (including shapes
+ * that only exist in node versions). Unrelated properties are kept; state
  * properties for deleted shapes are removed.
  */
 export function syncCanvasProperties(properties: EntityProperty[], doc: CanvasDoc): EntityProperty[] {
   const wanted = new Map<string, EntityProperty>();
-  for (const shape of doc.shapes.filter(isGameplay)) {
+  for (const shape of gameplayUniverse(doc)) {
     const name = shape.label?.trim() || shape.id;
     wanted.set(presentKey(shape), { id: presentKey(shape), key: presentKey(shape), name: `Canvas: ${name} present`, type: "bool", value: shape.present });
     if (shape.kind === "marker") {
@@ -198,59 +241,53 @@ export function syncCanvasProperties(properties: EntityProperty[], doc: CanvasDo
       wanted.set(refKey(shape), { id: refKey(shape), key: refKey(shape), name: refLabel, type: "storylet", value: shape.storylet_id });
     }
   }
-  const rest = properties.filter((property) => property.key !== CANVAS_PROPERTY_KEY && !property.key.startsWith(STATE_PREFIX));
+  const rest = properties.filter((property) => property.key !== CANVAS_PROPERTY_KEY && property.key !== CANVAS_VERSION_KEY && !property.key.startsWith(STATE_PREFIX));
   const docProperty: EntityProperty = { id: CANVAS_PROPERTY_KEY, key: CANVAS_PROPERTY_KEY, name: "Canvas", type: "string", multiline: true, value: serializeCanvas(doc) };
-  return [...rest, docProperty, ...wanted.values()];
+  const versionProperty: EntityProperty = { id: CANVAS_VERSION_KEY, key: CANVAS_VERSION_KEY, name: "Canvas version", type: "string", value: "" };
+  return [...rest, docProperty, versionProperty, ...wanted.values()];
 }
 
-/* ---------- Modify Canvas operations ---------- */
+/* ---------- Modify Canvas node ---------- */
 
-export type CanvasAction = "remove" | "add" | "set_icon";
-export interface CanvasOp { shape_id: string; action: CanvasAction; /** set_icon only. */ icon?: string }
-export interface ModifyCanvasConfig { canvas_entity: string; ops: CanvasOp[] }
+/** The node points at the one canvas version it owns in the entity's history. */
+export interface ModifyCanvasConfig { canvas_entity: string; version_id: string }
 
-/** Author-facing verbs for each gameplay kind. */
-export function actionsFor(kind: ShapeKind): Array<{ action: CanvasAction; label: string }> {
-  const noun = kind === "marker" ? "marker" : "reference";
-  const base = [{ action: "remove" as const, label: `Remove ${noun}` }, { action: "add" as const, label: `Add ${noun}` }];
-  return kind === "marker" ? [...base, { action: "set_icon", label: "Change icon" }] : base;
+export interface StateChange { shape: CanvasShape; key: string; value: boolean | string; type: "bool" | "string"; text: string }
+
+/**
+ * Gameplay state the version sets, relative to the entity's canvas. Only
+ * differences are written, so several nodes on one canvas compose.
+ */
+export function versionChanges(doc: CanvasDoc, version: CanvasSnapshot, refName?: RefName): StateChange[] {
+  const base = new Map(doc.shapes.filter(isGameplay).map((shape) => [shape.id, shape]));
+  const after = new Map(version.shapes.filter(isGameplay).map((shape) => [shape.id, shape]));
+  const changes: StateChange[] = [];
+  for (const id of new Set([...base.keys(), ...after.keys()])) {
+    const before = base.get(id); const next = after.get(id);
+    const shape = next ?? before!;
+    const name = shapeDisplayName(shape, refName);
+    const noun = shape.kind === "marker" ? "marker" : "reference";
+    const wasPresent = before?.present ?? false; const isPresent = next?.present ?? false;
+    if (wasPresent !== isPresent) {
+      changes.push({ shape, key: presentKey(shape), value: isPresent, type: "bool", text: `${isPresent ? "Add" : "Remove"} ${noun}: ${name}` });
+    }
+    // New shapes declare their own icon (see gameplayUniverse), so only existing markers need an icon command.
+    if (shape.kind === "marker" && before && next && isPresent) {
+      const icon = next.icon ?? DEFAULT_MARKER_ICON;
+      if (icon !== (before.icon ?? DEFAULT_MARKER_ICON)) {
+        changes.push({ shape, key: iconKey(shape), value: icon, type: "string", text: `Change icon to ${markerGlyph(icon)} ${markerIconLabel(icon)}: ${name}` });
+      }
+    }
+  }
+  return changes;
 }
 
-export function opLabelText(op: CanvasOp, shape: CanvasShape): string {
-  if (op.action === "set_icon") return `Change icon to ${markerGlyph(op.icon)} ${markerIconLabel(op.icon)}`;
-  return actionsFor(shape.kind).find((entry) => entry.action === op.action)?.label ?? op.action;
-}
-
-export function opProperty(op: CanvasOp, shape: CanvasShape): { key: string; value: boolean | string; type: "bool" | "string" } {
-  if (op.action === "set_icon") return { key: iconKey(shape), value: op.icon ?? DEFAULT_MARKER_ICON, type: "string" };
-  return { key: presentKey(shape), value: op.action === "add", type: "bool" };
-}
-
-export function validateOps(config: ModifyCanvasConfig, doc: CanvasDoc | null): string[] {
-  const issues: string[] = [];
+export function validateModifyCanvas(config: ModifyCanvasConfig, doc: CanvasDoc | null): string[] {
   if (!config.canvas_entity) return ["Modify Canvas must choose an entity with a canvas."];
   if (!doc) return ["Modify Canvas entity has no canvas."];
-  if (!config.ops.length) issues.push("Modify Canvas must apply at least one change.");
-  for (const op of config.ops) {
-    const shape = doc.shapes.find((candidate) => candidate.id === op.shape_id);
-    if (!shape || !isGameplay(shape)) { issues.push(`Modify Canvas targets a missing canvas element (${op.shape_id}).`); continue; }
-    if (!actionsFor(shape.kind).some((entry) => entry.action === op.action)) issues.push(`Canvas element ${shape.id} does not support '${op.action}'.`);
-    if (op.action === "set_icon" && !op.icon) issues.push(`Change icon on ${shape.id} must choose an icon.`);
-  }
-  return issues;
-}
-
-/** Pure preview of the runtime state after the operations run. */
-export function applyOps(doc: CanvasDoc, ops: CanvasOp[]): CanvasDoc {
-  const shapes = doc.shapes.map((shape) => {
-    let next = shape;
-    for (const op of ops.filter((candidate) => candidate.shape_id === shape.id)) {
-      if (op.action === "set_icon") next = { ...next, icon: op.icon ?? next.icon };
-      else next = { ...next, present: op.action === "add" };
-    }
-    return next;
-  });
-  return { ...doc, shapes };
+  if (!config.version_id) return ["Modify Canvas has no canvas version yet: open the node and save the canvas."];
+  if (!nodeVersion(doc, config.version_id)) return [`Modify Canvas version ${config.version_id} is missing from the entity's canvas history.`];
+  return [];
 }
 
 /** Apply runtime property values (e.g. from a run snapshot) to the canvas. */

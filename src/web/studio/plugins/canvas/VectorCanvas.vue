@@ -4,15 +4,21 @@ import { useRouter } from "vue-router";
 import { studioState } from "../../state.ts";
 import type { AnyEntity } from "../runtime.ts";
 import {
-  CANVAS_PROPERTY_KEY, DEFAULT_MARKER_ICON, MARKER_ICONS, NOTE_COLORS, UndoStack, actionsFor, isGameplay, newId, parseCanvas,
+  CANVAS_PROPERTY_KEY, DEFAULT_MARKER_ICON, MARKER_ICONS, NOTE_COLORS, UndoStack, isGameplay, newId, parseCanvas,
   pushRevision, restoreRevision, shapeDisplayName, snapshotOf, syncCanvasProperties,
   type CanvasDoc, type CanvasLayer, type CanvasShape, type ShapeKind,
 } from "./model.ts";
 import { allEntities as listEntities, refInfo, refName, STORYLET_COLOR } from "./refs.ts";
 import CanvasShapeView from "./CanvasShapeView.vue";
 
-const props = defineProps<{ entity: AnyEntity; readonly?: boolean }>();
-const emit = defineEmits<{ (e: "patch", value: Partial<AnyEntity>): void }>();
+/**
+ * `entity` mode (the entity's Canvas tab): every edit is a history revision
+ * saved on the entity. `node` mode (a Modify Canvas node): edits a working
+ * copy with undo only, no history; the caller saves it as one version.
+ */
+const props = withDefaults(defineProps<{ entity?: AnyEntity; readonly?: boolean; mode?: "entity" | "node"; initialDoc?: CanvasDoc }>(), { mode: "entity" });
+const emit = defineEmits<{ (e: "patch", value: Partial<AnyEntity>): void; (e: "change", value: CanvasDoc): void }>();
+const nodeMode = computed(() => props.mode === "node");
 const router = useRouter();
 
 type Tool = "select" | "pan" | ShapeKind;
@@ -31,7 +37,7 @@ const TOOLS: Array<{ id: Tool; label: string; glyph: string; group: "draw" | "lo
 const DEFAULT_SIZE: Partial<Record<ShapeKind, [number, number]>> = { marker: [40, 40], entity: [56, 56], storylet: [72, 56], note: [160, 120], text: [160, 28] };
 const uid = newId("vc");
 
-const doc = ref<CanvasDoc>(parseCanvas(propertyValue()));
+const doc = ref<CanvasDoc>(props.mode === "node" && props.initialDoc ? JSON.parse(JSON.stringify(props.initialDoc)) : parseCanvas(propertyValue()));
 const undo = new UndoStack();
 const undoVersion = ref(0);
 const tool = ref<Tool>("select");
@@ -40,7 +46,7 @@ const selectedId = ref<string | null>(null);
 const pendingEntityId = ref("");
 const pendingStoryletId = ref("");
 const pendingIcon = ref(DEFAULT_MARKER_ICON);
-const showRuntime = ref(false);
+const showRuntime = ref(props.mode === "node");
 const hover = ref<{ id: string; x: number; y: number } | null>(null);
 const sidePanel = ref<"layers" | "history">("layers");
 const zoom = ref(0.8); const panX = ref(20); const panY = ref(20);
@@ -49,8 +55,8 @@ const draft = ref<CanvasShape | null>(null);
 type Drag = { mode: "move" | "resize" | "pan" | "create"; startX: number; startY: number; origin: CanvasShape | null; panX: number; panY: number; before: ReturnType<typeof snapshotOf> };
 const drag = ref<Drag | null>(null);
 
-function propertyValue(): unknown { return props.entity.properties.find((property) => property.key === CANVAS_PROPERTY_KEY)?.value; }
-watch(() => props.entity.id, () => { doc.value = parseCanvas(propertyValue()); selectedId.value = null; });
+function propertyValue(): unknown { return props.entity?.properties.find((property) => property.key === CANVAS_PROPERTY_KEY)?.value; }
+watch(() => props.entity?.id, () => { if (nodeMode.value) return; doc.value = parseCanvas(propertyValue()); selectedId.value = null; });
 
 const allEntities = computed<AnyEntity[]>(() => listEntities());
 const storylets = computed(() => studioState.storylets);
@@ -77,14 +83,15 @@ const isLocked = (shape: CanvasShape) => props.readonly || !!layerById.value.get
 /* ---------- history ---------- */
 function persist(next: CanvasDoc) {
   doc.value = next;
-  emit("patch", { properties: syncCanvasProperties(props.entity.properties, next) });
+  if (nodeMode.value) { emit("change", next); return; }
+  emit("patch", { properties: syncCanvasProperties(props.entity?.properties ?? [], next) });
 }
 function commit(label: string, before: ReturnType<typeof snapshotOf>, mutate?: (doc: CanvasDoc) => void) {
   if (props.readonly) return;
   undo.record(before); undoVersion.value++;
   const next = JSON.parse(JSON.stringify(doc.value)) as CanvasDoc;
   mutate?.(next);
-  persist(pushRevision(next, label));
+  persist(nodeMode.value ? next : pushRevision(next, label));
 }
 function change(label: string, mutate: (doc: CanvasDoc) => void) { commit(label, snapshotOf(doc.value), mutate); }
 function doUndo() { const prev = undo.undo(doc.value); if (prev) { undoVersion.value++; persist({ ...doc.value, ...prev }); } }
@@ -368,8 +375,9 @@ const gameplayCount = computed(() => doc.value.shapes.filter(isGameplay).length)
             </select></label>
           <button v-if="refInfo(selected)?.route" class="btn btn-secondary vc-wide" @click="openReference(selected)">Open {{ refInfo(selected)?.name }} →</button>
           <div v-if="isGameplay(selected)" class="vc-state">
-            <label><input type="checkbox" :checked="selected.present" :disabled="isLocked(selected)" @change="updateSelected({ present: ($event.target as HTMLInputElement).checked }, 'Set initial presence')" /> On canvas at start</label>
-            <small class="form-hint">Storylets change this with a <strong>Modify Canvas</strong> node: {{ actionsFor(selected.kind).map((a) => a.label).join(', ') }}.</small>
+            <label><input type="checkbox" :checked="selected.present" :disabled="isLocked(selected)" @change="updateSelected({ present: ($event.target as HTMLInputElement).checked }, 'Set presence')" /> {{ nodeMode ? "On canvas after this node" : "On canvas at start" }}</label>
+            <small v-if="nodeMode" class="form-hint">Unchecking or deleting removes it when the node runs; new markers and references appear when it runs.</small>
+            <small v-else class="form-hint">Storylets change the canvas with a <strong>Modify Canvas</strong> node.</small>
           </div>
           <div v-if="!isGameplay(selected) && selected.kind !== 'note'" class="vc-row">
             <label class="vc-field"><span>Stroke</span><input type="color" :value="selected.stroke.startsWith('#') ? selected.stroke : '#888888'" :disabled="isLocked(selected)" @change="updateSelected({ stroke: ($event.target as HTMLInputElement).value }, 'Stroke color')" /></label>
@@ -384,7 +392,7 @@ const gameplayCount = computed(() => doc.value.shapes.filter(isGameplay).length)
 
         <nav class="vc-tabs">
           <button :class="['vc-tab', sidePanel === 'layers' && 'is-active']" @click="sidePanel = 'layers'">Layers</button>
-          <button :class="['vc-tab', sidePanel === 'history' && 'is-active']" @click="sidePanel = 'history'">History · {{ doc.revisions.length }}</button>
+          <button v-if="!nodeMode" :class="['vc-tab', sidePanel === 'history' && 'is-active']" @click="sidePanel = 'history'">History · {{ doc.revisions.length }}</button>
         </nav>
 
         <section v-if="sidePanel === 'layers'" class="vc-card" aria-label="Layers">
@@ -403,11 +411,11 @@ const gameplayCount = computed(() => doc.value.shapes.filter(isGameplay).length)
           <small class="form-hint">New shapes go on the highlighted layer.</small>
         </section>
 
-        <section v-else class="vc-card" aria-label="History">
+        <section v-else-if="!nodeMode" class="vc-card" aria-label="History">
           <p v-if="!doc.revisions.length" class="form-hint">No changes yet. Every edit is recorded here and saved with the entity.</p>
           <ol class="vc-history">
-            <li v-for="(revision, index) in [...doc.revisions].reverse()" :key="revision.at + '-' + index">
-              <span>{{ revision.label }}</span>
+            <li v-for="(revision, index) in [...doc.revisions].reverse()" :key="revision.at + '-' + index" :class="revision.source && 'is-node-version'">
+              <span>{{ revision.label }} <span v-if="revision.source" class="badge vc-version-badge">storylet version</span></span>
               <small>{{ formatTime(revision.at) }}</small>
               <button class="btn btn-secondary btn-small" :disabled="readonly || index === 0" @click="restore(doc.revisions.length - 1 - index)">Restore</button>
             </li>
@@ -470,5 +478,7 @@ const gameplayCount = computed(() => doc.value.shapes.filter(isGameplay).length)
 .vc-history { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; max-height: 360px; overflow: auto; }
 .vc-history li { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--border, #333); }
 .vc-history small { grid-column: 1; color: var(--text-muted, #999); }
+.vc-history li.is-node-version span:first-child { color: var(--type-location, #ff9f0a); }
+.vc-version-badge { font-size: 10px; margin-left: 4px; }
 .vc-history button { grid-row: 1 / 3; grid-column: 2; }
 </style>

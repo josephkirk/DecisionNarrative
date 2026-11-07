@@ -9,7 +9,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const root = path.resolve(import.meta.dirname, "../..");
-const out = path.join(import.meta.dirname, "out");
+const out = process.env.VISUAL_OUT ? path.resolve(process.env.VISUAL_OUT) : path.join(import.meta.dirname, "out");
 fs.mkdirSync(out, { recursive: true });
 const exe = process.platform === "win32" ? ".exe" : "";
 const binary = [
@@ -194,20 +194,51 @@ try {
   check("storylet References tab lists the canvas holder", (await refPane.getByText("Crypt", { exact: true }).count()) > 0);
   await shot(page, "canvas-05-storylet-references");
   await page.getByRole("button", { name: "Story graph" }).click();
+  const historyBefore = JSON.parse((await api("GET", "/api/v3/content/entity_templates/crypt")).properties.find((x: { key: string }) => x.key === "canvas_doc").value).revisions.length;
   await page.getByRole("button", { name: "Modify Canvas" }).first().click();
   const pluginNode = page.locator(".graph-node.plugin");
   await pluginNode.waitFor();
-  await pluginNode.click({ position: { x: 60, y: 50 } });
+  const editor = page.getByTestId("modify-canvas-editor");
+  await editor.waitFor();
+  check("adding Modify Canvas opens the full canvas editor", await editor.isVisible());
+  await editor.getByLabel("Canvas entity").selectOption("crypt");
+  const nodeStage = editor.locator(".vc-stage");
+  await nodeStage.waitFor();
+  check("node editor starts from the entity canvas", (await editor.locator(".vc-shape").count()) === 9, String(await editor.locator(".vc-shape").count()));
+  check("node editor has no History tab", (await editor.getByRole("button", { name: /^History/ }).count()) === 0);
+  await editor.locator('.vc-shape[data-kind="marker"]', { hasText: "Iron Gate" }).click();
+  await editor.getByRole("group", { name: "Marker icons" }).getByRole("button", { name: "Door (open)" }).click();
+  await editor.locator('.vc-shape[data-kind="marker"]', { hasText: "Key" }).click();
+  await page.keyboard.press("Delete");
+  await editor.locator('.vc-shape[data-kind="marker"]', { hasText: "Item" }).click();
+  await editor.getByLabel("On canvas after this node").uncheck();
+  await editor.getByRole("button", { name: "Marker (M)" }).click();
+  await editor.getByLabel("Icon for new markers").selectOption("skull");
+  const nodeBox = (await nodeStage.boundingBox())!;
+  await page.mouse.click(nodeBox.x + 120, nodeBox.y + 330);
+  check("node editor edits the canvas freely", (await editor.locator(".vc-shape").count()) === 9 && (await editor.locator(".vc-shape", { hasText: "Danger" }).count()) === 1);
+  await shot(page, "canvas-03-modify-node-editor");
+  await editor.getByRole("button", { name: "Save version" }).click();
+  await editor.waitFor({ state: "detached" });
   const inspector = page.getByTestId("modify-canvas-inspector");
-  await inspector.waitFor();
-  await inspector.locator("select").first().selectOption("crypt");
-  for (const [element, action] of [["Iron Gate (marker)", "Change icon"], ["Key (marker)", "Remove marker"], ["Item (marker)", "Remove marker"], ["Unlock the crypt (storylet)", "Remove reference"]] as const) {
-    await inspector.getByLabel("Canvas element").selectOption({ label: element });
-    await inspector.getByLabel("Change", { exact: true }).selectOption({ label: action });
-    if (action === "Change icon") await inspector.getByLabel("New icon").selectOption("door-open");
-    await inspector.getByRole("button", { name: "Add", exact: true }).click();
-  }
-  check("inspector lists four changes", (await inspector.locator(".mc-ops li").count()) === 4);
+  await inspector.locator(".mc-ops li").first().waitFor();
+  const opTexts = await inspector.locator(".mc-ops li").allTextContents();
+  check("inspector lists four gameplay changes", opTexts.length === 4, opTexts.join(" | "));
+  const cryptDoc = async () => JSON.parse((await api("GET", "/api/v3/content/entity_templates/crypt")).properties.find((x: { key: string }) => x.key === "canvas_doc").value);
+  let afterDoc = await cryptDoc();
+  check("saving adds exactly one version to the entity history", afterDoc.revisions.length === historyBefore + 1 && afterDoc.revisions.filter((r: { source?: unknown }) => r.source).length === 1, `${historyBefore} -> ${afterDoc.revisions.length}`);
+  check("the entity canvas itself is unchanged", afterDoc.shapes.length === 9);
+  // Edit again: the node keeps its one version.
+  // Deselect, then click the node: the editor opens again.
+  await page.locator(".graph-editor-canvas").click({ position: { x: 600, y: 700 } });
+  await pluginNode.click({ position: { x: 60, y: 50 } });
+  await editor.waitFor();
+  check("clicking the node opens the canvas editor", await editor.isVisible());
+  check("re-opening shows the saved version", (await editor.locator(".vc-shape", { hasText: "Danger" }).count()) === 1);
+  await editor.getByRole("button", { name: "Save version" }).click();
+  await editor.waitFor({ state: "detached" });
+  afterDoc = await cryptDoc();
+  check("saving again still leaves one version", afterDoc.revisions.length === historyBefore + 1, String(afterDoc.revisions.length));
   await shot(page, "canvas-03-modify-node");
   // Wire choice -> Modify Canvas -> End by dragging sockets.
   async function connect(from: ReturnType<Page["locator"]>, to: ReturnType<Page["locator"]>) {
@@ -225,12 +256,18 @@ try {
   const types = stored.graph.nodes.map((x: { type: string }) => x.type);
   check("stored graph has no plugin nodes (lowered)", !types.includes("plugin"), types.join(","));
   const commands = stored.graph.nodes.filter((x: { type: string }) => x.type === "apply_command");
-  check("lowered to four Apply Command nodes", commands.length === 4, String(commands.length));
+  check("lowered to version switch + four Apply Command nodes", commands.length === 5 && commands[0].property_key === "canvas_version", commands.map((c: { property_key: string }) => c.property_key).join(","));
   check("plugin metadata survives storage", stored.graph.nodes.some((x: { plugin?: { source?: unknown } }) => x.plugin?.source));
   await page.reload();
   await page.locator(".graph-node.plugin").waitFor();
   check("reload raises one Modify Canvas node", (await page.locator(".graph-node.plugin").count()) === 1 && (await page.locator(".graph-node.apply_command").count()) === 0);
   await shot(page, "canvas-04-graph");
+
+  await page.goto(`${base}/#/entity-templates/crypt`);
+  await page.getByRole("button", { name: "Canvas", exact: true }).click();
+  await page.getByRole("button", { name: /^History/ }).click();
+  check("entity history shows the storylet version", (await page.locator(".vc-history li.is-node-version").count()) === 1);
+  await shot(page, "canvas-07-entity-history");
 
   // Run it: the engine executes the lowered nodes against the location's map state.
   const project = await api("GET", "/api/v3/project");

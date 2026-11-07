@@ -1,130 +1,165 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { studioState } from "../../state.ts";
+import { computed, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
+import { StudioApi } from "../../api.ts";
+import { notify, studioState } from "../../state.ts";
+import { refreshWorkspace } from "../../view-models/workspace.ts";
+import type { NarrativeNode } from "../../narrativeGraphTypes.ts";
 import type { AnyEntity } from "../runtime.ts";
 import {
-  CANVAS_PROPERTY_KEY, MARKER_ICONS, actionsFor, applyOps, isGameplay, newId, opLabelText, parseCanvas, shapeDisplayName,
-  type CanvasAction, type CanvasOp, type ModifyCanvasConfig,
+  CANVAS_PROPERTY_KEY, emptyCanvas, newId, nodeVersion, snapshotOf, syncCanvasProperties, upsertNodeVersion, versionChanges,
+  type CanvasDoc, type ModifyCanvasConfig,
 } from "./model.ts";
-import { refName } from "./refs.ts";
+import { canvasOf } from "./modifyCanvasNode.ts";
+import { allEntities, refName } from "./refs.ts";
+import { hasCanvasTrait } from "./trait.ts";
 import CanvasShapeView from "./CanvasShapeView.vue";
+import VectorCanvas from "./VectorCanvas.vue";
 
-const props = defineProps<{ config: ModifyCanvasConfig }>();
+/**
+ * Modify Canvas inspector. Selecting the node opens the full canvas editor on
+ * a working copy (undo only, no history). Saving writes the result as the
+ * node's single version in the entity's canvas history.
+ */
+const props = defineProps<{ node: NarrativeNode; config: ModifyCanvasConfig }>();
 const emit = defineEmits<{ (e: "update:config", value: ModifyCanvasConfig): void }>();
+const route = useRoute();
 
-const entities = computed(() => [...studioState.entities, ...studioState.entityTemplates] as AnyEntity[]);
-const withCanvas = computed(() => entities.value.filter((entity) => entity.properties.some((property) => property.key === CANVAS_PROPERTY_KEY)));
-const target = computed(() => entities.value.find((entity) => entity.id === props.config.canvas_entity));
-const doc = computed(() => {
-  const raw = target.value?.properties.find((property) => property.key === CANVAS_PROPERTY_KEY)?.value;
-  return raw ? parseCanvas(raw) : null;
-});
-const elements = computed(() => doc.value?.shapes.filter(isGameplay) ?? []);
+const entities = computed(() => allEntities());
+const withCanvas = computed(() => entities.value.filter((entity) =>
+  hasCanvasTrait(entity, studioState.traitTemplates) || entity.properties.some((property) => property.key === CANVAS_PROPERTY_KEY)));
+const pickedEntity = ref(props.config.canvas_entity);
+const target = computed(() => entities.value.find((entity) => entity.id === pickedEntity.value));
+const baseDoc = computed<CanvasDoc | null>(() => target.value ? canvasOf(target.value) ?? emptyCanvas() : null);
+const version = computed(() => baseDoc.value && pickedEntity.value === props.config.canvas_entity ? nodeVersion(baseDoc.value, props.config.version_id) : undefined);
+const changes = computed(() => baseDoc.value && version.value ? versionChanges(baseDoc.value, version.value.snapshot, refName) : []);
+
+const storyletId = computed(() => typeof route.params.id === "string" ? route.params.id : "");
+const storyletTitle = computed(() => studioState.storylets.find((storylet) => storylet.id === storyletId.value)?.title ?? (storyletId.value || "storylet"));
+
+const open = ref(false);
+const working = ref<CanvasDoc | null>(null);
+const editorKey = ref(0);
+const saving = ref(false);
 const uid = newId("mc");
-const preview = ref<"before" | "after">("after");
-const shown = computed(() => doc.value ? (preview.value === "after" ? applyOps(doc.value, props.config.ops) : doc.value) : null);
+
+/** Working copy: the node's saved version, or the entity's canvas when there is none. */
+function startEditing() {
+  const base = baseDoc.value;
+  if (!base) { working.value = null; return; }
+  const snapshot = version.value?.snapshot ?? snapshotOf(base);
+  working.value = { ...base, ...snapshotOf(snapshot), revisions: [] };
+  editorKey.value++;
+}
+function openEditor() { open.value = true; startEditing(); }
+function closeEditor() { open.value = false; working.value = null; }
+function pickEntity(id: string) { pickedEntity.value = id; startEditing(); }
+
+onMounted(openEditor);
+watch(() => props.node.id, () => { pickedEntity.value = props.config.canvas_entity; openEditor(); });
+
+async function saveVersion() {
+  const entity = target.value;
+  if (!entity || !working.value) return;
+  saving.value = true;
+  try {
+    const kind = studioState.entities.some((row) => row.id === entity.id) ? "entities" : "entity_templates";
+    const fresh = await StudioApi.getContent<AnyEntity>(kind, entity.id);
+    const doc = canvasOf(fresh) ?? emptyCanvas();
+    const reuse = pickedEntity.value === props.config.canvas_entity && props.config.version_id;
+    const id = reuse ? props.config.version_id : newId("cv_");
+    const next = upsertNodeVersion(doc, {
+      id, label: `Modify Canvas · ${storyletTitle.value}`,
+      source: { storylet_id: storyletId.value, storylet_title: storyletTitle.value, node_id: props.node.id },
+      snapshot: working.value,
+    });
+    await StudioApi.saveContent(kind, { ...fresh, properties: syncCanvasProperties(fresh.properties, next) });
+    await refreshWorkspace([kind]);
+    emit("update:config", { canvas_entity: entity.id, version_id: id });
+    notify(`Canvas version saved to ${entity.name}. Save the storylet draft to apply it.`, "success");
+    closeEditor();
+  } catch (error) {
+    notify(`Could not save the canvas version: ${error instanceof Error ? error.message : String(error)}`, "error");
+  } finally {
+    saving.value = false;
+  }
+}
+
+const preview = computed(() => version.value?.snapshot ?? null);
 const viewBox = computed(() => {
-  const shapes = doc.value?.shapes ?? [];
+  const shapes = preview.value?.shapes ?? [];
   if (!shapes.length) return "0 0 400 240";
   const minX = Math.min(...shapes.map((s) => s.x)) - 40; const minY = Math.min(...shapes.map((s) => s.y)) - 40;
   const maxX = Math.max(...shapes.map((s) => s.x + s.w)) + 40; const maxY = Math.max(...shapes.map((s) => s.y + s.h)) + 40;
   return `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
 });
-const pendingShape = ref("");
-const pendingAction = ref<CanvasAction | "">("");
-const pendingIcon = ref(MARKER_ICONS[0]!.id);
-const pendingActions = computed(() => {
-  const shape = elements.value.find((entry) => entry.id === pendingShape.value);
-  return shape ? actionsFor(shape.kind) : [];
-});
-
-function update(patch: Partial<ModifyCanvasConfig>) { emit("update:config", { ...props.config, ...patch }); }
-function setEntity(id: string) { update({ canvas_entity: id, ops: [] }); }
-function addOp() {
-  if (!pendingShape.value || !pendingAction.value) return;
-  const op: CanvasOp = { shape_id: pendingShape.value, action: pendingAction.value };
-  if (op.action === "set_icon") op.icon = pendingIcon.value;
-  update({ ops: [...props.config.ops, op] });
-  pendingShape.value = ""; pendingAction.value = "";
-}
-function removeOp(index: number) { update({ ops: props.config.ops.filter((_, i) => i !== index) }); }
-function opLabel(op: CanvasOp) {
-  const shape = elements.value.find((entry) => entry.id === op.shape_id);
-  if (!shape) return `${op.action} (missing element)`;
-  return `${opLabelText(op, shape)}: ${shapeDisplayName(shape, refName)}`;
-}
-function quickAdd(shapeId: string, action: CanvasAction) { update({ ops: [...props.config.ops, { shape_id: shapeId, action }] }); }
 </script>
 
 <template>
   <div class="mc-root" data-testid="modify-canvas-inspector">
-    <div class="form-group">
-      <label class="field-label">Canvas entity</label>
-      <select class="form-select" :value="config.canvas_entity" @change="setEntity(($event.target as HTMLSelectElement).value)">
-        <option value="">Choose an entity with a canvas…</option>
-        <option v-for="entity in withCanvas" :key="entity.id" :value="entity.id">{{ entity.name }}</option>
-      </select>
-      <small v-if="!withCanvas.length" class="field-sublabel">Give an entity the <strong>Canvas</strong> trait and draw on its Canvas tab first.</small>
-    </div>
+    <p class="field-sublabel">
+      <template v-if="target">Canvas: <strong>{{ target.name }}</strong></template>
+      <template v-else>No canvas chosen.</template>
+    </p>
+    <button class="btn btn-primary" data-testid="open-modify-canvas" @click="openEditor">Open canvas</button>
 
-    <template v-if="doc">
+    <template v-if="version">
       <div class="form-group">
-        <label class="field-label">Changes, in order</label>
-        <ol class="mc-ops">
-          <li v-for="(op, index) in config.ops" :key="index">
-            <span>{{ opLabel(op) }}</span>
-            <button class="btn btn-small btn-secondary" :aria-label="`Remove change ${index + 1}`" @click="removeOp(index)">✕</button>
-          </li>
-          <li v-if="!config.ops.length" class="field-sublabel">No changes yet. Click an element on the canvas or pick one below.</li>
-        </ol>
-        <div class="mc-add">
-          <select v-model="pendingShape" class="form-select" aria-label="Canvas element">
-            <option value="">Element…</option>
-            <option v-for="shape in elements" :key="shape.id" :value="shape.id">{{ shapeDisplayName(shape, refName) }} ({{ shape.kind }})</option>
-          </select>
-          <select v-model="pendingAction" class="form-select" aria-label="Change" :disabled="!pendingActions.length">
-            <option value="">Change…</option>
-            <option v-for="entry in pendingActions" :key="entry.action" :value="entry.action">{{ entry.label }}</option>
-          </select>
-          <button class="btn btn-secondary" :disabled="!pendingShape || !pendingAction" @click="addOp">Add</button>
-          <select v-if="pendingAction === 'set_icon'" v-model="pendingIcon" class="form-select mc-icon" aria-label="New icon">
-            <option v-for="icon in MARKER_ICONS" :key="icon.id" :value="icon.id">{{ icon.glyph }} {{ icon.label }}</option>
-          </select>
-        </div>
+        <label class="field-label">Version</label>
+        <p class="field-sublabel">{{ version.label }} · {{ new Date(version.at).toLocaleString() }}</p>
       </div>
-
       <div class="form-group">
-        <div class="mc-preview-head">
-          <label class="field-label">Preview</label>
-          <div class="mc-seg">
-            <button :class="preview === 'before' && 'is-active'" @click="preview = 'before'">Before</button>
-            <button :class="preview === 'after' && 'is-active'" @click="preview = 'after'">After</button>
-          </div>
-        </div>
-        <svg class="mc-preview" :viewBox="viewBox" preserveAspectRatio="xMidYMid meet" aria-label="Canvas preview">
-          <template v-for="shape in shown?.shapes ?? []" :key="shape.id">
-            <g v-if="doc.layers.find((layer) => layer.id === shape.layer)?.visible !== false" class="mc-shape"
-              @click="isGameplay(shape) && quickAdd(shape.id, actionsFor(shape.kind)[0]!.action)">
-              <title v-if="isGameplay(shape)">Click: {{ actionsFor(shape.kind)[0]!.label }}</title>
-              <CanvasShapeView :shape="shape" :runtime="true" :uid="uid" />
-            </g>
-          </template>
-        </svg>
+        <label class="field-label">Gameplay changes when it runs</label>
+        <ul class="mc-ops">
+          <li v-for="change in changes" :key="change.key">{{ change.text }}</li>
+          <li v-if="!changes.length" class="field-sublabel">Drawing changes only (no markers or references change).</li>
+        </ul>
       </div>
+      <svg class="mc-preview" :viewBox="viewBox" preserveAspectRatio="xMidYMid meet" aria-label="Canvas preview">
+        <template v-for="shape in preview?.shapes ?? []" :key="shape.id">
+          <g v-if="preview?.layers.find((layer) => layer.id === shape.layer)?.visible !== false">
+            <CanvasShapeView :shape="shape" :runtime="true" :uid="uid" />
+          </g>
+        </template>
+      </svg>
     </template>
+    <p v-else-if="target" class="field-sublabel">No version yet. Open the canvas, edit it, and save.</p>
+
+    <Teleport to="body">
+      <div v-if="open" class="mc-overlay" role="dialog" aria-modal="true" aria-label="Modify Canvas editor" data-testid="modify-canvas-editor">
+        <header class="mc-overlay-head">
+          <div class="mc-overlay-title">
+            <strong>Modify Canvas</strong>
+            <select class="form-select" :value="pickedEntity" aria-label="Canvas entity" @change="pickEntity(($event.target as HTMLSelectElement).value)">
+              <option value="">Choose an entity with a canvas…</option>
+              <option v-for="entity in withCanvas" :key="entity.id" :value="entity.id">{{ entity.name }}</option>
+            </select>
+            <small class="field-sublabel">Edits here have no history. Saving adds one version to the entity's canvas history; this node applies it when it runs.</small>
+          </div>
+          <div class="mc-overlay-actions">
+            <button class="btn btn-secondary" @click="closeEditor">Cancel</button>
+            <button class="btn btn-primary" :disabled="!working || saving" @click="saveVersion">{{ saving ? "Saving…" : "Save version" }}</button>
+          </div>
+        </header>
+        <div class="mc-overlay-body">
+          <VectorCanvas v-if="working && target" :key="editorKey" mode="node" :entity="target" :initial-doc="working" @change="working = $event" />
+          <p v-else-if="!withCanvas.length" class="field-sublabel">Give an entity the <strong>Canvas</strong> trait and draw on its Canvas tab first.</p>
+          <p v-else class="field-sublabel">Choose the entity whose canvas this node changes.</p>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .mc-root { display: flex; flex-direction: column; gap: 10px; }
 .mc-ops { margin: 4px 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.mc-ops li { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-.mc-add { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px; }
-.mc-icon { grid-column: 1 / -1; }
-.mc-preview-head { display: flex; justify-content: space-between; align-items: center; }
-.mc-seg { display: flex; gap: 2px; }
-.mc-seg button { padding: 2px 8px; font-size: 12px; border: 1px solid var(--border, #333); background: transparent; color: var(--text, #eee); border-radius: 6px; cursor: pointer; }
-.mc-seg button.is-active { border-color: var(--accent, #0a84ff); background: color-mix(in srgb, var(--accent, #0a84ff) 20%, transparent); }
-.mc-preview { width: 100%; height: 220px; border: 1px solid var(--border, #333); border-radius: 8px; background: var(--surface-1, #111); }
-.mc-shape { cursor: pointer; }
+.mc-preview { width: 100%; height: 200px; border: 1px solid var(--border, #333); border-radius: 8px; background: var(--surface-1, #111); }
+.mc-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; gap: 10px; padding: 14px 18px; background: var(--bg-app, #0b0b0d); overflow: auto; }
+.mc-overlay-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.mc-overlay-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.mc-overlay-title .form-select { width: auto; min-width: 220px; }
+.mc-overlay-title small { flex-basis: 100%; }
+.mc-overlay-actions { display: flex; gap: 8px; }
+.mc-overlay-body { flex: 1; min-height: 0; }
 </style>

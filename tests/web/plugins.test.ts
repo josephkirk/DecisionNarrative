@@ -3,8 +3,9 @@ import { Context, registry, nodeTypeContribution, entityPanelsFor, propertyEdito
 import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../../src/web/studio/plugins/graphLowering.ts";
 import { modifyCanvasNode } from "../../src/web/studio/plugins/canvas/modifyCanvasNode.ts";
 import {
-  CANVAS_PROPERTY_KEY, UndoStack, applyOps, emptyCanvas, iconKey, parseCanvas, presentKey, pushRevision, refKey, restoreRevision,
-  serializeCanvas, syncCanvasProperties, validateOps, type CanvasDoc, type CanvasShape,
+  CANVAS_PROPERTY_KEY, CANVAS_VERSION_KEY, UndoStack, emptyCanvas, iconKey, nodeVersion, parseCanvas, presentKey, pushRevision, refKey,
+  restoreRevision, serializeCanvas, snapshotOf, syncCanvasProperties, upsertNodeVersion, validateModifyCanvas, versionChanges,
+  type CanvasDoc, type CanvasShape,
 } from "../../src/web/studio/plugins/canvas/model.ts";
 import { validateNarrativeGraph, type NarrativeGraph } from "../../src/web/studio/narrativeGraphTypes.ts";
 import type { EntityRecord } from "../../src/web/studio/contracts.ts";
@@ -95,15 +96,46 @@ test("canvas history records revisions, restores them and caps length", () => {
   expect(parseCanvas("not json").shapes).toEqual([]);
 });
 
-test("modify canvas ops validate and preview", () => {
+/** The version a Modify Canvas node saved: key deleted, gate opened, a new ghost marker, wall moved. */
+function unlockVersion(doc: CanvasDoc) {
+  const shapes = doc.shapes.filter((shape) => shape.id !== "s_key").map((shape) =>
+    shape.id === "s_gate" ? { ...shape, icon: "door-open" } : shape.id === "s_wall" ? { ...shape, x: 50 } : shape);
+  shapes.push(shape("s_ghost", "marker", { icon: "skull", label: "Ghost" }));
+  return { layers: doc.layers, shapes };
+}
+const SOURCE = { storylet_id: "unlock", storylet_title: "Unlock", node_id: "mc" };
+function versionedDoc(): CanvasDoc {
   const doc = mapDoc();
-  expect(validateOps({ canvas_entity: "loc_crypt", ops: [{ shape_id: "s_gate", action: "set_icon", icon: "door-open" }] }, doc)).toEqual([]);
-  expect(validateOps({ canvas_entity: "loc_crypt", ops: [{ shape_id: "s_key", action: "set_icon" }] }, doc).length).toBe(1);
-  expect(validateOps({ canvas_entity: "loc_crypt", ops: [{ shape_id: "s_wall", action: "remove" }] }, doc).length).toBe(1);
-  expect(validateOps({ canvas_entity: "", ops: [] }, doc).length).toBe(1);
-  const after = applyOps(doc, [{ shape_id: "s_gate", action: "set_icon", icon: "door-open" }, { shape_id: "s_key", action: "remove" }]);
-  expect(after.shapes.find((s) => s.id === "s_gate")!.icon).toBe("door-open");
-  expect(after.shapes.find((s) => s.id === "s_key")!.present).toBe(false);
+  return upsertNodeVersion(doc, { id: "cv_unlock", label: "Modify Canvas · Unlock", source: SOURCE, snapshot: unlockVersion(doc) });
+}
+
+test("a Modify Canvas node owns exactly one version in the canvas history", () => {
+  let doc = versionedDoc();
+  expect(doc.revisions.length).toBe(1);
+  doc = pushRevision(doc, "Edit");
+  doc = upsertNodeVersion(doc, { id: "cv_unlock", label: "Modify Canvas · Unlock", source: SOURCE, snapshot: snapshotOf(doc) });
+  expect(doc.revisions.filter((r) => r.id === "cv_unlock").length).toBe(1);
+  expect(doc.revisions.at(-1)!.id).toBe("cv_unlock");
+  // Edit history is capped but node versions are never trimmed.
+  for (let i = 0; i < 60; i++) doc = pushRevision(doc, `r${i}`);
+  expect(nodeVersion(doc, "cv_unlock")).toBeDefined();
+  expect(doc.revisions.filter((r) => !r.source).length).toBe(40);
+});
+
+test("version changes are gameplay diffs against the entity canvas", () => {
+  const doc = versionedDoc();
+  const changes = versionChanges(doc, nodeVersion(doc, "cv_unlock")!.snapshot);
+  expect(changes.map((c) => [c.key, c.value])).toEqual([
+    ["map_s_gate_icon", "door-open"], ["map_s_key_present", false], ["map_s_ghost_present", true],
+  ]);
+  // Shapes that exist only in a version are declared on the entity, absent at start.
+  const props = syncCanvasProperties([], doc);
+  expect(props.find((p) => p.key === "map_s_ghost_present")!.value).toBe(false);
+  expect(props.find((p) => p.key === CANVAS_VERSION_KEY)!.value).toBe("");
+  expect(validateModifyCanvas({ canvas_entity: "loc_crypt", version_id: "cv_unlock" }, doc)).toEqual([]);
+  expect(validateModifyCanvas({ canvas_entity: "loc_crypt", version_id: "" }, doc)[0]).toContain("no canvas version");
+  expect(validateModifyCanvas({ canvas_entity: "loc_crypt", version_id: "cv_gone" }, doc)[0]).toContain("missing");
+  expect(validateModifyCanvas({ canvas_entity: "", version_id: "" }, doc).length).toBe(1);
 });
 
 function storyGraph(): NarrativeGraph {
@@ -111,7 +143,7 @@ function storyGraph(): NarrativeGraph {
     nodes: [
       { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80, text: "Go" },
       { id: "mc", type: "plugin", title: "Unlock", x: 200, y: 0, width: 200, height: 100, plugin_type: "canvas.modify",
-        plugin_config: { canvas_entity: "loc_crypt", ops: [{ shape_id: "s_key", action: "remove" }, { shape_id: "s_gate", action: "set_icon", icon: "door-open" }] } },
+        plugin_config: { canvas_entity: "loc_crypt", version_id: "cv_unlock" } },
       { id: "end", type: "end", title: "End", x: 400, y: 0, width: 100, height: 80, is_terminal: true },
     ],
     edges: [
@@ -124,13 +156,16 @@ function storyGraph(): NarrativeGraph {
 test("Modify Canvas lowers to valid core Apply Command nodes and raises back", () => {
   const ctx = new Context("canvas-test");
   if (!nodeTypeContribution("canvas.modify")) ctx.nodeType(modifyCanvasNode);
-  const entities = [location()];
+  const entities = [location(versionedDoc())];
   const graph = storyGraph();
   expect(validatePluginNodes(graph, entities)).toEqual([]);
   const lowered = lowerPluginGraph(graph, entities);
   expect(lowered.nodes.some((n) => n.type === "plugin")).toBe(false);
   const commands = lowered.nodes.filter((n) => n.type === "apply_command");
-  expect(commands.map((n) => [n.property_key, n.value_type, n.value])).toEqual([["map_s_key_present", "bool", false], ["map_s_gate_icon", "string", "door-open"]]);
+  expect(commands.map((n) => [n.property_key, n.value_type, n.value])).toEqual([
+    [CANVAS_VERSION_KEY, "string", "cv_unlock"],
+    ["map_s_gate_icon", "string", "door-open"], ["map_s_key_present", "bool", false], ["map_s_ghost_present", "bool", true],
+  ]);
   expect(lowered.nodes.find((n) => n.type === "get_entity")!.entity_path).toBe("loc_crypt");
   expect(validateNarrativeGraph(lowered)).toEqual([]);
   // Survives a JSON round trip through storage, as the service returns it.
@@ -147,9 +182,7 @@ test("plugin nodes with missing plugins or bad config are reported", () => {
   expect(validatePluginNodes(graph, [location()])[0]).toContain("not loaded");
   const ctx = new Context("canvas-test-2");
   if (!nodeTypeContribution("canvas.modify")) ctx.nodeType(modifyCanvasNode);
-  const bad = storyGraph();
-  (bad.nodes[1]!.plugin_config as { ops: unknown[] }).ops = [];
-  expect(validatePluginNodes(bad, [location()])).toContain("Modify Canvas must apply at least one change.");
+  expect(validatePluginNodes(storyGraph(), [location()])[0]).toContain("missing from the entity's canvas history");
   ctx.dispose();
 });
 
