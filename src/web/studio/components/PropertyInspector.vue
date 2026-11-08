@@ -193,7 +193,7 @@ function setPlayedBy(id: string, checked: boolean) {
 const chronicleEntries = computed(() => sortChronicle(studioState.events));
 const factTagOptions = computed(() => uniqueTagNames(studioState.gameplayTags.map((tag) => tag.name)).filter((name) => name.startsWith("fact.")));
 const catalogTagNames = computed(() => uniqueTagNames(studioState.gameplayTags.map((tag) => tag.name)));
-const roleTagOptions = computed(() => catalogTagNames.value.filter((name) => name.startsWith("character.")));
+const roleTagOptions = computed(() => catalogTagNames.value);
 const targetRoles = computed(() => uniqueTagNames(["player", ...roleTagOptions.value]));
 const emotionTagOptions = computed(() => catalogTagNames.value.filter((name) => name === "emotion" || name.startsWith("emotion.")));
 const actionTagOptions = computed(() => catalogTagNames.value.filter((name) => name === "action" || name.startsWith("action.")));

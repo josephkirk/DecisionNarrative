@@ -30,7 +30,7 @@ const availableTemplates = computed(() => studioState.traitTemplates.filter((t) 
 const appliedTraits = computed(() => (draft.value?.traits ?? []).map((instance: TraitInstance) => ({ instance, template: studioState.traitTemplates.find((t) => t.id === instance.template_id) })).filter((e) => e.template));
 const hasAppliedUniqueTrait = computed(() => appliedTraits.value.some((entry) => entry.template?.unique));
 const appliedTraitLabels = computed(() => draft.value ? traitLabels(draft.value, studioState.traitTemplates) : []);
-const characterRoleOptions = computed<string[]>(() => studioState.gameplayTags.filter((tag) => tag.name.startsWith("character.")).map((tag) => tag.name));
+const characterRoleOptions = computed<string[]>(() => studioState.gameplayTags.map((tag) => tag.name));
 function roleTagOptions(templateKey: string | undefined, propertyKey: string): string[] | undefined {
   return templateKey === "character_settings" && propertyKey === "role" ? characterRoleOptions.value : undefined;
 }

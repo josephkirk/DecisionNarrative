@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loading of its project instructions.
 - Trait definition updates cannot invalidate existing unique or repeated traits.
 - Bundle imports reject malformed gameplay tag paths.
+- Character roles and storylet role requirements can select any registered gameplay tag.
 
 ## [0.1.0-alpha.1] - 2026-11-07
 
