@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Resizing a tree node no longer moves other nodes in the current layout.
 - Removed unused Rust helpers and resolved compiler warnings.
 
 ### Removed

@@ -95,7 +95,10 @@ function worldPoint(event: { clientX: number; clientY: number }): TreePoint {
 function updateNodeAppearance(id: string, update: Record<string, string | number>) {
   if (!graph.value || props.readonly) return;
   const appearance = graph.value.appearance ?? { nodes: {}, edges: {} };
-  patch({ ...graph.value, appearance: { ...appearance, nodes: { ...appearance.nodes, [id]: { ...appearance.nodes[id], ...update } } } });
+  const positions = ("width" in update || "height" in update) && layout.value
+    ? { ...graph.value.positions, [graph.value.direction]: { ...layout.value.positions } }
+    : graph.value.positions;
+  patch({ ...graph.value, positions, appearance: { ...appearance, nodes: { ...appearance.nodes, [id]: { ...appearance.nodes[id], ...update } } } });
 }
 function updateEdgeAppearance(index: number, update: Record<string, string | number>) {
   const edge = graph.value?.edges[index];
@@ -159,7 +162,7 @@ function movePan(event: PointerEvent) {
     const height = Math.max(60, Math.min(400, active.height + (north ? -dy : south ? dy : 0)));
     if (graph.value) {
       const appearance = graph.value.appearance ?? { nodes: {}, edges: {} };
-      const positions = { ...graph.value.positions, [graph.value.direction]: { ...graph.value.positions?.[graph.value.direction], [active.id]: { x: active.left + (west ? active.width - width : 0), y: active.top + (north ? active.height - height : 0) } } };
+      const positions = { ...graph.value.positions, [graph.value.direction]: { ...layout.value?.positions, [active.id]: { x: active.left + (west ? active.width - width : 0), y: active.top + (north ? active.height - height : 0) } } };
       patch({ ...graph.value, positions, appearance: { ...appearance, nodes: { ...appearance.nodes, [active.id]: { ...appearance.nodes[active.id], width, height } } } });
     }
     return;
