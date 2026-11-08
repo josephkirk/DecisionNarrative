@@ -1,6 +1,6 @@
 # DecisionNarrative
 
-**Version 0.1.0-alpha.1** — alpha prerelease. APIs, bundle schemas, and databases may change without migration.
+**Version 0.2.0-alpha.1** — alpha prerelease. APIs, bundle schemas, and databases may change without migration.
 
 DecisionNarrative is a local authoring and playtest studio for nonlinear, storylet-driven narrative games. It is designed to scale from a compact detective scenario to a large systemic RPG without imposing a built-in setting, cast, or linear plot structure.
 
@@ -64,7 +64,7 @@ cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 
 On this Windows workstation, install the optional review hook with `cp .githooks/pre-push .git/hooks/pre-push`. Preserve or merge any existing `pre-push` hook first. The hook requires Bun, Node.js, Git, an authenticated `gh` CLI, and Codex CLI signed in with ChatGPT; it does not use `OPENAI_API_KEY`.
 
-Each push queues a detached review of the pushed commit for its open GitHub pull request. Reviews run in an isolated temporary checkout and are posted as PR comments. Pushes are not blocked if review fails; inspect `%LOCALAPPDATA%\DecisionNarrative\local-review\review.log` for failures. Bypassing Git hooks skips the review.
+Each push queues a detached review of the pushed commit for its open GitHub pull request. The worker generates the diff in an isolated temporary checkout, then runs Codex from a separate temporary directory and passes the diff through stdin. Reviews are posted as PR comments. Pushes are not blocked if review fails; inspect `%LOCALAPPDATA%\DecisionNarrative\local-review\review.log` for failures. Bypassing Git hooks skips the review.
 
 ## Authoring and Starting Scenarios
 

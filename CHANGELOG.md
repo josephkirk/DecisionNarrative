@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0-alpha.1] - 2026-11-08
+
+### Added
+
+- Character, Location, and Fact classification traits can be combined on one
+  entity; the inventory plugin supplies the Item trait.
+- Traits have an optional unique flag. Each entity can have at most one unique
+  trait instance, enforced during authoring, saves, and bundle imports.
+- Local Codex reviews run after pushes and post commit-pinned comments to the
+  pull request without an API key.
+
+### Changed
+
+- Removed root entity types and the associated authoring and runtime paths.
+  Entities without classification traits remain valid.
+- Renamed the authoring section from Trait Templates to Traits.
+- Project databases and bundles use schema v6. Earlier schemas are rejected;
+  use a fresh database rather than migrating an existing one.
+
+### Fixed
+
+- Local review agents start outside the reviewed checkout, preventing automatic
+  loading of its project instructions.
+- Trait definition updates cannot invalidate existing unique or repeated traits.
+- Bundle imports reject malformed gameplay tag paths.
+
 ## [0.1.0-alpha.1] - 2026-11-07
 
 ### Added
