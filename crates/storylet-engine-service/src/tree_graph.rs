@@ -119,6 +119,7 @@ pub fn validate_tree_graphs(
 
         for instance in traits.iter().filter(|t| t.template_id == *tree_graph_template_id) {
             let mut valid_nodes: BTreeSet<&str> = BTreeSet::new();
+            let mut valid_edges: BTreeSet<(&str, &str)> = BTreeSet::new();
 
             // 1. Validate `nodes`
             match instance.values.get("nodes") {
@@ -212,6 +213,7 @@ pub fn validate_tree_graphs(
                             // Borrow strings from valid_nodes for zero-copy set lookup
                             let from_borrowed = *valid_nodes.get(from_str).unwrap();
                             let to_borrowed = *valid_nodes.get(to_str).unwrap();
+                            valid_edges.insert((from_borrowed, to_borrowed));
                             if !seen_edges.insert((from_borrowed, to_borrowed)) {
                                 issues.push(format!(
                                     "owner '{display_name}': tree_graph duplicate edge from '{from_str}' to '{to_str}'"
@@ -291,6 +293,24 @@ pub fn validate_tree_graphs(
                 },
                 Some(_) => issues.push(format!("owner '{display_name}': tree_graph shapes must be a JSON string")),
             }
+            match instance.values.get("appearance") {
+                None => {}
+                Some(Value::String(raw)) if raw.trim().is_empty() => {}
+                Some(Value::String(raw)) => match serde_json::from_str::<Value>(raw) {
+                    Ok(Value::Object(map)) => {
+                        validate_appearance_map(&map, display_name, &valid_nodes, &valid_edges, &mut issues);
+                    }
+                    Ok(_) => issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance must be a JSON object"
+                    )),
+                    Err(err) => issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance is malformed JSON: {err}"
+                    )),
+                },
+                Some(other) => issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance must be a JSON string, got {other}"
+                )),
+            }
         }
     }
 
@@ -358,6 +378,187 @@ fn validate_positions_map(
             if !y_valid {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph position for '{node_id}' in direction '{dir_key}' has invalid y coordinate, must be a finite number"
+                ));
+            }
+        }
+    }
+}
+
+fn is_valid_hex_color(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|b| b.is_ascii_hexdigit())
+}
+
+fn validate_appearance_map(
+    map: &serde_json::Map<String, Value>,
+    display_name: &str,
+    valid_nodes: &BTreeSet<&str>,
+    valid_edges: &BTreeSet<(&str, &str)>,
+    issues: &mut Vec<String>,
+) {
+    for key in map.keys() {
+        if key != "nodes" && key != "edges" {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance contains unknown key '{key}'"
+            ));
+        }
+    }
+
+    if let Some(nodes_val) = map.get("nodes") {
+        match nodes_val {
+            Value::Object(nodes_map) => {
+                validate_appearance_nodes(nodes_map, display_name, valid_nodes, issues);
+            }
+            other => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance 'nodes' must be an object, got {other}"
+                ));
+            }
+        }
+    }
+
+    if let Some(edges_val) = map.get("edges") {
+        match edges_val {
+            Value::Object(edges_map) => {
+                validate_appearance_edges(edges_map, display_name, valid_edges, issues);
+            }
+            other => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance 'edges' must be an object, got {other}"
+                ));
+            }
+        }
+    }
+}
+
+fn validate_appearance_nodes(
+    nodes_map: &serde_json::Map<String, Value>,
+    display_name: &str,
+    valid_nodes: &BTreeSet<&str>,
+    issues: &mut Vec<String>,
+) {
+    for (node_id, node_val) in nodes_map {
+        if !valid_nodes.contains(node_id.as_str()) {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance node '{node_id}' is not in nodes"
+            ));
+        }
+
+        let Some(node_obj) = node_val.as_object() else {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance for node '{node_id}' must be an object"
+            ));
+            continue;
+        };
+
+        for key in node_obj.keys() {
+            if !["background", "outline", "outlineWidth", "width", "height"].contains(&key.as_str()) {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance for node '{node_id}' contains unknown key '{key}'"
+                ));
+            }
+        }
+
+        if let Some(bg_val) = node_obj.get("background") {
+            let valid = bg_val.as_str().is_some_and(is_valid_hex_color);
+            if !valid {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance for node '{node_id}' has invalid background color, expected #RRGGBB"
+                ));
+            }
+        }
+
+        if let Some(outline_val) = node_obj.get("outline") {
+            let valid = outline_val.as_str().is_some_and(is_valid_hex_color);
+            if !valid {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance for node '{node_id}' has invalid outline color, expected #RRGGBB"
+                ));
+            }
+        }
+
+        if let Some(ow_val) = node_obj.get("outlineWidth") {
+            let valid = ow_val.as_f64().is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
+            if !valid {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance for node '{node_id}' has invalid outlineWidth, must be a finite number between 1 and 12"
+                ));
+            }
+        }
+
+        if let Some(w_val) = node_obj.get("width") {
+            let valid = w_val.as_f64().is_some_and(|w| w.is_finite() && (100.0..=600.0).contains(&w));
+            if !valid {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance for node '{node_id}' has invalid width, must be a finite number between 100 and 600"
+                ));
+            }
+        }
+
+        if let Some(h_val) = node_obj.get("height") {
+            let valid = h_val.as_f64().is_some_and(|h| h.is_finite() && (60.0..=400.0).contains(&h));
+            if !valid {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance for node '{node_id}' has invalid height, must be a finite number between 60 and 400"
+                ));
+            }
+        }
+    }
+}
+
+fn validate_appearance_edges(
+    edges_map: &serde_json::Map<String, Value>,
+    display_name: &str,
+    valid_edges: &BTreeSet<(&str, &str)>,
+    issues: &mut Vec<String>,
+) {
+    for (edge_key, edge_val) in edges_map {
+        let parsed_pair: Result<[String; 2], _> = serde_json::from_str(edge_key);
+        match parsed_pair {
+            Ok([from, to]) => {
+                if serde_json::to_string(&[&from, &to]).ok().as_deref() != Some(edge_key.as_str())
+                    || !valid_edges.contains(&(from.as_str(), to.as_str())) {
+                    issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance edge '{edge_key}' is not in edges"
+                    ));
+                }
+            }
+            Err(_) => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance malformed edge key '{edge_key}'"
+                ));
+            }
+        }
+
+        let Some(edge_obj) = edge_val.as_object() else {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance for edge '{edge_key}' must be an object"
+            ));
+            continue;
+        };
+
+        for key in edge_obj.keys() {
+            if key != "color" && key != "width" {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance for edge '{edge_key}' contains unknown key '{key}'"
+                ));
+            }
+        }
+
+        if let Some(color_val) = edge_obj.get("color") {
+            let valid = color_val.as_str().is_some_and(is_valid_hex_color);
+            if !valid {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance for edge '{edge_key}' has invalid color, expected #RRGGBB"
+                ));
+            }
+        }
+
+        if let Some(w_val) = edge_obj.get("width") {
+            let valid = w_val.as_f64().is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
+            if !valid {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance for edge '{edge_key}' has invalid width, must be a finite number between 1 and 12"
                 ));
             }
         }
@@ -699,5 +900,116 @@ mod tests {
         assert!(issues.iter().any(|i| i.contains("positions direction 'right' key 'missing-node' is not in nodes")));
         assert!(issues.iter().any(|i| i.contains("contains unknown key 'unknown_key'")));
         assert!(issues.iter().any(|i| i.contains("invalid x coordinate")));
+    }
+
+    #[test]
+    fn test_valid_appearance_survives_validation() {
+        let templates = standard_templates();
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            {
+                "id": "item-1",
+                "name": "Item 1",
+                "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+            },
+            {
+                "id": "item-2",
+                "name": "Item 2",
+                "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+            },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1", "item-2"],
+                        "edges": ["[\"item-1\",\"item-2\"]"],
+                        "appearance": json!({
+                            "nodes": {
+                                "item-1": {
+                                    "background": "#112233",
+                                    "outline": "#445566",
+                                    "outlineWidth": 4,
+                                    "width": 250,
+                                    "height": 120
+                                },
+                                "item-2": {}
+                            },
+                            "edges": {
+                                "[\"item-1\",\"item-2\"]": {
+                                    "color": "#aabbcc",
+                                    "width": 3.5
+                                }
+                            }
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+
+        let index = make_test_index(templates, entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.is_empty(), "unexpected issues: {issues:?}");
+    }
+
+    #[test]
+    fn test_appearance_malformed_and_invalid_values() {
+        let templates = standard_templates();
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            {
+                "id": "item-1",
+                "name": "Item 1",
+                "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+            },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1"],
+                        "edges": [],
+                        "appearance": json!({
+                            "unknown_root": true,
+                            "nodes": {
+                                "item-1": {
+                                    "background": "not-hex",
+                                    "outline": "#GGG",
+                                    "outlineWidth": 15,
+                                    "width": 50,
+                                    "height": 500,
+                                    "extra": "bad"
+                                },
+                                "stale-node": {}
+                            },
+                            "edges": {
+                                "malformed-edge-key": {},
+                                "[\"item-1\",\"item-1\"]": {
+                                    "color": "red",
+                                    "width": 0.5,
+                                    "extra_edge": 1
+                                }
+                            }
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+
+        let index = make_test_index(templates, entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.iter().any(|i| i.contains("appearance contains unknown key 'unknown_root'")));
+        assert!(issues.iter().any(|i| i.contains("invalid background color")));
+        assert!(issues.iter().any(|i| i.contains("invalid outline color")));
+        assert!(issues.iter().any(|i| i.contains("invalid outlineWidth")));
+        assert!(issues.iter().any(|i| i.contains("invalid width")));
+        assert!(issues.iter().any(|i| i.contains("invalid height")));
+        assert!(issues.iter().any(|i| i.contains("unknown key 'extra'")));
+        assert!(issues.iter().any(|i| i.contains("appearance node 'stale-node' is not in nodes")));
+        assert!(issues.iter().any(|i| i.contains("malformed edge key 'malformed-edge-key'")));
+        assert!(issues.iter().any(|i| i.contains("appearance edge '[\"item-1\",\"item-1\"]' is not in edges")));
+        assert!(issues.iter().any(|i| i.contains("invalid color")));
+        assert!(issues.iter().any(|i| i.contains("invalid width, must be a finite number between 1 and 12")));
+        assert!(issues.iter().any(|i| i.contains("unknown key 'extra_edge'")));
     }
 }

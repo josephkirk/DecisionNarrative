@@ -40,6 +40,108 @@ test("node shapes round-trip and reject unknown nodes or shapes", () => {
   expect(treeGraphOf(replaced.traits![0]!).shapes).toEqual({});
 });
 
+test("node and edge appearance round-trips and clears when omitted", () => {
+  const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const edgeKey = JSON.stringify(["start-a", "shared"]);
+  const appearanceGraph: TreeGraph = {
+    ...graph,
+    appearance: {
+      nodes: {
+        shared: {
+          background: "#112233",
+          outline: "#445566",
+          outlineWidth: 3,
+          width: 250,
+          height: 120,
+        },
+      },
+      edges: {
+        [edgeKey]: {
+          color: "#abcdef",
+          width: 4,
+        },
+      },
+    },
+  };
+  const patched = setTreeGraph(entity, trait, appearanceGraph);
+  const restored = treeGraphOf(patched.traits![0]!);
+  expect(restored.appearance).toEqual(appearanceGraph.appearance);
+
+  // Clearing old appearance when passed graph with appearance: undefined
+  const replaced = setTreeGraph({ ...entity, traits: [patched.traits![0]!] }, trait, graph);
+  expect(treeGraphOf(replaced.traits![0]!).appearance).toEqual({ nodes: {}, edges: {} });
+});
+
+test("existing graphs without appearance remain readable", () => {
+  const traitEmpty: TraitInstance = { id: "graph", template_id: "tree_graph", values: { nodes: ["a"], edges: [] } };
+  expect(treeGraphOf(traitEmpty).appearance).toBeUndefined();
+
+  const traitBlank: TraitInstance = { id: "graph", template_id: "tree_graph", values: { nodes: ["a"], edges: [], appearance: "" } };
+  expect(treeGraphOf(traitBlank).appearance).toBeUndefined();
+});
+
+test("appearance rejects invalid payload, unexpected fields, and out-of-range values", () => {
+  const base = { id: "graph", template_id: "tree_graph", values: { nodes: ["a", "b"], edges: [JSON.stringify(["a", "b"])] } };
+
+  // Malformed JSON and wrong type
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: "not-json" } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: 123 as unknown as string } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: "[]" } })).toThrow();
+
+  // Unexpected top-level fields
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ extra: 123 }) } })).toThrow();
+
+  // Unknown / stale node reference
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { missing: { background: "#112233" } } }) } })).toThrow();
+
+  // Unknown / stale edge reference
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ edges: { [JSON.stringify(["a", "missing"])]: { color: "#112233" } } }) } })).toThrow();
+
+  // Malformed edge key
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ edges: { "not-json": { color: "#112233" } } }) } })).toThrow();
+
+  // Unexpected fields in node/edge appearance
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { unexpected: true } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ edges: { [JSON.stringify(["a", "b"])]: { unexpected: true } } }) } })).toThrow();
+
+  // Invalid colors
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { background: "blue" } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { background: "#fff" } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { outline: "#gggggg" } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ edges: { [JSON.stringify(["a", "b"])]: { color: "112233" } } }) } })).toThrow();
+
+  // Out-of-bounds numbers
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { outlineWidth: 0 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { outlineWidth: 13 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { width: 99 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { width: 601 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { height: 59 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { height: 401 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ edges: { [JSON.stringify(["a", "b"])]: { width: 0 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ edges: { [JSON.stringify(["a", "b"])]: { width: 13 } } }) } })).toThrow();
+});
+
+test("treeErrors flags unknown nodes and edges in appearance", () => {
+  const eligible = new Set(graph.nodes);
+  expect(treeErrors({
+    ...graph,
+    appearance: {
+      nodes: { "unknown-node": { background: "#112233" } },
+      edges: {},
+    },
+  }, eligible)).not.toEqual([]);
+
+  expect(treeErrors({
+    ...graph,
+    appearance: {
+      nodes: {},
+      edges: { [JSON.stringify(["start-a", "end"])]: { color: "#112233" } },
+    },
+  }, eligible)).not.toEqual([]);
+});
+
+
 test("examples describe valid, distinct topologies", () => {
   expect(TREE_EXAMPLES.map((entry) => entry.id)).toEqual(["skill-tree", "roguelike-map", "relationship-tree"]);
   for (const example of TREE_EXAMPLES) {

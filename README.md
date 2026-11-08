@@ -111,11 +111,13 @@ is saved: a new or edited version is marked *storylet not saved* and a deleted n
 
 In a story graph, connect configured **Get Entity** nodes to the owner and item inputs of **Add Item**, **Remove Item**, or **Has Item**. Add/remove are flow nodes; Has Item outputs a boolean for a Condition Node. Inputs are checked for the required traits. Adding an item already present and removing an absent item are no-ops; adding to a full inventory fails. Runtime changes are part of the playtest state, not edits to the authored inventory.
 
-**Built-in: Tree Graph.** Add `TreeGraph` to an entity to open its **Tree** tab. Add entities carrying `TreeItem`, connect them using node ports or the connection controls, and save the owner. Multiple roots, shared nodes, cycles, and disconnected components are supported without game-specific progression rules. Pan and zoom the canvas; switch between four directional views and radial view, drag nodes or use arrow keys, and save a separate layout for each view. **Save layout** saves the entity draft; **Export JSON** downloads the graph, item metadata, and current coordinates. Skill-tree, roguelike-map, and relationship-tree examples create TreeItem entities in the project.
+**Built-in: Tree Graph.** Add `TreeGraph` to an entity to open its **Tree** tab. Add entities carrying `TreeItem`, then drag from a node's outer edge to another node to connect them. Multiple roots, shared nodes, cycles, and disconnected components are supported without game-specific progression rules. Pan and zoom the canvas; switch between four directional views and radial view, drag nodes or use arrow keys, and save a separate layout for each view. **Save layout** saves the entity draft; **Export JSON** downloads the graph, item metadata, and current coordinates.
 
-Right-click the canvas to search for and place a TreeItem, or right-click a node for connection and removal actions. The add-item and connection controls remain available without a mouse. Expand **View options** to customize the grid and thumbnails; these preferences are stored in the local browser, separate from the saved graph.
+Right-click the canvas to add TreeItems or create skill-tree, roguelike-map, and relationship-tree examples. Right-click a node to change its shape, colors, outline width, and dimensions; drag its resize handle to resize it. Nodes use their entities' thumbnails as backgrounds. Open node options to connect without a mouse.
 
-Open a node's options to choose a card, rounded rectangle, ellipse, or diamond. The node uses its entity's thumbnail as its background. Shape choices are saved with the graph; use the entity editor to change the thumbnail.
+Right-click a wire to change its color or thickness, or remove it. Drag a wire to reconnect its target; drop it on empty canvas to choose a target from a menu. Alt-drag across wires to cut them. Focus a wire and press Enter to open its options by keyboard.
+
+Expand **View options** to customize the grid and thumbnails; these preferences are stored in the local browser, separate from the saved graph.
 
 The **Plugins** tab lists installed plugins and turns them on or off.
 Visual check: `bun run test:visual:canvas`.

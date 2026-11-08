@@ -16,8 +16,11 @@ export const treeGraphPlugin = definePlugin({
       const graphTemplate = treeGraphTemplate();
       const existing = studioState.traitTemplates.find((template) => template.key === TREE_GRAPH_KEY);
       const templates = [graphTemplate, treeItemTemplate()].filter((template) => !studioState.traitTemplates.some((candidate) => candidate.key === template.key));
-      if (existing && !existing.properties.some((property) => property.key === "shapes")) {
-        templates.push({ ...existing, properties: [...existing.properties, graphTemplate.properties.find((property) => property.key === "shapes")!] });
+      if (existing) {
+        const missing = graphTemplate.properties.filter((property) => !existing.properties.some((candidate) => candidate.key === property.key));
+        if (missing.length) {
+          templates.push({ ...existing, properties: [...existing.properties, ...missing] });
+        }
       }
       if (!templates.length) return;
       creating = true;

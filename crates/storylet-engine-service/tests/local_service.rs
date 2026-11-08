@@ -231,6 +231,131 @@ async fn tree_graph_references_survive_saves_and_bundle_imports() {
     assert_eq!(loaded["traits"][0]["values"], graph["traits"][0]["values"]);
 }
 
+#[tokio::test]
+async fn tree_graph_appearance_survives_saves_and_rejects_invalids() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id": "tree_graph", "key": "tree_graph", "name": "TreeGraph",
+        "properties": [
+            {"id":"nodes","key":"nodes","name":"Nodes","type":"entity","is_array":true,"default":[]},
+            {"id":"edges","key":"edges","name":"Edges","type":"string","is_array":true,"default":[]},
+            {"id":"direction","key":"direction","name":"Direction","type":"string","default":"right"},
+            {"id":"positions","key":"positions","name":"Saved layouts","type":"string","default":""},
+            {"id":"appearance","key":"appearance","name":"Appearance","type":"string","default":""}
+        ]
+    })).await.unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id": "tree_item", "key": "tree_item", "name": "TreeItem", "properties": []
+    })).await.unwrap();
+    let item = json!({"id":"node1","name":"Node 1","traits":[{"id":"item","template_id":"tree_item","values":{}}]});
+    service.save_content_item("entity_templates", &item).await.unwrap();
+    let valid_appearance = json!({
+        "nodes": {
+            "node1": {
+                "background": "#112233",
+                "outline": "#445566",
+                "outlineWidth": 4,
+                "width": 250,
+                "height": 120
+            }
+        },
+        "edges": {
+            "[\"node1\",\"node1\"]": {
+                "color": "#aabbcc",
+                "width": 3.5
+            }
+        }
+    }).to_string();
+    let graph = json!({"id":"owner","name":"Owner","traits":[{
+        "id":"graph","template_id":"tree_graph",
+        "values":{
+            "nodes":["node1"],
+            "edges":["[\"node1\",\"node1\"]"],
+            "direction":"right",
+            "appearance": valid_appearance
+        }
+    }]});
+    service.save_content_item("entity_templates", &graph).await.unwrap();
+    let loaded = service.get_content_item("entity_templates", "owner").await.unwrap();
+    assert_eq!(loaded["traits"][0]["values"]["appearance"], valid_appearance);
+
+    // Export & import roundtrip
+    let bundle = serde_json::to_value(service.export_project_bundle().await.unwrap()).unwrap();
+    assert!(service.validate_bundle(&bundle).await.unwrap().is_empty());
+    service.import_bundle(&bundle).await.unwrap();
+    let imported = service.get_content_item("entity_templates", "owner").await.unwrap();
+    assert_eq!(imported["traits"][0]["values"]["appearance"], valid_appearance);
+
+    // Invalid color
+    let mut bad = graph.clone();
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"background\":\"#123\"}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid outlineWidth (< 1)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"outlineWidth\":0.5}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid outlineWidth (> 12)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"outlineWidth\":15}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid width (< 100)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"width\":50}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid width (> 600)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"width\":700}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid height (< 60)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"height\":40}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid height (> 400)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"height\":500}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Stale node reference
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"missing_node\":{\"width\":200}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Stale edge reference
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"missing\"]":{"width":2}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Malformed edge key
+    bad["traits"][0]["values"]["appearance"] = json!("{\"edges\":{\"node1->node1\":{\"width\":2}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Noncanonical edge keys are rejected so the editor can resolve the style.
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\", \"node1\"]":{"width":2}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid edge color
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"color":"blue"}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid edge width (< 1)
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"width":0}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid edge width (> 12)
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"width":13}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Unknown field on node
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"unknown\":123}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Unknown field on edge
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"unknown":123}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Unknown field on root
+    bad["traits"][0]["values"]["appearance"] = json!("{\"extraRoot\":123}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+}
+
 
 fn reveal_storylet(event_id: &str) -> Value {
     json!({"id":"tell","title":"Tell","content":{"text_template":"x"},"created_at":1,
