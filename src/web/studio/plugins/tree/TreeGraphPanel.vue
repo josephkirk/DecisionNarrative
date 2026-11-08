@@ -27,7 +27,7 @@ let mounted = true;
 onBeforeUnmount(() => { mounted = false; });
 let drag: { id: string; pointer: number; startX: number; startY: number; point: TreePoint } | null = null;
 const linkDrag = ref<{ from: string; edge?: number; pointer: number; startX: number; startY: number; x: number; y: number; moved: boolean } | null>(null);
-const resizeDrag = ref<{ id: string; pointer: number; x: number; y: number; width: number; height: number } | null>(null);
+const resizeDrag = ref<{ id: string; pointer: number; x: number; y: number; width: number; height: number; left: number; top: number; direction: string } | null>(null);
 const cutDrag = ref<{ pointer: number; start: TreePoint; end: TreePoint } | null>(null);
 const zoom = ref(100);
 const treeScroll = ref<HTMLElement | null>(null);
@@ -152,10 +152,16 @@ function movePan(event: PointerEvent) {
   if (cutDrag.value?.pointer === event.pointerId) { cutDrag.value.end = worldPoint(event); return; }
   if (resizeDrag.value?.pointer === event.pointerId) {
     const active = resizeDrag.value;
-    updateNodeAppearance(active.id, {
-      width: Math.max(100, Math.min(600, Math.round(active.width + (event.clientX - active.x) / zoomFactor.value))),
-      height: Math.max(60, Math.min(400, Math.round(active.height + (event.clientY - active.y) / zoomFactor.value))),
-    });
+    const dx = Math.round((event.clientX - active.x) / zoomFactor.value), dy = Math.round((event.clientY - active.y) / zoomFactor.value);
+    const west = active.direction.includes("w"), east = active.direction.includes("e");
+    const north = active.direction.includes("n"), south = active.direction.includes("s");
+    const width = Math.max(100, Math.min(600, active.width + (west ? -dx : east ? dx : 0)));
+    const height = Math.max(60, Math.min(400, active.height + (north ? -dy : south ? dy : 0)));
+    if (graph.value) {
+      const appearance = graph.value.appearance ?? { nodes: {}, edges: {} };
+      const positions = { ...graph.value.positions, [graph.value.direction]: { ...graph.value.positions?.[graph.value.direction], [active.id]: { x: active.left + (west ? active.width - width : 0), y: active.top + (north ? active.height - height : 0) } } };
+      patch({ ...graph.value, positions, appearance: { ...appearance, nodes: { ...appearance.nodes, [active.id]: { ...appearance.nodes[active.id], width, height } } } });
+    }
     return;
   }
   if (linkDrag.value?.pointer === event.pointerId) { moveLink(event); return; }
@@ -355,10 +361,13 @@ function finishCut() {
   });
   if (removed.size) removeEdges(removed);
 }
-function startResize(id: string, event: PointerEvent) {
-  if (props.readonly || event.button !== 0) return;
+function startResize(id: string, direction: string, event: PointerEvent) {
+  if (event.altKey) { startPan(event); return; }
+  if (props.readonly || creatingExample.value || event.button !== 0) return;
+  const point = layout.value?.positions[id];
+  if (!point) return;
   const size = nodeSize(id);
-  resizeDrag.value = { id, pointer: event.pointerId, x: event.clientX, y: event.clientY, ...size };
+  resizeDrag.value = { id, direction, pointer: event.pointerId, x: event.clientX, y: event.clientY, left: point.x, top: point.y, ...size };
   treeScroll.value?.setPointerCapture(event.pointerId);
   event.stopPropagation();
   event.preventDefault();
@@ -479,7 +488,7 @@ function edgePath(edge: TreeEdge): string | null {
 <template>
   <section class="tree-panel" aria-label="Tree graph">
     <header class="tree-header">
-      <div><h2>Tree graph</h2><p class="field-sublabel">Drag a node's edge to connect. Alt-drag across wires to cut. Right-click for options.</p></div>
+      <div><h2>Tree graph</h2><p class="field-sublabel">Drag outside a node to connect; drag its edge or corner to resize. Alt-drag across wires to cut. Right-click for options.</p></div>
       <div class="tree-view-controls">
         <label>View
           <select class="form-select" aria-label="Graph direction" :value="graph?.direction" :disabled="readonly || !graph || creatingExample" @change="changeDirection">
@@ -537,7 +546,7 @@ function edgePath(edge: TreeEdge): string | null {
               <span class="tree-node-art" aria-hidden="true"><img v-if="showThumbnails && thumbnailUrl(byId.get(id)?.thumbnail)" :src="thumbnailUrl(byId.get(id)?.thumbnail) ?? ''" width="164" height="68" alt="" /></span>
               <span class="tree-node-copy"><strong :title="label(id)">{{ label(id) }}</strong><small :title="description(id)">{{ roots.has(id) ? 'Root' : 'Tree item' }}</small></span>
               <button v-if="!readonly" type="button" class="tree-remove" :disabled="creatingExample" :aria-label="`Options for ${label(id)}`" @click.stop="openContext($event, id)">⋯</button>
-              <button v-if="!readonly" type="button" class="tree-resize" :aria-label="`Resize ${label(id)}`" title="Drag to resize; dimensions also available in node options" @pointerdown.stop="startResize(id, $event)">◢</button>
+              <template v-if="!readonly"><span v-for="direction in ['n','ne','e','se','s','sw','w','nw']" :key="direction" class="tree-resize" :class="`resize-${direction}`" :title="`Resize ${label(id)}`" aria-hidden="true" @pointerdown.stop="startResize(id, direction, $event)" /></template>
             </article>
           </div>
         <div v-if="menu" class="tree-context" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" @pointerdown.stop @wheel.stop @keydown.esc.stop="menu = null">
@@ -666,7 +675,14 @@ function edgePath(edge: TreeEdge): string | null {
 .zone-left, .zone-right { top: 0; bottom: 0; width: 14px; }
 .zone-top { top: -14px; } .zone-bottom { bottom: -14px; }
 .zone-left { left: -14px; } .zone-right { right: -14px; }
-.tree-resize { position: absolute; right: 0; bottom: 0; z-index: 3; color: var(--text-muted); background: transparent; border: 0; cursor: nwse-resize; }
+.tree-node:has(.tree-connect-zone:hover)::after { content: ""; position: absolute; inset: -14px; border: 1px solid var(--accent); pointer-events: none; }
+.tree-resize { position: absolute; z-index: 3; }
+.resize-n, .resize-s { left: 10px; right: 10px; height: 6px; cursor: ns-resize; }
+.resize-e, .resize-w { top: 10px; bottom: 10px; width: 6px; cursor: ew-resize; }
+.resize-n { top: 0; } .resize-s { bottom: 0; } .resize-e { right: 0; } .resize-w { left: 0; }
+.resize-ne, .resize-se, .resize-sw, .resize-nw { width: 10px; height: 10px; }
+.resize-ne { top: 0; right: 0; cursor: nesw-resize; } .resize-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.resize-nw { top: 0; left: 0; cursor: nwse-resize; } .resize-se { bottom: 0; right: 0; cursor: nwse-resize; }
 .tree-node.is-movable { cursor: grab; touch-action: none; }
 .tree-node.is-movable:active { cursor: grabbing; }
 .tree-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
