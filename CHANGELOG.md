@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and three example graphs.
 - Shared color wheel picker for tree graph and vector canvas colors.
 
+### Fixed
+
+- Removed unused Rust helpers and resolved compiler warnings.
+
 ### Removed
 
 - Automatic local pull-request reviews and their pre-push hook.

@@ -620,7 +620,7 @@ pub fn validate_unique_traits(traits: &[crate::contracts::TraitInstance], templa
 pub fn validate_trait_properties(
     properties: &mut [TraitPropertyDefinition],
     prefix: &str,
-    index: &WorkspaceIndex,
+    _index: &WorkspaceIndex,
 ) -> Result<(), String> {
     let mut seen = BTreeSet::new();
     for definition in properties {

@@ -26,14 +26,6 @@ pub const SALIENCE_DISTANCE_ALPHA: f64 = 0.05;
 /// Scores inside this window are treated as ties and resolved from the seed.
 pub const SALIENCE_TIE_EPSILON: f64 = 0.0001;
 
-fn default_specificity_weight() -> f64 {
-    1.0
-}
-
-fn default_target_weight() -> f32 {
-    1.0
-}
-
 fn default_base_cost() -> f64 {
     1.0
 }
@@ -44,14 +36,6 @@ fn default_used_penalty_cost() -> f64 {
 
 fn default_urgency_tag() -> String {
     "Standard".to_owned()
-}
-
-fn min_finite() -> f32 {
-    f32::MIN
-}
-
-fn max_finite() -> f32 {
-    f32::MAX
 }
 
 // ---------------------------------------------------------------------------

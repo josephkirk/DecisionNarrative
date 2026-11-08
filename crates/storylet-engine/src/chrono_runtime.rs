@@ -4517,7 +4517,7 @@ impl FlowGraphInstance {
     /// recorded so the exact inverse restores the prior topic and edge-use count.
     pub fn divert_topic(
         &mut self,
-        ctx: &mut RuntimeContext,
+        _ctx: &mut RuntimeContext,
         node_guid: u32,
         edge_id: &str,
     ) -> Result<Vec<SignalToken>, GraphError> {
