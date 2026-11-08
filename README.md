@@ -60,12 +60,6 @@ cargo test --manifest-path crates/storylet-engine/Cargo.toml
 cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 ```
 
-### Local pull-request reviews
-
-On this Windows workstation, install the optional review hook with `cp .githooks/pre-push .git/hooks/pre-push`. Preserve or merge any existing `pre-push` hook first. The hook requires Bun, Node.js, Git, an authenticated `gh` CLI, and Codex CLI signed in with ChatGPT; it does not use `OPENAI_API_KEY`.
-
-Each push queues a detached review of the pushed commit for its open GitHub pull request. The worker generates the diff in an isolated temporary checkout, then runs Codex from a separate temporary directory and passes the diff through stdin. Reviews are posted as PR comments. Pushes are not blocked if review fails; inspect `%LOCALAPPDATA%\DecisionNarrative\local-review\review.log` for failures. Bypassing Git hooks skips the review.
-
 ## Authoring and Starting Scenarios
 
 - **Storylet Library**: Browsable card grid with responsive columns (60 cards per page), search by title/text/group tag, status filters (Approved/Draft), location-tag filters, and ending badges. Storylets may target location tags; with no location tags they are not location-gated. With tags, they are eligible anywhere the current location shares at least one tag. Clicking any card opens the full-width graph editor.
