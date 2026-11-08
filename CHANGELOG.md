@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tree Graph plugin with TreeGraph and TreeItem traits, an infinite pan-and-zoom
   canvas, editable entity connections, multiple roots, directional and radial
-  layouts, saved node positions, JSON export, entity thumbnails, and skill-tree,
-  roguelike-map, and relationship-tree examples.
+  layouts, saved node positions, JSON export, entity thumbnails, contextual
+  editing, local display preferences, and skill-tree, roguelike-map, and
+  relationship-tree examples.
 
 ### Removed
 

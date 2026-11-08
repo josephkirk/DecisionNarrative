@@ -113,6 +113,8 @@ In a story graph, connect configured **Get Entity** nodes to the owner and item 
 
 **Built-in: Tree Graph.** Add `TreeGraph` to an entity to open its **Tree** tab. Add entities carrying `TreeItem`, connect them using node ports or the connection controls, and save the owner. Multiple roots, shared nodes, cycles, and disconnected components are supported without game-specific progression rules. Pan and zoom the canvas; switch between four directional views and radial view, drag nodes or use arrow keys, and save a separate layout for each view. **Save layout** saves the entity draft; **Export JSON** downloads the graph, item metadata, and current coordinates. Skill-tree, roguelike-map, and relationship-tree examples create TreeItem entities in the project.
 
+Right-click the canvas to search for and place a TreeItem, or right-click a node for connection and removal actions. The add-item and connection controls remain available without a mouse. Expand **View options** to customize the grid and thumbnails; these preferences are stored in the local browser, separate from the saved graph.
+
 The **Plugins** tab lists installed plugins and turns them on or off.
 Visual check: `bun run test:visual:canvas`.
 
