@@ -2,6 +2,8 @@ import type { TraitInstance, TraitTemplateRecord } from "../../contracts.ts";
 import type { AnyEntity } from "../runtime.ts";
 
 export type TreeDirection = "right" | "left" | "down" | "up" | "radial";
+export type TreeShape = "card" | "rounded" | "ellipse" | "diamond";
+export const TREE_SHAPES: readonly TreeShape[] = ["card", "rounded", "ellipse", "diamond"];
 
 export interface TreeEdge {
   from: string;
@@ -16,6 +18,7 @@ export interface TreeGraph {
   edges: TreeEdge[];
   direction: TreeDirection;
   positions?: TreePositions;
+  shapes?: Record<string, TreeShape>;
 }
 
 export const TREE_GRAPH_KEY = "tree_graph";
@@ -40,6 +43,7 @@ export function treeGraphTemplate(): TraitTemplateRecord {
       { id: "edges", key: "edges", name: "Edges", type: "string", is_array: true, default: [] },
       { id: "direction", key: "direction", name: "Direction", type: "string", default: "right" },
       { id: "positions", key: "positions", name: "Saved layouts", type: "string", default: "" },
+      { id: "shapes", key: "shapes", name: "Node shapes", type: "string", default: "" },
     ],
   };
 }
@@ -130,7 +134,20 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
       positions[view as TreeDirection] = coordinates;
     }
   }
-  return { nodes, edges, direction, positions };
+  let shapes: Record<string, TreeShape> | undefined;
+  if (values.shapes !== undefined && (typeof values.shapes !== "string" || values.shapes.trim() !== "")) {
+    if (typeof values.shapes !== "string") throw new Error("Malformed node shapes: expected a JSON string.");
+    let data: unknown;
+    try { data = JSON.parse(values.shapes); } catch { throw new Error("Malformed node shapes: invalid JSON."); }
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Malformed node shapes: expected an object.");
+    shapes = Object.create(null) as Record<string, TreeShape>;
+    const nodeIds = new Set(nodes);
+    for (const [id, shape] of Object.entries(data)) {
+      if (!nodeIds.has(id) || typeof shape !== "string" || !TREE_SHAPES.includes(shape as TreeShape)) throw new Error(`Invalid node shape for '${id}'.`);
+      shapes[id] = shape as TreeShape;
+    }
+  }
+  return { nodes, edges, direction, positions, ...(shapes ? { shapes } : {}) };
 }
 
 export function setTreeGraph(entity: AnyEntity, instance: TraitInstance, graph: TreeGraph): Partial<AnyEntity> {
@@ -146,6 +163,7 @@ export function setTreeGraph(entity: AnyEntity, instance: TraitInstance, graph: 
               edges: encodedEdges,
               direction: graph.direction,
               positions: JSON.stringify(graph.positions ?? {}),
+              ...(graph.shapes || "shapes" in trait.values ? { shapes: JSON.stringify(graph.shapes ?? {}) } : {}),
             },
           }
         : trait,

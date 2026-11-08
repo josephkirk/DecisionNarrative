@@ -29,6 +29,17 @@ test("saved positions survive round-trip independently by direction", () => {
   expect(() => treeGraphOf({ ...trait, values: { nodes: ["shared"], positions: JSON.stringify({ right: { missing: { x: 1, y: 2 } } }) } })).toThrow();
 });
 
+test("node shapes round-trip and reject unknown nodes or shapes", () => {
+  const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const restored = treeGraphOf(setTreeGraph(entity, trait, { ...graph, shapes: { shared: "diamond", end: "ellipse" } }).traits![0]!);
+  expect(restored.shapes).toEqual({ shared: "diamond", end: "ellipse" });
+  expect(() => treeGraphOf({ ...trait, values: { nodes: ["shared"], shapes: '{"shared":"triangle"}' } })).toThrow();
+  expect(() => treeGraphOf({ ...trait, values: { nodes: ["shared"], shapes: '{"missing":"card"}' } })).toThrow();
+  const replaced = setTreeGraph({ ...entity, traits: [setTreeGraph(entity, trait, { ...graph, shapes: { shared: "diamond" } }).traits![0]!] }, trait, graph);
+  expect(treeGraphOf(replaced.traits![0]!).shapes).toEqual({});
+});
+
 test("examples describe valid, distinct topologies", () => {
   expect(TREE_EXAMPLES.map((entry) => entry.id)).toEqual(["skill-tree", "roguelike-map", "relationship-tree"]);
   for (const example of TREE_EXAMPLES) {

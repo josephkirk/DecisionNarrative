@@ -274,6 +274,23 @@ pub fn validate_tree_graphs(
                     ));
                 }
             }
+            match instance.values.get("shapes") {
+                None => {}
+                Some(Value::String(raw)) if raw.trim().is_empty() => {}
+                Some(Value::String(raw)) => match serde_json::from_str::<Value>(raw) {
+                    Ok(Value::Object(shapes)) => {
+                        for (id, shape) in &shapes {
+                            if !valid_nodes.contains(id.as_str())
+                                || !shape.as_str().is_some_and(|value| ["card", "rounded", "ellipse", "diamond"].contains(&value))
+                            {
+                                issues.push(format!("owner '{display_name}': tree_graph invalid shape for node '{id}'"));
+                            }
+                        }
+                    }
+                    _ => issues.push(format!("owner '{display_name}': tree_graph shapes must be a JSON object")),
+                },
+                Some(_) => issues.push(format!("owner '{display_name}': tree_graph shapes must be a JSON string")),
+            }
         }
     }
 

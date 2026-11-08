@@ -201,6 +201,15 @@ async fn tree_graph_references_survive_saves_and_bundle_imports() {
         "values":{"nodes":["skill"],"edges":["[\"skill\",\"skill\"]"],"direction":"radial","positions":"{\"radial\":{\"skill\":{\"x\":-320,\"y\":-120}}}"}
     }]});
     service.save_content_item("entity_templates", &graph).await.unwrap();
+    let mut definition = service.get_content_item("trait_templates", "tree_graph").await.unwrap();
+    definition["properties"].as_array_mut().unwrap().push(json!({"id":"shapes","key":"shapes","name":"Node shapes","type":"string","default":""}));
+    service.save_content_item("trait_templates", &definition).await.unwrap();
+    let mut graph = graph;
+    graph["traits"][0]["values"]["shapes"] = json!("{\"skill\":\"diamond\"}");
+    service.save_content_item("entity_templates", &graph).await.unwrap();
+    let mut invalid_shape = graph.clone();
+    invalid_shape["traits"][0]["values"]["shapes"] = json!("{\"skill\":\"triangle\"}");
+    assert!(service.save_content_item("entity_templates", &invalid_shape).await.is_err());
     let mut invalid = graph.clone();
     invalid["traits"][0]["values"]["nodes"] = json!(["plain"]);
     assert!(service.save_content_item("entity_templates", &invalid).await.is_err());

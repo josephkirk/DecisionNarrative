@@ -443,7 +443,8 @@ impl StudioService {
                 if let Some(previous) = stored.as_ref() {
                     let is_tree_trait = matches!(previous.key.as_str(), "tree_graph" | "tree_item");
                     let schema_changed = previous.key != prepared.key
-                        || (previous.key == "tree_graph" && previous.properties != prepared.properties);
+                        || (previous.key == "tree_graph"
+                            && previous.properties.iter().any(|property| !prepared.properties.contains(property)));
                     if is_tree_trait && schema_changed && (
                         index.entities.iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == previous.id))
                         || index.entity_templates.iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == previous.id))

@@ -115,6 +115,8 @@ In a story graph, connect configured **Get Entity** nodes to the owner and item 
 
 Right-click the canvas to search for and place a TreeItem, or right-click a node for connection and removal actions. The add-item and connection controls remain available without a mouse. Expand **View options** to customize the grid and thumbnails; these preferences are stored in the local browser, separate from the saved graph.
 
+Open a node's options to choose a card, rounded rectangle, ellipse, or diamond. The node uses its entity's thumbnail as its background. Shape choices are saved with the graph; use the entity editor to change the thumbnail.
+
 The **Plugins** tab lists installed plugins and turns them on or off.
 Visual check: `bun run test:visual:canvas`.
 

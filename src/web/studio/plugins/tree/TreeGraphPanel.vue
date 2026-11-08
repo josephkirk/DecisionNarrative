@@ -7,7 +7,7 @@ import { thumbnailUrl } from "../../thumbnails.ts";
 import { refreshWorkspace } from "../../view-models/workspace.ts";
 import type { AnyEntity } from "../runtime.ts";
 import { TREE_EXAMPLES } from "./examples.ts";
-import { TREE_GRAPH_KEY, TREE_ITEM_KEY, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, treeTrait, type TreeDirection, type TreeEdge, type TreeGraph, type TreePoint, type TreePositions } from "./model.ts";
+import { TREE_GRAPH_KEY, TREE_ITEM_KEY, TREE_SHAPES, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, treeTrait, type TreeDirection, type TreeEdge, type TreeGraph, type TreePoint, type TreePositions, type TreeShape } from "./model.ts";
 
 const props = defineProps<{ entity: AnyEntity; readonly?: boolean }>();
 const emit = defineEmits<{ (event: "patch", patch: Partial<AnyEntity>): void; (event: "save"): void }>();
@@ -138,7 +138,8 @@ function openContext(event: MouseEvent, node?: string) {
   event.preventDefault();
   event.stopPropagation();
   const rect = treeScroll.value.getBoundingClientRect();
-  const x = event.clientX - rect.left, y = event.clientY - rect.top;
+  const anchor = event.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : rect;
+  const x = (event.clientX || anchor.left + anchor.width / 2) - rect.left, y = (event.clientY || anchor.bottom) - rect.top;
   menuSearch.value = "";
   menu.value = {
     x: Math.max(0, Math.min(x, rect.width - 260)),
@@ -146,7 +147,7 @@ function openContext(event: MouseEvent, node?: string) {
     node,
     point: { x: Math.round((x - panX.value) / zoomFactor.value), y: Math.round((y - panY.value) / zoomFactor.value) },
   };
-  void nextTick(() => treeScroll.value?.querySelector<HTMLElement>(".tree-context input, .tree-context button")?.focus());
+  void nextTick(() => treeScroll.value?.querySelector<HTMLElement>(".tree-context input, .tree-context select, .tree-context button")?.focus());
 }
 function addAtContext(id: string) {
   const current = graph.value, position = menu.value?.point;
@@ -176,9 +177,16 @@ function removeItem(id: string) {
   for (const [view, points] of Object.entries(graph.value.positions ?? {})) {
     positions[view as TreeDirection] = Object.fromEntries(Object.entries(points).filter(([node]) => node !== id));
   }
-  patch({ ...graph.value, nodes: graph.value.nodes.filter((node) => node !== id), edges: graph.value.edges.filter((edge) => edge.from !== id && edge.to !== id), positions });
+  const shapes = graph.value.shapes ? Object.fromEntries(Object.entries(graph.value.shapes).filter(([node]) => node !== id)) : undefined;
+  patch({ ...graph.value, nodes: graph.value.nodes.filter((node) => node !== id), edges: graph.value.edges.filter((edge) => edge.from !== id && edge.to !== id), positions, shapes });
   if (source.value === id) source.value = "";
   if (target.value === id) target.value = "";
+}
+function setShape(id: string, event: Event) {
+  if (!graph.value || props.readonly) return;
+  const shape = (event.target as HTMLSelectElement).value as TreeShape;
+  if (!TREE_SHAPES.includes(shape)) return;
+  patch({ ...graph.value, shapes: { ...graph.value.shapes, [id]: shape } });
 }
 function connect(from: string, to: string) {
   if (!graph.value || props.readonly) return;
@@ -312,14 +320,19 @@ function edgePath(edge: TreeEdge): string | null {
   const b = layout.value?.positions[edge.to];
   if (!a || !b) return null;
   if (edge.from === edge.to) {
-    return `M ${a.x + 108} ${a.y} C ${a.x + 130} ${a.y - 38}, ${a.x + 34} ${a.y - 38}, ${a.x + 56} ${a.y}`;
+    const inset = graph.value?.shapes?.[edge.from] === "diamond" ? 11 : graph.value?.shapes?.[edge.from] === "ellipse" ? 2 : 0;
+    return `M ${a.x + 108} ${a.y + inset} C ${a.x + 130} ${a.y - 38}, ${a.x + 34} ${a.y - 38}, ${a.x + 56} ${a.y + inset}`;
   }
   const ax = a.x + 82, ay = a.y + 34, bx = b.x + 82, by = b.y + 34;
   const dx = bx - ax, dy = by - ay;
   if (dx === 0 && dy === 0) return null;
-  const clip = (x: number, y: number) => Math.min(x === 0 ? Infinity : 82 / Math.abs(x), y === 0 ? Infinity : 34 / Math.abs(y));
-  const t = clip(dx, dy);
-  const x1 = ax + dx * t, y1 = ay + dy * t, x2 = bx - dx * t, y2 = by - dy * t;
+  const clip = (shape: TreeShape | undefined) => {
+    if (shape === "diamond") return 1 / (Math.abs(dx) / 82 + Math.abs(dy) / 34);
+    if (shape === "ellipse") return 1 / Math.hypot(dx / 82, dy / 34);
+    return Math.min(dx === 0 ? Infinity : 82 / Math.abs(dx), dy === 0 ? Infinity : 34 / Math.abs(dy));
+  };
+  const fromClip = clip(graph.value?.shapes?.[edge.from]), toClip = clip(graph.value?.shapes?.[edge.to]);
+  const x1 = ax + dx * fromClip, y1 = ay + dy * fromClip, x2 = bx - dx * toClip, y2 = by - dy * toClip;
   const reciprocal = graph.value?.edges.some((other) => other.from === edge.to && other.to === edge.from);
   if (!reciprocal) return `M ${x1} ${y1} L ${x2} ${y2}`;
   const length = Math.hypot(dx, dy);
@@ -400,20 +413,21 @@ function edgePath(edge: TreeEdge): string | null {
               <template v-for="(edge, index) in graph.edges" :key="`${edge.from}-${edge.to}-${index}`"><path v-if="edgePath(edge)" :d="edgePath(edge) ?? ''" class="tree-edge" :marker-end="`url(#${markerId})`" /></template>
               <path v-if="pendingLink" :d="pendingLink" class="tree-edge tree-edge-pending" />
             </svg>
-            <article v-for="id in graph.nodes" :key="id" class="tree-node" :data-tree-id="id" :class="{ 'is-movable': !readonly }" :style="{ left: `${layout.positions[id]?.x ?? 0}px`, top: `${layout.positions[id]?.y ?? 0}px` }" :tabindex="readonly ? undefined : 0" :aria-label="`${label(id)}${roots.has(id) ? ', root' : ''}. Use arrow keys to move.`" @contextmenu.stop="openContext($event, id)" @pointerdown="startDrag(id, $event)" @pointermove="dragNode" @pointerup="endDrag" @pointercancel="endDrag" @keydown="keyboardMove(id, $event)">
+            <article v-for="id in graph.nodes" :key="id" class="tree-node" :data-tree-id="id" :class="[`shape-${graph.shapes?.[id] ?? 'card'}`, { 'is-movable': !readonly }]" :style="{ left: `${layout.positions[id]?.x ?? 0}px`, top: `${layout.positions[id]?.y ?? 0}px` }" :tabindex="readonly ? undefined : 0" :aria-label="`${label(id)}${roots.has(id) ? ', root' : ''}. Use arrow keys to move.`" @contextmenu.stop="openContext($event, id)" @pointerdown="startDrag(id, $event)" @pointermove="dragNode" @pointerup="endDrag" @pointercancel="endDrag" @keydown="keyboardMove(id, $event)">
               <button v-if="!readonly" type="button" class="tree-port tree-port-in" :disabled="!source || creatingExample" :aria-label="`Connect to ${label(id)}`" :title="`Connect to ${label(id)}`" @click.stop="connect(source, id)"></button>
               <button v-if="!readonly" type="button" class="tree-port tree-port-out" :disabled="creatingExample" :aria-label="`Connect from ${label(id)}`" :title="`Drag from ${label(id)} to another item, or click then choose a target`" @pointerdown.stop="beginLink(id, $event)" @pointermove.stop="moveLink" @pointerup.stop="finishLink" @pointercancel.stop="linkDrag = null" @click.stop="source = id"></button>
-              <template v-if="showThumbnails">
-                <img v-if="thumbnailUrl(byId.get(id)?.thumbnail)" :src="thumbnailUrl(byId.get(id)?.thumbnail) ?? ''" alt="" width="36" height="36" />
-                <span v-else class="tree-node-placeholder" aria-hidden="true">◇</span>
-              </template>
+              <span class="tree-node-art" aria-hidden="true"><img v-if="showThumbnails && thumbnailUrl(byId.get(id)?.thumbnail)" :src="thumbnailUrl(byId.get(id)?.thumbnail) ?? ''" width="164" height="68" alt="" /></span>
               <span class="tree-node-copy"><strong :title="label(id)">{{ label(id) }}</strong><small :title="description(id)">{{ roots.has(id) ? 'Root' : 'Tree item' }}</small></span>
-              <button v-if="!readonly" type="button" class="tree-remove" :disabled="creatingExample" :aria-label="`Remove ${label(id)} from tree`" @click="removeItem(id)">×</button>
+              <button v-if="!readonly" type="button" class="tree-remove" :disabled="creatingExample" :aria-label="`Options for ${label(id)}`" @click.stop="openContext($event, id)">⋯</button>
             </article>
           </div>
         <div v-if="menu" class="tree-context" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" @pointerdown.stop @wheel.stop @keydown.esc.stop="menu = null">
           <template v-if="menu.node">
             <strong>{{ label(menu.node) }}</strong>
+            <label :for="`shape-${menu.node}`">Node shape</label>
+            <select :id="`shape-${menu.node}`" class="form-select" aria-label="Node shape" :value="graph.shapes?.[menu.node] ?? 'card'" @change="setShape(menu.node, $event)">
+              <option value="card">Card</option><option value="rounded">Rounded</option><option value="ellipse">Ellipse</option><option value="diamond">Diamond</option>
+            </select>
             <button type="button" @click="source = menu.node; menu = null">Start connection</button>
             <button type="button" class="tree-context-danger" @click="removeItem(menu.node); menu = null">Remove from tree</button>
           </template>
@@ -475,7 +489,16 @@ function edgePath(edge: TreeEdge): string | null {
 .tree-edges .tree-edge { fill: none; stroke: var(--accent); stroke-width: 2; }
 .tree-edges .tree-edge-pending { stroke-dasharray: 5 4; }
 .tree-edges marker path { fill: var(--accent); }
-.tree-node { position: absolute; box-sizing: border-box; width: 164px; height: 68px; display: flex; align-items: center; gap: 8px; padding: 8px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-top: 2px solid var(--accent); }
+.tree-node { position: absolute; box-sizing: border-box; width: 164px; height: 68px; display: flex; align-items: center; gap: 8px; padding: 8px; }
+.tree-node-art { position: absolute; inset: 0; overflow: hidden; background: var(--bg-card); border: 1px solid var(--accent); pointer-events: none; }
+.tree-node-art img { width: 100%; height: 100%; object-fit: cover; }
+.tree-node-art:has(img)::after { content: ""; position: absolute; inset: 0; background: rgb(0 0 0 / 30%); }
+.shape-rounded .tree-node-art { border-radius: 14px; }
+.shape-ellipse .tree-node-art { border-radius: 50%; }
+.shape-diamond .tree-node-art { border: 0; background: var(--accent); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.shape-diamond .tree-node-art::before { content: ""; position: absolute; inset: 2px; background: var(--bg-card); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.shape-diamond .tree-node-art img { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.shape-diamond .tree-node-copy { padding-left: 27px; }
 .tree-port { position: absolute; top: 27px; width: 12px; height: 12px; padding: 0; border: 1px solid var(--accent); background: var(--bg-card); cursor: crosshair; z-index: 2; }
 .tree-port-in { left: -7px; }
 .tree-port-out { right: -7px; }
@@ -484,12 +507,10 @@ function edgePath(edge: TreeEdge): string | null {
 .tree-node.is-movable { cursor: grab; touch-action: none; }
 .tree-node.is-movable:active { cursor: grabbing; }
 .tree-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.tree-node img, .tree-node-placeholder { width: 36px; height: 36px; flex: none; object-fit: cover; }
-.tree-node-placeholder { display: grid; place-items: center; color: var(--accent); border: 1px solid var(--border-subtle); }
-.tree-node-copy { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.tree-node-copy { position: relative; min-width: 0; flex: 1; display: grid; gap: 3px; }
 .tree-node-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .tree-node-copy small { color: var(--text-muted); font-size: 10px; }
-.tree-remove { border: 0; background: transparent; color: var(--text-muted); cursor: pointer; padding: 2px 4px; }
+.tree-remove { position: relative; border: 0; background: transparent; color: var(--text-primary); cursor: pointer; padding: 4px; }
 .tree-remove:hover, .tree-remove:focus-visible { color: var(--status-danger); }
 .tree-connection-list { border: 1px solid var(--border-subtle); padding: 8px 12px; }
 .tree-connection-list summary { cursor: pointer; }
