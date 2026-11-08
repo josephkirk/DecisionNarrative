@@ -11,9 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tree Graph plugin with TreeGraph and TreeItem traits, an infinite pan-and-zoom
   canvas, editable entity connections, multiple roots, directional and radial
-  layouts, resizable nodes with configurable shapes and colors, contextual wire
-  styling, reconnection and cutting, entity thumbnail backgrounds, JSON export,
-  local display preferences, and three example graphs.
+  layouts, configurable canvas backgrounds, resizable nodes with configurable
+  shapes and colors, normal, dashed, dotted and brush wires, reconnection and
+  cutting, entity thumbnail backgrounds, JSON export, local display preferences,
+  and three example graphs.
 
 ### Removed
 

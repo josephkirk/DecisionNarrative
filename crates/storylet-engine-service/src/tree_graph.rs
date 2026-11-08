@@ -397,9 +397,18 @@ fn validate_appearance_map(
     issues: &mut Vec<String>,
 ) {
     for key in map.keys() {
-        if key != "nodes" && key != "edges" {
+        if key != "nodes" && key != "edges" && key != "canvasBackground" {
             issues.push(format!(
                 "owner '{display_name}': tree_graph appearance contains unknown key '{key}'"
+            ));
+        }
+    }
+
+    if let Some(canvas_bg_val) = map.get("canvasBackground") {
+        let valid = canvas_bg_val.as_str().is_some_and(is_valid_hex_color);
+        if !valid {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance has invalid canvasBackground color, expected #RRGGBB"
             ));
         }
     }
@@ -538,7 +547,7 @@ fn validate_appearance_edges(
         };
 
         for key in edge_obj.keys() {
-            if key != "color" && key != "width" {
+            if key != "color" && key != "width" && key != "pattern" {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph appearance for edge '{edge_key}' contains unknown key '{key}'"
                 ));
@@ -559,6 +568,17 @@ fn validate_appearance_edges(
             if !valid {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph appearance for edge '{edge_key}' has invalid width, must be a finite number between 1 and 12"
+                ));
+            }
+        }
+
+        if let Some(pat_val) = edge_obj.get("pattern") {
+            let valid = pat_val
+                .as_str()
+                .is_some_and(|p| matches!(p, "solid" | "dash" | "dot" | "brush"));
+            if !valid {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance for edge '{edge_key}' has invalid pattern, expected solid, dash, dot, or brush"
                 ));
             }
         }
@@ -925,6 +945,7 @@ mod tests {
                         "nodes": ["item-1", "item-2"],
                         "edges": ["[\"item-1\",\"item-2\"]"],
                         "appearance": json!({
+                            "canvasBackground": "#112233",
                             "nodes": {
                                 "item-1": {
                                     "background": "#112233",
@@ -938,7 +959,8 @@ mod tests {
                             "edges": {
                                 "[\"item-1\",\"item-2\"]": {
                                     "color": "#aabbcc",
-                                    "width": 3.5
+                                    "width": 3.5,
+                                    "pattern": "dash"
                                 }
                             }
                         }).to_string()
@@ -970,6 +992,7 @@ mod tests {
                         "nodes": ["item-1"],
                         "edges": [],
                         "appearance": json!({
+                            "canvasBackground": "not-hex",
                             "unknown_root": true,
                             "nodes": {
                                 "item-1": {
@@ -987,6 +1010,7 @@ mod tests {
                                 "[\"item-1\",\"item-1\"]": {
                                     "color": "red",
                                     "width": 0.5,
+                                    "pattern": "zigzag",
                                     "extra_edge": 1
                                 }
                             }
@@ -999,6 +1023,7 @@ mod tests {
         let index = make_test_index(templates, entities, Vec::new());
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.iter().any(|i| i.contains("appearance contains unknown key 'unknown_root'")));
+        assert!(issues.iter().any(|i| i.contains("invalid canvasBackground color")));
         assert!(issues.iter().any(|i| i.contains("invalid background color")));
         assert!(issues.iter().any(|i| i.contains("invalid outline color")));
         assert!(issues.iter().any(|i| i.contains("invalid outlineWidth")));
@@ -1011,5 +1036,85 @@ mod tests {
         assert!(issues.iter().any(|i| i.contains("invalid color")));
         assert!(issues.iter().any(|i| i.contains("invalid width, must be a finite number between 1 and 12")));
         assert!(issues.iter().any(|i| i.contains("unknown key 'extra_edge'")));
+        assert!(issues.iter().any(|i| i.contains("invalid pattern, expected solid, dash, dot, or brush")));
+    }
+
+    #[test]
+    fn test_appearance_edge_patterns() {
+        let templates = standard_templates();
+        for valid_pat in ["solid", "dash", "dot", "brush"] {
+            let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+                {
+                    "id": "item-1",
+                    "name": "Item 1",
+                    "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+                },
+                {
+                    "id": "item-2",
+                    "name": "Item 2",
+                    "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+                },
+                {
+                    "id": "graph-owner",
+                    "name": "Graph Owner",
+                    "traits": [{
+                        "template_id": "tid-tree-graph",
+                        "values": {
+                            "nodes": ["item-1", "item-2"],
+                            "edges": ["[\"item-1\",\"item-2\"]"],
+                            "appearance": json!({
+                                "edges": {
+                                    "[\"item-1\",\"item-2\"]": {
+                                        "pattern": valid_pat
+                                    }
+                                }
+                            }).to_string()
+                        }
+                    }]
+                }
+            ])).unwrap();
+            let index = make_test_index(templates.clone(), entities, Vec::new());
+            let issues = validate_tree_graphs(&index, None, None);
+            assert!(issues.is_empty(), "pattern {valid_pat} produced issues: {issues:?}");
+        }
+
+        for invalid_pat in [json!("wave"), json!(123), json!(true), json!(null), json!(["solid"])] {
+            let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+                {
+                    "id": "item-1",
+                    "name": "Item 1",
+                    "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+                },
+                {
+                    "id": "item-2",
+                    "name": "Item 2",
+                    "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+                },
+                {
+                    "id": "graph-owner",
+                    "name": "Graph Owner",
+                    "traits": [{
+                        "template_id": "tid-tree-graph",
+                        "values": {
+                            "nodes": ["item-1", "item-2"],
+                            "edges": ["[\"item-1\",\"item-2\"]"],
+                            "appearance": json!({
+                                "edges": {
+                                    "[\"item-1\",\"item-2\"]": {
+                                        "pattern": invalid_pat
+                                    }
+                                }
+                            }).to_string()
+                        }
+                    }]
+                }
+            ])).unwrap();
+            let index = make_test_index(templates.clone(), entities, Vec::new());
+            let issues = validate_tree_graphs(&index, None, None);
+            assert!(
+                issues.iter().any(|i| i.contains("invalid pattern, expected solid, dash, dot, or brush")),
+                "expected rejection for pattern {invalid_pat}, got {issues:?}"
+            );
+        }
     }
 }

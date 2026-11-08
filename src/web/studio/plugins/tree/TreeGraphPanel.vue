@@ -11,6 +11,12 @@ import { TREE_GRAPH_KEY, TREE_ITEM_KEY, TREE_SHAPES, layoutTree, setTreeGraph, t
 
 const props = defineProps<{ entity: AnyEntity; readonly?: boolean }>();
 const emit = defineEmits<{ (event: "patch", patch: Partial<AnyEntity>): void; (event: "save"): void }>();
+const wireOptions = [
+  { id: "solid", label: "Normal wire" },
+  { id: "dash", label: "Dashed wire" },
+  { id: "dot", label: "Dotted wire" },
+  { id: "brush", label: "Brush wire" },
+] as const;
 const item = ref("");
 const source = ref("");
 const notice = ref("");
@@ -95,6 +101,13 @@ function updateEdgeAppearance(index: number, update: Record<string, string | num
   if (!graph.value || !edge || props.readonly) return;
   const appearance = graph.value.appearance ?? { nodes: {}, edges: {} }, key = edgeKey(edge);
   patch({ ...graph.value, appearance: { ...appearance, edges: { ...appearance.edges, [key]: { ...appearance.edges[key], ...update } } } });
+}
+function setCanvasBackground(color?: string) {
+  if (!graph.value || props.readonly) return;
+  const appearance = { ...(graph.value.appearance ?? { nodes: {}, edges: {} }) };
+  if (color === undefined) delete appearance.canvasBackground;
+  else appearance.canvasBackground = color;
+  patch({ ...graph.value, appearance });
 }
 async function fitGraph() {
   await nextTick();
@@ -228,6 +241,7 @@ function removeItem(id: string) {
   const shapes = graph.value.shapes ? Object.fromEntries(Object.entries(graph.value.shapes).filter(([node]) => node !== id)) : undefined;
   const edges = graph.value.edges.filter((edge) => edge.from !== id && edge.to !== id);
   const appearance = graph.value.appearance && {
+    ...graph.value.appearance,
     nodes: Object.fromEntries(Object.entries(graph.value.appearance.nodes).filter(([node]) => node !== id)),
     edges: Object.fromEntries(edges.map((edge) => [edgeKey(edge), graph.value!.appearance!.edges[edgeKey(edge)]]).filter(([, value]) => value !== undefined)),
   };
@@ -503,14 +517,15 @@ function edgePath(edge: TreeEdge): string | null {
       <p v-if="status" class="field-sublabel" role="status">{{ status }}</p>
       <p v-if="source && !readonly" class="tree-link-hint" role="status">Connecting from {{ label(source) }}. Open another node's options to connect. <button type="button" @click="source = ''">Cancel</button></p>
       <div class="tree-meta"><span>{{ graph.nodes.length }} items</span><span>{{ graph.edges.length }} connections</span><span>{{ roots.size }} roots</span></div>
-      <div ref="treeScroll" class="tree-scroll" :class="{ 'hide-grid': !showGrid }" tabindex="0" aria-label="Tree graph canvas; drag background to pan, use mouse wheel to zoom" @contextmenu="openContext($event)" @pointerdown="startPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @wheel.prevent="wheelZoom" @keydown="keyboardPan">
+      <div ref="treeScroll" class="tree-scroll" :class="{ 'hide-grid': !showGrid }" :style="{ backgroundColor: graph.appearance?.canvasBackground }" tabindex="0" aria-label="Tree graph canvas; drag background to pan, use mouse wheel to zoom" @contextmenu="openContext($event)" @pointerdown="startPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @wheel.prevent="wheelZoom" @keydown="keyboardPan">
         <button v-if="!readonly" type="button" class="tree-canvas-actions btn btn-secondary" @pointerdown.stop @click.stop="openContext($event)">Canvas actions</button>
         <div v-if="!graph.nodes.length" class="tree-empty"><strong>Start with an item</strong><span>Add an entity with the TreeItem trait, then connect it to others.</span></div>
         <div v-else class="tree-world" :style="{ transform: `translate(${panX}px, ${panY}px) scale(${zoomFactor})` }">
             <svg class="tree-edges" aria-label="Tree connections">
               <defs><marker :id="markerId" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" /></marker></defs>
               <template v-for="(edge, index) in graph.edges" :key="`${edge.from}-${edge.to}-${index}`">
-                <path v-if="edgePath(edge)" :d="edgePath(edge) ?? ''" class="tree-edge" :style="{ stroke: graph.appearance?.edges[edgeKey(edge)]?.color, strokeWidth: graph.appearance?.edges[edgeKey(edge)]?.width }" :marker-end="`url(#${markerId})`" />
+                <path v-if="edgePath(edge) && graph.appearance?.edges[edgeKey(edge)]?.pattern === 'brush'" :d="edgePath(edge) ?? ''" class="tree-edge" :style="{ stroke: graph.appearance.edges[edgeKey(edge)]?.color, strokeWidth: Math.max(1, (graph.appearance.edges[edgeKey(edge)]?.width ?? 2) * .45) }" />
+                <path v-if="edgePath(edge)" :d="edgePath(edge) ?? ''" class="tree-edge" :class="`wire-${graph.appearance?.edges[edgeKey(edge)]?.pattern ?? 'solid'}`" :style="{ stroke: graph.appearance?.edges[edgeKey(edge)]?.color, strokeWidth: graph.appearance?.edges[edgeKey(edge)]?.width }" :marker-end="`url(#${markerId})`" />
                 <path v-if="edgePath(edge) && !readonly" :d="edgePath(edge) ?? ''" class="tree-edge-hit" :data-index="index" :aria-label="`Connection from ${label(edge.from)} to ${label(edge.to)}; press Enter for options`" role="button" tabindex="0" @pointerdown.stop="wireDown(index, $event)" @contextmenu.stop.prevent="openContext($event, undefined, index)" @keydown.enter.prevent.stop="openEdgeKeyboard($event, index)" />
               </template>
               <path v-if="pendingLink" :d="pendingLink" class="tree-edge tree-edge-pending" />
@@ -544,6 +559,19 @@ function edgePath(edge: TreeEdge): string | null {
             <strong>{{ label(graph.edges[menu.edge]!.from) }} → {{ label(graph.edges[menu.edge]!.to) }}</strong>
             <label>Wire color <input type="color" :value="graph.appearance?.edges[edgeKey(graph.edges[menu.edge]!)]?.color ?? '#06b6d4'" @input="updateEdgeAppearance(menu.edge, { color: ($event.target as HTMLInputElement).value })" /></label>
             <label>Wire thickness <input type="number" min="1" max="12" :value="graph.appearance?.edges[edgeKey(graph.edges[menu.edge]!)]?.width ?? 2" @change="updateEdgeAppearance(menu.edge, { width: Math.max(1, Math.min(12, Number(($event.target as HTMLInputElement).value) || 1)) })" /></label>
+            <span class="tree-pattern-label">Wire style</span>
+            <div class="tree-patterns" role="group" aria-label="Wire style">
+              <button v-for="option in wireOptions" :key="option.id" type="button" :title="option.label" :aria-label="option.label" :aria-pressed="(graph.appearance?.edges[edgeKey(graph.edges[menu.edge]!) ]?.pattern ?? 'solid') === option.id" @click="updateEdgeAppearance(menu.edge, { pattern: option.id })">
+                <svg viewBox="0 0 42 16" aria-hidden="true" width="42" height="16">
+                  <template v-if="option.id === 'brush'">
+                    <path d="M 5 11 L 12 4 M 4 12 C 3 12 3 14 2 14 C 5 14 7 14 7 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    <path d="M 19 8 H 39" fill="none" stroke="currentColor" stroke-width="1" />
+                    <path d="M 19 8 H 39" class="wire-brush" fill="none" stroke="currentColor" stroke-width="2" />
+                  </template>
+                  <path v-else d="M 3 8 H 39" :class="`wire-${option.id}`" fill="none" stroke="currentColor" stroke-width="2" />
+                </svg>
+              </button>
+            </div>
             <button type="button" @click="menu.reconnect = menu.edge; menu.edge = undefined; menuSearch = ''">Reconnect target</button>
             <button type="button" class="tree-context-danger" @click="removeEdge(menu.edge); menu = null">Remove wire</button>
           </template>
@@ -556,6 +584,8 @@ function edgePath(edge: TreeEdge): string | null {
             </div>
           </template>
           <template v-else>
+            <label>Canvas background <input type="color" aria-label="Canvas background" :value="graph.appearance?.canvasBackground ?? '#1a1c20'" @input="setCanvasBackground(($event.target as HTMLInputElement).value)" /></label>
+            <button v-if="graph.appearance?.canvasBackground" type="button" @click="setCanvasBackground()">Reset background</button>
             <label for="tree-context-search">Add TreeItem</label>
             <input id="tree-context-search" v-model="menuSearch" class="form-input" aria-label="Search TreeItem entities" placeholder="Search items…" />
             <div class="tree-context-results">
@@ -608,6 +638,13 @@ function edgePath(edge: TreeEdge): string | null {
 .tree-world { position: absolute; left: 0; top: 0; transform-origin: top left; }
 .tree-edges { position: absolute; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .tree-edges .tree-edge { fill: none; stroke: var(--accent); stroke-width: 2; }
+.wire-dash { stroke-dasharray: 10 6; }
+.wire-dot { stroke-dasharray: 1 6; stroke-linecap: round; }
+.wire-brush { stroke-dasharray: 18 2 5 2 1 2; stroke-linecap: round; }
+.tree-pattern-label { font-size: 12px; }
+.tree-patterns { display: flex; gap: 4px; }
+.tree-patterns button { padding: 4px; border: 1px solid var(--border-subtle); }
+.tree-patterns button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .tree-edges .tree-edge-hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: grab; }
 .tree-edges .tree-edge-hit:focus-visible { stroke: var(--accent); stroke-opacity: .35; }
 .tree-edges .tree-cut-line { fill: none; stroke: var(--status-danger); stroke-width: 2; stroke-dasharray: 5 4; pointer-events: none; }

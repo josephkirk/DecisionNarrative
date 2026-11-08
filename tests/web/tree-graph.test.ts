@@ -47,6 +47,7 @@ test("node and edge appearance round-trips and clears when omitted", () => {
   const appearanceGraph: TreeGraph = {
     ...graph,
     appearance: {
+      canvasBackground: "#223344",
       nodes: {
         shared: {
           background: "#112233",
@@ -60,6 +61,7 @@ test("node and edge appearance round-trips and clears when omitted", () => {
         [edgeKey]: {
           color: "#abcdef",
           width: 4,
+          pattern: "brush",
         },
       },
     },
@@ -90,6 +92,7 @@ test("appearance rejects invalid payload, unexpected fields, and out-of-range va
   expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: "[]" } })).toThrow();
 
   // Unexpected top-level fields
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ canvasBackground: "red" }) } })).toThrow();
   expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ extra: 123 }) } })).toThrow();
 
   // Unknown / stale node reference
@@ -104,6 +107,7 @@ test("appearance rejects invalid payload, unexpected fields, and out-of-range va
   // Unexpected fields in node/edge appearance
   expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { unexpected: true } } }) } })).toThrow();
   expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ edges: { [JSON.stringify(["a", "b"])]: { unexpected: true } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ edges: { [JSON.stringify(["a", "b"])]: { pattern: "zigzag" } } }) } })).toThrow();
 
   // Invalid colors
   expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { background: "blue" } } }) } })).toThrow();

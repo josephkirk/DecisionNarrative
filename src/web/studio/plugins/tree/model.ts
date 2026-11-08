@@ -21,12 +21,17 @@ export interface TreeNodeAppearance {
   height?: number;
 }
 
+export type TreeWirePattern = "solid" | "dash" | "dot" | "brush";
+export const TREE_WIRE_PATTERNS: readonly TreeWirePattern[] = ["solid", "dash", "dot", "brush"];
+
 export interface TreeEdgeAppearance {
   color?: string;
   width?: number;
+  pattern?: TreeWirePattern;
 }
 
 export interface TreeAppearance {
+  canvasBackground?: string;
   nodes: Record<string, TreeNodeAppearance>;
   edges: Record<string, TreeEdgeAppearance>;
 }
@@ -183,9 +188,13 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
     try { data = JSON.parse(values.appearance); } catch { throw new Error("Malformed appearance: invalid JSON."); }
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Malformed appearance: expected an object.");
     for (const key of Object.keys(data)) {
-      if (key !== "nodes" && key !== "edges") throw new Error(`Malformed appearance: unexpected field '${key}'.`);
+      if (key !== "nodes" && key !== "edges" && key !== "canvasBackground") throw new Error(`Malformed appearance: unexpected field '${key}'.`);
     }
     const appearanceMap = data as Record<string, unknown>;
+    const canvasBackground = appearanceMap.canvasBackground;
+    if (canvasBackground !== undefined && (typeof canvasBackground !== "string" || !HEX_COLOR_REGEX.test(canvasBackground))) {
+      throw new Error("Invalid canvas background: expected a hex color in #RRGGBB format.");
+    }
     const rawNodes = appearanceMap.nodes;
     const parsedNodes: Record<string, TreeNodeAppearance> = Object.create(null);
     if (rawNodes !== undefined) {
@@ -248,7 +257,7 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
         if (!validEdgeKeys.has(edgeKey)) throw new Error(`Invalid appearance: unknown edge '${edgeKey}'.`);
         if (!style || typeof style !== "object" || Array.isArray(style)) throw new Error(`Invalid appearance for edge '${edgeKey}': expected an object.`);
         for (const key of Object.keys(style)) {
-          if (!["color", "width"].includes(key)) {
+          if (!["color", "width", "pattern"].includes(key)) {
             throw new Error(`Invalid appearance for edge '${edgeKey}': unexpected field '${key}'.`);
           }
         }
@@ -266,10 +275,16 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
           }
           edgeAppearance.width = s.width;
         }
+        if (s.pattern !== undefined) {
+          if (typeof s.pattern !== "string" || !TREE_WIRE_PATTERNS.includes(s.pattern as TreeWirePattern)) {
+            throw new Error(`Invalid appearance for edge '${edgeKey}': unknown wire pattern.`);
+          }
+          edgeAppearance.pattern = s.pattern as TreeWirePattern;
+        }
         parsedEdges[edgeKey] = edgeAppearance;
       }
     }
-    appearance = { nodes: parsedNodes, edges: parsedEdges };
+    appearance = { nodes: parsedNodes, edges: parsedEdges, ...(canvasBackground !== undefined ? { canvasBackground: canvasBackground as string } : {}) };
   }
   return { nodes, edges, direction, positions, ...(shapes ? { shapes } : {}), ...(appearance ? { appearance } : {}) };
 }
@@ -293,6 +308,7 @@ export function setTreeGraph(entity: AnyEntity, instance: TraitInstance, graph: 
               ...(graph.appearance !== undefined || "appearance" in trait.values || "appearance" in instance.values
                 ? {
                     appearance: JSON.stringify({
+                      ...(graph.appearance?.canvasBackground !== undefined ? { canvasBackground: graph.appearance.canvasBackground } : {}),
                       nodes: graph.appearance?.nodes ?? {},
                       edges: graph.appearance?.edges ?? {},
                     }),
@@ -344,6 +360,9 @@ export function treeErrors(graph: TreeGraph, eligibleIds: ReadonlySet<string>): 
   }
 
   if (graph.appearance) {
+    if (graph.appearance.canvasBackground !== undefined && !HEX_COLOR_REGEX.test(graph.appearance.canvasBackground)) {
+      errors.push("Invalid canvas background color.");
+    }
     if (graph.appearance.nodes) {
       for (const [id, style] of Object.entries(graph.appearance.nodes)) {
         if (!nodeSet.has(id)) {
@@ -377,6 +396,9 @@ export function treeErrors(graph: TreeGraph, eligibleIds: ReadonlySet<string>): 
         }
         if (style.width !== undefined && (!Number.isFinite(style.width) || style.width < MIN_WIRE_WIDTH || style.width > MAX_WIRE_WIDTH)) {
           errors.push(`Invalid appearance width for edge '${edgeKey}'.`);
+        }
+        if (style.pattern !== undefined && !TREE_WIRE_PATTERNS.includes(style.pattern)) {
+          errors.push(`Invalid appearance pattern for edge '${edgeKey}'.`);
         }
       }
     }
