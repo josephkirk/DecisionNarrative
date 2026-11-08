@@ -9,7 +9,7 @@ import { inventoryErrors, inventoryOf, inventoryOwnerTemplate, itemTemplate, set
 import { inventoryNodes } from "../../src/web/studio/plugins/inventory/nodes.ts";
 
 function entity(id: string, trait: string): EntityTemplateRecord {
-  return { id, object_id: id, game_id: id, name: id, root_tag: "item", tags: [], properties: [], traits: [{ id: `${id}-trait`, template_id: trait, values: {} }] };
+  return { id, object_id: id, game_id: id, name: id, tags: [], properties: [], traits: [{ id: `${id}-trait`, template_id: trait, values: {} }] };
 }
 const node = (id: string, type: NarrativeNode["type"], rest: Partial<NarrativeNode> = {}): NarrativeNode =>
   ({ id, type, title: id, x: 0, y: 0, width: 120, height: 100, ...rest });

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { traitLabels } from "../../entityModel.ts";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { studioState } from "../../state.ts";
@@ -284,7 +285,7 @@ const gameplayCount = computed(() => doc.value.shapes.filter(isGameplay).length)
         @click="tool = entry.id">{{ entry.glyph }}</button>
       <select v-if="tool === 'entity'" v-model="pendingEntityId" class="form-select vc-entity-pick" aria-label="Entity to place">
         <option value="">Choose entity to place…</option>
-        <option v-for="entity in allEntities" :key="entity.id" :value="entity.id">{{ entity.name }} ({{ entity.root_tag }})</option>
+        <option v-for="entity in allEntities" :key="entity.id" :value="entity.id">{{ entity.name }}{{ traitLabels(entity, studioState.traitTemplates).length ? ` (${traitLabels(entity, studioState.traitTemplates).join(" · ")})` : "" }}</option>
       </select>
       <select v-if="tool === 'storylet'" v-model="pendingStoryletId" class="form-select vc-entity-pick" aria-label="Storylet to place">
         <option value="">Choose storylet to place…</option>
@@ -366,7 +367,7 @@ const gameplayCount = computed(() => doc.value.shapes.filter(isGameplay).length)
           <label v-if="selected.kind === 'entity'" class="vc-field"><span>Entity</span>
             <select class="form-select" :value="selected.entity_id ?? ''" :disabled="isLocked(selected)" @change="updateSelected({ entity_id: ($event.target as HTMLSelectElement).value || undefined }, 'Link entity')">
               <option value="">None</option>
-              <option v-for="entity in allEntities" :key="entity.id" :value="entity.id">{{ entity.name }} ({{ entity.root_tag }})</option>
+              <option v-for="entity in allEntities" :key="entity.id" :value="entity.id">{{ entity.name }}{{ traitLabels(entity, studioState.traitTemplates).length ? ` (${traitLabels(entity, studioState.traitTemplates).join(" · ")})` : "" }}</option>
             </select></label>
           <label v-if="selected.kind === 'storylet'" class="vc-field"><span>Storylet</span>
             <select class="form-select" :value="selected.storylet_id ?? ''" :disabled="isLocked(selected)" @change="updateSelected({ storylet_id: ($event.target as HTMLSelectElement).value || undefined }, 'Link storylet')">

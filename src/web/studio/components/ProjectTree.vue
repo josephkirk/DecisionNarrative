@@ -2,7 +2,6 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import type { TreeRow } from "../projectTree.ts";
-import { rootTagColor } from "../entityModel.ts";
 import { thumbnailUrl } from "../thumbnails.ts";
 import type { ContentRootDefinition } from "../projectTree.ts";
 import { useProjectTree } from "../view-models/projectTree.ts";
@@ -54,7 +53,6 @@ function rowGlyph(row: TreeRow): string {
 }
 
 function rowColor(row: TreeRow): string {
-  if (row.rootTag) return rootTagColor(row.rootTag);
   return "var(--text-muted)";
 }
 

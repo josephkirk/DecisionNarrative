@@ -173,12 +173,36 @@ impl TagBitset {
 /// Semantic layer of a world graph vertex (REQ-WB-01).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[repr(u8)]
 pub enum GraphLayer {
     #[default]
-    Location,
-    Character,
-    Item,
-    Fact,
+    Location = 0,
+    Character = 1,
+    Item = 2,
+    Fact = 3,
+}
+
+/// Compact set of independent capabilities represented by one world vertex.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct GraphLayers(u8);
+
+impl GraphLayers {
+    pub fn insert(&mut self, layer: GraphLayer) {
+        self.0 |= 1 << layer as u8;
+    }
+
+    pub fn contains(&self, layer: &GraphLayer) -> bool {
+        self.0 & (1 << *layer as u8) != 0
+    }
+}
+
+impl From<GraphLayer> for GraphLayers {
+    fn from(layer: GraphLayer) -> Self {
+        let mut layers = Self::default();
+        layers.insert(layer);
+        layers
+    }
 }
 
 /// Typed attribute value stored on a vertex.
@@ -237,7 +261,7 @@ pub struct WorldVertex {
     #[serde(default)]
     pub vertex_id: String,
     #[serde(default)]
-    pub layer: GraphLayer,
+    pub layers: GraphLayers,
     /// Entity row this vertex represents, when the vertex stands for an
     /// authored entity. Movement uses this to place the current-location tag on
     /// actor rows through WorldGraph relations.
@@ -910,7 +934,7 @@ impl WorldStateTable {
         let actors: Vec<(String, u16)> = self
             .vertices
             .iter()
-            .filter(|vertex| vertex.layer == GraphLayer::Character)
+            .filter(|vertex| vertex.layers.contains(&GraphLayer::Character))
             .filter_map(|vertex| {
                 vertex
                     .entity_index
@@ -1097,7 +1121,7 @@ impl WorldStateTable {
         }
         let vertex_pattern = &pattern.vertices[index];
         for vertex in &self.vertices {
-            if vertex.layer != vertex_pattern.layer {
+            if !vertex.layers.contains(&vertex_pattern.layer) {
                 continue;
             }
             if let Some(id) = &vertex_pattern.vertex_id {
@@ -1255,7 +1279,7 @@ impl WorldStateTable {
             }
             added_vertices.push(WorldVertex {
                 vertex_id: id,
-                layer: template.layer,
+                layers: template.layer.into(),
                 entity_index: None,
                 attributes: template.attributes.clone(),
             });
@@ -2098,10 +2122,10 @@ fn validate_entity_bounds(
         let vertex = state
             .vertex_for_entity(entity_id)
             .ok_or_else(|| ChronoStateError::EntityVertexMissing { index: entity_id })?;
-        if vertex.layer != GraphLayer::Location {
+        if !vertex.layers.contains(&GraphLayer::Location) {
             return Err(ChronoStateError::VertexLayerMismatch {
                 vertex_id: vertex.vertex_id.clone(),
-                layer: vertex.layer,
+                layers: vertex.layers,
             });
         }
     }
@@ -2234,7 +2258,7 @@ pub enum ChronoStateError {
     },
     VertexLayerMismatch {
         vertex_id: String,
-        layer: GraphLayer,
+        layers: GraphLayers,
     },
     TagIndexOutOfRange {
         index: u16,
@@ -2359,10 +2383,10 @@ impl fmt::Display for ChronoStateError {
             Self::EntityVertexMissing { index } => {
                 write!(formatter, "entity {index} has no world graph vertex")
             }
-            Self::VertexLayerMismatch { vertex_id, layer } => {
+            Self::VertexLayerMismatch { vertex_id, layers } => {
                 write!(
                     formatter,
-                    "vertex '{vertex_id}' is on layer {layer:?}, expected location"
+                    "vertex '{vertex_id}' has layers {layers:?}, expected location"
                 )
             }
             Self::TagIndexOutOfRange { index } => {
@@ -2511,6 +2535,30 @@ mod tests {
 
 
     #[test]
+    fn one_vertex_can_match_multiple_capabilities_and_be_a_location() {
+        let mut layers = GraphLayers::from(GraphLayer::Character);
+        layers.insert(GraphLayer::Location);
+        let mut state = WorldStateTable::with_capacity(1);
+        state.vertices.push(WorldVertex {
+            vertex_id: "travelling-city".into(),
+            layers,
+            entity_index: Some(0),
+            attributes: BTreeMap::new(),
+        });
+        for layer in [GraphLayer::Character, GraphLayer::Location] {
+            let pattern = GraphPattern {
+                vertices: vec![VertexPattern { layer, ..Default::default() }],
+                ..Default::default()
+            };
+            assert!(state.match_graph_pattern(&pattern).is_ok());
+        }
+        assert!(validate_entity_bounds(&state, &MutationOp {
+            move_player: Some(0),
+            ..Default::default()
+        }).is_ok());
+    }
+
+    #[test]
     fn move_player_updates_actor_presence_and_reverts_exactly() {
         let registry = GameplayTagRegistry::compile(names(&[
             "location.cave",
@@ -2532,19 +2580,19 @@ mod tests {
             .unwrap();
         state.vertices.push(WorldVertex {
             vertex_id: "char.rogue".to_string(),
-            layer: GraphLayer::Character,
+            layers: GraphLayer::Character.into(),
             entity_index: Some(2),
             attributes: BTreeMap::new(),
         });
         state.vertices.push(WorldVertex {
             vertex_id: "loc.cave".to_string(),
-            layer: GraphLayer::Location,
+            layers: GraphLayer::Location.into(),
             entity_index: Some(1),
             attributes: BTreeMap::new(),
         });
         state.vertices.push(WorldVertex {
             vertex_id: "loc.start".to_string(),
-            layer: GraphLayer::Location,
+            layers: GraphLayer::Location.into(),
             entity_index: Some(0),
             attributes: BTreeMap::new(),
         });
@@ -2599,7 +2647,7 @@ mod tests {
             rejected.unwrap_err(),
             ChronoStateError::VertexLayerMismatch {
                 vertex_id: "char.rogue".to_string(),
-                layer: GraphLayer::Character,
+                layers: GraphLayer::Character.into(),
             }
         );
         assert_eq!(state, before);
@@ -2622,14 +2670,14 @@ mod tests {
         let mut state = WorldStateTable::with_capacity(5);
         state.vertices.push(WorldVertex {
             vertex_id: "actor".to_string(),
-            layer: GraphLayer::Character,
+            layers: GraphLayer::Character.into(),
             entity_index: Some(0),
             attributes: BTreeMap::new(),
         });
         for index in 1..5u16 {
             state.vertices.push(WorldVertex {
                 vertex_id: format!("loc.{index}"),
-                layer: GraphLayer::Location,
+                layers: GraphLayer::Location.into(),
                 entity_index: Some(index),
                 attributes: BTreeMap::new(),
             });
@@ -2809,3 +2857,7 @@ mod tests {
         assert_eq!(flags, original_flags);
     }
 }
+
+
+
+

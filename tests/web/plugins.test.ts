@@ -20,7 +20,7 @@ function mapDoc(): CanvasDoc {
   return { ...emptyCanvas(), shapes: [shape("s_gate", "marker", { icon: "door", label: "Iron Gate" }), shape("s_key", "marker", { icon: "key" }), shape("s_wall", "line", { points: [0, 0, 10, 0] })] };
 }
 function location(doc = mapDoc()): EntityRecord {
-  return { id: "loc_crypt", name: "Crypt", root_tag: "location", tags: [], traits: [], properties: syncCanvasProperties([], doc) };
+  return { id: "loc_crypt", name: "Crypt", tags: [], traits: [], properties: syncCanvasProperties([], doc) };
 }
 
 test("plugin contributions are removed when the plugin is disposed", () => {
@@ -29,14 +29,14 @@ test("plugin contributions are removed when the plugin is disposed", () => {
   const child = root.plugin(definePlugin({
     name: "demo",
     apply(ctx) {
-      ctx.entityPanel({ id: "demo-panel", label: "Demo", appliesTo: (e) => e.root_tag === "location", component: Dummy });
+      ctx.entityPanel({ id: "demo-panel", label: "Demo", appliesTo: (e) => e.traits.some((trait) => trait.template_id === "location-trait"), component: Dummy });
       ctx.propertyEditor({ id: "demo-prop", matches: (p) => p.key === "demo", component: Dummy });
       ctx.nodeType({ type: "demo.node", label: "Demo", defaults: () => ({}), lower: () => ({ nodes: [], edges: [], entry: "", exit: "" }) });
     },
   }));
   expect(registry.plugins).toContain("demo");
-  expect(entityPanelsFor(location()).map((p) => p.id)).toContain("demo-panel");
-  expect(entityPanelsFor({ ...location(), root_tag: "item" }).map((p) => p.id)).not.toContain("demo-panel");
+  expect(entityPanelsFor({ ...location(), traits: [{ id: "t", template_id: "location-trait", values: {} }] }).map((p) => p.id)).toContain("demo-panel");
+  expect(entityPanelsFor(location()).map((p) => p.id)).not.toContain("demo-panel");
   expect(propertyEditorFor({ id: "x", key: "demo", name: "Demo", type: "string" })?.id).toBe("demo-prop");
   expect(nodeTypeContribution("demo.node")?.label).toBe("Demo");
   child.dispose();

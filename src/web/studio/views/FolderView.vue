@@ -10,7 +10,6 @@ import {
   rootDefinition,
   type TreeItem,
 } from "../projectTree.ts";
-import { rootTagColor } from "../entityModel.ts";
 import { thumbnailInitial, thumbnailUrl } from "../thumbnails.ts";
 import { useProjectTree } from "../view-models/projectTree.ts";
 
@@ -76,7 +75,7 @@ function openItem(item: TreeItem) {
 }
 
 function tileColor(item: TreeItem): string {
-  return item.rootTag ? rootTagColor(item.rootTag) : "var(--accent)";
+  return "var(--text-muted)";
 }
 
 function onDrop(event: DragEvent) {

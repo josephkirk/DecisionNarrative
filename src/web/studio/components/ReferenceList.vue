@@ -19,7 +19,7 @@ const router = useRouter();
 const GROUPS: Array<{ kind: string; label: string; color: string }> = [
   { kind: "entity_template", label: "Entity Templates", color: "#3b82f6" },
   { kind: "storylet", label: "Storylets", color: "#10b981" },
-  { kind: "trait_template", label: "Trait Templates", color: "#a855f7" },
+  { kind: "trait_template", label: "Traits", color: "#a855f7" },
 ];
 
 const viewMode = ref<"split" | "graph" | "list">("split");

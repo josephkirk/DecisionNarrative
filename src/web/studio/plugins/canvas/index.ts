@@ -18,7 +18,7 @@ export const vectorCanvasPlugin = definePlugin({
   version: "1.1.0",
   description: "Adds the Canvas trait. Entities with it get a layered vector canvas with markers, sticky notes and entity/storylet references, plus a Modify Canvas story node.",
   apply(ctx) {
-    // Ensure the project has the "Canvas" trait template.
+    // Ensure the project has the "Canvas" trait.
     let creating = false;
     async function ensureTrait() {
       if (creating || !studioState.project || findCanvasTrait(studioState.traitTemplates)) return;

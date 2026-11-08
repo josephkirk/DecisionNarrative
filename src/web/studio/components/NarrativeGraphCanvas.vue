@@ -2,6 +2,7 @@
 import { ref, computed, watch } from "vue";
 import { learnNodeDefaults, graphNodeTypes, graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, GRAPH_PIN_COLORS, type GraphValueType, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType } from "../narrativeGraphTypes.ts";
 import { studioState, notify } from "../state.ts";
+import { hasTraitKey } from "../entityModel.ts";
 import { registry, nodeTypeContribution, pluginNodeDeleted } from "../plugins/runtime.ts";
 
 const props = withDefaults(defineProps<{
@@ -412,7 +413,7 @@ function addNode(type: NodeType, pluginType?: string) {
     baseNode.kind = "recollection";
     baseNode.visibility = "private";
   } else if (type === "go_to_location") {
-    baseNode.location_id = studioState.entityTemplates.find((entity) => entity.root_tag === "location")?.id ?? "";
+    baseNode.location_id = studioState.entityTemplates.find((entity) => hasTraitKey(entity, studioState.traitTemplates, "location"))?.id ?? "";
     baseNode.height = 100;
   } else if (type === "qbn_storylet_hub") {
     baseNode.deck_storylet_ids = [];

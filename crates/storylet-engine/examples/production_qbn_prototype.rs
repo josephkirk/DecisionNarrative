@@ -76,7 +76,7 @@ fn build_world(locations: usize, characters: usize, items: usize) -> WorldStateT
     for i in 0..locations {
         graph.vertices.push(WorldVertex {
             vertex_id: id("loc", i),
-            layer: GraphLayer::Location,
+            layers: GraphLayer::Location.into(),
             entity_index: None,
             attributes: BTreeMap::new(),
         });
@@ -84,7 +84,7 @@ fn build_world(locations: usize, characters: usize, items: usize) -> WorldStateT
     for i in 0..characters {
         graph.vertices.push(WorldVertex {
             vertex_id: id("char", i),
-            layer: GraphLayer::Character,
+            layers: GraphLayer::Character.into(),
             entity_index: None,
             attributes: BTreeMap::new(),
         });
@@ -92,7 +92,7 @@ fn build_world(locations: usize, characters: usize, items: usize) -> WorldStateT
     for i in 0..items {
         graph.vertices.push(WorldVertex {
             vertex_id: id("item", i),
-            layer: GraphLayer::Item,
+            layers: GraphLayer::Item.into(),
             entity_index: None,
             attributes: BTreeMap::new(),
         });
@@ -324,7 +324,7 @@ fn match_all(graph: &WorldStateTable, pattern: &GraphPattern, cap: usize) -> Mat
                     .vertices
                     .iter()
                     .filter(|vertex| {
-                        vertex.layer == vp.layer
+                        vertex.layers.contains(&vp.layer)
                             && vp
                                 .vertex_id
                                 .as_ref()

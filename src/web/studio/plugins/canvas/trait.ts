@@ -1,6 +1,6 @@
 /**
  * The "Canvas" trait: entities with it get the Canvas tab. The plugin creates
- * the trait template on first load when the project does not have it yet.
+ * the trait on first load when the project does not have it yet.
  */
 import type { TraitTemplateRecord } from "../../contracts.ts";
 import type { AnyEntity } from "../runtime.ts";

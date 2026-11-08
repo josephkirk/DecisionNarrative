@@ -50,7 +50,7 @@ test("fresh designer workspace exposes intrinsic World and canonical Entity Temp
 
     const entities = await request("/api/v3/content/entities");
     expect(entities.status).toBe(200);
-    expect(await entities.json()).toEqual(expect.arrayContaining([expect.objectContaining({ id: "world", root_tag: "world", properties: [], traits: [] })]));
+    expect(await entities.json()).toEqual(expect.arrayContaining([expect.objectContaining({ id: "world", properties: [], traits: [] })]));
     const templates = await request("/api/v3/content/entity_templates");
     expect(templates.status).toBe(200);
     expect(await templates.json()).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: "world" })]));
@@ -62,7 +62,7 @@ test("fresh designer workspace exposes intrinsic World and canonical Entity Temp
     const created = await request("/api/v3/content/entity_templates", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: "", object_id: "", game_id: "", game_id_auto: true, name: "Station", root_tag: "location", description: "", folder_id: null, tags: [], properties: [], traits: [] }),
+      body: JSON.stringify({ id: "", object_id: "", game_id: "", game_id_auto: true, name: "Station", description: "", folder_id: null, tags: [], properties: [], traits: [] }),
     });
     expect(created.status).toBe(201);
     expect((await created.json()).id).toBeTruthy();

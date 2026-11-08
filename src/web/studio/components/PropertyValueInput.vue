@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { AssetLinkValue, EntityRecord, EntityTemplateRecord, PropertyScalar, PropertyType, PropertyValue } from "../contracts.ts";
 import { defaultPropertyValue } from "../propertyModel.ts";
-import { ROOT_TAGS } from "../entityModel.ts";
+import { traitLabels, hasTraitKey } from "../entityModel.ts";
 import { studioState } from "../state.ts";
 import ReferencePicker, { type PickerItem } from "./ReferencePicker.vue";
 import TagEditor from "./TagEditor.vue";
@@ -14,7 +14,7 @@ const props = defineProps<{
   disabled?: boolean;
   tagOptions?: string[];
   selectionOnly?: boolean;
-  rootFilter?: string;
+  traitKeyFilter?: string;
 }>();
 const emit = defineEmits<{ "update:modelValue": [value: PropertyValue] }>();
 
@@ -31,15 +31,10 @@ watch(
 const isArray = computed(() => props.isArray ?? false);
 
 const entitiesByType = computed(() => {
-  const groups = new Map<string, { type: string; label: string; entities: Array<EntityRecord | EntityTemplateRecord> }>();
-  for (const entity of [...studioState.entities, ...studioState.entityTemplates]) {
-    const type = entity.root_tag;
-    if (props.rootFilter && type !== props.rootFilter) continue;
-    const group = groups.get(type) ?? { type, label: type, entities: [] };
-    group.entities.push(entity);
-    groups.set(type, group);
-  }
-  return [...groups.values()];
+  const entities = [...studioState.entities, ...studioState.entityTemplates];
+  return [{ type: "entities", label: "Entities", entities: entities.filter((entity) =>
+    !props.traitKeyFilter || hasTraitKey(entity, studioState.traitTemplates, props.traitKeyFilter),
+  ) }];
 });
 
 function commit(value: PropertyValue) {
@@ -177,7 +172,7 @@ const linkItems = computed<PickerItem[]>(() => {
     group.entities.map((entity) => ({
       id: entity.id,
       title: entity.name,
-      subtitle: group.label,
+      subtitle: traitLabels(entity, studioState.traitTemplates).join(" · ") || group.label,
     })),
   );
 });
@@ -242,7 +237,7 @@ function onAssetSelect(event: Event, write: (value: AssetLinkValue | null) => vo
       :disabled="props.disabled"
       @input="onText($event, emitScalar)"
     ></textarea>
-    <select v-else-if="props.type === 'string' && props.selectionOnly" class="form-select" :value="textValue(props.modelValue as PropertyScalar)" :disabled="props.disabled" @change="emitScalar(($event.target as HTMLSelectElement).value)"><option value="">(none)</option><option v-for="option in (props.tagOptions ?? [])" :key="option" :value="option">{{ option }}</option></select>
+    <select v-else-if="props.type === 'string' && props.selectionOnly" class="form-select" aria-label="Value" :value="textValue(props.modelValue as PropertyScalar)" :disabled="props.disabled" @change="emitScalar(($event.target as HTMLSelectElement).value)"><option value="">(none)</option><option v-for="option in (props.tagOptions ?? [])" :key="option" :value="option">{{ option }}</option></select>
     <input
       v-else-if="props.type === 'string'"
       key="scalar-string"
@@ -405,7 +400,7 @@ function onAssetSelect(event: Event, write: (value: AssetLinkValue | null) => vo
         </select>
         <button class="link-browse-btn" type="button" title="Browse storylets" aria-label="Browse storylets" :disabled="props.disabled" @click="openPicker(index)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
       </div>
-      <button class="btn btn-secondary" type="button" :disabled="props.disabled" @click="removeElement(Number(index))">✕</button>
+      <button class="btn btn-secondary" type="button" :disabled="props.disabled" @click="removeElement(Number(index))">Remove</button>
     </div>
     <button class="btn btn-secondary" type="button" :disabled="props.disabled" @click="addElement">+ Add element</button>
     </template>
@@ -447,7 +442,10 @@ function onAssetSelect(event: Event, write: (value: AssetLinkValue | null) => vo
   padding: 8px 12px;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-  outline: none;
+}
+.num-stepper__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .num-stepper__input:disabled {
   cursor: not-allowed;
@@ -527,14 +525,14 @@ function onAssetSelect(event: Event, write: (value: AssetLinkValue | null) => vo
   height: 16px;
   border-radius: 9999px;
   background: var(--text-dim);
-  transition: left 0.12s ease-out, background-color 0.12s ease-out;
+  transition: transform 0.12s ease-out, background-color 0.12s ease-out;
 }
 .bool-switch[aria-checked="true"] .bool-switch__track {
   border-color: var(--accent);
   background: var(--accent-subtle);
 }
 .bool-switch[aria-checked="true"] .bool-switch__knob {
-  left: 20px;
+  transform: translateX(18px);
   background: var(--accent);
 }
 .bool-switch__state {

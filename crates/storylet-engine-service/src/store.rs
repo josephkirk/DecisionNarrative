@@ -56,7 +56,7 @@ impl Store {
             let marker: Option<String> = self.conn.query_row(
                 "SELECT value FROM store_metadata WHERE key = 'schema_version'", [],
                 |row| row.get(0)).optional()?;
-            if marker.as_deref() != Some("5") { return Err(rusqlite::Error::InvalidQuery); }
+            if marker.as_deref() != Some("6") { return Err(rusqlite::Error::InvalidQuery); }
             for column in ["last_result_json", "mutation_revision"] {
                 let present: bool = self.conn.query_row(
                     "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chrono_playtest_sessions') WHERE name=?1)",
@@ -72,24 +72,14 @@ impl Store {
             }
             let has_legacy_records: bool = self.conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM content_records WHERE
-                    entity IN ('qualities','npc_behaviors')
-                    OR (entity='trait_templates' AND id IN
-                        ('system.character','system.location','system.item','system.fact','system.other')))",
+                    entity IN ('qualities','npc_behaviors'))",
                 [], |row| row.get(0))?;
             if has_legacy_records { return Err(rusqlite::Error::InvalidQuery); }
-            let canonical_templates: i64 = self.conn.query_row(
-                "SELECT count(*) FROM content_records WHERE entity='trait_templates' AND id IN
-                ('system.character_settings','system.location_settings','system.passion',
-                 'system.passion_threshold','system.passion_link')",
-                [], |row| row.get(0))?;
-            let protected_roots: i64 = self.conn.query_row(
-                "SELECT count(*) FROM content_records WHERE entity='gameplay_tags' AND id IN
-                ('character','location','item','fact','other','world')",
-                [], |row| row.get(0))?;
+            let canonical_capabilities: i64 = self.conn.query_row("SELECT count(*) FROM content_records WHERE entity='trait_templates' AND id IN ('system.character','system.location','system.fact')", [], |row| row.get(0))?;
             let has_world: bool = self.conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM content_records WHERE entity='entities' AND id='world')",
                 [], |row| row.get(0))?;
-            if canonical_templates != 5 || protected_roots != 6 || !has_world {
+            if !has_world || canonical_capabilities != 3 {
                 return Err(rusqlite::Error::InvalidQuery);
             }
         }
@@ -133,7 +123,7 @@ impl Store {
              CREATE INDEX IF NOT EXISTS idx_runtime_events_session
                  ON runtime_events(session_id, event_id);")?;
         self.conn.execute(
-            "INSERT OR IGNORE INTO store_metadata (key, value) VALUES ('schema_version', '5')", [])?;
+            "INSERT OR IGNORE INTO store_metadata (key, value) VALUES ('schema_version', '6')", [])?;
         let exists: bool = self.conn.query_row(
             "SELECT 1 FROM project_metadata WHERE singleton = 1", [], |_| Ok(true))
             .optional()?.is_some();
@@ -141,7 +131,7 @@ impl Store {
             self.conn.execute(
                 "INSERT INTO project_metadata (singleton, project_id, name, revision)
                  VALUES (1, 'workspace-project', 'Workspace', 0)", [])?;
-            seed_protected_records(&self.conn)?;
+            seed_system_records(&self.conn)?;
         }
         ensure_world_entity(&self.conn)?;
         Ok(())
@@ -191,16 +181,10 @@ impl Store {
         entity: &str,
         id: &str,
     ) -> Result<Option<String>, rusqlite::Error> {
-        let stored: Option<String> = self.conn.query_row(
+        self.conn.query_row(
             "SELECT data_json FROM content_records WHERE entity = ?1 AND id = ?2",
             params![entity, id], |row| row.get(0),
-        ).optional()?;
-        Ok(stored.or_else(|| {
-            if entity != "trait_templates" {
-                return None;
-            }
-            id.strip_prefix("system.").filter(|key| crate::contracts::ADDITIVE_SYSTEM_TRAITS.contains(key)).map(system_trait_json)
-        }))
+        ).optional()
     }
 
     pub fn list_content_json(&self, entity: &str) -> Result<Vec<String>, rusqlite::Error> {
@@ -208,28 +192,7 @@ impl Store {
             .conn
             .prepare("SELECT data_json FROM content_records WHERE entity = ?1 ORDER BY id")?;
         let rows = stmt.query_map(params![entity], |row| row.get::<_, String>(0))?;
-        let mut records: Vec<String> = rows.collect::<Result<_, _>>()?;
-        // Provide the additive system traits to older v5 projects without
-        // rewriting their stored data or changing the project revision.
-        if entity == "trait_templates" {
-            let id_of = |row: &str| {
-                serde_json::from_str::<Value>(row)
-                    .ok()
-                    .and_then(|value| value.get("id").and_then(Value::as_str).map(str::to_owned))
-                    .unwrap_or_default()
-            };
-            let mut added = false;
-            for key in crate::contracts::ADDITIVE_SYSTEM_TRAITS {
-                if !records.iter().any(|row| id_of(row) == format!("system.{key}")) {
-                    records.push(system_trait_json(key));
-                    added = true;
-                }
-            }
-            if added {
-                records.sort_by(|a, b| id_of(a).cmp(&id_of(b)));
-            }
-        }
-        Ok(records)
+        rows.collect()
     }
 
     pub fn save_content(
@@ -778,7 +741,7 @@ impl Store {
             }),
             now,
         )?;
-        seed_protected_records(&tx)?;
+        seed_system_records(&tx)?;
         ensure_world_entity(&tx)?;
         tx.commit()?;
         Ok(next_revision as u64)
@@ -1006,27 +969,8 @@ fn chrono_now_ms() -> i64 {
         .as_millis() as i64
 }
 
-fn system_trait_json(key: &str) -> String {
-    let spec = SYSTEM_TRAIT_TEMPLATES.iter().find(|spec| spec.key == key).expect("system trait exists");
-    let properties: Vec<Value> = spec.properties.iter().map(|property| json!({
-        "key": property.key, "name": property.name, "type": property.property_type,
-        "is_array": property.is_array, "default": serde_json::from_str::<Value>(property.default_json).expect("valid system trait default")
-    })).collect();
-    json!({"id":format!("system.{key}"), "key":key, "key_auto":false,
-        "name":spec.name, "description":"", "folder_id":null, "properties":properties,
-        "allow_multiple":spec.allow_multiple, "system":true, "created_at":0}).to_string()
-}
 
-fn seed_protected_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
-    let roots = ["character", "location", "item", "fact", "other", "world"];
-    for name in roots {
-        let record = json!({"id": name, "name": name, "description": "",
-            "protected": true, "created_at": 0});
-        conn.execute(
-            "INSERT OR IGNORE INTO content_records (entity,id,data_json,revision,updated_at)
-             VALUES ('gameplay_tags',?1,?2,1,0)",
-            params![name, record.to_string()])?;
-    }
+fn seed_system_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
     for template in SYSTEM_TRAIT_TEMPLATES {
         let properties: Vec<Value> = template.properties.iter().map(|spec| json!({
             "key": spec.key,
@@ -1046,6 +990,7 @@ fn seed_protected_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::E
             "folder_id": null,
             "properties": properties,
             "allow_multiple": template.allow_multiple,
+            "unique": false,
             "system": true,
             "created_at": 0
         });
@@ -1060,7 +1005,7 @@ pub fn ensure_world_entity(conn: &rusqlite::Connection) -> Result<(), rusqlite::
         "SELECT 1 FROM content_records WHERE entity='entities' AND id='world'",
         [], |_| Ok(true)).optional()?.unwrap_or(false);
     if !exists {
-        let world = json!({"id":"world","name":"World","root_tag":"world","tags":[]});
+        let world = json!({"id":"world","name":"World","tags":[]});
         conn.execute(
             "INSERT INTO content_records (entity,id,data_json,revision,updated_at)
              VALUES ('entities','world',?1,1,0)", params![world.to_string()])?;
@@ -1072,19 +1017,6 @@ pub fn ensure_world_entity(conn: &rusqlite::Connection) -> Result<(), rusqlite::
 mod tests {
     use super::{ChronoPlaytestRow, Store};
 
-    #[test]
-    fn old_v5_projects_expose_participant_trait_without_mutation() {
-        let store = Store::open_in_memory().unwrap();
-        store.conn.execute("DELETE FROM content_records WHERE entity='trait_templates' AND id='system.participant'", []).unwrap();
-        let before = store.get_project_metadata().unwrap().revision;
-        let traits = store.list_trait_templates().unwrap();
-        assert!(traits.iter().any(|item| item.id == "system.participant"));
-        assert_eq!(store.get_project_metadata().unwrap().revision, before);
-        let direct = store.get_content_json("trait_templates", "system.participant").unwrap().unwrap();
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&direct).unwrap()["id"], "system.participant");
-        let actual: bool = store.conn.query_row("SELECT EXISTS(SELECT 1 FROM content_records WHERE entity='trait_templates' AND id='system.participant')", [], |row| row.get(0)).unwrap();
-        assert!(!actual);
-    }
 
     #[test]
     fn chrono_playtest_row_round_trips() {

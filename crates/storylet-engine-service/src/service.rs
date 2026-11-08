@@ -71,12 +71,6 @@ fn persisted_runtime(store: &Store, templates: &[TraitTemplateRecord], entity_te
     let world = store.list_entities().map_err(|e| e.to_string())?
         .into_iter().find(|entity| entity.id == entities::WORLD_ENTITY_ID)
         .ok_or_else(|| "Intrinsic World entity is missing from persisted entities".to_string())?;
-    if world.root_tag != entities::WORLD_ENTITY_ID {
-        return Err(format!(
-            "Intrinsic World entity must retain the '{}' root gameplay tag",
-            entities::WORLD_ENTITY_ID
-        ));
-    }
     Ok(entities::runtime_records_with_world(&world, entity_templates, templates))
 }
 
@@ -434,10 +428,23 @@ impl StudioService {
                 let stored: Option<TraitTemplateRecord> =
                     load_stored_record(&inner.store, "trait_templates", stored_id)?;
                 if stored.as_ref().is_some_and(|template| template.system) {
-                    return Err("System trait templates cannot be modified".into());
+                    return Err("System traits cannot be modified".into());
                 }
                 let prepared =
                     entities::prepare_trait_template(payload, stored.as_ref(), &index)?;
+                if stored.as_ref().is_some_and(|previous|
+                    previous.unique != prepared.unique || previous.allow_multiple != prepared.allow_multiple
+                ) {
+                    let mut templates = inner.store.list_trait_templates().map_err(|error| error.to_string())?;
+                    templates.retain(|template| template.id != prepared.id);
+                    templates.push(prepared.clone());
+                    for record in inner.store.list_entities().map_err(|error| error.to_string())? {
+                        entities::validate_unique_traits(&record.traits, &templates, &format!("entity '{}'", record.name))?;
+                    }
+                    for record in inner.store.list_entity_templates().map_err(|error| error.to_string())? {
+                        entities::validate_unique_traits(&record.traits, &templates, &format!("entity template '{}'", record.name))?;
+                    }
+                }
                 serde_json::to_value(prepared).map_err(|e| e.to_string())?
             }
             "gameplay_tags" => {
@@ -683,7 +690,7 @@ impl StudioService {
                         .map_err(ContentDeleteError::Persistence)?;
                 if template.is_some_and(|template| template.system) {
                     return Err(ContentDeleteError::Conflict(
-                        "System trait templates cannot be deleted".into(),
+                        "System traits cannot be deleted".into(),
                     ));
                 }
             }
@@ -697,10 +704,7 @@ impl StudioService {
                     .find(|tag| tag.id == id)
                     .ok_or_else(|| ContentDeleteError::Conflict(format!("Gameplay tag '{id}' not found")))?;
                 if tag.protected {
-                    return Err(ContentDeleteError::Conflict(format!(
-                        "Cannot delete protected root gameplay tag '{}'",
-                        tag.name
-                    )));
+                    return Err(ContentDeleteError::Conflict(format!("Cannot delete protected gameplay tag '{}'", tag.name)));
                 }
                 if tags.iter().any(|child| {
                     child
@@ -827,7 +831,7 @@ impl StudioService {
         Ok(value)
     }
 
-    /// Where an entity template, gameplay tag, asset, or trait template is used.
+    /// Where an entity template, gameplay tag, asset, or trait is used.
     pub async fn content_references(
         &self,
         kind: &str,
@@ -1344,7 +1348,7 @@ fn kind_label(kind: &str) -> &'static str {
         "entity_templates" => "entity template",
         "gameplay_tags" => "gameplay tag",
         "assets" => "asset",
-        "trait_templates" => "trait template",
+        "trait_templates" => "trait",
         _ => "item",
     }
 }
@@ -1473,9 +1477,9 @@ fn validate_storylet_gameplay_tags(
     let tags = store.list_gameplay_tags().map_err(|error| error.to_string())?;
     let is_registered = |name: &str| tags.iter().any(|tag| tag.name == name);
     for name in &storylet.location_tags {
-        if !is_registered(name) || (name != "location" && !name.starts_with("location.")) {
+        if !is_registered(name) {
             return Err(format!(
-                "Storylet validation failed: location tag '{name}' must be a registered location gameplay tag"
+                "Storylet validation failed: gameplay tag '{name}' is not registered"
             ));
         }
     }
@@ -1486,13 +1490,7 @@ fn validate_storylet_gameplay_tags(
                 parameter.param_name
             ));
         };
-        if (role != "character" && !role.starts_with("character."))
-            || !is_registered(&role)
-        {
-            return Err(format!(
-                "Storylet validation failed: role tag '{role}' must be a registered character gameplay tag"
-            ));
-        }
+        if !is_registered(&role) { return Err(format!("Storylet validation failed: gameplay tag '{role}' is not registered")); }
     }
 
     let events = store.list_events().map_err(|error| error.to_string())?;
@@ -1507,18 +1505,11 @@ fn validate_storylet_gameplay_tags(
         }
     }
 
-    let entity_templates = store
-        .list_entity_templates()
-        .map_err(|error| error.to_string())?;
-    fn check_graph_tags(
-        value: &Value,
-        tags: &[GameplayTagRecord],
-        entities: &[EntityTemplateRecord],
-    ) -> Result<(), String> {
+    fn check_graph_tags(value: &Value, tags: &[GameplayTagRecord]) -> Result<(), String> {
         let Some(object) = value.as_object() else {
             if let Some(values) = value.as_array() {
                 for item in values {
-                    check_graph_tags(item, tags, entities)?;
+                    check_graph_tags(item, tags)?;
                 }
             }
             return Ok(());
@@ -1535,51 +1526,18 @@ fn validate_storylet_gameplay_tags(
                     "tag" | "emotion_tag" | "action_tag" | "emote"
                 );
                 if role_key && name != "player" {
-                    if !name.starts_with("character.")
-                        || !tags.iter().any(|tag| tag.name == name)
-                    {
-                        return Err(format!(
-                            "Storylet validation failed: role '{name}' must be a registered character gameplay tag"
-                        ));
-                    }
+                    if !tags.iter().any(|tag| tag.name == name) { return Err(format!("Storylet validation failed: gameplay tag '{name}' is not registered")); }
                 } else if tag_key {
-                    let Some(tag) = tags.iter().find(|tag| tag.name == name) else {
-                        return Err(format!(
-                            "Storylet validation failed: gameplay tag '{name}' is not registered"
-                        ));
-                    };
-                    if key == "tag"
-                        && let Some(target_id) = object
-                            .get("target_entity_id")
-                            .and_then(Value::as_str)
-                    {
-                        let target = entities
-                            .iter()
-                            .find(|entity| entity.id == target_id)
-                            .ok_or_else(|| {
-                                format!(
-                                    "Storylet validation failed: tag target entity '{target_id}' does not exist"
-                                )
-                            })?;
-                        let target_root = &target.root_tag;
-                        if tag.name != *target_root
-                            && !tag.name.starts_with(&format!("{target_root}."))
-                        {
-                            return Err(format!(
-                                "Storylet validation failed: tag '{name}' is outside target root '{target_root}'"
-                            ));
-                        }
-                    }
+                    if !tags.iter().any(|tag| tag.name == name) { return Err(format!("Storylet validation failed: gameplay tag '{name}' is not registered")); }
                 }
             }
-            check_graph_tags(value, tags, entities)?;
+            check_graph_tags(value, tags)?;
         }
         Ok(())
     }
     check_graph_tags(
         &serde_json::to_value(graph).map_err(|error| error.to_string())?,
         &tags,
-        &entity_templates,
     )
 }
 
@@ -1643,7 +1601,7 @@ fn collect_references(
         "entity_templates" | "gameplay_tags" | "assets" | "trait_templates" | "storylets"
     ) {
         return Err(
-            "References are available for entity templates, gameplay tags, assets, trait templates, and storylets"
+            "References are available for entity templates, gameplay tags, assets, traits, and storylets"
                 .to_string(),
         );
     }

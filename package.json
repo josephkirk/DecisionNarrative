@@ -1,6 +1,6 @@
 {
   "name": "decisionnarrative-storylet-studio",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.1",
   "description": "Local authoring and playtest studio for non-linear storylet-driven narrative games",
   "type": "module",
   "scripts": {

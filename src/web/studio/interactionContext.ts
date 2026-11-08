@@ -49,7 +49,7 @@ const viewNames: Record<string, string> = {
   "edit-storylet": "Storylet Editor",
   browse: "Project Browser",
   "entity-template": "Entity Template Editor",
-  "trait-template": "Trait Template Editor",
+  "trait-template": "Trait Editor",
   asset: "Asset Editor",
   codex: "Rules & Events",
   tags: "Tag Manager",

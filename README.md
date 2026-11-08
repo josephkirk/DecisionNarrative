@@ -1,6 +1,6 @@
 # DecisionNarrative
 
-**Version 0.1.0-alpha.1** — alpha prerelease. APIs, bundle schemas, and databases may change without migration.
+**Version 0.2.0-alpha.1** — alpha prerelease. APIs, bundle schemas, and databases may change without migration.
 
 DecisionNarrative is a local authoring and playtest studio for nonlinear, storylet-driven narrative games. It is designed to scale from a compact detective scenario to a large systemic RPG without imposing a built-in setting, cast, or linear plot structure.
 
@@ -10,7 +10,7 @@ The platform couples a host-independent Rust decision core with a unified local 
 
 - **Narrative Core (`crates/storylet-engine`)**: Host-independent Rust library with zero I/O dependencies. ChronoFlow v5 uses data-oriented world state, fixed gameplay-tag bitsets, reversible mutation deltas, persistent call history, and deterministic QBN, salience, waypoint, token, timeline, invoke, and reconciliation runtime APIs. Adds participants with per-participant knowledge, a canon chronicle with per-participant telling and `Reveal` nodes, `Learn` / `Move` / `Knows` / `Colocated` nodes, and a world clock with scheduled connections and occupancy rules. A deterministic run kernel replays an action log against content, so runs can be rewound, reloaded after edits, and explained. Exports a C ABI for native embedding (Unreal / Unity / Godot / .NET), including `dn_run_*` entry points for deterministic runs.
 - **Unified Local Service (`crates/storylet-engine-service`)**: Axum, Tokio, and rusqlite service providing single-store SQLite persistence, REST endpoints, Server-Sent Events (SSE) live streams, and stdio/HTTP Model Context Protocol (MCP) server.
-- **Authoring Studio (`src/web`)**: Vue 3 (Composition API) + Vite + Vue Router application. Articy:draft-style project tree (Storylets, intrinsic Entities, Entity Templates, Trait Templates, Assets) with custom folders/subfolders, live search, drag-and-drop hierarchy, and grid/list folder browsing. Generic entity-template authoring (characters, locations, items, facts, other) with Blueprint-style custom properties, composable trait templates, thumbnail storage, and bidirectional reference tracking with graph jump-to-node. Full-width graph storylet editor with a contextual property inspector, Tag Manager reference tracking, world/canon events, and starting-condition scenarios. A **Play** view (`/play`) reads and plays the story directly; see [docs/design/playtest-ui.md](docs/design/playtest-ui.md).
+- **Authoring Studio (`src/web`)**: Vue 3 (Composition API) + Vite + Vue Router application. Articy:draft-style project tree (Storylets, intrinsic Entities, Entity Templates, Traits, Assets) with custom folders/subfolders, live search, drag-and-drop hierarchy, and grid/list folder browsing. Generic entity-template authoring (characters, locations, items, facts, other) with Blueprint-style custom properties, composable traits, thumbnail storage, and bidirectional reference tracking with graph jump-to-node. Full-width graph storylet editor with a contextual property inspector, Tag Manager reference tracking, world/canon events, and starting-condition scenarios. A **Play** view (`/play`) reads and plays the story directly; see [docs/design/playtest-ui.md](docs/design/playtest-ui.md).
 - **Drama Director (`crates/storylet-engine`)**: Deterministic eligibility and selection in Rust; no embedding ranker or model dependency.
 - **Interaction Context (`src/web/studio/interactionContext.ts`)**: Shares the active studio view, project, focused entity/selection, and playtest revision with a local MCP agent. The agent works through MCP operations directly; the studio does not call a model or generate content.
 
@@ -32,16 +32,16 @@ bun run play
 
 On Windows you can run `run.bat` (or `run.bat fresh`) instead, which stops any previous server, installs dependencies if needed, then builds and starts the service.
 
-Open `http://127.0.0.1:3000` in your browser (e.g. Microsoft Edge, Chrome, Safari). `bun run play` uses `data/storylet_studio_v5.db`; set `STORYLET_STUDIO_DB_PATH` to select a different file or `:memory:` for isolated testing.
+Open `http://127.0.0.1:3000` in your browser (e.g. Microsoft Edge, Chrome, Safari). `bun run play` uses `data/storylet_studio_v6.db`; set `STORYLET_STUDIO_DB_PATH` to select a different file or `:memory:` for isolated testing.
 
-`bun run play:fresh` opens the separate `data/storylet_studio_v5_clean.db` workspace and binds on port 3001; it does not modify the default database. Earlier schema versions are rejected without migration. The MCP process inherits `STORYLET_STUDIO_DB_PATH` when the agent client passes it through.
+`bun run play:fresh` opens the separate `data/storylet_studio_v6_clean.db` workspace and binds on port 3001; it does not modify the default database. Earlier schema versions are rejected without migration. The MCP process inherits `STORYLET_STUDIO_DB_PATH` when the agent client passes it through.
 
 ## Environment configuration
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
 | `STORYLET_STUDIO_ADDR` | `127.0.0.1:3000` | HTTP service bind address (`play:fresh` defaults to port 3001) |
-| `STORYLET_STUDIO_DB_PATH` | `data/storylet_studio_v5.db` | Unified SQLite database file path |
+| `STORYLET_STUDIO_DB_PATH` | `data/storylet_studio_v6.db` | Unified SQLite database file path |
 
 No AI service or model-provider environment variables are required.
 
@@ -60,19 +60,26 @@ cargo test --manifest-path crates/storylet-engine/Cargo.toml
 cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 ```
 
+### Local pull-request reviews
+
+On this Windows workstation, install the optional review hook with `cp .githooks/pre-push .git/hooks/pre-push`. Preserve or merge any existing `pre-push` hook first. The hook requires Bun, Node.js, Git, an authenticated `gh` CLI, and Codex CLI signed in with ChatGPT; it does not use `OPENAI_API_KEY`.
+
+Each push queues a detached review of the pushed commit for its open GitHub pull request. The worker generates the diff in an isolated temporary checkout, then runs Codex from a separate temporary directory and passes the diff through stdin. Reviews are posted as PR comments. Pushes are not blocked if review fails; inspect `%LOCALAPPDATA%\DecisionNarrative\local-review\review.log` for failures. Bypassing Git hooks skips the review.
+
 ## Authoring and Starting Scenarios
 
 - **Storylet Library**: Browsable card grid with responsive columns (60 cards per page), search by title/text/group tag, status filters (Approved/Draft), location-tag filters, and ending badges. Storylets may target location tags; with no location tags they are not location-gated. With tags, they are eligible anywhere the current location shares at least one tag. Clicking any card opens the full-width graph editor.
 - **Storylet Graph Editor**: Authors edit the graph canvas and inspect storylet metadata, dialogue sections, ordered lines or idle actions, role/tag/audio metadata, local variables, and node-specific rules. Go To Location nodes move the player to a selected project location and must be directly targeted by a Choice branch. Graph validation runs before draft save and approval; valid graphs require exactly one Start and one or more End nodes, with every node reachable from Start and able to reach an End. Each End is either terminal (ends the run) or a jump to another storylet. A jump takes precedence over a leftover terminal flag; a storylet is a dedicated ending only when every End is terminal and has no jump. Variable and condition nodes select global or storylet-local scope; right-click adds or deletes graph items, and Alt-drag cuts wires.
 - **Starting Scenarios**: Scenarios configure only starting conditions (player start location policy, initial property overrides, actor population and location policies, and random seed). Scenarios do not lock in plot arcs, storylet deck membership, or run length. All approved storylets in the project remain eligible during playtest based on dynamic world preconditions and role availability.
 - **Tag Manager**: Browse the hierarchical Gameplay Tag catalog, add root and child tags, inspect references, and open referenced entities or storylets.
-- **Story Codex & World Bible**: Author world and canon events. Character settings, location settings, and passion data are composed from reusable trait templates.
-- **Project Tree & Entities**: Keep the intrinsic World entity under Entities; author characters, locations, items, facts, and other game objects as Entity Templates under the separate Entity Templates root. Compose reusable Trait Templates with default values and entity-specific overrides, and manage append-only Assets with versioning and external storage references.
+- **Story Codex & World Bible**: Author world and canon events. Character settings, location settings, and passion data are composed from reusable traits.
+- **Project Tree & Entities**: Keep the intrinsic World entity under Entities; author characters, locations, items, facts, and other game objects as Entity Templates under the separate Entity Templates root. Classify characters, locations, and facts with composable `system.character`, `system.location`, and `system.fact` trait instances; entities may carry multiple classification traits. Items use the inventory plugin Item trait. Gameplay Tag namespaces are independent of entity classification, and the intrinsic World is entity `world`. Compose reusable traits with default values and entity-specific overrides, and manage append-only Assets with versioning and external storage references.
+- **Trait uniqueness**: The **Unique trait** toggle defaults off. An entity can contain at most one trait instance marked unique, including duplicate instances of the same trait. Non-unique traits may coexist; `allow_multiple` controls whether the same trait may be applied more than once.
 - **Play**: A Play button in the top toolbar (and **Play from here** in the storylet editor) starts a run. The prose column is the centre of the screen; the run advances itself until it needs a choice, a move, or an ending. A *where & when* strip shows the clock, place, and participant tabs (hot-seat). Every step is on a timeline: click an earlier step to rewind, and choosing differently branches automatically. When content changes, **Reload run** replays the same actions on the new content and reports where it diverged. A closed-by-default *Inspect* panel shows knowledge provenance and the chronicle, and *Why?* explains the nearest misses when nothing is available.
 - **Coverage Explorer**: `workspace.coverage` / `/api/v4/coverage` deterministically explores the compiled project by replaying runs, so unreachable content can be found without hand-playing.
 - **Participants & Knowledge**: Characters act through storylets on the world clock. Knowledge is tracked per participant with provenance, co-presence witnesses what happens, and `Reveal` nodes tell canon chronicle events to chosen participants.
 - **Project Authoring Aids**: Storylets can carry time windows and participant badges; world connections and the clock are authored as system traits and validated.
-- **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v5) containing entities, entity templates, folders, trait templates, assets, storylets, and scenarios, with transactional validation. Earlier bundle schemas are rejected; use a fresh schema-v5 database rather than migrating a legacy database.
+- **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v6) containing entities, entity templates, folders, traits, assets, storylets, and scenarios, with transactional validation. Earlier bundle schemas are rejected; use a fresh schema-v6 database rather than migrating a legacy database.
 
 ## Plugins
 
@@ -106,7 +113,7 @@ icons) as Apply Command nodes, so several nodes on one canvas compose. Node chan
 is saved: a new or edited version is marked *storylet not saved* and a deleted node's version *removal pending*;
 **Save draft** commits them, and closing or reopening the storylet without saving discards them.
 
-**Built-in: Inventory.** The plugin creates the `InventoryOwner` and `Item` trait templates on workspace load. Add the `InventoryOwner` trait to an entity to get an **Inventory** tab. Set rows and columns (1–20 each, default 4×4, capacity = rows × columns), then add entities carrying the `Item` trait; each item occupies one slot, must be unique, and displays its entity thumbnail when present. Save the entity to persist the layout and initial contents. A grid cannot be shrunk below its current item count.
+**Built-in: Inventory.** The plugin creates the `InventoryOwner` and `Item` traits on workspace load. Add the `InventoryOwner` trait to an entity to get an **Inventory** tab. Set rows and columns (1–20 each, default 4×4, capacity = rows × columns), then add entities carrying the `Item` trait; each item occupies one slot, must be unique, and displays its entity thumbnail when present. Save the entity to persist the layout and initial contents. A grid cannot be shrunk below its current item count.
 
 In a story graph, connect configured **Get Entity** nodes to the owner and item inputs of **Add Item**, **Remove Item**, or **Has Item**. Add/remove are flow nodes; Has Item outputs a boolean for a Condition Node. Inputs are checked for the required traits. Adding an item already present and removing an absent item are no-ops; adding to a full inventory fails. Runtime changes are part of the playtest state, not edits to the authored inventory.
 The **Plugins** tab lists installed plugins and turns them on or off.

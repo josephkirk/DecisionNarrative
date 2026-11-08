@@ -79,7 +79,7 @@ pub fn entity_references(
         if storylet
             .location_tags
             .iter()
-            .any(|tag| target.tags.iter().any(|entity_tag| entity_tag == tag) || target.root_tag == *tag)
+            .any(|tag| target.tags.iter().any(|entity_tag| entity_tag == tag))
         {
             record(
                 &mut out,
@@ -262,9 +262,6 @@ fn role_query(query: &str, name: &str) -> bool {
 pub fn gameplay_tag_references(target: &GameplayTagRecord, ctx: &ReferenceContext) -> Vec<ContentReference> {
     let mut out = Vec::new();
     for entity in ctx.entities {
-        if entity.root_tag == target.name {
-            record(&mut out, "entity_template", &entity.id, &entity.name, None, "Root gameplay tag".into(), ReferenceVia::Tag);
-        }
         if entity.tags.iter().any(|tag| tag == &target.name) {
             record(&mut out, "entity_template", &entity.id, &entity.name, None, "Gameplay tag".into(), ReferenceVia::Tag);
         }

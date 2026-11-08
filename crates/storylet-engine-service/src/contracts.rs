@@ -483,7 +483,7 @@ pub const STORYLET_CLUSTER_TYPES: [&str; 4] = [
 ];
 
 /// The persisted project interchange schema.
-pub const PROJECT_BUNDLE_SCHEMA_VERSION: u32 = 5;
+pub const PROJECT_BUNDLE_SCHEMA_VERSION: u32 = 6;
 
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -514,7 +514,7 @@ pub enum PropertyType {
     Json,
 }
 
-/// A reusable typed property definition for trait templates.
+/// A reusable typed property definition for traits.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TraitPropertyDefinition {
     #[serde(flatten)]
@@ -559,11 +559,11 @@ pub struct SystemTraitTemplateSpec {
     pub properties: &'static [SystemTraitPropertySpec],
 }
 
-/// System traits added after v5 shipped. Older projects get them virtually and
-/// bundles without them still validate.
-pub const ADDITIVE_SYSTEM_TRAITS: &[&str] = &["participant", "connection", "clock", "milestone", "intent_probe"];
 
 pub const SYSTEM_TRAIT_TEMPLATES: &[SystemTraitTemplateSpec] = &[
+    SystemTraitTemplateSpec { key: "character", name: "Character", allow_multiple: false, properties: &[] },
+    SystemTraitTemplateSpec { key: "location", name: "Location", allow_multiple: false, properties: &[] },
+    SystemTraitTemplateSpec { key: "fact", name: "Fact", allow_multiple: false, properties: &[] },
     SystemTraitTemplateSpec { key: "participant", name: "Participant", allow_multiple: false, properties: &[
         SystemTraitPropertySpec { key: "controller", name: "Controller", property_type: PropertyType::String, is_array: false, default_json: "\"human\"" },
         SystemTraitPropertySpec { key: "seat", name: "Seat", property_type: PropertyType::Int, is_array: false, default_json: "0" },
@@ -662,6 +662,7 @@ pub struct GameplayTagRecord {
 }
 /// Concrete entity instances (e.g. David using Character template, or empty entities).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EntityRecord {
     #[serde(default)]
     pub id: String,
@@ -673,8 +674,6 @@ pub struct EntityRecord {
     pub template_id: Option<String>,
     #[serde(default)]
     pub name: String,
-    #[serde(default)]
-    pub root_tag: String,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
@@ -694,6 +693,7 @@ pub struct EntityRecord {
 
 /// Authored entity consumed directly by runtime projection.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EntityTemplateRecord {
     #[serde(default)]
     pub id: String,
@@ -704,7 +704,6 @@ pub struct EntityTemplateRecord {
     #[serde(default)]
     pub game_id_auto: bool,
     pub name: String,
-    pub root_tag: String,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
@@ -721,35 +720,6 @@ pub struct EntityTemplateRecord {
     pub created_at: Option<i64>,
 }
 
-impl EntityTemplateRecord {
-    /// Validate intrinsic category and canonical tag namespace invariants.
-    pub fn validate_tags(&self, registered: &[GameplayTagRecord]) -> Result<(), String> {
-        let root = self.root_tag.trim();
-        if root.is_empty() || root.contains('.') {
-            return Err("root_tag must be a non-empty name without dots".into());
-        }
-        let root_match = registered.iter().find(|tag| tag.name.eq_ignore_ascii_case(root))
-            .ok_or_else(|| format!("root gameplay tag '{root}' is not registered"))?;
-        if root_match.name.contains('.') {
-            return Err("root gameplay tag must not contain dots".into());
-        }
-        for tag in &self.tags {
-            let canonical = tag.trim();
-            if canonical.is_empty() || (!canonical.eq_ignore_ascii_case(root)
-                && !canonical.to_ascii_lowercase().starts_with(&(root.to_ascii_lowercase() + ".")))
-            {
-                return Err(format!("tag '{canonical}' is outside root namespace '{root}'"));
-            }
-            if !registered.iter().any(|item| item.name.eq_ignore_ascii_case(canonical)) {
-                return Err(format!("gameplay tag '{canonical}' is not registered"));
-            }
-        }
-        if self.tags.iter().any(|tag| tag.eq_ignore_ascii_case(root)) {
-            return Err("root_tag must not be duplicated in tags".into());
-        }
-        Ok(())
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TraitTemplateRecord {
@@ -768,6 +738,8 @@ pub struct TraitTemplateRecord {
     pub properties: Vec<TraitPropertyDefinition>,
     #[serde(default)]
     pub allow_multiple: bool,
+    #[serde(default)]
+    pub unique: bool,
     #[serde(default)]
     pub system: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -827,6 +799,7 @@ pub struct AssetRecord {
 pub enum WorldObjectLayer {
     Item,
     Fact,
+    Generic,
 }
 
 /// An item or fact entity projected into the runtime graph.
@@ -846,7 +819,7 @@ pub enum ReferenceVia {
     Tag,
 }
 
-/// Where an entity, asset, or trait template is used.
+/// Where an entity, asset, or trait is used.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ContentReference {
     pub source_kind: String,

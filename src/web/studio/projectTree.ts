@@ -1,3 +1,4 @@
+import { traitLabels } from "./entityModel.ts";
 import type {
   AssetRecord,
   ContentRoot,
@@ -7,7 +8,7 @@ import type {
   StoryletRecord,
   TraitTemplateRecord,
 } from "./contracts.ts";
-import { rootTagLabel } from "./entityModel.ts";
+
 
 export interface ContentRootDefinition {
   root: ContentRoot;
@@ -20,7 +21,7 @@ export const CONTENT_ROOTS: ContentRootDefinition[] = [
   { root: "storylets", label: "Storylets", kind: "storylets", newLabel: "New Storylet" },
   { root: "entities", label: "Entities", kind: "entities", newLabel: "New Entity" },
   { root: "entity_templates", label: "Entity Templates", kind: "entity_templates", newLabel: "New Entity Template" },
-  { root: "trait_templates", label: "Trait Templates", kind: "trait_templates", newLabel: "New Trait Template" },
+  { root: "trait_templates", label: "Traits", kind: "trait_templates", newLabel: "New Trait" },
   { root: "assets", label: "Assets", kind: "assets", newLabel: "New Asset" },
 ];
 
@@ -46,7 +47,6 @@ export interface TreeItem {
   folderId: string | null;
   thumbnail: string | null;
   detail: string;
-  rootTag?: string;
 }
 
 export interface TreeSource {
@@ -100,8 +100,7 @@ export function buildTreeItems(input: BuildTreeInput): TreeSource {
       label: entity.name,
       folderId: entity.folder_id ?? null,
       thumbnail: entity.thumbnail ?? null,
-      detail: rootTagLabel(entity.root_tag),
-      rootTag: entity.root_tag,
+      detail: traitLabels(entity, input.traitTemplates).join(" · ") || "No traits",
     });
   }
   for (const entity of input.entityTemplates) {
@@ -111,8 +110,7 @@ export function buildTreeItems(input: BuildTreeInput): TreeSource {
       label: entity.name,
       folderId: entity.folder_id ?? null,
       thumbnail: entity.thumbnail ?? null,
-      detail: rootTagLabel(entity.root_tag),
-      rootTag: entity.root_tag,
+      detail: traitLabels(entity, input.traitTemplates).join(" · ") || "No traits",
     });
   }
   for (const template of input.traitTemplates) {
@@ -150,7 +148,6 @@ export interface TreeRow {
   folderId?: string | null;
   thumbnail?: string | null;
   detail?: string;
-  rootTag?: string;
   hasChildren: boolean;
   expanded: boolean;
 }
@@ -275,7 +272,6 @@ export function flattenTree(input: {
       folderId: item.folderId,
       thumbnail: item.thumbnail,
       detail: item.detail,
-      rootTag: item.rootTag,
       hasChildren: false,
       expanded: false,
     });
