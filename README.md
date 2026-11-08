@@ -110,6 +110,9 @@ is saved: a new or edited version is marked *storylet not saved* and a deleted n
 **Built-in: Inventory.** The plugin creates the `InventoryOwner` and `Item` traits on workspace load. Add the `InventoryOwner` trait to an entity to get an **Inventory** tab. Set rows and columns (1–20 each, default 4×4, capacity = rows × columns), then add entities carrying the `Item` trait; each item occupies one slot, must be unique, and displays its entity thumbnail when present. Save the entity to persist the layout and initial contents. A grid cannot be shrunk below its current item count.
 
 In a story graph, connect configured **Get Entity** nodes to the owner and item inputs of **Add Item**, **Remove Item**, or **Has Item**. Add/remove are flow nodes; Has Item outputs a boolean for a Condition Node. Inputs are checked for the required traits. Adding an item already present and removing an absent item are no-ops; adding to a full inventory fails. Runtime changes are part of the playtest state, not edits to the authored inventory.
+
+**Built-in: Tree Graph.** Add `TreeGraph` to an entity to open its **Tree** tab. Add entities carrying `TreeItem`, connect them using node ports or the connection controls, and save the owner. Multiple roots, shared nodes, cycles, and disconnected components are supported without game-specific progression rules. Pan and zoom the canvas; switch between four directional views and radial view, drag nodes or use arrow keys, and save a separate layout for each view. **Save layout** saves the entity draft; **Export JSON** downloads the graph, item metadata, and current coordinates. Skill-tree, roguelike-map, and relationship-tree examples create TreeItem entities in the project.
+
 The **Plugins** tab lists installed plugins and turns them on or off.
 Visual check: `bun run test:visual:canvas`.
 

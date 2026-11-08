@@ -1048,6 +1048,7 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
         folders: content.folders.clone(),
         storylet_ids: content.storylets.iter().map(|storylet| storylet.id.clone()).collect(),
     };
+    issues.extend(crate::tree_graph::validate_tree_graphs(&index, None, None));
     for entity in &content.entities {
         if let Err(error) = validate_unique_traits(&entity.traits, &index.templates, &format!("entity '{}'", entity.name)) { issues.push(error); }
         let mut property_ids = BTreeSet::new();

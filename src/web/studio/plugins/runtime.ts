@@ -23,7 +23,7 @@ export interface EntityPanelContribution {
   label: string;
   /** Return false to hide the panel for this entity. */
   appliesTo(entity: AnyEntity): boolean;
-  /** Receives props `{ entity, readonly }` and emits `patch(Partial<entity>)`. */
+  /** Receives props `{ entity, readonly }`; emits `patch(Partial<entity>)` or `save()` for the entity draft. */
   component: Component;
   order?: number;
 }

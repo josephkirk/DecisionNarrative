@@ -29,7 +29,7 @@ Paths in this document are relative to the repository root.
 
 A `Plugin` has a `name`, optional `description` and `version`, and `apply(ctx)`, which may return a promise. `definePlugin` is a typed identity function; it does not install or isolate the plugin.
 
-The studio's `installBuiltinPlugins()` registers entries from `BUILTIN_PLUGINS` once. The list contains `vectorCanvasPlugin` and `inventoryPlugin`. Code with access to the application can also call `pluginManager.register(plugin, { builtin: false })`; there is no documented UI for loading arbitrary plugin files. Registration with an existing name is ignored. The Plugins view lists manager entries and their contribution counts and offers enable/disable and reload controls.
+The studio's `installBuiltinPlugins()` registers entries from `BUILTIN_PLUGINS` once. The list contains `vectorCanvasPlugin`, `inventoryPlugin`, and `treeGraphPlugin`. Code with access to the application can also call `pluginManager.register(plugin, { builtin: false })`; there is no documented UI for loading arbitrary plugin files. Registration with an existing name is ignored. The Plugins view lists manager entries and their contribution counts and offers enable/disable and reload controls.
 
 The manager keeps disabled plugin names under `dn.studio.disabledPlugins` in browser `localStorage`; storage access is best effort. This setting is per browser, not a project setting. Disabling or unregistering disposes the plugin's context and removes its registrations; it does **not** remove persisted project data or rewrite stored graphs. Re-enabling applies the plugin again.
 
@@ -59,7 +59,7 @@ ctx.entityPanel({
 });
 ```
 
-The entity editor renders applicable panels as tabs. The component receives `entity` and `readonly` props and emits `patch` with a partial entity; the host applies the patch to its editor draft. It should respect `readonly`. `AnyEntity` covers entity records and entity templates. The existing canvas panel is a concrete example of a panel that edits entity properties.
+The entity editor renders applicable panels as tabs. The component receives `entity` and `readonly` props and emits `patch` with a partial entity; the host applies the patch to its editor draft. A panel may emit `save` to save the entire current entity draft. It should respect `readonly`. `AnyEntity` covers entity records and entity templates. The existing canvas panel is a concrete example of a panel that edits entity properties.
 
 ### Property editor
 
@@ -156,6 +156,12 @@ These behaviors are part of the current uncommitted implementation and may chang
 The built-in inventory plugin provisions `inventory_owner` (displayed as InventoryOwner) and `item` traits. The owner trait stores `rows`, `columns`, and an ordered array of entity references in `items`; the Item trait identifies eligible entities. An owner has an Inventory tab with a 1–20 row and column grid. Each item uses one slot; the panel prevents duplicates, overflow, and shrinking below the number of items. Changes belong to the entity draft until it is saved.
 
 `inventory.add`, `inventory.remove`, and `inventory.has` require owner and item EntityRef inputs, each connected directly to a configured Get Entity node. Studio and service validation check the relevant traits. Add and remove lower to flow nodes; Has lowers to a pure boolean node usable by a Condition Node. During playtest the service projects trait data into runtime-only typed properties, including concrete inventory entities. The engine checks the Item marker, owner inventory, bounds, and capacity; add is idempotent and errors on full, remove is idempotent, and has returns membership. Mutations produce reversible graph diffs. The grid contains unique entity IDs, not stack counts or multi-cell items.
+
+## Tree Graph plugin
+
+The built-in Tree Graph plugin provisions `tree_graph` (displayed as TreeGraph) and `tree_item` (TreeItem) traits. A TreeGraph entity exposes a Tree tab; only entities with TreeItem may be added as nodes. The trait stores `nodes` as typed entity references, `edges` as JSON-encoded `[source, target]` pairs in a string array, `direction` as one of `right`, `left`, `down`, `up`, or `radial`, and `positions` as a JSON string mapping view directions to per-node coordinates. Entity thumbnails are displayed when available.
+
+Connections are directed, but can form cycles or share nodes. Roots are nodes without incoming connections; a cyclic component can have no root. The layout uses a deterministic traversal for disconnected and rootless components. Drag the canvas background to pan or use the mouse wheel to zoom; keyboard arrows pan the focused canvas. Switching views preserves graph topology; dragging nodes or using arrow keys adjusts coordinates independently for each view. **Save layout** saves the entire entity draft. **Export JSON** downloads the graph, resolved current layout, and referenced item metadata; it does not export complete entity records or an importable project bundle. The skill-tree, roguelike-map, and relationship-tree examples create actual TreeItem entity templates in the project, then stage the example graph in the owner draft. Service and bundle validation reject missing or ineligible targets, malformed connections, duplicates, and invalid view directions or coordinates. Removing a node also removes its connections and saved positions. This plugin does not implement game-specific unlock or progression rules.
 
 ## Adding a plugin
 

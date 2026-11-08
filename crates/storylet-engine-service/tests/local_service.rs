@@ -177,6 +177,51 @@ async fn disabling_multiple_rejects_existing_duplicate_traits() {
     assert_eq!(service.get_content_item("trait_templates", "repeatable").await.unwrap()["allow_multiple"], true);
 }
 
+#[tokio::test]
+async fn tree_graph_references_survive_saves_and_bundle_imports() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id": "tree_graph", "key": "tree_graph", "name": "TreeGraph",
+        "properties": [
+            {"id":"nodes","key":"nodes","name":"Nodes","type":"entity","is_array":true,"default":[]},
+            {"id":"edges","key":"edges","name":"Edges","type":"string","is_array":true,"default":[]},
+            {"id":"direction","key":"direction","name":"Direction","type":"string","default":"right"},
+            {"id":"positions","key":"positions","name":"Saved layouts","type":"string","default":""}
+        ]
+    })).await.unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id":"tree_item","key":"tree_item","name":"TreeItem","properties":[]
+    })).await.unwrap();
+    let item = service.save_content_item("entity_templates", &json!({
+        "id":"skill","name":"Skill","traits":[{"id":"marker","template_id":"tree_item","values":{}}]
+    })).await.unwrap();
+    service.save_content_item("entity_templates", &json!({"id":"plain","name":"Plain"})).await.unwrap();
+    let graph = json!({"id":"owner","name":"Owner","traits":[{
+        "id":"graph","template_id":"tree_graph",
+        "values":{"nodes":["skill"],"edges":["[\"skill\",\"skill\"]"],"direction":"radial","positions":"{\"radial\":{\"skill\":{\"x\":-320,\"y\":-120}}}"}
+    }]});
+    service.save_content_item("entity_templates", &graph).await.unwrap();
+    let mut invalid = graph.clone();
+    invalid["traits"][0]["values"]["nodes"] = json!(["plain"]);
+    assert!(service.save_content_item("entity_templates", &invalid).await.is_err());
+    let mut missing_marker = item.clone();
+    missing_marker["traits"] = json!([]);
+    assert!(service.save_content_item("entity_templates", &missing_marker).await.is_err());
+    let mut marker = service.get_content_item("trait_templates", "tree_item").await.unwrap();
+    marker["key"] = json!("renamed_item");
+    assert!(service.save_content_item("trait_templates", &marker).await.is_err());
+    let mut definition = service.get_content_item("trait_templates", "tree_graph").await.unwrap();
+    definition["properties"].as_array_mut().unwrap().clear();
+    assert!(service.save_content_item("trait_templates", &definition).await.is_err());
+    assert!(service.delete_content_item("entity_templates", "skill").await.is_err());
+
+    let bundle = serde_json::to_value(service.export_project_bundle().await.unwrap()).unwrap();
+    assert!(service.validate_bundle(&bundle).await.unwrap().is_empty());
+    service.import_bundle(&bundle).await.unwrap();
+    let loaded = service.get_content_item("entity_templates", "owner").await.unwrap();
+    assert_eq!(loaded["traits"][0]["values"], graph["traits"][0]["values"]);
+}
+
 
 fn reveal_storylet(event_id: &str) -> Value {
     json!({"id":"tell","title":"Tell","content":{"text_template":"x"},"created_at":1,

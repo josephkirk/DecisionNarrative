@@ -306,7 +306,7 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
     </section>
 
     <section v-else-if="activePanel" class="entity-content-stack" :data-plugin-panel="activePanel.id">
-      <component :is="activePanel.component" :entity="draft" :readonly="intrinsic" @patch="patch" />
+      <component :is="activePanel.component" :entity="draft" :readonly="intrinsic" @patch="patch" @save="save" />
     </section>
 
     <ReferenceList v-else :references="references" :loading="referencesLoading" />

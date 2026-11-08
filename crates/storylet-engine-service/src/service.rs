@@ -416,12 +416,20 @@ impl StudioService {
                 let stored: Option<EntityRecord> =
                     load_stored_record(&inner.store, "entities", stored_id)?;
                 let prepared = entities::prepare_entity_record(payload, stored.as_ref(), &index)?;
+                if crate::tree_graph::requires_validation(&index, stored.as_ref().map_or(&[], |record| record.traits.as_slice()), &prepared.traits) {
+                    let issues = crate::tree_graph::validate_tree_graphs(&index, Some((&prepared.id, &prepared.name, &prepared.traits)), None);
+                    if !issues.is_empty() { return Err(issues.join("; ")); }
+                }
                 serde_json::to_value(prepared).map_err(|e| e.to_string())?
             }
             "entity_templates" => {
                 let stored: Option<EntityTemplateRecord> =
                     load_stored_record(&inner.store, "entity_templates", stored_id)?;
                 let prepared = entities::prepare_entity(payload, stored.as_ref(), &index)?;
+                if crate::tree_graph::requires_validation(&index, stored.as_ref().map_or(&[], |record| record.traits.as_slice()), &prepared.traits) {
+                    let issues = crate::tree_graph::validate_tree_graphs(&index, Some((&prepared.id, &prepared.name, &prepared.traits)), None);
+                    if !issues.is_empty() { return Err(issues.join("; ")); }
+                }
                 serde_json::to_value(prepared).map_err(|e| e.to_string())?
             }
             "trait_templates" => {
@@ -432,6 +440,17 @@ impl StudioService {
                 }
                 let prepared =
                     entities::prepare_trait_template(payload, stored.as_ref(), &index)?;
+                if let Some(previous) = stored.as_ref() {
+                    let is_tree_trait = matches!(previous.key.as_str(), "tree_graph" | "tree_item");
+                    let schema_changed = previous.key != prepared.key
+                        || (previous.key == "tree_graph" && previous.properties != prepared.properties);
+                    if is_tree_trait && schema_changed && (
+                        index.entities.iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == previous.id))
+                        || index.entity_templates.iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == previous.id))
+                    ) {
+                        return Err("TreeGraph and TreeItem trait keys and active graph schemas cannot be changed while in use".into());
+                    }
+                }
                 if stored.as_ref().is_some_and(|previous|
                     previous.unique != prepared.unique || previous.allow_multiple != prepared.allow_multiple
                 ) {
@@ -624,6 +643,11 @@ impl StudioService {
             ));
         }
         let inner = self.inner.lock().await;
+        if matches!(entity, "entities" | "entity_templates") {
+            let index = build_workspace_index(&inner.store).map_err(ContentDeleteError::Persistence)?;
+            let issues = crate::tree_graph::validate_tree_graphs(&index, None, Some(id));
+            if !issues.is_empty() { return Err(ContentDeleteError::Conflict(issues.join("; "))); }
+        }
         if entity == "storylets" {
             let templates = inner
                 .store
@@ -688,10 +712,16 @@ impl StudioService {
                 let template: Option<TraitTemplateRecord> =
                     load_stored_record(&inner.store, entity, Some(id))
                         .map_err(ContentDeleteError::Persistence)?;
-                if template.is_some_and(|template| template.system) {
+                if template.as_ref().is_some_and(|template| template.system) {
                     return Err(ContentDeleteError::Conflict(
                         "System traits cannot be deleted".into(),
                     ));
+                }
+                if template.as_ref().is_some_and(|template| matches!(template.key.as_str(), "tree_graph" | "tree_item"))
+                    && inner.store.list_entities().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
+                        .iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == id))
+                {
+                    return Err(ContentDeleteError::Conflict("Cannot delete a tree trait used by an entity".into()));
                 }
             }
             if entity == "gameplay_tags" {
