@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Automatic local pull-request reviews and their pre-push hook.
+
 ## [0.2.0-alpha.1] - 2026-11-08
 
 ### Added
