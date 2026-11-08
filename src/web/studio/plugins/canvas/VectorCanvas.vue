@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { traitLabels } from "../../entityModel.ts";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import ColorWheelPicker from "../../components/ColorWheelPicker.vue";
 import { useRouter } from "vue-router";
 import { studioState } from "../../state.ts";
 import type { AnyEntity } from "../runtime.ts";
@@ -346,10 +347,7 @@ const gameplayCount = computed(() => doc.value.shapes.filter(isGameplay).length)
           <template v-if="selected.kind === 'note'">
             <label class="vc-field"><span>Note</span>
               <textarea class="form-input" rows="4" :value="selected.text ?? ''" :disabled="isLocked(selected)" @change="updateSelected({ text: ($event.target as HTMLTextAreaElement).value }, 'Edit note')"></textarea></label>
-            <div class="vc-swatches" role="group" aria-label="Note colour">
-              <button v-for="color in NOTE_COLORS" :key="color" :class="['vc-swatch', selected.fill === color && 'is-active']" :style="{ background: color }"
-                :aria-label="`Note colour ${color}`" :disabled="isLocked(selected)" @click="updateSelected({ fill: color }, 'Note colour')"></button>
-            </div>
+            <label class="vc-field"><span>Note colour</span><ColorWheelPicker label="Note colour" :model-value="selected.fill" :disabled="isLocked(selected)" @update:model-value="updateSelected({ fill: $event }, 'Note colour')" /></label>
           </template>
           <div v-if="selected.kind === 'marker'" class="vc-field"><span>Icon</span>
             <div class="vc-icons" role="group" aria-label="Marker icons">
@@ -381,8 +379,8 @@ const gameplayCount = computed(() => doc.value.shapes.filter(isGameplay).length)
             <small v-else class="form-hint">Storylets change the canvas with a <strong>Modify Canvas</strong> node.</small>
           </div>
           <div v-if="!isGameplay(selected) && selected.kind !== 'note'" class="vc-row">
-            <label class="vc-field"><span>Stroke</span><input type="color" :value="selected.stroke.startsWith('#') ? selected.stroke : '#888888'" :disabled="isLocked(selected)" @change="updateSelected({ stroke: ($event.target as HTMLInputElement).value }, 'Stroke color')" /></label>
-            <label class="vc-field"><span>Fill</span><input type="color" :value="selected.fill.startsWith('#') ? selected.fill : '#444444'" :disabled="isLocked(selected)" @change="updateSelected({ fill: ($event.target as HTMLInputElement).value }, 'Fill color')" /></label>
+            <label class="vc-field"><span>Stroke</span><ColorWheelPicker label="Stroke color" :model-value="selected.stroke.startsWith('#') ? selected.stroke : '#888888'" :disabled="isLocked(selected)" @update:model-value="updateSelected({ stroke: $event }, 'Stroke color')" /></label>
+            <label class="vc-field"><span>Fill</span><ColorWheelPicker label="Fill color" :model-value="selected.fill.startsWith('#') ? selected.fill : '#444444'" :disabled="isLocked(selected)" @update:model-value="updateSelected({ fill: $event }, 'Fill color')" /></label>
             <label class="vc-field"><span>Width</span><input class="form-input" type="number" min="1" max="40" :value="selected.strokeWidth" :disabled="isLocked(selected)" @change="updateSelected({ strokeWidth: Number(($event.target as HTMLInputElement).value) || 1 }, 'Stroke width')" /></label>
           </div>
           <div class="vc-row">
@@ -455,9 +453,6 @@ const gameplayCount = computed(() => doc.value.shapes.filter(isGameplay).length)
 .vc-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)); gap: 4px; }
 .vc-icon-pick { height: 32px; border-radius: 6px; border: 1px solid var(--border, #333); background: transparent; font-size: 16px; cursor: pointer; }
 .vc-icon-pick.is-active { border-color: var(--accent, #0a84ff); background: color-mix(in srgb, var(--accent, #0a84ff) 20%, transparent); }
-.vc-swatches { display: flex; gap: 6px; }
-.vc-swatch { width: 26px; height: 26px; border-radius: 6px; border: 2px solid transparent; cursor: pointer; }
-.vc-swatch.is-active { border-color: var(--accent, #0a84ff); }
 .vc-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .vc-card { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border, #333); border-radius: 10px; background: var(--surface-2, #1c1c1e); }
 .vc-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

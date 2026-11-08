@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import ColorWheelPicker from "../../components/ColorWheelPicker.vue";
 import { StudioApi } from "../../api.ts";
 import type { EntityTemplateRecord } from "../../contracts.ts";
 import { studioState } from "../../state.ts";
@@ -546,8 +547,8 @@ function edgePath(edge: TreeEdge): string | null {
             <select :id="`shape-${menu.node}`" class="form-select" aria-label="Node shape" :value="graph.shapes?.[menu.node] ?? 'card'" @change="setShape(menu.node, $event)">
               <option value="card">Card</option><option value="rounded">Rounded</option><option value="ellipse">Ellipse</option><option value="diamond">Diamond</option>
             </select>
-            <label>Background <input type="color" :value="graph.appearance?.nodes[menu.node]?.background ?? '#1a1c20'" @input="updateNodeAppearance(menu.node, { background: ($event.target as HTMLInputElement).value })" /></label>
-            <label>Outline <input type="color" :value="graph.appearance?.nodes[menu.node]?.outline ?? '#06b6d4'" @input="updateNodeAppearance(menu.node, { outline: ($event.target as HTMLInputElement).value })" /></label>
+            <label>Background <ColorWheelPicker label="Node background" :model-value="graph.appearance?.nodes[menu.node]?.background ?? '#1a1c20'" @update:model-value="updateNodeAppearance(menu.node, { background: $event })" /></label>
+            <label>Outline <ColorWheelPicker label="Node outline" :model-value="graph.appearance?.nodes[menu.node]?.outline ?? '#06b6d4'" @update:model-value="updateNodeAppearance(menu.node, { outline: $event })" /></label>
             <label>Outline size <input type="number" min="1" max="12" :value="graph.appearance?.nodes[menu.node]?.outlineWidth ?? 1" @change="updateNodeAppearance(menu.node, { outlineWidth: Math.max(1, Math.min(12, Number(($event.target as HTMLInputElement).value) || 1)) })" /></label>
             <label>Width <input type="number" min="100" max="600" :value="nodeSize(menu.node).width" @change="updateNodeAppearance(menu.node, { width: Math.max(100, Math.min(600, Number(($event.target as HTMLInputElement).value) || 100)) })" /></label>
             <label>Height <input type="number" min="60" max="400" :value="nodeSize(menu.node).height" @change="updateNodeAppearance(menu.node, { height: Math.max(60, Math.min(400, Number(($event.target as HTMLInputElement).value) || 60)) })" /></label>
@@ -557,7 +558,7 @@ function edgePath(edge: TreeEdge): string | null {
           </template>
           <template v-else-if="menu.edge !== undefined && graph.edges[menu.edge]">
             <strong>{{ label(graph.edges[menu.edge]!.from) }} → {{ label(graph.edges[menu.edge]!.to) }}</strong>
-            <label>Wire color <input type="color" :value="graph.appearance?.edges[edgeKey(graph.edges[menu.edge]!)]?.color ?? '#06b6d4'" @input="updateEdgeAppearance(menu.edge, { color: ($event.target as HTMLInputElement).value })" /></label>
+            <label>Wire color <ColorWheelPicker label="Wire color" :model-value="graph.appearance?.edges[edgeKey(graph.edges[menu.edge]!)]?.color ?? '#06b6d4'" @update:model-value="updateEdgeAppearance(menu.edge, { color: $event })" /></label>
             <label>Wire thickness <input type="number" min="1" max="12" :value="graph.appearance?.edges[edgeKey(graph.edges[menu.edge]!)]?.width ?? 2" @change="updateEdgeAppearance(menu.edge, { width: Math.max(1, Math.min(12, Number(($event.target as HTMLInputElement).value) || 1)) })" /></label>
             <span class="tree-pattern-label">Wire style</span>
             <div class="tree-patterns" role="group" aria-label="Wire style">
@@ -584,7 +585,7 @@ function edgePath(edge: TreeEdge): string | null {
             </div>
           </template>
           <template v-else>
-            <label>Canvas background <input type="color" aria-label="Canvas background" :value="graph.appearance?.canvasBackground ?? '#1a1c20'" @input="setCanvasBackground(($event.target as HTMLInputElement).value)" /></label>
+            <label>Canvas background <ColorWheelPicker label="Canvas background" :model-value="graph.appearance?.canvasBackground ?? '#1a1c20'" @update:model-value="setCanvasBackground($event)" /></label>
             <button v-if="graph.appearance?.canvasBackground" type="button" @click="setCanvasBackground()">Reset background</button>
             <label for="tree-context-search">Add TreeItem</label>
             <input id="tree-context-search" v-model="menuSearch" class="form-input" aria-label="Search TreeItem entities" placeholder="Search items…" />

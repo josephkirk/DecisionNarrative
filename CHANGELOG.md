@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shapes and colors, normal, dashed, dotted and brush wires, reconnection and
   cutting, entity thumbnail backgrounds, JSON export, local display preferences,
   and three example graphs.
+- Shared color wheel picker for tree graph and vector canvas colors.
 
 ### Removed
 
