@@ -295,6 +295,7 @@ function wireDoubleClick(event: MouseEvent) {
   if (!hit) return;
   const index = Number(hit.dataset.index);
   if (!Number.isInteger(index) || !graph.value?.edges[index] || props.readonly) return;
+  source.value = "";
   openContext(event, undefined, index);
   editRelationship(index);
 }
@@ -408,8 +409,13 @@ function beginLink(id: string, event: PointerEvent) {
   if (event.altKey) { startPan(event); return; }
   if (event.button !== 0 || props.readonly || creatingExample.value) return;
   const hit = wireAtPoint(event.clientX, event.clientY);
-  if (hit) { wireDown(Number(hit.dataset.index), event); return; }
-  source.value = id;
+  const zone = event.currentTarget as HTMLElement, bounds = zone.getBoundingClientRect();
+  const distance = zone.classList.contains("zone-top") ? bounds.bottom - event.clientY
+    : zone.classList.contains("zone-bottom") ? event.clientY - bounds.top
+    : zone.classList.contains("zone-left") ? bounds.right - event.clientX : event.clientX - bounds.left;
+  // Keep a narrow connection-start area at the node edge when a wire overlaps the zone.
+  if (hit && distance > 5 * zoomFactor.value) { wireDown(Number(hit.dataset.index), event); return; }
+  if (!hit) source.value = id;
   linkDrag.value = { from: id, pointer: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, moved: false };
   treeScroll.value?.setPointerCapture(event.pointerId);
   event.stopPropagation();

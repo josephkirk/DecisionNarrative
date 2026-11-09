@@ -422,6 +422,22 @@ try {
   check("export contains named relationship", exported.graph.edges.some((edge: { from: string; to: string; relationship?: string }) =>
     edge.from === "item-b" && edge.to === "item-c" && edge.relationship === "leads to"));
 
+  // Starting on an occupied connection zone must create a new wire, not reconnect the old one.
+  const occupiedZone = await nodeA.locator(".tree-connect-zone.zone-right").boundingBox();
+  const destination = await nodeC.boundingBox();
+  if (!occupiedZone || !destination) throw new Error("Missing node or connection zone");
+  const occupiedPoint = { x: occupiedZone.x + 2, y: occupiedZone.y + occupiedZone.height / 2 };
+  check("connection zone overlaps an existing wire", await page.evaluate(({ x, y }) =>
+    document.elementsFromPoint(x, y).some((element) => element.matches('.tree-edge-hit[aria-label*="Connection from Item A to Item B"]')), occupiedPoint));
+  await page.mouse.move(occupiedPoint.x, occupiedPoint.y);
+  await page.mouse.down();
+  await page.mouse.move(destination.x + destination.width / 2, destination.y + destination.height / 2, { steps: 10 });
+  await page.mouse.up();
+  const addedFromOccupiedZone = page.locator('.tree-edge-hit[aria-label*="Connection from Item A to Item C"]');
+  await addedFromOccupiedZone.waitFor({ state: "attached" });
+  check("occupied zone creates a new wire", await addedFromOccupiedZone.count() === 1);
+  check("occupied zone preserves the existing wire", await initialEdge.count() === 1);
+
   if (errors.length) console.log("console errors:\n" + errors.join("\n"));
   check("no console errors", errors.length === 0);
 } finally {
