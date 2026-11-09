@@ -19,6 +19,7 @@ function validate(config: TreePointerConfig, ctx: LowerContext): string[] {
   if (!entity) return ["Connect a configured Get Entity node to the tree input."];
   const trait = treeTrait(entity, studioState.traitTemplates, TREE_GRAPH_KEY);
   if (!trait) return [`${entity.name} must have the TreeGraph trait.`];
+  if (entity.id === "world") return ["The intrinsic World cannot own a TreeGraph."];
   if (config.entity_id !== id) return ["Choose a position for the connected tree."];
   try {
     if (!treeGraphOf(trait).nodes.includes(config.target_id)) return ["Choose a position in the connected tree."];

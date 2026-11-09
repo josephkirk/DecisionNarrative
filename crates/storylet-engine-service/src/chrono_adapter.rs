@@ -715,6 +715,9 @@ pub fn initialize_chrono_world(
         let vertex = state.vertices.iter_mut().find(|vertex| vertex.vertex_id == vertex_id)
             .ok_or_else(|| format!("scenario initial_properties entity {entity_id} has no runtime vertex"))?;
         for (key, value) in values {
+            if crate::tree_pointer::is_reserved_key(key) {
+                return Err(format!("scenario initial_properties cannot override internal tree state '{key}'"));
+            }
             if key.trim().is_empty() {
                 return Err(format!("scenario initial_properties for {entity_id} contains an empty property key"));
             }
@@ -1137,6 +1140,25 @@ mod world_object_vertex_tests {
             overridden.state.vertex("guard").unwrap().attributes.get("prop.score"),
             Some(&AttributeValue::Float(9.0))
         );
+
+        for key in ["__tree_position", "__tree_nodes"] {
+            let mut imported = scenario.clone();
+            imported.initial_properties.get_mut("guard").unwrap().insert(key.into(), json!("spoofed"));
+            let error = initialize_chrono_world(
+                &compiled,
+                &[],
+                &world,
+                &entities,
+                &records.locations,
+                &records.characters,
+                &records.world_objects,
+                &[],
+                &records.entity_tag_seeds,
+                Some(&imported),
+                "square",
+            ).err().expect("imported scenario cannot override internal tree state");
+            assert!(error.contains(key), "{error}");
+        }
     }
 }
 

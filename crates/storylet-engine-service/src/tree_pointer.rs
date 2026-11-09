@@ -4,6 +4,7 @@ use crate::contracts::{EntityProperty, EntityRecord, EntityTemplateRecord, Prope
 
 pub const POSITION: &str = "__tree_position";
 pub const NODES: &str = "__tree_nodes";
+pub fn is_reserved_key(key: &str) -> bool { matches!(key, POSITION | NODES) }
 
 pub fn uses_pointer(graph: &crate::narrative_graph::NarrativeGraph) -> bool {
     graph.nodes.iter().any(|node| match &node.data {
@@ -13,7 +14,7 @@ pub fn uses_pointer(graph: &crate::narrative_graph::NarrativeGraph) -> bool {
     })
 }
 
-pub fn validate_pointer_graph(graph: &crate::narrative_graph::NarrativeGraph, entities: &[EntityTemplateRecord]) -> Result<(), String> {
+pub fn validate_pointer_graph(graph: &crate::narrative_graph::NarrativeGraph, entities: &[EntityTemplateRecord], templates: &[TraitTemplateRecord]) -> Result<(), String> {
     use crate::narrative_graph::{NarrativeEdgeKind, NarrativeNodeData};
     for node in &graph.nodes {
         let (value_type, command) = match &node.data {
@@ -30,8 +31,11 @@ pub fn validate_pointer_graph(graph: &crate::narrative_graph::NarrativeGraph, en
             .filter(|_| inputs.next().is_none())
             .ok_or_else(|| format!("node '{}' needs one configured tree entity input", node.id))?;
         let owner = graph.nodes.iter().find(|source| source.id == input.from_node)
-            .and_then(|source| match &source.data { NarrativeNodeData::GetEntity { entity_path } => entities.iter().find(|entity| entity.id == *entity_path), _ => None })
+            .and_then(|source| match &source.data { NarrativeNodeData::GetEntity { entity_path } => entities.iter().find(|entity| entity.id == entity_path.trim()), _ => None })
             .ok_or_else(|| format!("node '{}' needs a configured Get Entity tree input", node.id))?;
+        let is_tree = templates.iter().any(|template| template.key == crate::tree_graph::TREE_GRAPH_KEY
+            && owner.traits.iter().any(|instance| instance.template_id == template.id));
+        if !is_tree { return Err(format!("entity '{}' must have TreeGraph", owner.id)); }
         let members = owner.properties.iter().find(|property| property.key == NODES).and_then(|property| property.value.as_array())
             .ok_or_else(|| format!("entity '{}' must have TreeGraph", owner.id))?;
         if command.is_some_and(|value| !members.contains(value)) {
@@ -41,6 +45,50 @@ pub fn validate_pointer_graph(graph: &crate::narrative_graph::NarrativeGraph, en
             for edge in graph.edges.iter().filter(|edge| edge.kind == NarrativeEdgeKind::Data && edge.from_node == node.id) {
                 if let Some(NarrativeNodeData::Compare { value, .. }) = graph.nodes.iter().find(|target| target.id == edge.to_node).map(|target| &target.data) {
                     if !members.contains(value) { return Err(format!("node '{}' selects a position outside tree '{}'", node.id, owner.id)); }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Refuse tree edits that would invalidate a saved storylet's selected position.
+pub fn validate_owner_references(
+    owner_id: &str,
+    traits: Option<&[crate::contracts::TraitInstance]>,
+    templates: &[TraitTemplateRecord],
+    storylets: &[crate::contracts::StoryletRecord],
+) -> Result<(), String> {
+    use crate::narrative_graph::{NarrativeEdgeKind, NarrativeNodeData};
+    let tree_id = templates.iter().find(|template| template.key == crate::tree_graph::TREE_GRAPH_KEY).map(|template| template.id.as_str());
+    let tree = traits.and_then(|traits| traits.iter().find(|instance| Some(instance.template_id.as_str()) == tree_id));
+    for storylet in storylets {
+        for graph in [storylet.graph.as_ref(), storylet.precondition_graph.as_ref()].into_iter().flatten() {
+            for node in &graph.nodes {
+                let target = match &node.data {
+                    NarrativeNodeData::ApplyCommand { property_key, value, .. } if property_key == POSITION => Some(value),
+                    NarrativeNodeData::GetEntityProperty { property_key, .. } if property_key == POSITION => None,
+                    _ => continue,
+                };
+                let targets_owner = graph.edges.iter().any(|edge| {
+                    edge.kind == NarrativeEdgeKind::Data && edge.to_node == node.id && edge.to_port == "entity"
+                        && graph.nodes.iter().any(|source| source.id == edge.from_node
+                            && matches!(&source.data, NarrativeNodeData::GetEntity { entity_path } if entity_path.trim() == owner_id))
+                });
+                if !targets_owner { continue; }
+                let members = tree.and_then(|instance| instance.values.get("nodes")).and_then(Value::as_array)
+                    .ok_or_else(|| format!("Cannot change tree '{owner_id}': storylet '{}' uses its tree position.", storylet.title))?;
+                if target.is_some_and(|value| !members.contains(value)) {
+                    return Err(format!("Cannot change tree '{owner_id}': storylet '{}' selects a removed tree item.", storylet.title));
+                }
+                if target.is_none() {
+                    for edge in graph.edges.iter().filter(|edge| edge.kind == NarrativeEdgeKind::Data && edge.from_node == node.id) {
+                        if let Some(NarrativeNodeData::Compare { value, .. }) = graph.nodes.iter().find(|next| next.id == edge.to_node).map(|next| &next.data) {
+                            if !members.contains(value) {
+                                return Err(format!("Cannot change tree '{owner_id}': storylet '{}' checks a removed tree item.", storylet.title));
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -136,9 +184,26 @@ mod tests {
         let mut projected = original.clone();
         project_tree_entities(&mut projected, &[], &templates).unwrap();
         assert!(original[0].properties.is_empty());
-        assert!(validate_pointer_graph(&graph("a"), &projected).is_ok());
-        assert!(validate_pointer_graph(&graph("missing"), &projected).unwrap_err().contains("outside tree"));
-        assert!(validate_pointer_graph(&graph("a"), &projected[1..]).is_err());
+        assert!(validate_pointer_graph(&graph("a"), &projected, &templates).is_ok());
+        assert!(validate_pointer_graph(&graph("missing"), &projected, &templates).unwrap_err().contains("outside tree"));
+        assert!(validate_pointer_graph(&graph("a"), &projected[1..], &templates).is_err());
+        let mut impostor = projected.clone();
+        impostor[0].traits.clear();
+        assert!(validate_pointer_graph(&graph("a"), &impostor, &templates).unwrap_err().contains("TreeGraph"));
+        let mut spaced = graph("a");
+        if let crate::narrative_graph::NarrativeNodeData::GetEntity { entity_path } = &mut spaced.nodes[1].data {
+            *entity_path = " tree ".into();
+        }
+        assert!(validate_pointer_graph(&spaced, &projected, &templates).is_ok());
+        let storylet: StoryletRecord = serde_json::from_value(json!({
+            "id":"test","title":"Referenced story","content":{"text_template":"x"},"created_at":1,"graph":spaced
+        })).unwrap();
+        assert!(validate_owner_references("tree", Some(&original[0].traits), &templates, std::slice::from_ref(&storylet)).is_ok());
+        assert!(validate_owner_references("tree", None, &templates, std::slice::from_ref(&storylet)).is_err());
+        let mut changed = original[0].traits.clone();
+        changed[0].values.insert("nodes".into(), json!(["b"]));
+        assert!(validate_owner_references("tree", Some(&changed), &templates, std::slice::from_ref(&storylet)).is_err());
+        assert!(validate_owner_references("other", None, &templates, &[storylet]).is_ok());
     }
 
     #[test]

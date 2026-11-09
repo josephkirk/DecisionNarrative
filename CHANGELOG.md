@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Tree pointer references now protect selected items and tree owners from invalidating saved storylets; scenario overrides cannot alter internal tree state.
+- Tree position previews preserve node shapes, images and wire styles, with readable labels, keyboard selection, and zoom focus.
 - Connecting, reconnecting, or removing tree wires preserves node positions.
 - The tree canvas grid follows pan and zoom.
 - Resizing a tree node no longer moves other nodes in the current layout.

@@ -416,9 +416,16 @@ impl StudioService {
                 let stored: Option<EntityRecord> =
                     load_stored_record(&inner.store, "entities", stored_id)?;
                 let prepared = entities::prepare_entity_record(payload, stored.as_ref(), &index)?;
+                if prepared.id == entities::WORLD_ENTITY_ID && index.templates.iter().any(|template|
+                    template.key == crate::tree_graph::TREE_GRAPH_KEY && prepared.traits.iter().any(|instance| instance.template_id == template.id))
+                {
+                    return Err("The intrinsic World cannot have a TreeGraph trait".into());
+                }
                 if crate::tree_graph::requires_validation(&index, stored.as_ref().map_or(&[], |record| record.traits.as_slice()), &prepared.traits) {
                     let issues = crate::tree_graph::validate_tree_graphs(&index, Some((&prepared.id, &prepared.name, &prepared.traits)), None);
                     if !issues.is_empty() { return Err(issues.join("; ")); }
+                    let storylets = inner.store.list_storylets().map_err(|error| error.to_string())?;
+                    crate::tree_pointer::validate_owner_references(&prepared.id, Some(&prepared.traits), &index.templates, &storylets)?;
                 }
                 serde_json::to_value(prepared).map_err(|e| e.to_string())?
             }
@@ -429,6 +436,8 @@ impl StudioService {
                 if crate::tree_graph::requires_validation(&index, stored.as_ref().map_or(&[], |record| record.traits.as_slice()), &prepared.traits) {
                     let issues = crate::tree_graph::validate_tree_graphs(&index, Some((&prepared.id, &prepared.name, &prepared.traits)), None);
                     if !issues.is_empty() { return Err(issues.join("; ")); }
+                    let storylets = inner.store.list_storylets().map_err(|error| error.to_string())?;
+                    crate::tree_pointer::validate_owner_references(&prepared.id, Some(&prepared.traits), &index.templates, &storylets)?;
                 }
                 serde_json::to_value(prepared).map_err(|e| e.to_string())?
             }
@@ -506,6 +515,12 @@ impl StudioService {
             .and_then(Value::as_str)
             .ok_or("Item must have an 'id' field")?
             .to_string();
+        if entity == "scenarios" && final_payload.get("initial_properties").and_then(Value::as_object)
+            .is_some_and(|owners| owners.values().filter_map(Value::as_object)
+                .any(|properties| properties.keys().any(|key| crate::tree_pointer::is_reserved_key(key))))
+        {
+            return Err("Scenario initial properties cannot override internal tree state".into());
+        }
 
         if entity == "storylets" {
             if let Some(value) = final_payload.get("default_learn_visibility") {
@@ -605,10 +620,10 @@ impl StudioService {
                 let mut runtime_entities = index.entity_templates.clone();
                 crate::inventory::project_inventory_entities(&mut runtime_entities, &index.entities, &index.templates)?;
                 crate::tree_pointer::project_tree_entities(&mut runtime_entities, &index.entities, &index.templates)?;
-                crate::tree_pointer::validate_pointer_graph(&graph, &runtime_entities)
+                crate::tree_pointer::validate_pointer_graph(&graph, &runtime_entities, &index.templates)
                     .map_err(|error| format!("Tree position validation failed: {error}"))?;
                 if let Some(precondition) = &storylet.precondition_graph {
-                    crate::tree_pointer::validate_pointer_graph(precondition, &runtime_entities)
+                    crate::tree_pointer::validate_pointer_graph(precondition, &runtime_entities, &index.templates)
                         .map_err(|error| format!("Tree position validation failed: {error}"))?;
                 }
             }
@@ -670,6 +685,13 @@ impl StudioService {
             let index = build_workspace_index(&inner.store).map_err(ContentDeleteError::Persistence)?;
             let issues = crate::tree_graph::validate_tree_graphs(&index, None, Some(id));
             if !issues.is_empty() { return Err(ContentDeleteError::Conflict(issues.join("; "))); }
+            let exists = if entity == "entities" { index.entities.iter().any(|record| record.id == id) }
+                else { index.entity_templates.iter().any(|record| record.id == id) };
+            if exists {
+                let storylets = inner.store.list_storylets().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
+                crate::tree_pointer::validate_owner_references(id, None, &index.templates, &storylets)
+                    .map_err(ContentDeleteError::Conflict)?;
+            }
         }
         if entity == "storylets" {
             let templates = inner

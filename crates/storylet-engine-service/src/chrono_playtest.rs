@@ -528,11 +528,11 @@ fn read_content(store: &Store) -> Result<WorkspaceContent, ChronoPlaytestError> 
     for storylet in &storylets {
         let graph = storylet.graph.clone().unwrap_or_else(|| crate::narrative_graph::NarrativeGraph::from_storylet(storylet));
         validate_entity_property_graph(&graph, &entities).map_err(compile_error)?;
-        crate::tree_pointer::validate_pointer_graph(&graph, &entities).map_err(compile_error)?;
+        crate::tree_pointer::validate_pointer_graph(&graph, &entities, &templates).map_err(compile_error)?;
         crate::inventory::validate_inventory_graph(&graph, &entities).map_err(compile_error)?;
         if let Some(precondition) = storylet.precondition_graph.as_ref() {
             validate_entity_property_graph(precondition, &entities).map_err(compile_error)?;
-            crate::tree_pointer::validate_pointer_graph(precondition, &entities).map_err(compile_error)?;
+            crate::tree_pointer::validate_pointer_graph(precondition, &entities, &templates).map_err(compile_error)?;
             crate::inventory::validate_inventory_graph(precondition, &entities).map_err(compile_error)?;
         }
     }

@@ -34,10 +34,11 @@ try {
   const treeTrait = traits.find((trait) => trait.key === "tree_graph");
   const itemTrait = traits.find((trait) => trait.key === "tree_item");
   assert(treeTrait && itemTrait, "tree traits available");
-  for (const [id, name] of [["pointer-root", "Root"], ["pointer-child", "Child"]]) {
-    await api("POST", "/api/v3/content/entity_templates", { id, name, traits: [{ id: `${id}-trait`, template_id: itemTrait.id, values: {} }] });
+  const longName = "The Grandmaster Archivist of the Forgotten Constellation";
+  for (const [id, name] of [["pointer-root", "Root"], ["pointer-child", "Child"], ["pointer-long", longName]]) {
+    await api("POST", "/api/v3/content/entity_templates", { id, name, thumbnail: id === "pointer-root" ? "docs/images/tree-pointer-inspector.png" : null, traits: [{ id: `${id}-trait`, template_id: itemTrait.id, values: {} }] });
   }
-  await api("POST", "/api/v3/content/entity_templates", { id: "pointer-tree", name: "Skill tree", traits: [{ id: "tree-instance", template_id: treeTrait.id, values: { nodes: ["pointer-root", "pointer-child"], edges: ['["pointer-root","pointer-child"]'], direction: "right", positions: JSON.stringify({ right: { "pointer-root": { x: -200, y: -100 }, "pointer-child": { x: 60, y: -100 } } }) } }] });
+  await api("POST", "/api/v3/content/entity_templates", { id: "pointer-tree", name: "Skill tree", traits: [{ id: "tree-instance", template_id: treeTrait.id, values: { nodes: ["pointer-root", "pointer-child", "pointer-long"], edges: ['["pointer-root","pointer-child"]', '["pointer-root","pointer-long"]'], direction: "right", positions: JSON.stringify({ right: { "pointer-root": { x: -200, y: -100 }, "pointer-child": { x: 60, y: -100 }, "pointer-long": { x: 60, y: 30 } } }), appearance: JSON.stringify({ nodes: { "pointer-long": { background: "#ffffff" } }, edges: {}, defaults: { edge: { color: "#ff9900", width: 3, pattern: "dash" } } }) } }] });
   const source = { id: "pointer", type: "plugin", title: "Set Tree Position", x: 300, y: 150, width: 220, height: 120, plugin_type: "tree.set_position", plugin_config: { entity_id: "pointer-tree", target_id: "pointer-root" } };
   const input = { id: "owner-input", kind: "data", from_node: "owner", from_port: "output", to_node: "pointer", to_port: "entity" };
   const n = (id: string, type: string, x: number, extra: object = {}) => ({ id, type, title: id, x, y: 150, width: 180, height: 100, ...extra });
@@ -59,12 +60,31 @@ try {
     await page.screenshot({ path: path.join(os.tmpdir(), "tree-pointer-failure.png") });
     throw error;
   });
-  assert(await picker.getByRole("button", { name: "Select Root" }).getAttribute("aria-pressed") === "true", "configured position is highlighted");
+  assert(await picker.getByRole("radio", { name: "Select Root" }).getAttribute("aria-checked") === "true", "configured position is highlighted");
+  const thumbnail = picker.getByRole("radio", { name: "Select Root" }).locator("image");
+  assert((await thumbnail.getAttribute("href"))?.includes("tree-pointer-inspector.png"), "tree preview shows the item's thumbnail");
+  const wireStyle = await picker.locator(".tree-pointer-wire").first().evaluate((element) => ({ color: getComputedStyle(element).stroke, dash: getComputedStyle(element).strokeDasharray }));
+  assert(wireStyle.color === "rgb(255, 153, 0)" && wireStyle.dash !== "none", "tree preview preserves authored wire color and pattern");
   const viewport = await picker.boundingBox();
-  const negativeNode = await picker.getByRole("button", { name: "Select Root" }).boundingBox();
+  const negativeNode = await picker.getByRole("radio", { name: "Select Root" }).boundingBox();
   assert(viewport && negativeNode && negativeNode.x >= viewport.x && negativeNode.y >= viewport.y, "nodes with negative coordinates are visible");
-  await picker.getByRole("button", { name: "Select Child" }).click();
-  assert(await picker.getByRole("button", { name: "Select Child" }).getAttribute("aria-pressed") === "true", "click selects position in the read-only tree");
+  const longLabel = picker.getByRole("radio", { name: `Select ${longName}` }).locator(".tree-pointer-label span");
+  const labelStyle = await longLabel.evaluate((element) => ({ overflow: element.scrollWidth > element.clientWidth, ellipsis: getComputedStyle(element).textOverflow, color: getComputedStyle(element).color }));
+  assert(labelStyle.overflow && labelStyle.ellipsis === "ellipsis", "long names retain their beginning with an ellipsis");
+  assert(labelStyle.color === "rgb(17, 19, 23)", "light node backgrounds use dark readable text");
+  await picker.getByRole("radio", { name: "Select Child" }).click();
+  assert(await picker.getByRole("radio", { name: "Select Child" }).getAttribute("aria-checked") === "true", "click selects position in the read-only tree");
+  await picker.getByRole("radio", { name: "Select Child" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  assert(await picker.getByRole("radio", { name: "Select Root" }).getAttribute("aria-checked") === "true", "arrow keys change the selected position");
+  await page.keyboard.press("ArrowRight");
+  assert(await picker.locator('[role="radio"][tabindex="0"]').count() === 1, "tree selection has one keyboard tab stop");
+  await page.getByRole("button", { name: "Zoom in tree preview" }).click();
+  const zoomed = await picker.getByRole("radio", { name: "Select Child" }).boundingBox();
+  const zoomViewport = await picker.boundingBox();
+  assert(zoomed && zoomViewport && zoomed.x < zoomViewport.x + zoomViewport.width && zoomed.x + zoomed.width > zoomViewport.x,
+    "zoom keeps the selected node visible");
+  await page.getByRole("button", { name: "Fit tree preview" }).click();
   if (process.env.TREE_POINTER_SCREENSHOT) await page.screenshot({ path: process.env.TREE_POINTER_SCREENSHOT });
   await Promise.all([
     page.waitForResponse((response) => response.url().endsWith("/api/v3/content/storylets/pointer-story") && response.request().method() === "PUT" && response.ok(), { timeout: 5000 }).catch(async (error) => {
@@ -77,11 +97,58 @@ try {
   assert(saved.graph.nodes.find((node: { id: string; value?: unknown }) => node.id === "pointer__position")?.value === "pointer-child", "storylet saves the selected target");
   const after = await api("GET", "/api/v3/content/entity_templates/pointer-tree");
   assert(JSON.stringify(before.traits) === JSON.stringify(after.traits), "selection does not modify the tree");
+  const removed = structuredClone(after);
+  removed.traits[0].values.nodes = ["pointer-root", "pointer-long"];
+  removed.traits[0].values.edges = ['["pointer-root","pointer-long"]'];
+  removed.traits[0].values.positions = "";
+  let removeError = "";
+  try { await api("PUT", "/api/v3/content/entity_templates/pointer-tree", removed); } catch (error) { removeError = String(error); }
+  assert(removeError.includes("storylet") && removeError.includes("removed"), "removing a referenced position is rejected");
+  const noTrait = { ...after, traits: [] };
+  let traitError = "";
+  try { await api("PUT", "/api/v3/content/entity_templates/pointer-tree", noTrait); } catch (error) { traitError = String(error); }
+  assert(traitError.includes("storylet"), "removing a referenced TreeGraph trait is rejected");
+  await api("POST", "/api/v3/content/entity_templates", { id: "impostor", name: "Not a tree", properties: [
+    { id: "p", key: "__tree_position", name: "position", type: "string", value: "" },
+    { id: "n", key: "__tree_nodes", name: "nodes", type: "entity", is_array: true, value: ["pointer-root"] },
+  ] });
+  const fake = structuredClone(saved);
+  fake.id = "impostor-story";
+  fake.title = "Impostor";
+  fake.graph.nodes.find((node: { type: string }) => node.type === "get_entity").entity_path = "impostor";
+  fake.graph.nodes.find((node: { type: string }) => node.type === "apply_command").value = "pointer-root";
+  let spoofError = "";
+  try { await api("POST", "/api/v3/content/storylets", fake); } catch (error) { spoofError = String(error); }
+  assert(spoofError.includes("TreeGraph"), "authored properties cannot impersonate the TreeGraph trait");
+  const world = await api("GET", "/api/v3/content/entities/world");
+  let worldError = "";
+  try {
+    await api("PUT", "/api/v3/content/entities/world", { ...world, traits: [{ id: "world-tree", template_id: treeTrait.id, values: { nodes: ["pointer-root"], edges: [], direction: "right" } }] });
+  } catch (error) { worldError = String(error); }
+  assert(worldError.includes("intrinsic World"), "intrinsic World rejects a TreeGraph trait");
+  await api("POST", "/api/v3/content/entities", { id: "pointer-instance", name: "Concrete tree", traits: [
+    { id: "instance-tree", template_id: treeTrait.id, values: { nodes: ["pointer-root", "pointer-child"], edges: [], direction: "right" } }
+  ] });
+  const instanceStory = structuredClone(saved);
+  instanceStory.id = "instance-story";
+  instanceStory.title = "Concrete owner story";
+  instanceStory.graph.nodes.find((node: { type: string }) => node.type === "get_entity").entity_path = "pointer-instance";
+  await api("POST", "/api/v3/content/storylets", instanceStory);
+  let deleteError = "";
+  try { await api("DELETE", "/api/v3/content/entities/pointer-instance"); } catch (error) { deleteError = String(error); }
+  assert(deleteError.includes("storylet"), "referenced concrete tree owners cannot be deleted");
   await page.reload();
   await picker.waitFor();
-  assert(await picker.getByRole("button", { name: "Select Child" }).getAttribute("aria-pressed") === "true", "selected position survives reload");
+  assert(await picker.getByRole("radio", { name: "Select Child" }).getAttribute("aria-checked") === "true", "selected position survives reload");
   await api("POST", "/api/v3/content/entity_templates", { id: "pointer-location", name: "Location", traits: [{ id: "location", template_id: "system.location", values: {} }] });
   await api("POST", "/api/v3/content/scenarios", { id: "pointer-scenario", name: "Scenario", seed: 7, start_location_policy: { mode: "fixed", location_id: "pointer-location" } });
+  let scenarioError = "";
+  try {
+    await api("POST", "/api/v3/content/scenarios", { id: "override", name: "Override", seed: 7,
+      start_location_policy: { mode: "fixed", location_id: "pointer-location" },
+      initial_properties: { "pointer-tree": { "__tree_position": "missing" } } });
+  } catch (error) { scenarioError = String(error); }
+  assert(scenarioError.includes("internal tree state"), "scenarios cannot override the tree pointer");
   const run = await api("POST", "/api/v4/runs", {
     start: { kind: "beginning" }, storyletId: "pointer-story", expectedRevision: (await api("GET", "/api/v3/project")).revision, idempotencyKey: "tree-pointer-visual"
   });
@@ -109,14 +176,42 @@ try {
   await page.goto(`${base}/#/storylets/pointer-check/edit?node=check`);
   await page.reload();
   await picker.waitFor();
-  assert(await picker.getByRole("button", { name: "Select Child" }).getAttribute("aria-pressed") === "true", "boolean check restores its selected position");
-  await picker.getByRole("button", { name: "Select Root" }).click();
+  assert(await picker.getByRole("radio", { name: "Select Child" }).getAttribute("aria-checked") === "true", "boolean check restores its selected position");
+  await picker.getByRole("radio", { name: "Select Root" }).click();
   await Promise.all([
     page.waitForResponse((response) => response.url().endsWith("/api/v3/content/storylets/pointer-check") && response.request().method() === "PUT" && response.ok()),
     page.getByRole("button", { name: "Save draft" }).click(),
   ]);
   const savedCheck = await api("GET", "/api/v3/content/storylets/pointer-check");
   assert(savedCheck.graph.nodes.find((node: { id: string; value?: unknown }) => node.id === "check__compare")?.value === "pointer-root", "boolean check saves its selected position");
+  const removeChecked = structuredClone(after);
+  removeChecked.traits[0].values.nodes = ["pointer-child", "pointer-long"];
+  removeChecked.traits[0].values.edges = [];
+  removeChecked.traits[0].values.positions = "";
+  let checkRemovalError = "";
+  try { await api("PUT", "/api/v3/content/entity_templates/pointer-tree", removeChecked); } catch (error) { checkRemovalError = String(error); }
+  assert(checkRemovalError.includes("checks a removed"), "removing a position used by a boolean check is rejected");
+  const extraIds = Array.from({ length: 12 }, (_, index) => `skill-${index}`);
+  for (const id of extraIds) {
+    await api("POST", "/api/v3/content/entity_templates", { id, name: `Skill ${id}`, traits: [{ id: `${id}-trait`, template_id: itemTrait.id, values: {} }] });
+  }
+  const large = structuredClone(after);
+  const largeNodes = ["pointer-root", "pointer-child", "pointer-long", ...extraIds];
+  large.traits[0].values.nodes = largeNodes;
+  large.traits[0].values.edges = largeNodes.slice(1).map((id: string, index: number) => JSON.stringify([largeNodes[index], id]));
+  large.traits[0].values.positions = "";
+  await api("PUT", "/api/v3/content/entity_templates/pointer-tree", large);
+  await page.reload();
+  await picker.waitFor();
+  const zoomIn = page.getByRole("button", { name: "Zoom in tree preview" });
+  await zoomIn.click();
+  await zoomIn.click();
+  assert(await zoomIn.isEnabled(), "large trees can zoom beyond four times fit");
+  await zoomIn.click();
+  const chosen = await picker.getByRole("radio", { name: "Select Root" }).boundingBox();
+  const region = await picker.boundingBox();
+  assert(chosen && region && chosen.x < region.x + region.width && chosen.x + chosen.width > region.x,
+    "large-tree zoom keeps the selected position visible");
   await page.getByRole("button", { name: "Set Tree Position", exact: true }).first().click();
   assert(await page.getByText("Connect a Get Entity node to choose a tree.").isVisible(), "unconnected node explains how to choose a tree");
   assert(errors.length === 0, `no browser errors: ${errors.join("; ")}`);
