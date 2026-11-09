@@ -113,6 +113,10 @@ In a story graph, connect configured **Get Entity** nodes to the owner and item 
 
 **Built-in: Tree Graph.** Add `TreeGraph` to an entity to open its **Tree** tab. Add entities carrying `TreeItem`, then drag from a node's outer edge to another node to connect them. Multiple roots, shared nodes, cycles, and disconnected components are supported without game-specific progression rules. Pan and zoom the canvas; switch between four directional views and radial view, drag nodes or use arrow keys, and save a separate layout for each view. **Save layout** saves the entity draft; **Export JSON** downloads the graph, item metadata, and current coordinates.
 
+Switch between **Canvas** and **List** in the Tree tab. The list shows the hierarchy, incoming relationships, and editable columns defined by the `TreeItem` trait. Shared nodes and cycles appear as reference rows. Edits to other items save automatically; edits to the tree owner remain in its draft until saved. Failed item saves retain their edits and offer retry or discard.
+
+`TreeItem` includes non-negative integer **Level** and **Cost**, a **Cost entity** reference, gameplay tags to add and remove, **Description**, **Asset**, and **Gameplay entity**. The gameplay entity can refer to an in-game skill or another entity; it is independent of TreeGraph connections. Add further columns by adding properties to the `TreeItem` trait.
+
 Right-click the canvas or open **Canvas actions** to change its background color, add TreeItems, or create skill-tree, roguelike-map, and relationship-tree examples. The background color is saved with the graph; **Reset background** restores the theme default. Right-click a node to change its shape, colors, outline width, and dimensions; drag its resize handle to resize it. Nodes use their entities' thumbnails as backgrounds. Open node options to connect without a mouse.
 
 Use **Canvas actions → Add image** to place a PNG or JPEG under nodes and wires. Drag its edges to resize it. Right-click an image or node to lock or unlock its position and size. Exported JSON references the uploaded image file; it does not include the file bytes.

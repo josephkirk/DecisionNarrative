@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import type { EntityProperty, PropertyDefinition, TraitInstance } from "../contracts.ts";
 import { traitEditProblem, traitLabels } from "../entityModel.ts";
 import { notify, studioState } from "../state.ts";
@@ -105,7 +105,10 @@ function reapplyTemplate() {
     onTemplateChange(templateId.value);
   }
 }
-onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.value || window.confirm("Discard unsaved changes?"));
+onMounted(() => { void loadReferences(); });
+const confirmDiscard = () => !dirty.value || window.confirm("Discard unsaved changes?");
+onBeforeRouteLeave(confirmDiscard);
+onBeforeRouteUpdate(confirmDiscard);
 </script>
 <template>
   <div v-if="!loading && draft" class="entity-page-surface scroll-fade-mask">

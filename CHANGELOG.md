@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tree canvas image layers with move, resize and lock controls, and node locks.
 - Named tree-wire relationships, editable by double-click or the wire menu and
   retained when wires are reconnected, saved, or exported.
+- Tree list view with editable TreeItem trait columns, hierarchy and relationship
+  references, plus default gameplay fields and non-negative level and cost.
 - Shared color wheel picker for tree graph and vector canvas colors.
 
 ### Fixed

@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import ColorWheelPicker from "../../components/ColorWheelPicker.vue";
 import TreeImageLayer from "./TreeImageLayer.vue";
+import TreeListView from "./TreeListView.vue";
 import { StudioApi } from "../../api.ts";
 import type { EntityTemplateRecord } from "../../contracts.ts";
 import { studioState } from "../../state.ts";
@@ -20,6 +21,7 @@ const wireOptions = [
   { id: "brush", label: "Brush wire" },
 ] as const;
 const source = ref("");
+const viewMode = ref<"canvas" | "list">("canvas");
 const notice = ref("");
 const status = ref("");
 const creatingExample = ref(false);
@@ -642,15 +644,24 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
 <template>
   <section class="tree-panel" aria-label="Tree graph">
     <header class="tree-header">
-      <div><h2>Tree graph</h2><p class="field-sublabel">Drag outside a node to connect; drag its edge or corner to resize. Double-click a wire to name its relationship. Alt-drag across wires to cut. Right-click for options.</p></div>
+      <div>
+        <h2>Tree graph</h2>
+        <p v-if="viewMode === 'canvas'" class="field-sublabel">Drag outside a node to connect; drag its edge or corner to resize. Double-click a wire to name its relationship. Alt-drag across wires to cut. Right-click for options.</p>
+        <p v-else class="field-sublabel">Browse relationships and edit TreeItem properties.</p>
+      </div>
+      <div class="tree-view-switch" role="group" aria-label="Tree view">
+        <button type="button" :aria-pressed="viewMode === 'canvas'" @click="viewMode = 'canvas'">Canvas</button>
+        <button type="button" :aria-pressed="viewMode === 'list'" @click="viewMode = 'list'; menu = null; source = ''">List</button>
+      </div>
     </header>
     <p v-if="parsed.error" class="tree-error" role="alert">Tree data cannot be read: {{ parsed.error }}</p>
     <template v-if="graph && layout">
       <p v-if="notice || issues.length" class="tree-error" role="alert">{{ notice || issues.join(' ') }}</p>
       <p v-if="status" class="field-sublabel" role="status">{{ status }}</p>
-      <p v-if="source && !readonly" class="tree-link-hint" role="status">Connecting from {{ label(source) }}. Open another node's options to connect. <button type="button" @click="source = ''">Cancel</button></p>
+      <p v-if="viewMode === 'canvas' && source && !readonly" class="tree-link-hint" role="status">Connecting from {{ label(source) }}. Open another node's options to connect. <button type="button" @click="source = ''">Cancel</button></p>
       <div class="tree-meta"><span>{{ graph.nodes.length }} items</span><span>{{ graph.edges.length }} connections</span><span>{{ roots.size }} roots</span></div>
-      <div :id="canvasId" ref="treeScroll" class="tree-scroll" :class="{ 'hide-grid': !showGrid }" :style="{ backgroundColor: graph.appearance?.canvasBackground, backgroundPosition: `${panX}px ${panY}px`, backgroundSize: `${24 * zoomFactor}px ${24 * zoomFactor}px` }" tabindex="0" aria-label="Tree graph canvas; drag background to pan, use mouse wheel to zoom" @contextmenu="openContext($event)" @dblclick="wireDoubleClick" @pointerdown="startPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @wheel.prevent="wheelZoom" @keydown="keyboardPan">
+      <TreeListView v-show="viewMode === 'list'" :graph="graph" :owner="entity" :readonly="readonly" @patch="emit('patch', $event)" />
+      <div v-show="viewMode === 'canvas'" :id="canvasId" ref="treeScroll" class="tree-scroll" :class="{ 'hide-grid': !showGrid }" :style="{ backgroundColor: graph.appearance?.canvasBackground, backgroundPosition: `${panX}px ${panY}px`, backgroundSize: `${24 * zoomFactor}px ${24 * zoomFactor}px` }" tabindex="0" aria-label="Tree graph canvas; drag background to pan, use mouse wheel to zoom" @contextmenu="openContext($event)" @dblclick="wireDoubleClick" @pointerdown="startPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @wheel.prevent="wheelZoom" @keydown="keyboardPan">
         <component :is="'style'" v-if="customCanvasCss" v-text="customCanvasCss" />
         <input ref="imageInput" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" hidden @change="addImage" />
         <strong class="tree-canvas-title" :title="entity.name">{{ entity.name }}</strong>
@@ -786,6 +797,11 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
 .tree-header { justify-content: space-between; }
 .tree-header h2 { margin: 0 0 4px; }
 .tree-header p { margin: 0; }
+.tree-view-switch { display: inline-flex; border: 1px solid var(--border-subtle); background: var(--bg-card); }
+.tree-view-switch button { min-height: 36px; padding: 6px 14px; color: var(--text-muted); background: transparent; border: 0; cursor: pointer; }
+.tree-view-switch button + button { border-left: 1px solid var(--border-subtle); }
+.tree-view-switch button[aria-pressed="true"] { color: var(--text-main); background: var(--bg-card-hover); box-shadow: inset 0 -2px var(--accent); }
+.tree-view-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .zoom-label { grid-template-columns: auto auto; }
 .zoom-label input { grid-column: 1 / -1; width: 110px; }
 .tree-options { position: relative; margin-left: auto; color: var(--text-primary); font-size: 13px; }
