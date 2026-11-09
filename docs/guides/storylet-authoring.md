@@ -20,6 +20,7 @@ Property controls are selected from the declared property schema of the connecte
 Execution-flow sockets and wires are white; value pins and wires use a color for their value type (for example, Boolean, Integer, Float, String, or EntityRef). Connect `Get Entity` to the optional `target` input on `Add Entity Tag`, `Remove Entity Tag`, or `Has Entity Tag` to choose a runtime target; without that connection, each node keeps its configured target. `Apply Command` operations follow the selected Entity property type: Boolean offers Set/Toggle, Integer and Float offer Set/Add/Subtract, and other types offer Set. Changing the selected property resets an operation that is no longer valid to Set.
 
 For TreeGraph entities, connect Get Entity to **Set Tree Position** or **Is Tree Position** in the Story Graph. Choose a TreeItem in the read-only preview. If you change the connected tree, choose a position in the new tree before saving. Set changes that tree's playtest pointer; Is provides a boolean to a Condition Node. The pointer starts unset and can move directly to any member of the tree.
+The tree preview's **Fit** control shows the full graph; use the zoom controls to inspect individual items.
 
 
 The Story Graph toolbar and canvas context menu expose the Chrono `QBN Storylet Hub`, `Salience Selector`, and `Waypoint Conversation` nodes.

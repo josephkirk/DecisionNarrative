@@ -39,7 +39,7 @@ const bounds = computed(() => {
   if (!Number.isFinite(minX)) return { x: 0, y: 0, width: 320, height: 180 };
   return { x: minX, y: minY, width: Math.max(320, maxX - minX), height: Math.max(180, maxY - minY) };
 });
-const maxZoom = computed(() => Math.max(4, Math.ceil(bounds.value.width / 240)));
+const maxZoom = computed(() => Math.max(4, Math.ceil(bounds.value.width / 240), Math.ceil(bounds.value.height / 240)));
 const visibleEdges = computed(() => (parsed.value.tree?.edges ?? []).filter((edge) => layout.value?.positions[edge.from] && layout.value.positions[edge.to]));
 const wireStyle = (edge: TreeEdge) => ({ ...parsed.value.tree?.appearance?.defaults?.edge, ...parsed.value.tree?.appearance?.edges[JSON.stringify([edge.from, edge.to])] });
 const shape = (id: string) => parsed.value.tree?.shapes?.[id] ?? parsed.value.tree?.appearance?.defaults?.node?.shape ?? "card";
@@ -133,7 +133,7 @@ async function moveSelection(id: string, event: KeyboardEvent) {
         <button type="button" aria-label="Zoom in tree preview" :disabled="zoom >= maxZoom" @click="setZoom(zoom * 2)">+</button>
       </div>
       <div ref="viewport" class="tree-pointer-viewport" role="region" aria-label="Tree positions" tabindex="0" :style="{ background: parsed.tree.appearance?.canvasBackground }">
-        <svg role="radiogroup" :style="{ width: `${zoom * 100}%` }" :viewBox="`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`" aria-label="Choose a tree item">
+        <svg role="radiogroup" :style="{ width: `min(${zoom * 100}%, ${zoom * 320 * bounds.width / bounds.height}px)` }" :viewBox="`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`" aria-label="Choose a tree item">
           <defs>
             <marker :id="`${clipId}-arrow`" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" /></marker>
             <clipPath v-for="(id, index) in parsed.tree.nodes" :id="`${clipId}-${index}`" :key="id">
@@ -165,7 +165,7 @@ async function moveSelection(id: string, event: KeyboardEvent) {
 
 <style scoped>
 .tree-pointer-inspector p { margin: 0 0 8px; font-size: 13px; }
-.tree-pointer-viewport { max-height: 320px; max-width: 100%; overflow: auto; border: 1px solid var(--border, #364052); background: var(--surface, #141923); }
+.tree-pointer-viewport { box-sizing: content-box; max-height: 320px; max-width: 100%; overflow: auto; border: 1px solid var(--border, #364052); background: var(--surface, #141923); }
 .tree-pointer-viewport:focus-visible, .tree-pointer-node:focus-visible { outline: 2px solid var(--accent, #06b6d4); outline-offset: 2px; }
 .tree-pointer-wire { fill: none; stroke: #6d8192; stroke-width: 2; }
 .tree-pointer-wire.wire-dash { stroke-dasharray: 10 6; }

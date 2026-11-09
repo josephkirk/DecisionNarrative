@@ -232,6 +232,13 @@ try {
   const visibleRegion = await picker.boundingBox();
   assert(last && visibleRegion && last.x < visibleRegion.x + visibleRegion.width && last.x + last.width > visibleRegion.x,
     "keyboard navigation scrolls the selected tree position into view");
+  large.traits[0].values.direction = "down";
+  await api("PUT", "/api/v3/content/entity_templates/pointer-tree", large);
+  await page.reload();
+  await picker.waitFor();
+  await page.getByRole("button", { name: "Fit tree preview" }).click();
+  const fitDimensions = await picker.evaluate((element) => ({ height: element.clientHeight, contentHeight: element.scrollHeight, svg: element.querySelector("svg")?.getBoundingClientRect().toJSON(), css: element.querySelector("svg")?.getAttribute("style") }));
+  assert(fitDimensions.contentHeight <= fitDimensions.height + 1, `Fit shows the complete vertical tree without scrolling: ${JSON.stringify(fitDimensions)}`);
   await page.getByRole("button", { name: "Set Tree Position", exact: true }).first().click();
   assert(await page.getByText("Connect a Get Entity node to choose a tree.").isVisible(), "unconnected node explains how to choose a tree");
   assert(errors.length === 0, `no browser errors: ${errors.join("; ")}`);
