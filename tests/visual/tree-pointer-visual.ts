@@ -62,6 +62,14 @@ try {
     throw error;
   });
   assert(await picker.getByRole("radio", { name: "Select Root" }).getAttribute("aria-checked") === "true", "configured position is highlighted");
+  await page.setViewportSize({ width: 800, height: 700 });
+  const narrowLayout = await page.locator(".graph-editor-workspace").evaluate((element) => ({
+    direction: getComputedStyle(element).flexDirection,
+    width: element.querySelector(".graph-editor-canvas")?.getBoundingClientRect().width ?? 0,
+  }));
+  assert(narrowLayout.direction === "column" && narrowLayout.width >= 400, "narrow editor stacks the inspector instead of squeezing the canvas");
+  if (process.env.TREE_POINTER_NARROW_SCREENSHOT) await page.screenshot({ path: process.env.TREE_POINTER_NARROW_SCREENSHOT });
+  await page.setViewportSize({ width: 1440, height: 900 });
   const thumbnail = picker.getByRole("radio", { name: "Select Root" }).locator("image");
   assert((await thumbnail.getAttribute("href"))?.includes("tree-pointer-inspector.png"), "tree preview shows the item's thumbnail");
   const wireStyle = await picker.locator(".tree-pointer-wire").first().evaluate((element) => ({ color: getComputedStyle(element).stroke, dash: getComputedStyle(element).strokeDasharray }));

@@ -254,7 +254,7 @@ function deleteSelectedNode(nodeId: string) {
 </template>
 
 <style scoped>
-.full-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; background: var(--bg-app); }
+.full-editor { display: flex; flex-direction: column; container-type: inline-size; height: 100%; min-height: 0; overflow: hidden; background: var(--bg-app); }
 .editor-toolbar { height: auto; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 8px 16px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
 .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .toolbar-right { margin-left: auto; flex-shrink: 0; }
@@ -281,6 +281,8 @@ function deleteSelectedNode(nodeId: string) {
   .editor-toolbar { flex-wrap: nowrap; overflow-x: auto; }
   .toolbar-left { flex-wrap: nowrap; flex: 0 0 auto; }
   .toolbar-right { flex: 0 0 auto; }
+}
+@container (max-width: 600px) {
   .graph-editor-workspace { flex-direction: column; overflow-y: auto; }
   .graph-editor-canvas { flex: 0 0 auto; height: 46vh; min-height: 280px; }
   :deep(.property-inspector-panel) { width: 100%; border-left: 0; border-top: 1px solid var(--border-subtle); overflow-y: visible; }
