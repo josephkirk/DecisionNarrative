@@ -276,9 +276,13 @@ function editRelationship(index: number) {
   editingRelationship.value = true;
   void nextTick(() => treeScroll.value?.querySelector<HTMLInputElement>(".tree-relationship-name")?.focus());
 }
+function cancelRelationshipEdit() {
+  editingRelationship.value = false;
+  void nextTick(() => treeScroll.value?.querySelector<HTMLButtonElement>(".tree-relationship-toggle")?.focus());
+}
 function wireAtPoint(x: number, y: number): SVGElement | undefined {
   return document.elementsFromPoint(x, y).find((element): element is SVGElement =>
-    element instanceof SVGElement && element.matches(".tree-edge-hit") && !!treeScroll.value?.contains(element));
+    element instanceof SVGElement && element.matches(".tree-edge-hit, .tree-edge-label.is-editable") && !!treeScroll.value?.contains(element));
 }
 function openZoneContext(id: string, event: MouseEvent) {
   const hit = wireAtPoint(event.clientX, event.clientY);
@@ -286,7 +290,7 @@ function openZoneContext(id: string, event: MouseEvent) {
 }
 function wireDoubleClick(event: MouseEvent) {
   const top = document.elementFromPoint(event.clientX, event.clientY);
-  if (!top?.closest(".tree-edge-hit, .tree-connect-zone")) return;
+  if (!top?.closest(".tree-edge-hit, .tree-edge-label, .tree-connect-zone")) return;
   const hit = wireAtPoint(event.clientX, event.clientY);
   if (!hit) return;
   const index = Number(hit.dataset.index);
@@ -676,7 +680,7 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
               <template v-for="(edge, index) in graph.edges" :key="`${edge.from}-${edge.to}-${index}`">
                 <path v-if="edgePath(edge) && edgeAppearance(edge).pattern === 'brush'" :d="edgePath(edge) ?? ''" class="tree-edge" :style="{ stroke: edgeAppearance(edge).color, strokeWidth: Math.max(1, (edgeAppearance(edge).width ?? 2) * .45) }" />
                 <path v-if="edgePath(edge)" :d="edgePath(edge) ?? ''" class="tree-edge" :class="`wire-${edgeAppearance(edge).pattern ?? 'solid'}`" :style="{ stroke: edgeAppearance(edge).color, strokeWidth: edgeAppearance(edge).width }" :marker-end="`url(#${markerId})`" />
-                <text v-if="edge.relationship && edgeGeometry(edge)" class="tree-edge-label" :x="edgeGeometry(edge)!.label.x" :y="edgeGeometry(edge)!.label.y" dy="-6">{{ edge.relationship }}</text>
+                <text v-if="edge.relationship && edgeGeometry(edge)" class="tree-edge-label" :class="{ 'is-editable': !readonly }" :data-index="index" :x="edgeGeometry(edge)!.label.x" :y="edgeGeometry(edge)!.label.y" dy="-6" @pointerdown.stop="wireDown(index, $event)" @contextmenu.stop.prevent="openContext($event, undefined, index)">{{ edge.relationship }}</text>
                 <path v-if="edgePath(edge) && !readonly" :d="edgePath(edge) ?? ''" class="tree-edge-hit" :data-index="index" :aria-label="`Connection from ${label(edge.from)} to ${label(edge.to)}${edge.relationship ? `, ${edge.relationship}` : ''}; press Enter for options`" role="button" tabindex="0" @pointerdown.stop="wireDown(index, $event)" @contextmenu.stop.prevent="openContext($event, undefined, index)" @keydown.enter.prevent.stop="openEdgeKeyboard($event, index)" />
               </template>
               <path v-if="pendingLink" :d="pendingLink" class="tree-edge tree-edge-pending" />
@@ -719,9 +723,9 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
               <label for="tree-relationship-name">Relationship name</label>
               <input id="tree-relationship-name" v-model="relationshipDraft" class="form-input tree-relationship-name" aria-label="Relationship name" placeholder="Relationship name" @keydown.enter.prevent.stop="setRelationship(menu.edge, relationshipDraft)" />
               <button type="button" :disabled="!relationshipDraft.trim()" @click="setRelationship(menu.edge, relationshipDraft)">Save relationship</button>
-              <button type="button" @click="editingRelationship = false">Cancel</button>
+              <button type="button" @click="cancelRelationshipEdit">Cancel</button>
             </template>
-            <button v-else type="button" @click="editRelationship(menu.edge)">{{ graph.edges[menu.edge]!.relationship ? 'Edit relationship' : 'Add relationship' }}</button>
+            <button v-else type="button" class="tree-relationship-toggle" @click="editRelationship(menu.edge)">{{ graph.edges[menu.edge]!.relationship ? 'Edit relationship' : 'Add relationship' }}</button>
             <button v-if="graph.edges[menu.edge]!.relationship" type="button" @click="setRelationship(menu.edge)">Remove relationship</button>
             <label>Wire color <ColorWheelPicker label="Wire color" :model-value="edgeAppearance(graph.edges[menu.edge]!).color ?? '#06b6d4'" @update:model-value="updateEdgeAppearance(menu.edge, { color: $event })" /></label>
             <label>Wire thickness <input type="number" min="1" max="12" :value="edgeAppearance(graph.edges[menu.edge]!).width ?? 2" @change="updateEdgeAppearance(menu.edge, { width: Math.max(1, Math.min(12, Number(($event.target as HTMLInputElement).value) || 1)) })" /></label>
@@ -821,6 +825,7 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
 .tree-patterns button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .tree-edges .tree-edge-hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: grab; }
 .tree-edges .tree-edge-label { fill: var(--text-main); stroke: var(--bg-card); stroke-width: 4px; paint-order: stroke; font-size: 14px; font-weight: 600; text-anchor: middle; pointer-events: none; }
+.tree-edges .tree-edge-label.is-editable { pointer-events: bounding-box; cursor: grab; }
 .tree-edges .tree-edge-hit:focus-visible { stroke: var(--accent); stroke-opacity: .35; }
 .tree-edges .tree-cut-line { fill: none; stroke: var(--status-danger); stroke-width: 2; stroke-dasharray: 5 4; pointer-events: none; }
 .tree-edges .tree-edge-pending { stroke-dasharray: 5 4; }

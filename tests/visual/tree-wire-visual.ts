@@ -320,6 +320,18 @@ try {
   check("reconnected edge preserves relationship name in accessible label", (await reconnectedNamedEdge.count()) === 1);
   check("reconnected edge preserves visible relationship label", await edgeLabel.isVisible());
 
+  const labelBox = await edgeLabel.boundingBox();
+  if (!labelBox) throw new Error("Relationship label has no visible bounds");
+  const labelPoint = { x: labelBox.x + labelBox.width / 2, y: labelBox.y + labelBox.height * .45 };
+  check("relationship text is an interactive wire target", await page.evaluate(({ x, y }) =>
+    document.elementsFromPoint(x, y).some((element) => element.matches(".tree-edge-label.is-editable")), labelPoint));
+  await page.mouse.dblclick(labelPoint.x, labelPoint.y);
+  await relInput.waitFor({ state: "visible" });
+  check("double-clicking relationship text opens its editor", (await relInput.inputValue()) === "causes");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  check("cancelling returns focus to the edit action", await page.locator(".tree-relationship-toggle").evaluate((element) => document.activeElement === element));
+  await page.keyboard.press("Escape");
+
   // 12. Contextual edit: right-click wire opens context menu with Edit/Remove options
   const reconnectedEdgeMidpoint = await getEdgeMidpoint(reconnectedNamedEdge);
   await page.mouse.click(reconnectedEdgeMidpoint.x, reconnectedEdgeMidpoint.y, { button: "right" });
