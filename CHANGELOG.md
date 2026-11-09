@@ -13,13 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   canvas, editable entity connections, multiple roots, directional and radial
   layouts, configurable canvas backgrounds, nodes resizable from any edge or
   corner, visible connection zones, configurable shapes and colors, normal,
-  dashed, dotted and brush wires, reconnection and
-  cutting, entity thumbnail backgrounds, JSON export, local display preferences,
-  and three example graphs.
+  dashed, dotted and brush wires, reconnection and cutting, entity thumbnail
+  backgrounds, a responsive canvas title, in-canvas view controls and JSON export,
+  local display preferences, and three example graphs.
 - Shared color wheel picker for tree graph and vector canvas colors.
 
 ### Fixed
 
+- Connecting, reconnecting, or removing tree wires preserves node positions.
+- The tree canvas grid follows pan and zoom.
 - Resizing a tree node no longer moves other nodes in the current layout.
 - Removed unused Rust helpers and resolved compiler warnings.
 

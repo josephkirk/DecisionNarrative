@@ -18,7 +18,6 @@ const wireOptions = [
   { id: "dot", label: "Dotted wire" },
   { id: "brush", label: "Brush wire" },
 ] as const;
-const item = ref("");
 const source = ref("");
 const notice = ref("");
 const status = ref("");
@@ -209,10 +208,12 @@ function openContext(event: MouseEvent, node?: string, edge?: number) {
   menuSearch.value = "";
   menu.value = {
     x: Math.max(0, Math.min(x, rect.width - 260)),
-    y: Math.max(0, Math.min(y, rect.height - 280)),
+    y: Math.max(0, Math.min(y, rect.height - Math.min(420, rect.height))),
     node,
     edge,
-    point: { x: Math.round((x - panX.value) / zoomFactor.value), y: Math.round((y - panY.value) / zoomFactor.value) },
+    point: event.currentTarget instanceof HTMLElement && event.currentTarget.closest(".tree-canvas-toolbar")
+      ? { x: Math.round((rect.width / 2 - panX.value) / zoomFactor.value), y: Math.round((rect.height / 2 - panY.value) / zoomFactor.value) }
+      : { x: Math.round((x - panX.value) / zoomFactor.value), y: Math.round((y - panY.value) / zoomFactor.value) },
   };
   void nextTick(() => treeScroll.value?.querySelector<HTMLElement>(".tree-context input, .tree-context select, .tree-context button")?.focus());
 }
@@ -233,14 +234,6 @@ function patch(next: TreeGraph) {
   emit("patch", setTreeGraph(props.entity, owner.value, next));
   notice.value = "";
   status.value = "";
-}
-function addItem() {
-  if (!graph.value || !available.value.some((entity) => entity.id === item.value)) {
-    notice.value = "Choose an entity with the TreeItem trait.";
-    return;
-  }
-  patch({ ...graph.value, nodes: [...graph.value.nodes, item.value] });
-  item.value = "";
 }
 function removeItem(id: string) {
   if (!graph.value) return;
@@ -268,7 +261,8 @@ function connect(from: string, to: string) {
   if (!graph.value || props.readonly) return;
   if (!graph.value.nodes.includes(from) || !graph.value.nodes.includes(to)) { notice.value = "Choose both connection endpoints."; return; }
   if (graph.value.edges.some((edge) => edge.from === from && edge.to === to)) { notice.value = "That connection already exists."; return; }
-  patch({ ...graph.value, edges: [...graph.value.edges, { from, to }] });
+  const positions = { ...graph.value.positions, [graph.value.direction]: { ...layout.value?.positions } };
+  patch({ ...graph.value, positions, edges: [...graph.value.edges, { from, to }] });
   source.value = "";
 }
 function beginLink(id: string, event: PointerEvent) {
@@ -314,7 +308,8 @@ function removeEdges(indices: ReadonlySet<number>) {
   if (!graph.value || props.readonly) return;
   const edges = graph.value.edges.filter((_, index) => !indices.has(index));
   const appearance = graph.value.appearance && { ...graph.value.appearance, edges: Object.fromEntries(edges.map((edge) => [edgeKey(edge), graph.value!.appearance!.edges[edgeKey(edge)]]).filter(([, value]) => value !== undefined)) };
-  patch({ ...graph.value, edges, appearance });
+  const positions = { ...graph.value.positions, [graph.value.direction]: { ...layout.value?.positions } };
+  patch({ ...graph.value, positions, edges, appearance });
 }
 function removeEdge(index: number) { removeEdges(new Set([index])); }
 function reconnectEdge(index: number, to: string) {
@@ -330,7 +325,8 @@ function reconnectEdge(index: number, to: string) {
     if (previous) styles[edgeKey(replacement)] = previous;
     appearance = { ...appearance, edges: styles };
   }
-  patch({ ...current, edges, appearance });
+  const positions = { ...current.positions, [current.direction]: { ...layout.value?.positions } };
+  patch({ ...current, positions, edges, appearance });
   menu.value = null;
 }
 function wireDown(index: number, event: PointerEvent) {
@@ -492,47 +488,40 @@ function edgePath(edge: TreeEdge): string | null {
   <section class="tree-panel" aria-label="Tree graph">
     <header class="tree-header">
       <div><h2>Tree graph</h2><p class="field-sublabel">Drag outside a node to connect; drag its edge or corner to resize. Alt-drag across wires to cut. Right-click for options.</p></div>
-      <div class="tree-view-controls">
-        <label>View
-          <select class="form-select" aria-label="Graph direction" :value="graph?.direction" :disabled="readonly || !graph || creatingExample" @change="changeDirection">
-            <option value="right">Left to right</option><option value="left">Right to left</option>
-            <option value="down">Top to bottom</option><option value="up">Bottom to top</option><option value="radial">Radial</option>
-          </select>
-        </label>
-        <button type="button" class="btn btn-secondary" :disabled="!graph?.nodes.length" @click="fitGraph">Fit graph</button>
-        <button v-if="!readonly" type="button" class="btn btn-primary" :disabled="!graph || creatingExample || !!issues.length" title="Saves all entity changes" @click="emit('save')">Save layout</button>
-      </div>
     </header>
     <p v-if="parsed.error" class="tree-error" role="alert">Tree data cannot be read: {{ parsed.error }}</p>
     <template v-if="graph && layout">
-      <fieldset v-if="!readonly" class="tree-tools" :disabled="creatingExample">
-        <legend>Add an item</legend>
-        <label>Tree item
-          <select v-model="item" class="form-select" aria-label="Tree item to add">
-            <option value="">Choose a TreeItem entity…</option>
-            <option v-for="candidate in available" :key="candidate.id" :value="candidate.id">{{ candidate.name }} ({{ candidate.id }})</option>
-          </select>
-        </label>
-        <button type="button" class="btn btn-primary" :disabled="!item" @click="addItem">Add item</button>
-      </fieldset>
-      <details class="tree-options">
-        <summary>View options</summary>
-        <div class="tree-settings">
-          <label class="zoom-label">Zoom <output>{{ zoom }}%</output><input v-model.number="zoom" type="range" min="10" max="200" step="1" aria-label="Graph zoom" /></label>
-          <label><input v-model="showGrid" type="checkbox" /> Show grid</label>
-          <label><input v-model="showThumbnails" type="checkbox" /> Show thumbnails</label>
-          <button v-if="!readonly" type="button" class="btn btn-secondary" :disabled="!graph || creatingExample" @click="resetLayout">Reset view layout</button>
-          <button type="button" class="btn btn-secondary" :disabled="!graph.nodes.length" @click="exportJson">Export JSON</button>
-        </div>
-        <p class="field-sublabel">Grid and thumbnail preferences are saved on this device. Saving layout also saves other entity changes.</p>
-      </details>
       <p v-if="notice || issues.length" class="tree-error" role="alert">{{ notice || issues.join(' ') }}</p>
       <p v-if="status" class="field-sublabel" role="status">{{ status }}</p>
       <p v-if="source && !readonly" class="tree-link-hint" role="status">Connecting from {{ label(source) }}. Open another node's options to connect. <button type="button" @click="source = ''">Cancel</button></p>
       <div class="tree-meta"><span>{{ graph.nodes.length }} items</span><span>{{ graph.edges.length }} connections</span><span>{{ roots.size }} roots</span></div>
-      <div ref="treeScroll" class="tree-scroll" :class="{ 'hide-grid': !showGrid }" :style="{ backgroundColor: graph.appearance?.canvasBackground }" tabindex="0" aria-label="Tree graph canvas; drag background to pan, use mouse wheel to zoom" @contextmenu="openContext($event)" @pointerdown="startPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @wheel.prevent="wheelZoom" @keydown="keyboardPan">
-        <button v-if="!readonly" type="button" class="tree-canvas-actions btn btn-secondary" @pointerdown.stop @click.stop="openContext($event)">Canvas actions</button>
-        <div v-if="!graph.nodes.length" class="tree-empty"><strong>Start with an item</strong><span>Add an entity with the TreeItem trait, then connect it to others.</span></div>
+      <div ref="treeScroll" class="tree-scroll" :class="{ 'hide-grid': !showGrid }" :style="{ backgroundColor: graph.appearance?.canvasBackground, backgroundPosition: `${panX}px ${panY}px`, backgroundSize: `${24 * zoomFactor}px ${24 * zoomFactor}px` }" tabindex="0" aria-label="Tree graph canvas; drag background to pan, use mouse wheel to zoom" @contextmenu="openContext($event)" @pointerdown="startPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @wheel.prevent="wheelZoom" @keydown="keyboardPan">
+        <strong class="tree-canvas-title" :title="entity.name">{{ entity.name }}</strong>
+        <div class="tree-canvas-toolbar" @pointerdown.stop @wheel.stop>
+          <button v-if="!readonly" type="button" class="btn btn-secondary" @click.stop="openContext($event)">Canvas actions</button>
+          <label class="tree-direction">View
+            <select class="form-select" aria-label="Graph direction" :value="graph.direction" :disabled="readonly || creatingExample" @change="changeDirection">
+              <option value="right">Left to right</option><option value="left">Right to left</option>
+              <option value="down">Top to bottom</option><option value="up">Bottom to top</option><option value="radial">Radial</option>
+            </select>
+          </label>
+          <button type="button" class="btn btn-secondary" :disabled="!graph.nodes.length" @click="fitGraph">Fit graph</button>
+          <button v-if="!readonly" type="button" class="btn btn-primary" :disabled="creatingExample || !!issues.length" title="Saves all entity changes" @click="emit('save')">Save layout</button>
+          <details class="tree-options">
+            <summary>View options</summary>
+            <div class="tree-options-panel">
+            <div class="tree-settings">
+              <label class="zoom-label">Zoom <output>{{ zoom }}%</output><input v-model.number="zoom" type="range" min="10" max="200" step="1" aria-label="Graph zoom" /></label>
+              <label><input v-model="showGrid" type="checkbox" /> Show grid</label>
+              <label><input v-model="showThumbnails" type="checkbox" /> Show thumbnails</label>
+              <button v-if="!readonly" type="button" class="btn btn-secondary" :disabled="creatingExample" @click="resetLayout">Reset view layout</button>
+              <button type="button" class="btn btn-secondary" :disabled="!graph.nodes.length" @click="exportJson">Export JSON</button>
+            </div>
+            <p class="field-sublabel">Grid and thumbnail preferences are saved on this device. Saving layout also saves other entity changes.</p>
+            </div>
+          </details>
+        </div>
+        <div v-if="!graph.nodes.length" class="tree-empty"><strong>Start with an item</strong><span>Right-click the canvas or use Canvas actions to add a TreeItem.</span></div>
         <div v-else class="tree-world" :style="{ transform: `translate(${panX}px, ${panY}px) scale(${zoomFactor})` }">
             <svg class="tree-edges" aria-label="Tree connections">
               <defs><marker :id="markerId" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" /></marker></defs>
@@ -616,32 +605,37 @@ function edgePath(edge: TreeEdge): string | null {
 
 <style scoped>
 .tree-panel { display: grid; gap: 12px; min-width: 0; }
-.tree-header, .tree-view-controls, .tree-tools, .tree-meta { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.tree-header, .tree-meta { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
 .tree-header { justify-content: space-between; }
 .tree-header h2 { margin: 0 0 4px; }
 .tree-header p { margin: 0; }
-.tree-view-controls label, .tree-tools label { display: grid; gap: 4px; font-size: 12px; color: var(--text-muted); }
-.tree-tools { border: 1px solid var(--border-subtle); background: var(--bg-card); padding: 12px; }
-.tree-tools select { min-width: 150px; max-width: 250px; }
 .zoom-label { grid-template-columns: auto auto; }
 .zoom-label input { grid-column: 1 / -1; width: 110px; }
-.tree-options { border: 1px solid var(--border-subtle); background: var(--bg-card); padding: 8px 12px; }
-.tree-options summary { cursor: pointer; font-size: 13px; color: var(--text-primary); }
-.tree-options[open] summary { margin-bottom: 10px; }
-.tree-settings { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
-.tree-settings label:not(.zoom-label) { display: flex; align-items: center; gap: 6px; font-size: 13px; }
-.tree-settings .zoom-label { display: grid; gap: 4px; font-size: 12px; }
+.tree-options { position: relative; margin-left: auto; color: var(--text-primary); font-size: 13px; }
+.tree-options summary { display: flex; align-items: center; box-sizing: border-box; min-height: 36px; cursor: pointer; border: 1px solid var(--border-subtle); background: var(--bg-card); border-radius: 5px; padding: 6px 12px; }
+.tree-options summary::before { content: "▸"; margin-right: 5px; }
+.tree-options[open] summary::before { content: "▾"; }
+.tree-options-panel { position: absolute; top: calc(100% + 4px); right: 0; width: min(240px, calc(100vw - 48px)); max-height: 290px; overflow: auto; box-sizing: border-box; padding: 10px; background: var(--bg-card); border: 1px solid var(--border-subtle); box-shadow: 0 8px 24px rgb(0 0 0 / 35%); }
+.tree-settings { display: grid; gap: 8px; padding: 8px 0; }
+.tree-settings label:not(.zoom-label) { display: flex; align-items: center; min-height: 32px; gap: 8px; }
+.tree-settings .zoom-label { display: grid; gap: 4px; }
 .tree-error { color: var(--status-danger); margin: 0; }
 .tree-link-hint { margin: 0; color: var(--text-muted); font-size: 13px; }
 .tree-link-hint button { border: 0; background: transparent; color: var(--accent); cursor: pointer; text-decoration: underline; }
 .tree-meta { color: var(--text-muted); font-size: 12px; gap: 16px; }
-.tree-canvas-actions { position: absolute; top: 10px; left: 10px; z-index: 3; }
-.tree-scroll { position: relative; overflow: hidden; height: min(65vh, 620px); min-height: 360px; border: 1px solid var(--border-subtle); background-color: var(--bg-card); background-image: radial-gradient(var(--border-subtle) 1px, transparent 1px); background-size: 24px 24px; cursor: grab; touch-action: none; }
+.tree-canvas-toolbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 3; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; pointer-events: none; }
+.tree-canvas-toolbar > button, .tree-canvas-toolbar select, .tree-settings button { box-sizing: border-box; min-height: 36px; }
+.tree-canvas-toolbar select { height: 36px; }
+.tree-canvas-toolbar > * { pointer-events: auto; }
+.tree-direction { display: flex; align-items: center; gap: 6px; color: var(--text-muted); background: var(--bg-card); font-size: 12px; }
+.tree-scroll { position: relative; container-type: inline-size; overflow: hidden; height: min(65vh, 620px); min-height: 360px; border: 1px solid var(--border-subtle); background-color: var(--bg-card); background-image: radial-gradient(var(--border-subtle) 1px, transparent 1px); background-size: 24px 24px; cursor: grab; touch-action: none; }
+.tree-canvas-title { position: absolute; z-index: 2; left: 16px; bottom: 12px; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: clamp(20px, 4cqw, 48px); line-height: 1.15; text-shadow: 0 1px 6px var(--bg-card); pointer-events: none; }
 .tree-scroll.hide-grid { background-image: none; }
-.tree-context { position: absolute; z-index: 4; width: min(250px, 100%); max-height: min(270px, 100%); overflow: auto; display: grid; gap: 6px; box-sizing: border-box; padding: 10px; color: var(--text-primary); background: var(--bg-card); border: 1px solid var(--border-subtle); box-shadow: 0 8px 24px rgb(0 0 0 / 35%); cursor: default; touch-action: auto; }
+.tree-context { position: absolute; z-index: 4; width: min(250px, 100%); max-height: min(420px, 100%); overflow: auto; display: grid; gap: 6px; box-sizing: border-box; padding: 10px; color: var(--text-primary); background: var(--bg-card); border: 1px solid var(--border-subtle); box-shadow: 0 8px 24px rgb(0 0 0 / 35%); cursor: default; touch-action: auto; }
+.tree-context :deep(.color-trigger), .tree-context input, .tree-context select { box-sizing: border-box; min-height: 36px; }
 .tree-context label, .tree-context strong { font-size: 12px; }
 .tree-context-results { display: grid; gap: 2px; overflow-y: auto; }
-.tree-context button { border: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 8px; cursor: pointer; }
+.tree-context button { min-height: 36px; border: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 8px 10px; cursor: pointer; }
 .tree-context button:hover, .tree-context button:focus-visible { background: var(--bg-hover, #30343b); outline: 1px solid var(--accent); }
 .tree-context button small { display: block; color: var(--text-muted); overflow-wrap: anywhere; }
 .tree-context .tree-context-danger { color: var(--status-danger); }
@@ -695,6 +689,5 @@ function edgePath(edge: TreeEdge): string | null {
 .tree-remove { position: relative; border: 0; background: transparent; color: var(--text-primary); cursor: pointer; padding: 4px; }
 .tree-remove:hover, .tree-remove:focus-visible { color: var(--status-danger); }
 .tree-context label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.tree-context input[type=number] { width: 70px; }
-@media (max-width: 700px) { .tree-tools label { flex: 1 1 160px; } .tree-tools select { max-width: none; width: 100%; } }
+.tree-context input[type=number] { width: 70px; padding: 6px 8px; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: 4px; }
 </style>
