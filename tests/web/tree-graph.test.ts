@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { TraitInstance } from "../../src/web/studio/contracts.ts";
 import type { AnyEntity } from "../../src/web/studio/plugins/runtime.ts";
 import { TREE_EXAMPLES } from "../../src/web/studio/plugins/tree/examples.ts";
-import { CARD_HEIGHT, CARD_WIDTH, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, type TreeDirection, type TreeGraph } from "../../src/web/studio/plugins/tree/model.ts";
+import { CARD_HEIGHT, CARD_WIDTH, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, type TreeDirection, type TreeGraph, type TreeShape } from "../../src/web/studio/plugins/tree/model.ts";
 
 const graph: TreeGraph = {
   nodes: ["start-a", "start-b", "shared", "end"],
@@ -197,4 +197,166 @@ test("crowded radial levels keep adjacent node cards apart", () => {
     const a = points[crowded.nodes[i]!]!, b = points[crowded.nodes[j]!]!;
     expect(Math.abs(a.x - b.x) >= CARD_WIDTH || Math.abs(a.y - b.y) >= CARD_HEIGHT).toBe(true);
   }
+});
+
+test("global defaults round-trip through setTreeGraph and treeGraphOf", () => {
+  const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const graphWithDefaults: TreeGraph = {
+    ...graph,
+    appearance: {
+      defaults: {
+        node: {
+          background: "#112233",
+          outline: "#445566",
+          outlineWidth: 3,
+          width: 250,
+          height: 120,
+          shape: "diamond",
+        },
+        edge: {
+          color: "#aabbcc",
+          width: 4,
+          pattern: "dash",
+        },
+        customCss: ".tree-node { opacity: 0.95; }",
+      },
+      nodes: {},
+      edges: {},
+    },
+  };
+  const patched = setTreeGraph(entity, trait, graphWithDefaults);
+  const restored = treeGraphOf(patched.traits![0]!);
+  expect(restored.appearance?.defaults).toEqual(graphWithDefaults.appearance!.defaults);
+});
+
+test("appearance defaults reject invalid structures, unexpected fields, and out-of-range values", () => {
+  const base = { id: "graph", template_id: "tree_graph", values: { nodes: ["a", "b"], edges: [JSON.stringify(["a", "b"])] } };
+
+  // Invalid defaults container type
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: "invalid" }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: [1, 2] }) } })).toThrow();
+
+  // Unexpected top-level defaults fields
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { extra: 123 } }) } })).toThrow();
+
+  // Invalid customCss type
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { customCss: 123 } }) } })).toThrow();
+
+  // Unexpected field in node defaults
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { unknownField: "x" } } }) } })).toThrow();
+
+  // Unexpected field in edge defaults
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { edge: { unknownField: "x" } } }) } })).toThrow();
+
+  // Invalid default node shape
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { shape: "triangle" } } }) } })).toThrow();
+
+  // Valid default node shapes accepted
+  for (const shape of ["card", "rounded", "ellipse", "diamond"] as const) {
+    const res = treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { shape } } }) } });
+    expect(res.appearance?.defaults?.node?.shape).toBe(shape);
+  }
+
+  // Invalid default node colors
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { background: "blue" } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { outline: "#gggggg" } } }) } })).toThrow();
+
+  // Out-of-bounds default node numbers
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { outlineWidth: 0 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { outlineWidth: 13 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { width: 99 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { width: 601 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { height: 59 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { height: 401 } } }) } })).toThrow();
+
+  // Invalid default edge fields
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { edge: { color: "not-hex" } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { edge: { width: 0 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { edge: { width: 13 } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { edge: { pattern: "zigzag" } } }) } })).toThrow();
+});
+
+test("treeErrors flags invalid fields in appearance.defaults", () => {
+  const eligible = new Set(graph.nodes);
+  expect(treeErrors({
+    ...graph,
+    appearance: {
+      defaults: {
+        node: { background: "not-hex" },
+      },
+      nodes: {},
+      edges: {},
+    },
+  }, eligible)).not.toEqual([]);
+
+  expect(treeErrors({
+    ...graph,
+    appearance: {
+      defaults: {
+        node: { shape: "hexagon" as unknown as TreeShape },
+      },
+      nodes: {},
+      edges: {},
+    },
+  }, eligible)).not.toEqual([]);
+
+  expect(treeErrors({
+    ...graph,
+    appearance: {
+      defaults: {
+        edge: { color: "not-hex" },
+      },
+      nodes: {},
+      edges: {},
+    },
+  }, eligible)).not.toEqual([]);
+});
+
+test("layoutTree expands spacing and bounding box using default node dimensions", () => {
+  const baseLayout = layoutTree(graph);
+  const withDefaults: TreeGraph = {
+    ...graph,
+    appearance: {
+      defaults: {
+        node: { width: 300, height: 150 },
+      },
+      nodes: {},
+      edges: {},
+    },
+  };
+  const expandedLayout = layoutTree(withDefaults);
+
+  // Since default dimensions (300x150) are larger than CARD_WIDTH (164) and CARD_HEIGHT (68),
+  // total layout dimensions must be larger.
+  expect(expandedLayout.width).toBeGreaterThan(baseLayout.width);
+  expect(expandedLayout.height).toBeGreaterThan(baseLayout.height);
+
+  // Level spacing along X axis for direction "right" must be larger
+  const baseDeltaX = baseLayout.positions.shared!.x - baseLayout.positions["start-a"]!.x;
+  const expandedDeltaX = expandedLayout.positions.shared!.x - expandedLayout.positions["start-a"]!.x;
+  expect(expandedDeltaX).toBeGreaterThan(baseDeltaX);
+});
+
+test("layoutTree precedence: per-node overrides take precedence over defaults", () => {
+  const withDefaultsAndOverride: TreeGraph = {
+    ...graph,
+    appearance: {
+      defaults: {
+        node: { width: 300, height: 150 },
+      },
+      nodes: {
+        end: {
+          width: 450,
+          height: 200,
+        },
+      },
+      edges: {},
+    },
+  };
+  const layout = layoutTree(withDefaultsAndOverride);
+
+  // Width must accommodate end node with width 450 (which is larger than default 300)
+  const endPos = layout.positions.end!;
+  expect(layout.width).toBeGreaterThanOrEqual(Math.ceil(endPos.x + 450 + 40));
 });

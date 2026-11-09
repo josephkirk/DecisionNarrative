@@ -38,6 +38,16 @@ export interface PropertyEditorContribution {
   component: Component;
 }
 
+/** UI attached to a trait; replaces the default property list in the entity trait inspector. */
+export interface TraitInspectorContribution {
+  id?: string;
+  traitKey: string;
+  /** Set by the runtime: name of the plugin that registered it. */
+  owner?: string;
+  /** Receives props `{ entity, readonly }`; emits `patch(Partial<AnyEntity>)`. */
+  component: Component;
+}
+
 /** Core nodes a plugin node expands to. The engine only executes core nodes. */
 export interface LoweredFragment {
   nodes: NarrativeNode[];
@@ -113,10 +123,11 @@ export function definePlugin(plugin: Plugin): Plugin { return plugin; }
 export interface Registry {
   entityPanels: EntityPanelContribution[];
   propertyEditors: PropertyEditorContribution[];
+  traitInspectors: TraitInspectorContribution[];
   nodeTypes: NodeTypeContribution<any>[];
   plugins: string[];
 }
-export const registry: Registry = reactive<Registry>({ entityPanels: [], propertyEditors: [], nodeTypes: [], plugins: [] }) as Registry;
+export const registry: Registry = reactive<Registry>({ entityPanels: [], propertyEditors: [], traitInspectors: [], nodeTypes: [], plugins: [] }) as Registry;
 
 type Listener = (...args: any[]) => void;
 const listeners = new Map<string, Set<Listener>>();
@@ -144,6 +155,10 @@ export class Context {
 
   propertyEditor(editor: PropertyEditorContribution): Disposer {
     return this.effect(addTo(registry.propertyEditors, markRaw({ ...editor, owner: this.name, component: markRaw(editor.component) })));
+  }
+
+  traitInspector(inspector: TraitInspectorContribution): Disposer {
+    return this.effect(addTo(registry.traitInspectors, markRaw({ ...inspector, owner: this.name, component: markRaw(inspector.component) })));
   }
 
   nodeType<C>(node: NodeTypeContribution<C>): Disposer {
@@ -214,4 +229,8 @@ export function entityPanelsFor(entity: AnyEntity): EntityPanelContribution[] {
 
 export function propertyEditorFor(property: PropertyDefinition | EntityProperty, entity?: AnyEntity): PropertyEditorContribution | undefined {
   return registry.propertyEditors.find((editor) => editor.matches(property, entity));
+}
+
+export function traitInspectorFor(traitKey: string | undefined): TraitInspectorContribution | undefined {
+  return traitKey ? registry.traitInspectors.find((inspector) => inspector.traitKey === traitKey) : undefined;
 }

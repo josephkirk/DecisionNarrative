@@ -397,7 +397,7 @@ fn validate_appearance_map(
     issues: &mut Vec<String>,
 ) {
     for key in map.keys() {
-        if key != "nodes" && key != "edges" && key != "canvasBackground" {
+        if key != "nodes" && key != "edges" && key != "canvasBackground" && key != "defaults" {
             issues.push(format!(
                 "owner '{display_name}': tree_graph appearance contains unknown key '{key}'"
             ));
@@ -410,6 +410,19 @@ fn validate_appearance_map(
             issues.push(format!(
                 "owner '{display_name}': tree_graph appearance has invalid canvasBackground color, expected #RRGGBB"
             ));
+        }
+    }
+
+    if let Some(defaults_val) = map.get("defaults") {
+        match defaults_val {
+            Value::Object(defaults_map) => {
+                validate_appearance_defaults(defaults_map, display_name, issues);
+            }
+            other => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance 'defaults' must be an object, got {other}"
+                ));
+            }
         }
     }
 
@@ -584,6 +597,168 @@ fn validate_appearance_edges(
         }
     }
 }
+
+fn validate_appearance_defaults(
+    defaults_map: &serde_json::Map<String, Value>,
+    display_name: &str,
+    issues: &mut Vec<String>,
+) {
+    for key in defaults_map.keys() {
+        if key != "node" && key != "edge" && key != "customCss" {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance defaults contains unknown key '{key}'"
+            ));
+        }
+    }
+
+    if let Some(node_val) = defaults_map.get("node") {
+        match node_val {
+            Value::Object(node_obj) => {
+                validate_appearance_default_node(node_obj, display_name, issues);
+            }
+            other => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance defaults 'node' must be an object, got {other}"
+                ));
+            }
+        }
+    }
+
+    if let Some(edge_val) = defaults_map.get("edge") {
+        match edge_val {
+            Value::Object(edge_obj) => {
+                validate_appearance_default_edge(edge_obj, display_name, issues);
+            }
+            other => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance defaults 'edge' must be an object, got {other}"
+                ));
+            }
+        }
+    }
+
+    if let Some(css_val) = defaults_map.get("customCss") {
+        if !css_val.is_string() {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance defaults 'customCss' must be a string, got {css_val}"
+            ));
+        }
+    }
+}
+
+fn validate_appearance_default_node(
+    node_obj: &serde_json::Map<String, Value>,
+    display_name: &str,
+    issues: &mut Vec<String>,
+) {
+    for key in node_obj.keys() {
+        if !["background", "outline", "outlineWidth", "width", "height", "shape"].contains(&key.as_str()) {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance default node contains unknown key '{key}'"
+            ));
+        }
+    }
+
+    if let Some(bg_val) = node_obj.get("background") {
+        let valid = bg_val.as_str().is_some_and(is_valid_hex_color);
+        if !valid {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance default node has invalid background color, expected #RRGGBB"
+            ));
+        }
+    }
+
+    if let Some(outline_val) = node_obj.get("outline") {
+        let valid = outline_val.as_str().is_some_and(is_valid_hex_color);
+        if !valid {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance default node has invalid outline color, expected #RRGGBB"
+            ));
+        }
+    }
+
+    if let Some(ow_val) = node_obj.get("outlineWidth") {
+        let valid = ow_val.as_f64().is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
+        if !valid {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance default node has invalid outlineWidth, must be a finite number between 1 and 12"
+            ));
+        }
+    }
+
+    if let Some(w_val) = node_obj.get("width") {
+        let valid = w_val.as_f64().is_some_and(|w| w.is_finite() && (100.0..=600.0).contains(&w));
+        if !valid {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance default node has invalid width, must be a finite number between 100 and 600"
+            ));
+        }
+    }
+
+    if let Some(h_val) = node_obj.get("height") {
+        let valid = h_val.as_f64().is_some_and(|h| h.is_finite() && (60.0..=400.0).contains(&h));
+        if !valid {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance default node has invalid height, must be a finite number between 60 and 400"
+            ));
+        }
+    }
+
+    if let Some(shape_val) = node_obj.get("shape") {
+        let valid = shape_val
+            .as_str()
+            .is_some_and(|s| ["card", "rounded", "ellipse", "diamond"].contains(&s));
+        if !valid {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance default node has invalid shape, expected card, rounded, ellipse, or diamond"
+            ));
+        }
+    }
+}
+
+fn validate_appearance_default_edge(
+    edge_obj: &serde_json::Map<String, Value>,
+    display_name: &str,
+    issues: &mut Vec<String>,
+) {
+    for key in edge_obj.keys() {
+        if key != "color" && key != "width" && key != "pattern" {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance default edge contains unknown key '{key}'"
+            ));
+        }
+    }
+
+    if let Some(color_val) = edge_obj.get("color") {
+        let valid = color_val.as_str().is_some_and(is_valid_hex_color);
+        if !valid {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance default edge has invalid color, expected #RRGGBB"
+            ));
+        }
+    }
+
+    if let Some(w_val) = edge_obj.get("width") {
+        let valid = w_val.as_f64().is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
+        if !valid {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance default edge has invalid width, must be a finite number between 1 and 12"
+            ));
+        }
+    }
+
+    if let Some(pat_val) = edge_obj.get("pattern") {
+        let valid = pat_val
+            .as_str()
+            .is_some_and(|p| matches!(p, "solid" | "dash" | "dot" | "brush"));
+        if !valid {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance default edge has invalid pattern, expected solid, dash, dot, or brush"
+            ));
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1116,5 +1291,195 @@ mod tests {
                 "expected rejection for pattern {invalid_pat}, got {issues:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_appearance_defaults_valid() {
+        let templates = standard_templates();
+        for shape in ["card", "rounded", "ellipse", "diamond"] {
+            let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+                {
+                    "id": "item-1",
+                    "name": "Item 1",
+                    "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+                },
+                {
+                    "id": "item-2",
+                    "name": "Item 2",
+                    "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+                },
+                {
+                    "id": "graph-owner",
+                    "name": "Graph Owner",
+                    "traits": [{
+                        "template_id": "tid-tree-graph",
+                        "values": {
+                            "nodes": ["item-1", "item-2"],
+                            "edges": ["[\"item-1\",\"item-2\"]"],
+                            "appearance": json!({
+                                "defaults": {
+                                    "node": {
+                                        "background": "#123456",
+                                        "outline": "#abcdef",
+                                        "outlineWidth": 5.0,
+                                        "width": 200.0,
+                                        "height": 100.0,
+                                        "shape": shape
+                                    },
+                                    "edge": {
+                                        "color": "#654321",
+                                        "width": 2.5,
+                                        "pattern": "dot"
+                                    },
+                                    "customCss": ".tree-node { opacity: 0.9; }"
+                                }
+                            }).to_string()
+                        }
+                    }]
+                }
+            ])).unwrap();
+            let index = make_test_index(templates.clone(), entities, Vec::new());
+            let issues = validate_tree_graphs(&index, None, None);
+            assert!(issues.is_empty(), "shape {shape} produced issues: {issues:?}");
+        }
+
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            {
+                "id": "item-1",
+                "name": "Item 1",
+                "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+            },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1"],
+                        "edges": [],
+                        "appearance": json!({
+                            "defaults": {}
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+        let index = make_test_index(templates, entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.is_empty(), "empty defaults produced issues: {issues:?}");
+    }
+
+    #[test]
+    fn test_appearance_defaults_invalid_fields_and_ranges() {
+        let templates = standard_templates();
+
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            {
+                "id": "item-1",
+                "name": "Item 1",
+                "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+            },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1"],
+                        "edges": [],
+                        "appearance": json!({
+                            "defaults": {
+                                "unknown_defaults_key": 42,
+                                "node": "not-an-object",
+                                "edge": 123,
+                                "customCss": false
+                            }
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.iter().any(|i| i.contains("appearance defaults contains unknown key 'unknown_defaults_key'")));
+        assert!(issues.iter().any(|i| i.contains("appearance defaults 'node' must be an object")));
+        assert!(issues.iter().any(|i| i.contains("appearance defaults 'edge' must be an object")));
+        assert!(issues.iter().any(|i| i.contains("appearance defaults 'customCss' must be a string")));
+
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            {
+                "id": "item-1",
+                "name": "Item 1",
+                "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+            },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1"],
+                        "edges": [],
+                        "appearance": json!({
+                            "defaults": "not-an-object"
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.iter().any(|i| i.contains("appearance 'defaults' must be an object")));
+
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            {
+                "id": "item-1",
+                "name": "Item 1",
+                "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+            },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1"],
+                        "edges": [],
+                        "appearance": json!({
+                            "defaults": {
+                                "node": {
+                                    "background": "not-a-hex",
+                                    "outline": "#XYZ123",
+                                    "outlineWidth": 15,
+                                    "width": 50,
+                                    "height": 500,
+                                    "shape": "octagon",
+                                    "extra_node_key": 1
+                                },
+                                "edge": {
+                                    "color": "blue",
+                                    "width": 0.5,
+                                    "pattern": "wave",
+                                    "extra_edge_key": 2
+                                }
+                            }
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+        let index = make_test_index(templates, entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.iter().any(|i| i.contains("appearance default node contains unknown key 'extra_node_key'")));
+        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid background color")));
+        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid outline color")));
+        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid outlineWidth")));
+        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid width")));
+        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid height")));
+        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid shape, expected card, rounded, ellipse, or diamond")));
+        assert!(issues.iter().any(|i| i.contains("appearance default edge contains unknown key 'extra_edge_key'")));
+        assert!(issues.iter().any(|i| i.contains("appearance default edge has invalid color")));
+        assert!(issues.iter().any(|i| i.contains("appearance default edge has invalid width")));
+        assert!(issues.iter().any(|i| i.contains("appearance default edge has invalid pattern, expected solid, dash, dot, or brush")));
     }
 }

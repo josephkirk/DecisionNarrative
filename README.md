@@ -115,6 +115,8 @@ In a story graph, connect configured **Get Entity** nodes to the owner and item 
 
 Right-click the canvas or open **Canvas actions** to change its background color, add TreeItems, or create skill-tree, roguelike-map, and relationship-tree examples. The background color is saved with the graph; **Reset background** restores the theme default. Right-click a node to change its shape, colors, outline width, and dimensions; drag its resize handle to resize it. Nodes use their entities' thumbnails as backgrounds. Open node options to connect without a mouse.
 
+In the entity's **Traits** tab, TreeGraph settings define default node and wire styles. Individual node and wire settings override those defaults; choose **Use tree defaults** to clear an override. Import a CSS file or edit CSS there to customize that tree's canvas. Styles are scoped to the canvas; CSS `@import` is not supported. Only import CSS from sources you trust.
+
 Right-click a wire to choose a normal, dashed, dotted, or brush style, change its color or thickness, or remove it. Drag a wire to reconnect its target; drop it on empty canvas to choose a target from a menu. Alt-drag across wires to cut them. Focus a wire and press Enter to open its options by keyboard.
 
 Expand **View options** to customize the grid and thumbnails; these preferences are stored in the local browser, separate from the saved graph.

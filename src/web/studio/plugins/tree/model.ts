@@ -30,8 +30,15 @@ export interface TreeEdgeAppearance {
   pattern?: TreeWirePattern;
 }
 
+export interface TreeAppearanceDefaults {
+  node?: TreeNodeAppearance & { shape?: TreeShape };
+  edge?: TreeEdgeAppearance;
+  customCss?: string;
+}
+
 export interface TreeAppearance {
   canvasBackground?: string;
+  defaults?: TreeAppearanceDefaults;
   nodes: Record<string, TreeNodeAppearance>;
   edges: Record<string, TreeEdgeAppearance>;
 }
@@ -188,12 +195,117 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
     try { data = JSON.parse(values.appearance); } catch { throw new Error("Malformed appearance: invalid JSON."); }
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Malformed appearance: expected an object.");
     for (const key of Object.keys(data)) {
-      if (key !== "nodes" && key !== "edges" && key !== "canvasBackground") throw new Error(`Malformed appearance: unexpected field '${key}'.`);
+      if (key !== "nodes" && key !== "edges" && key !== "canvasBackground" && key !== "defaults") throw new Error(`Malformed appearance: unexpected field '${key}'.`);
     }
     const appearanceMap = data as Record<string, unknown>;
     const canvasBackground = appearanceMap.canvasBackground;
     if (canvasBackground !== undefined && (typeof canvasBackground !== "string" || !HEX_COLOR_REGEX.test(canvasBackground))) {
       throw new Error("Invalid canvas background: expected a hex color in #RRGGBB format.");
+    }
+    const rawDefaults = appearanceMap.defaults;
+    let parsedDefaults: TreeAppearanceDefaults | undefined;
+    if (rawDefaults !== undefined) {
+      if (!rawDefaults || typeof rawDefaults !== "object" || Array.isArray(rawDefaults)) throw new Error("Malformed appearance: defaults must be an object.");
+      for (const key of Object.keys(rawDefaults)) {
+        if (key !== "node" && key !== "edge" && key !== "customCss") {
+          throw new Error(`Invalid appearance defaults: unexpected field '${key}'.`);
+        }
+      }
+      const defObj = rawDefaults as Record<string, unknown>;
+      let parsedNodeDefault: (TreeNodeAppearance & { shape?: TreeShape }) | undefined;
+      if (defObj.node !== undefined) {
+        if (!defObj.node || typeof defObj.node !== "object" || Array.isArray(defObj.node)) {
+          throw new Error("Invalid appearance defaults: node must be an object.");
+        }
+        for (const key of Object.keys(defObj.node)) {
+          if (!["background", "outline", "outlineWidth", "width", "height", "shape"].includes(key)) {
+            throw new Error(`Invalid appearance defaults for node: unexpected field '${key}'.`);
+          }
+        }
+        const s = defObj.node as Record<string, unknown>;
+        const nodeDef: TreeNodeAppearance & { shape?: TreeShape } = {};
+        if (s.background !== undefined) {
+          if (typeof s.background !== "string" || !HEX_COLOR_REGEX.test(s.background)) {
+            throw new Error("Invalid appearance defaults for node: background must be a hex color in #RRGGBB format.");
+          }
+          nodeDef.background = s.background;
+        }
+        if (s.outline !== undefined) {
+          if (typeof s.outline !== "string" || !HEX_COLOR_REGEX.test(s.outline)) {
+            throw new Error("Invalid appearance defaults for node: outline must be a hex color in #RRGGBB format.");
+          }
+          nodeDef.outline = s.outline;
+        }
+        if (s.outlineWidth !== undefined) {
+          if (typeof s.outlineWidth !== "number" || !Number.isFinite(s.outlineWidth) || s.outlineWidth < MIN_OUTLINE_WIDTH || s.outlineWidth > MAX_OUTLINE_WIDTH) {
+            throw new Error(`Invalid appearance defaults for node: outlineWidth must be a finite number between ${MIN_OUTLINE_WIDTH} and ${MAX_OUTLINE_WIDTH}.`);
+          }
+          nodeDef.outlineWidth = s.outlineWidth;
+        }
+        if (s.width !== undefined) {
+          if (typeof s.width !== "number" || !Number.isFinite(s.width) || s.width < MIN_NODE_WIDTH || s.width > MAX_NODE_WIDTH) {
+            throw new Error(`Invalid appearance defaults for node: width must be a finite number between ${MIN_NODE_WIDTH} and ${MAX_NODE_WIDTH}.`);
+          }
+          nodeDef.width = s.width;
+        }
+        if (s.height !== undefined) {
+          if (typeof s.height !== "number" || !Number.isFinite(s.height) || s.height < MIN_NODE_HEIGHT || s.height > MAX_NODE_HEIGHT) {
+            throw new Error(`Invalid appearance defaults for node: height must be a finite number between ${MIN_NODE_HEIGHT} and ${MAX_NODE_HEIGHT}.`);
+          }
+          nodeDef.height = s.height;
+        }
+        if (s.shape !== undefined) {
+          if (typeof s.shape !== "string" || !TREE_SHAPES.includes(s.shape as TreeShape)) {
+            throw new Error("Invalid appearance defaults for node: unknown shape.");
+          }
+          nodeDef.shape = s.shape as TreeShape;
+        }
+        parsedNodeDefault = nodeDef;
+      }
+      let parsedEdgeDefault: TreeEdgeAppearance | undefined;
+      if (defObj.edge !== undefined) {
+        if (!defObj.edge || typeof defObj.edge !== "object" || Array.isArray(defObj.edge)) {
+          throw new Error("Invalid appearance defaults: edge must be an object.");
+        }
+        for (const key of Object.keys(defObj.edge)) {
+          if (!["color", "width", "pattern"].includes(key)) {
+            throw new Error(`Invalid appearance defaults for edge: unexpected field '${key}'.`);
+          }
+        }
+        const s = defObj.edge as Record<string, unknown>;
+        const edgeDef: TreeEdgeAppearance = {};
+        if (s.color !== undefined) {
+          if (typeof s.color !== "string" || !HEX_COLOR_REGEX.test(s.color)) {
+            throw new Error("Invalid appearance defaults for edge: color must be a hex color in #RRGGBB format.");
+          }
+          edgeDef.color = s.color;
+        }
+        if (s.width !== undefined) {
+          if (typeof s.width !== "number" || !Number.isFinite(s.width) || s.width < MIN_WIRE_WIDTH || s.width > MAX_WIRE_WIDTH) {
+            throw new Error(`Invalid appearance defaults for edge: width must be a finite number between ${MIN_WIRE_WIDTH} and ${MAX_WIRE_WIDTH}.`);
+          }
+          edgeDef.width = s.width;
+        }
+        if (s.pattern !== undefined) {
+          if (typeof s.pattern !== "string" || !TREE_WIRE_PATTERNS.includes(s.pattern as TreeWirePattern)) {
+            throw new Error("Invalid appearance defaults for edge: unknown wire pattern.");
+          }
+          edgeDef.pattern = s.pattern as TreeWirePattern;
+        }
+        parsedEdgeDefault = edgeDef;
+      }
+      let parsedCustomCss: string | undefined;
+      if (defObj.customCss !== undefined) {
+        if (typeof defObj.customCss !== "string") {
+          throw new Error("Invalid appearance defaults: customCss must be a string.");
+        }
+        parsedCustomCss = defObj.customCss;
+      }
+      parsedDefaults = {
+        ...(parsedNodeDefault !== undefined ? { node: parsedNodeDefault } : {}),
+        ...(parsedEdgeDefault !== undefined ? { edge: parsedEdgeDefault } : {}),
+        ...(parsedCustomCss !== undefined ? { customCss: parsedCustomCss } : {}),
+      };
     }
     const rawNodes = appearanceMap.nodes;
     const parsedNodes: Record<string, TreeNodeAppearance> = Object.create(null);
@@ -284,7 +396,13 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
         parsedEdges[edgeKey] = edgeAppearance;
       }
     }
-    appearance = { nodes: parsedNodes, edges: parsedEdges, ...(canvasBackground !== undefined ? { canvasBackground: canvasBackground as string } : {}) };
+    appearance = {
+      nodes: parsedNodes,
+      edges: parsedEdges,
+      ...(canvasBackground !== undefined ? { canvasBackground: canvasBackground as string } : {}),
+      ...(parsedDefaults !== undefined ? { defaults: parsedDefaults } : {}),
+    };
+
   }
   return { nodes, edges, direction, positions, ...(shapes ? { shapes } : {}), ...(appearance ? { appearance } : {}) };
 }
@@ -309,6 +427,7 @@ export function setTreeGraph(entity: AnyEntity, instance: TraitInstance, graph: 
                 ? {
                     appearance: JSON.stringify({
                       ...(graph.appearance?.canvasBackground !== undefined ? { canvasBackground: graph.appearance.canvasBackground } : {}),
+                      ...(graph.appearance?.defaults !== undefined ? { defaults: graph.appearance.defaults } : {}),
                       nodes: graph.appearance?.nodes ?? {},
                       edges: graph.appearance?.edges ?? {},
                     }),
@@ -362,6 +481,44 @@ export function treeErrors(graph: TreeGraph, eligibleIds: ReadonlySet<string>): 
   if (graph.appearance) {
     if (graph.appearance.canvasBackground !== undefined && !HEX_COLOR_REGEX.test(graph.appearance.canvasBackground)) {
       errors.push("Invalid canvas background color.");
+    }
+    if (graph.appearance.defaults) {
+      if (graph.appearance.defaults.node) {
+        const node = graph.appearance.defaults.node;
+        if (node.background !== undefined && !HEX_COLOR_REGEX.test(node.background)) {
+          errors.push("Invalid appearance default background for node.");
+        }
+        if (node.outline !== undefined && !HEX_COLOR_REGEX.test(node.outline)) {
+          errors.push("Invalid appearance default outline for node.");
+        }
+        if (node.outlineWidth !== undefined && (!Number.isFinite(node.outlineWidth) || node.outlineWidth < MIN_OUTLINE_WIDTH || node.outlineWidth > MAX_OUTLINE_WIDTH)) {
+          errors.push("Invalid appearance default outlineWidth for node.");
+        }
+        if (node.width !== undefined && (!Number.isFinite(node.width) || node.width < MIN_NODE_WIDTH || node.width > MAX_NODE_WIDTH)) {
+          errors.push("Invalid appearance default width for node.");
+        }
+        if (node.height !== undefined && (!Number.isFinite(node.height) || node.height < MIN_NODE_HEIGHT || node.height > MAX_NODE_HEIGHT)) {
+          errors.push("Invalid appearance default height for node.");
+        }
+        if (node.shape !== undefined && !TREE_SHAPES.includes(node.shape)) {
+          errors.push("Invalid appearance default shape for node.");
+        }
+      }
+      if (graph.appearance.defaults.edge) {
+        const edge = graph.appearance.defaults.edge;
+        if (edge.color !== undefined && !HEX_COLOR_REGEX.test(edge.color)) {
+          errors.push("Invalid appearance default color for edge.");
+        }
+        if (edge.width !== undefined && (!Number.isFinite(edge.width) || edge.width < MIN_WIRE_WIDTH || edge.width > MAX_WIRE_WIDTH)) {
+          errors.push("Invalid appearance default width for edge.");
+        }
+        if (edge.pattern !== undefined && !TREE_WIRE_PATTERNS.includes(edge.pattern)) {
+          errors.push("Invalid appearance default pattern for edge.");
+        }
+      }
+      if (graph.appearance.defaults.customCss !== undefined && typeof graph.appearance.defaults.customCss !== "string") {
+        errors.push("Invalid appearance default customCss.");
+      }
     }
     if (graph.appearance.nodes) {
       for (const [id, style] of Object.entries(graph.appearance.nodes)) {
@@ -470,14 +627,16 @@ export function layoutTree(graph: TreeGraph): TreeLayout {
   const levels: string[][] = Array.from({ length: maxLevel + 1 }, () => []);
   for (const node of graph.nodes) levels[depth.get(node)!]!.push(node);
 
+  const defaultNodeWidth = graph.appearance?.defaults?.node?.width ?? CARD_WIDTH;
+  const defaultNodeHeight = graph.appearance?.defaults?.node?.height ?? CARD_HEIGHT;
+
   let maxNodeWidth = CARD_WIDTH;
   let maxNodeHeight = CARD_HEIGHT;
-  if (graph.appearance?.nodes) {
-    for (const node of graph.nodes) {
-      const style = graph.appearance.nodes[node];
-      if (style?.width && style.width > maxNodeWidth) maxNodeWidth = style.width;
-      if (style?.height && style.height > maxNodeHeight) maxNodeHeight = style.height;
-    }
+  for (const node of graph.nodes) {
+    const nodeWidth = graph.appearance?.nodes?.[node]?.width ?? defaultNodeWidth;
+    const nodeHeight = graph.appearance?.nodes?.[node]?.height ?? defaultNodeHeight;
+    if (nodeWidth > maxNodeWidth) maxNodeWidth = nodeWidth;
+    if (nodeHeight > maxNodeHeight) maxNodeHeight = nodeHeight;
   }
 
   const positions: Record<string, { x: number; y: number }> = Object.create(null);
@@ -555,8 +714,8 @@ export function layoutTree(graph: TreeGraph): TreeLayout {
   let maxX = 0;
   let maxY = 0;
   for (const [id, pos] of Object.entries(positions)) {
-    const nodeWidth = graph.appearance?.nodes?.[id]?.width ?? CARD_WIDTH;
-    const nodeHeight = graph.appearance?.nodes?.[id]?.height ?? CARD_HEIGHT;
+    const nodeWidth = graph.appearance?.nodes?.[id]?.width ?? defaultNodeWidth;
+    const nodeHeight = graph.appearance?.nodes?.[id]?.height ?? defaultNodeHeight;
     if (pos.x + nodeWidth > maxX) maxX = pos.x + nodeWidth;
     if (pos.y + nodeHeight > maxY) maxY = pos.y + nodeHeight;
   }

@@ -3,6 +3,7 @@ import { notify, studioState } from "../../state.ts";
 import { refreshWorkspace } from "../../view-models/workspace.ts";
 import { definePlugin } from "../runtime.ts";
 import TreeGraphPanel from "./TreeGraphPanel.vue";
+import TreeDefaultsEditor from "./TreeDefaultsEditor.vue";
 import { TREE_GRAPH_KEY, treeGraphTemplate, treeItemTemplate, treeTrait } from "./model.ts";
 
 export const treeGraphPlugin = definePlugin({
@@ -37,6 +38,11 @@ export const treeGraphPlugin = definePlugin({
       id: "tree-graph", label: "Tree", order: 30,
       appliesTo: (entity) => !!treeTrait(entity, studioState.traitTemplates, TREE_GRAPH_KEY),
       component: TreeGraphPanel,
+    });
+    ctx.traitInspector({
+      id: "tree-defaults",
+      traitKey: TREE_GRAPH_KEY,
+      component: TreeDefaultsEditor,
     });
   },
 });
