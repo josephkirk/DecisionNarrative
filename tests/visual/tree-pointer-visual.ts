@@ -39,6 +39,7 @@ try {
     await api("POST", "/api/v3/content/entity_templates", { id, name, thumbnail: id === "pointer-root" ? "docs/images/tree-pointer-inspector.png" : null, traits: [{ id: `${id}-trait`, template_id: itemTrait.id, values: {} }] });
   }
   await api("POST", "/api/v3/content/entity_templates", { id: "pointer-tree", name: "Skill tree", traits: [{ id: "tree-instance", template_id: treeTrait.id, values: { nodes: ["pointer-root", "pointer-child", "pointer-long"], edges: ['["pointer-root","pointer-child"]', '["pointer-root","pointer-long"]'], direction: "right", positions: JSON.stringify({ right: { "pointer-root": { x: -200, y: -100 }, "pointer-child": { x: 60, y: -100 }, "pointer-long": { x: 60, y: 30 } } }), appearance: JSON.stringify({ nodes: { "pointer-long": { background: "#ffffff" } }, edges: {}, defaults: { edge: { color: "#ff9900", width: 3, pattern: "dash" } } }) } }] });
+  await api("POST", "/api/v3/content/entity_templates", { id: "second-tree", name: "Second tree", traits: [{ id: "second-tree-instance", template_id: treeTrait.id, values: { nodes: ["pointer-root"], edges: [], direction: "right" } }] });
   const source = { id: "pointer", type: "plugin", title: "Set Tree Position", x: 300, y: 150, width: 220, height: 120, plugin_type: "tree.set_position", plugin_config: { entity_id: "pointer-tree", target_id: "pointer-root" } };
   const input = { id: "owner-input", kind: "data", from_node: "owner", from_port: "output", to_node: "pointer", to_port: "entity" };
   const n = (id: string, type: string, x: number, extra: object = {}) => ({ id, type, title: id, x, y: 150, width: 180, height: 100, ...extra });
@@ -97,6 +98,13 @@ try {
   assert(saved.graph.nodes.find((node: { id: string; value?: unknown }) => node.id === "pointer__position")?.value === "pointer-child", "storylet saves the selected target");
   const after = await api("GET", "/api/v3/content/entity_templates/pointer-tree");
   assert(JSON.stringify(before.traits) === JSON.stringify(after.traits), "selection does not modify the tree");
+  await page.locator(".node-title-input").nth(1).click();
+  await page.locator("select.form-select").selectOption("second-tree");
+  await page.locator(".node-title-input").nth(3).click();
+  const changedTreeWarning = page.getByRole("alert").filter({ hasText: "The connected tree changed" });
+  assert(await changedTreeWarning.isVisible(), "changing the connected tree explains that a new position is required");
+  await picker.getByRole("radio", { name: "Select Root" }).click();
+  assert(await changedTreeWarning.count() === 0, "choosing a position in the new tree clears the warning");
   const removed = structuredClone(after);
   removed.traits[0].values.nodes = ["pointer-root", "pointer-long"];
   removed.traits[0].values.edges = ['["pointer-root","pointer-long"]'];
@@ -153,10 +161,16 @@ try {
     start: { kind: "beginning" }, storyletId: "pointer-story", expectedRevision: (await api("GET", "/api/v3/project")).revision, idempotencyKey: "tree-pointer-visual"
   });
   assert(typeof run.id === "string", "saved pointer story starts in the real playtest service");
+  await page.reload();
+  await picker.waitFor();
   await page.locator(".graph-node.get_entity .node-body").click();
   await page.locator(".property-inspector-panel select").selectOption("world");
   await page.locator(".graph-node.plugin .node-body").click();
-  assert(await page.getByText("World does not have the TreeGraph trait.").isVisible(), "non-tree input explains the missing trait");
+  assert(await page.getByText("The intrinsic World cannot own a TreeGraph.").isVisible(), "World input explains that it cannot own a tree");
+  await page.locator(".graph-node.get_entity .node-body").click();
+  await page.locator(".property-inspector-panel select").selectOption("impostor");
+  await page.locator(".graph-node.plugin .node-body").click();
+  assert(await page.getByText("Not a tree does not have the TreeGraph trait.").isVisible(), "non-tree input explains the missing trait");
 
   const checkSource = { ...source, id: "check", title: "Is Tree Position", plugin_type: "tree.is_position", plugin_config: { entity_id: "pointer-tree", target_id: "pointer-child" } };
   const checkInput = { ...input, id: "check-input", to_node: "check" };
@@ -212,6 +226,12 @@ try {
   const region = await picker.boundingBox();
   assert(chosen && region && chosen.x < region.x + region.width && chosen.x + chosen.width > region.x,
     "large-tree zoom keeps the selected position visible");
+  await picker.getByRole("radio", { name: "Select Root" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  const last = await picker.getByRole("radio", { name: "Select Skill skill-11" }).boundingBox();
+  const visibleRegion = await picker.boundingBox();
+  assert(last && visibleRegion && last.x < visibleRegion.x + visibleRegion.width && last.x + last.width > visibleRegion.x,
+    "keyboard navigation scrolls the selected tree position into view");
   await page.getByRole("button", { name: "Set Tree Position", exact: true }).first().click();
   assert(await page.getByText("Connect a Get Entity node to choose a tree.").isVisible(), "unconnected node explains how to choose a tree");
   assert(errors.length === 0, `no browser errors: ${errors.join("; ")}`);

@@ -308,6 +308,18 @@ try {
   await namedEdge.waitFor({ state: "attached" });
   check("wire accessible label includes relationship name", (await namedEdge.count()) === 1);
 
+  const editPoint = await getEdgeMidpoint(namedEdge);
+  await page.mouse.dblclick(editPoint.x, editPoint.y);
+  await relInput.fill("");
+  check("clearing an existing relationship can be saved", await saveRelBtn.isEnabled());
+  await saveRelBtn.click();
+  check("clearing the relationship removes its wire label", await edgeLabel.count() === 0);
+  const clearedEdge = page.locator('.tree-edge-hit[aria-label*="Connection from Item B to Item D"]');
+  const restorePoint = await getEdgeMidpoint(clearedEdge);
+  await page.mouse.dblclick(restorePoint.x, restorePoint.y);
+  await relInput.fill("causes");
+  await saveRelBtn.click();
+
   // 11. Reconnect preservation: drag named wire from Item D to Item C
   const namedEdgeMidpoint = await getEdgeMidpoint(namedEdge);
   await page.mouse.move(namedEdgeMidpoint.x, namedEdgeMidpoint.y);

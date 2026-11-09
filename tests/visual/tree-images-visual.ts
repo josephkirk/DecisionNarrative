@@ -200,6 +200,22 @@ try {
   await imageEl.locator("img").evaluate(async (img: HTMLImageElement) => { await img.decode(); });
   check("uploaded image bytes render", await imageEl.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth > 0));
 
+  // A short image menu should stay near its anchor even in a short canvas.
+  const canvas = page.locator(".tree-scroll");
+  await canvas.evaluate((element: HTMLElement) => { element.style.height = "390px"; });
+  await imageEl.scrollIntoViewIfNeeded();
+  await sleep(100);
+  const compactImage = (await imageEl.boundingBox())!;
+  const clickY = compactImage.y + compactImage.height / 2;
+  await page.mouse.click(compactImage.x + compactImage.width / 2, clickY, { button: "right" });
+  const compactMenu = (await contextMenu.boundingBox())!;
+  const compactCanvas = (await canvas.boundingBox())!;
+  const expectedY = Math.max(compactCanvas.y, Math.min(clickY, compactCanvas.y + compactCanvas.height - compactMenu.height));
+  check("image menu stays near its anchor and within a short canvas", Math.abs(compactMenu.y - expectedY) <= 2);
+  await page.keyboard.press("Escape");
+  await canvas.evaluate((element: HTMLElement) => { element.style.height = ""; });
+  await sleep(100);
+
   // 5. Verify image can drag and resize
   const initialPos = await getPos(imageEl);
   const initialBox = (await imageEl.boundingBox())!;

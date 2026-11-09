@@ -33,12 +33,27 @@ const resizeDrag = ref<{ id: string; pointer: number; x: number; y: number; widt
 const cutDrag = ref<{ pointer: number; start: TreePoint; end: TreePoint } | null>(null);
 const zoom = ref(100);
 const treeScroll = ref<HTMLElement | null>(null);
+const contextMenu = ref<HTMLElement | null>(null);
 const imageInput = ref<HTMLInputElement | null>(null);
 let imagePoint: TreePoint | null = null;
 const panX = ref(40);
 const panY = ref(40);
 let pan: { pointer: number; x: number; y: number } | null = null;
 const menu = ref<{ x: number; y: number; node?: string; edge?: number; image?: string; reconnect?: number; point: TreePoint } | null>(null);
+watch(contextMenu, (element, _previous, onCleanup) => {
+  if (!element) return;
+  const fit = () => {
+    const canvas = treeScroll.value, current = menu.value;
+    if (!canvas || !current) return;
+    current.x = Math.max(0, Math.min(current.x, canvas.clientWidth - element.offsetWidth));
+    current.y = Math.max(0, Math.min(current.y, canvas.clientHeight - element.offsetHeight));
+  };
+  const observer = new ResizeObserver(fit);
+  observer.observe(element);
+  if (treeScroll.value) observer.observe(treeScroll.value);
+  fit();
+  onCleanup(() => observer.disconnect());
+});
 const menuSearch = ref("");
 const editingRelationship = ref(false);
 const relationshipDraft = ref("");
@@ -259,8 +274,8 @@ function openContext(event: MouseEvent, node?: string, edge?: number) {
   menuSearch.value = "";
   editingRelationship.value = false;
   menu.value = {
-    x: Math.max(0, Math.min(x, rect.width - 260)),
-    y: Math.max(0, Math.min(y, rect.height - Math.min(420, rect.height))),
+    x: Math.max(0, x),
+    y: Math.max(0, y),
     node,
     edge,
     point: event.currentTarget instanceof HTMLElement && event.currentTarget.closest(".tree-canvas-toolbar")
@@ -306,7 +321,7 @@ function setRelationship(index: number, name?: string) {
   const edge = current?.edges[index];
   if (!current || !edge || props.readonly) return;
   const relationship = name?.trim();
-  if (name !== undefined && !relationship) return;
+  if (name !== undefined && !relationship && !edge.relationship) return;
   const { relationship: _previous, ...unnamed } = edge;
   const replacement = relationship ? { ...unnamed, relationship } : unnamed;
   patch({ ...current, edges: current.edges.map((other, i) => i === index ? replacement : other) });
@@ -711,7 +726,7 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
               <template v-if="!readonly && !nodeAppearance(id).locked"><span v-for="direction in ['n','ne','e','se','s','sw','w','nw']" :key="direction" class="tree-resize" :class="`resize-${direction}`" :title="`Resize ${label(id)}`" aria-hidden="true" @pointerdown.stop="startResize(id, direction, $event)" /></template>
             </article>
           </div>
-        <div v-if="menu" class="tree-context" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" @pointerdown.stop @wheel.stop @keydown.esc.stop="menu = null">
+        <div v-if="menu" ref="contextMenu" class="tree-context" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" @pointerdown.stop @wheel.stop @keydown.esc.stop="menu = null">
           <template v-if="menu.node">
             <strong>{{ label(menu.node) }}</strong>
             <button type="button" @click="updateNodeAppearance(menu.node, { locked: !nodeAppearance(menu.node).locked })">{{ nodeAppearance(menu.node).locked ? 'Unlock node' : 'Lock node' }}</button>
@@ -739,7 +754,7 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
             <template v-if="editingRelationship">
               <label for="tree-relationship-name">Relationship name</label>
               <input id="tree-relationship-name" v-model="relationshipDraft" class="form-input tree-relationship-name" aria-label="Relationship name" placeholder="Relationship name" @keydown.enter.prevent.stop="setRelationship(menu.edge, relationshipDraft)" />
-              <button type="button" :disabled="!relationshipDraft.trim()" @click="setRelationship(menu.edge, relationshipDraft)">Save relationship</button>
+              <button type="button" :disabled="!relationshipDraft.trim() && !graph.edges[menu.edge]!.relationship" @click="setRelationship(menu.edge, relationshipDraft)">Save relationship</button>
               <button type="button" @click="cancelRelationshipEdit">Cancel</button>
             </template>
             <button v-else type="button" class="tree-relationship-toggle" @click="editRelationship(menu.edge)">{{ graph.edges[menu.edge]!.relationship ? 'Edit relationship' : 'Add relationship' }}</button>

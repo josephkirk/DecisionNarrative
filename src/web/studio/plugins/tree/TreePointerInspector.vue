@@ -121,8 +121,8 @@ async function moveSelection(id: string, event: KeyboardEvent) {
   <div class="tree-pointer-inspector">
     <p v-if="!entityId">Connect a Get Entity node to choose a tree.</p>
     <p v-else-if="!owner">The connected entity is unavailable.</p>
-    <p v-else-if="!trait">{{ owner.name }} does not have the TreeGraph trait.</p>
     <p v-else-if="owner.id === 'world'">The intrinsic World cannot own a TreeGraph.</p>
+    <p v-else-if="!trait">{{ owner.name }} does not have the TreeGraph trait.</p>
     <p v-else-if="parsed.error" role="alert">{{ parsed.error }}</p>
     <p v-else-if="!parsed.tree?.nodes.length">This tree has no items.</p>
     <template v-else-if="layout && parsed.tree">
@@ -156,6 +156,7 @@ async function moveSelection(id: string, event: KeyboardEvent) {
           </g>
         </svg>
       </div>
+      <p v-if="config.target_id && config.entity_id !== entityId" role="alert">The connected tree changed. Choose a position in {{ owner?.name }}.</p>
       <p v-if="config.entity_id === entityId && config.target_id && !parsed.tree.nodes.includes(config.target_id)" role="alert">The selected item is no longer in this tree. Choose another position.</p>
       <p v-else-if="config.entity_id === entityId && config.target_id">Selected: <strong>{{ names.get(config.target_id) || config.target_id }}</strong></p>
     </template>
