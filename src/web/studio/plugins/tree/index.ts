@@ -4,6 +4,8 @@ import { refreshWorkspace } from "../../view-models/workspace.ts";
 import { definePlugin } from "../runtime.ts";
 import TreeGraphPanel from "./TreeGraphPanel.vue";
 import TreeDefaultsEditor from "./TreeDefaultsEditor.vue";
+import TreePointerInspector from "./TreePointerInspector.vue";
+import { isTreePositionNode, setTreePositionNode } from "./pointerNodes.ts";
 import { TREE_GRAPH_KEY, treeGraphTemplate, treeItemTemplate, treeTrait } from "./model.ts";
 
 export const treeGraphPlugin = definePlugin({
@@ -32,6 +34,8 @@ export const treeGraphPlugin = definePlugin({
     }
     ctx.on("workspace/loaded", () => void ensureTraits());
     void ensureTraits();
+    ctx.nodeType({ ...setTreePositionNode, inspector: TreePointerInspector });
+    ctx.nodeType({ ...isTreePositionNode, inspector: TreePointerInspector });
     ctx.entityPanel({
       id: "tree-graph", label: "Tree", order: 30,
       appliesTo: (entity) => !!treeTrait(entity, studioState.traitTemplates, TREE_GRAPH_KEY),

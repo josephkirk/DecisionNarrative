@@ -601,6 +601,17 @@ impl StudioService {
                 crate::inventory::validate_inventory_graph(&graph, &runtime_entities)
                     .map_err(|error| format!("Inventory validation failed: {error}"))?;
             }
+            if crate::tree_pointer::uses_pointer(&graph) || storylet.precondition_graph.as_ref().is_some_and(crate::tree_pointer::uses_pointer) {
+                let mut runtime_entities = index.entity_templates.clone();
+                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.entities, &index.templates)?;
+                crate::tree_pointer::project_tree_entities(&mut runtime_entities, &index.entities, &index.templates)?;
+                crate::tree_pointer::validate_pointer_graph(&graph, &runtime_entities)
+                    .map_err(|error| format!("Tree position validation failed: {error}"))?;
+                if let Some(precondition) = &storylet.precondition_graph {
+                    crate::tree_pointer::validate_pointer_graph(precondition, &runtime_entities)
+                        .map_err(|error| format!("Tree position validation failed: {error}"))?;
+                }
+            }
             storylet.ending = graph.ending_from_graph();
             entities::normalize_optional_id(&mut storylet.folder_id);
             entities::validate_folder_ref("storylets", storylet.folder_id.as_deref(), &index)

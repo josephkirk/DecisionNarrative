@@ -16,6 +16,7 @@ pub mod scenario;
 pub mod service;
 pub mod store;
 pub mod tree_graph;
+pub mod tree_pointer;
 
 pub use http::build_router;
 pub use service::StudioService;

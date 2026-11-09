@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retained when wires are reconnected, saved, or exported.
 - Tree list view with editable TreeItem trait columns, hierarchy and relationship
   references, plus default gameplay fields and non-negative level and cost.
+- Tree position storylet nodes with a read-only graph picker and per-tree playtest pointer.
 - Shared color wheel picker for tree graph and vector canvas colors.
 
 ### Fixed

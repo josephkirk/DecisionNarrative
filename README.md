@@ -117,6 +117,8 @@ Switch between **Canvas** and **List** in the Tree tab. The list shows the hiera
 
 `TreeItem` includes non-negative integer **Level** and **Cost**, a **Cost entity** reference, gameplay tags to add and remove, **Description**, **Asset**, and **Gameplay entity**. The gameplay entity can refer to an in-game skill or another entity; it is independent of TreeGraph connections. Add further columns by adding properties to the `TreeItem` trait.
 
+In a story graph, connect **Get Entity** to **Set Tree Position** or **Is Tree Position**. Select a TreeItem in the read-only tree preview. Set moves that tree's playtest pointer to the selected item; Is outputs a boolean for a Condition Node. Each tree starts with no position, and any item in the tree can be selected regardless of connections. The pointer belongs to playtest state, not the authored tree.
+
 Right-click the canvas or open **Canvas actions** to change its background color, add TreeItems, or create skill-tree, roguelike-map, and relationship-tree examples. The background color is saved with the graph; **Reset background** restores the theme default. Right-click a node to change its shape, colors, outline width, and dimensions; drag its resize handle to resize it. Nodes use their entities' thumbnails as backgrounds. Open node options to connect without a mouse.
 
 Use **Canvas actions → Add image** to place a PNG or JPEG under nodes and wires. Drag its edges to resize it. Right-click an image or node to lock or unlock its position and size. Exported JSON references the uploaded image file; it does not include the file bytes.
