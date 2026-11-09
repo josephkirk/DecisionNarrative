@@ -181,19 +181,31 @@ pub fn validate_tree_graphs(
                             continue;
                         };
 
-                        let parsed_pair: Result<[String; 2], _> = serde_json::from_str(edge_str);
-                        let edge_endpoints = match parsed_pair {
-                            Ok([from, to]) => (from, to),
-                            _ => {
+                        let parsed_json = serde_json::from_str::<Value>(edge_str);
+                        let edge_endpoints = match &parsed_json {
+                            Ok(Value::Array(items)) => match items.as_slice() {
+                                [Value::String(from), Value::String(to)] => {
+                                    Some((from.as_str(), to.as_str()))
+                                }
+                                [Value::String(from), Value::String(to), Value::String(rel)]
+                                    if !rel.trim().is_empty() =>
+                                {
+                                    Some((from.as_str(), to.as_str()))
+                                }
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+
+                        let (from_str, to_str) = match edge_endpoints {
+                            Some(endpoints) => endpoints,
+                            None => {
                                 issues.push(format!(
                                     "owner '{display_name}': tree_graph malformed edge '{edge_str}'"
                                 ));
                                 continue;
                             }
                         };
-
-                        let from_str = edge_endpoints.0.as_str();
-                        let to_str = edge_endpoints.1.as_str();
 
                         let from_valid = valid_nodes.contains(from_str);
                         let to_valid = valid_nodes.contains(to_str);
@@ -1955,5 +1967,91 @@ mod tests {
         assert!(issues.iter().any(|i| i.contains("appearance image at index 4 missing 'locked'")));
         assert!(issues.iter().any(|i| i.contains("appearance image at index 5 'id' must be a string")));
         assert!(issues.iter().any(|i| i.contains("appearance image at index 5 has invalid src")));
+    }
+
+    #[test]
+    fn test_edge_relationship_labels() {
+        let templates = standard_templates();
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            {
+                "id": "item-1",
+                "name": "Item 1",
+                "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+            },
+            {
+                "id": "item-2",
+                "name": "Item 2",
+                "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+            },
+            {
+                "id": "item-3",
+                "name": "Item 3",
+                "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+            },
+            {
+                "id": "graph-valid",
+                "name": "Graph Valid",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1", "item-2", "item-3"],
+                        "edges": [
+                            "[\"item-1\",\"item-2\",\"leads_to\"]",
+                            "[\"item-2\",\"item-3\",\"depends on\"]",
+                            "[\"item-3\",\"item-1\"]"
+                        ]
+                    }
+                }]
+            },
+            {
+                "id": "graph-invalid",
+                "name": "Graph Invalid",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1", "item-2"],
+                        "edges": [
+                            "[\"item-1\",\"item-2\",\"\"]",
+                            "[\"item-1\",\"item-2\",\"   \"]",
+                            "[\"item-1\",\"item-2\",123]",
+                            "[\"item-1\",\"item-2\",null]",
+                            "[\"item-1\",\"item-2\",true]",
+                            "[\"item-1\",\"item-2\",[\"nested\"]]",
+                            "[\"item-1\",\"item-2\",{\"rel\":\"name\"}]",
+                            "[\"item-1\",\"item-2\",\"rel\",\"extra\"]"
+                        ]
+                    }
+                }]
+            },
+            {
+                "id": "graph-duplicate",
+                "name": "Graph Duplicate",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1", "item-2"],
+                        "edges": [
+                            "[\"item-1\",\"item-2\"]",
+                            "[\"item-1\",\"item-2\",\"named\"]"
+                        ]
+                    }
+                }]
+            }
+        ])).unwrap();
+
+        let index = make_test_index(templates, entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+
+        assert!(!issues.iter().any(|i| i.contains("Graph Valid")));
+
+        let invalid_issues: Vec<&String> = issues.iter().filter(|i| i.contains("Graph Invalid")).collect();
+        assert_eq!(invalid_issues.len(), 8);
+        for issue in &invalid_issues {
+            assert!(issue.contains("tree_graph malformed edge"));
+        }
+
+        let dup_issues: Vec<&String> = issues.iter().filter(|i| i.contains("Graph Duplicate")).collect();
+        assert_eq!(dup_issues.len(), 1);
+        assert!(dup_issues[0].contains("duplicate edge from 'item-1' to 'item-2'"));
     }
 }

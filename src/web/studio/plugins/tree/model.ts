@@ -8,6 +8,7 @@ export const TREE_SHAPES: readonly TreeShape[] = ["card", "rounded", "ellipse", 
 export interface TreeEdge {
   from: string;
   to: string;
+  relationship?: string;
 }
 export interface TreePoint { x: number; y: number }
 export type TreePositions = Partial<Record<TreeDirection, Record<string, TreePoint>>>;
@@ -169,8 +170,14 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
       } catch (err) {
         throw new Error(`Malformed edge JSON at index ${index}: ${raw} (${err instanceof Error ? err.message : String(err)})`);
       }
-      if (!Array.isArray(parsed) || parsed.length !== 2 || typeof parsed[0] !== "string" || typeof parsed[1] !== "string") {
-        throw new Error(`Malformed edge structure at index ${index}: expected [from, to] string pair, received ${raw}.`);
+      if (!Array.isArray(parsed) || (parsed.length !== 2 && parsed.length !== 3) || typeof parsed[0] !== "string" || typeof parsed[1] !== "string") {
+        throw new Error(`Malformed edge structure at index ${index}: expected [from, to] or [from, to, relationship] string array, received ${raw}.`);
+      }
+      if (parsed.length === 3) {
+        if (typeof parsed[2] !== "string" || parsed[2].trim() === "") {
+          throw new Error(`Malformed edge relationship at index ${index}: expected non-empty string, received ${JSON.stringify(parsed[2])}.`);
+        }
+        return { from: parsed[0], to: parsed[1], relationship: parsed[2] };
       }
       return { from: parsed[0], to: parsed[1] };
     });
@@ -499,7 +506,12 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
 }
 
 export function setTreeGraph(entity: AnyEntity, instance: TraitInstance, graph: TreeGraph): Partial<AnyEntity> {
-  const encodedEdges = graph.edges.map((edge) => JSON.stringify([edge.from, edge.to]));
+  const encodedEdges = graph.edges.map((edge) => {
+    if (typeof edge.relationship === "string" && edge.relationship.trim() !== "") {
+      return JSON.stringify([edge.from, edge.to, edge.relationship]);
+    }
+    return JSON.stringify([edge.from, edge.to]);
+  });
   return {
     traits: (entity.traits ?? []).map((trait) => {
       if (trait.id !== instance.id) {
@@ -558,6 +570,9 @@ export function treeErrors(graph: TreeGraph, eligibleIds: ReadonlySet<string>): 
     errors.push("Edge endpoints must exist in the graph nodes.");
   }
 
+  if (graph.edges.some((edge) => edge.relationship !== undefined && (typeof edge.relationship !== "string" || !edge.relationship.trim()))) {
+    errors.push("Edge relationship must be a nonempty string.");
+  }
   const seenEdges = new Set<string>();
   let hasDuplicate = false;
   for (const edge of graph.edges) {

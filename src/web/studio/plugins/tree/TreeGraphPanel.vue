@@ -38,6 +38,8 @@ const panY = ref(40);
 let pan: { pointer: number; x: number; y: number } | null = null;
 const menu = ref<{ x: number; y: number; node?: string; edge?: number; image?: string; reconnect?: number; point: TreePoint } | null>(null);
 const menuSearch = ref("");
+const editingRelationship = ref(false);
+const relationshipDraft = ref("");
 const showGrid = ref(true);
 const showThumbnails = ref(true);
 try {
@@ -253,6 +255,7 @@ function openContext(event: MouseEvent, node?: string, edge?: number) {
   const anchor = event.currentTarget instanceof Element ? event.currentTarget.getBoundingClientRect() : rect;
   const x = (event.clientX || anchor.left + anchor.width / 2) - rect.left, y = (event.clientY || anchor.bottom) - rect.top;
   menuSearch.value = "";
+  editingRelationship.value = false;
   menu.value = {
     x: Math.max(0, Math.min(x, rect.width - 260)),
     y: Math.max(0, Math.min(y, rect.height - Math.min(420, rect.height))),
@@ -267,6 +270,41 @@ function openContext(event: MouseEvent, node?: string, edge?: number) {
 function openEdgeKeyboard(event: KeyboardEvent, index: number) {
   const bounds = (event.currentTarget as Element).getBoundingClientRect();
   openContext(new MouseEvent("contextmenu", { clientX: bounds.left + bounds.width / 2, clientY: bounds.top + bounds.height / 2 }), undefined, index);
+}
+function editRelationship(index: number) {
+  relationshipDraft.value = graph.value?.edges[index]?.relationship ?? "";
+  editingRelationship.value = true;
+  void nextTick(() => treeScroll.value?.querySelector<HTMLInputElement>(".tree-relationship-name")?.focus());
+}
+function wireAtPoint(x: number, y: number): SVGElement | undefined {
+  return document.elementsFromPoint(x, y).find((element): element is SVGElement =>
+    element instanceof SVGElement && element.matches(".tree-edge-hit") && !!treeScroll.value?.contains(element));
+}
+function openZoneContext(id: string, event: MouseEvent) {
+  const hit = wireAtPoint(event.clientX, event.clientY);
+  openContext(event, hit ? undefined : id, hit ? Number(hit.dataset.index) : undefined);
+}
+function wireDoubleClick(event: MouseEvent) {
+  const top = document.elementFromPoint(event.clientX, event.clientY);
+  if (!top?.closest(".tree-edge-hit, .tree-connect-zone")) return;
+  const hit = wireAtPoint(event.clientX, event.clientY);
+  if (!hit) return;
+  const index = Number(hit.dataset.index);
+  if (!Number.isInteger(index) || !graph.value?.edges[index] || props.readonly) return;
+  openContext(event, undefined, index);
+  editRelationship(index);
+}
+function setRelationship(index: number, name?: string) {
+  const current = graph.value;
+  const edge = current?.edges[index];
+  if (!current || !edge || props.readonly) return;
+  const relationship = name?.trim();
+  if (name !== undefined && !relationship) return;
+  const { relationship: _previous, ...unnamed } = edge;
+  const replacement = relationship ? { ...unnamed, relationship } : unnamed;
+  patch({ ...current, edges: current.edges.map((other, i) => i === index ? replacement : other) });
+  editingRelationship.value = false;
+  menu.value = null;
 }
 function addAtContext(id: string) {
   const current = graph.value, position = menu.value?.point;
@@ -365,6 +403,8 @@ function connect(from: string, to: string) {
 function beginLink(id: string, event: PointerEvent) {
   if (event.altKey) { startPan(event); return; }
   if (event.button !== 0 || props.readonly || creatingExample.value) return;
+  const hit = wireAtPoint(event.clientX, event.clientY);
+  if (hit) { wireDown(Number(hit.dataset.index), event); return; }
   source.value = id;
   linkDrag.value = { from: id, pointer: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, moved: false };
   treeScroll.value?.setPointerCapture(event.pointerId);
@@ -413,7 +453,7 @@ function reconnectEdge(index: number, to: string) {
   const current = graph.value, edge = current?.edges[index];
   if (!current || !edge || !current.nodes.includes(to) || props.readonly) return;
   if (current.edges.some((other, i) => i !== index && other.from === edge.from && other.to === to)) { notice.value = "That connection already exists."; return; }
-  const replacement = { from: edge.from, to };
+  const replacement = { ...edge, to };
   const edges = current.edges.map((other, i) => i === index ? replacement : other);
   let appearance = current.appearance;
   if (appearance) {
@@ -431,7 +471,7 @@ function wireDown(index: number, event: PointerEvent) {
   const edge = graph.value?.edges[index];
   if (!edge || props.readonly || event.button !== 0) return;
   linkDrag.value = { from: edge.from, edge: index, pointer: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, moved: false };
-  treeScroll.value?.setPointerCapture(event.pointerId);
+  (event.currentTarget as Element).setPointerCapture(event.pointerId);
   event.preventDefault();
   event.stopPropagation();
 }
@@ -555,7 +595,7 @@ async function createExample(id: string) {
     notice.value = `Could not create example: ${error instanceof Error ? error.message : String(error)}.${remaining ? ` ${remaining} created entities could not be removed.` : ""}`;
   } finally { creatingExample.value = false; }
 }
-function edgePath(edge: TreeEdge): string | null {
+function edgeGeometry(edge: TreeEdge): { path: string; label: TreePoint } | null {
   const a = layout.value?.positions[edge.from];
   const b = layout.value?.positions[edge.to];
   if (!a || !b) return null;
@@ -563,7 +603,10 @@ function edgePath(edge: TreeEdge): string | null {
   if (edge.from === edge.to) {
     const halfWidth = sizeA.width / 2, halfHeight = sizeA.height / 2, offset = Math.min(26, halfWidth / 2);
     const inset = nodeShape(edge.from) === "diamond" ? halfHeight * offset / halfWidth : nodeShape(edge.from) === "ellipse" ? halfHeight * (1 - Math.sqrt(1 - (offset / halfWidth) ** 2)) : 0;
-    return `M ${a.x + halfWidth + offset} ${a.y + inset} C ${a.x + halfWidth + offset + 24} ${a.y - 38}, ${a.x + halfWidth - offset - 24} ${a.y - 38}, ${a.x + halfWidth - offset} ${a.y + inset}`;
+    return {
+      path: `M ${a.x + halfWidth + offset} ${a.y + inset} C ${a.x + halfWidth + offset + 24} ${a.y - 38}, ${a.x + halfWidth - offset - 24} ${a.y - 38}, ${a.x + halfWidth - offset} ${a.y + inset}`,
+      label: { x: a.x + halfWidth, y: (a.y + inset) * .25 + (a.y - 38) * .75 },
+    };
   }
   const ax = a.x + sizeA.width / 2, ay = a.y + sizeA.height / 2, bx = b.x + sizeB.width / 2, by = b.y + sizeB.height / 2;
   const dx = bx - ax, dy = by - ay;
@@ -577,16 +620,19 @@ function edgePath(edge: TreeEdge): string | null {
   const fromClip = clip(edge.from, sizeA), toClip = clip(edge.to, sizeB);
   const x1 = ax + dx * fromClip, y1 = ay + dy * fromClip, x2 = bx - dx * toClip, y2 = by - dy * toClip;
   const reciprocal = graph.value?.edges.some((other) => other.from === edge.to && other.to === edge.from);
-  if (!reciprocal) return `M ${x1} ${y1} L ${x2} ${y2}`;
+  const midpoint = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
+  if (!reciprocal) return { path: `M ${x1} ${y1} L ${x2} ${y2}`, label: midpoint };
   const length = Math.hypot(dx, dy);
-  return `M ${x1} ${y1} Q ${(x1 + x2) / 2 - dy / length * 32} ${(y1 + y2) / 2 + dx / length * 32} ${x2} ${y2}`;
+  const cx = midpoint.x - dy / length * 32, cy = midpoint.y + dx / length * 32;
+  return { path: `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`, label: { x: (midpoint.x + cx) / 2, y: (midpoint.y + cy) / 2 } };
 }
+function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.path ?? null; }
 </script>
 
 <template>
   <section class="tree-panel" aria-label="Tree graph">
     <header class="tree-header">
-      <div><h2>Tree graph</h2><p class="field-sublabel">Drag outside a node to connect; drag its edge or corner to resize. Alt-drag across wires to cut. Right-click for options.</p></div>
+      <div><h2>Tree graph</h2><p class="field-sublabel">Drag outside a node to connect; drag its edge or corner to resize. Double-click a wire to name its relationship. Alt-drag across wires to cut. Right-click for options.</p></div>
     </header>
     <p v-if="parsed.error" class="tree-error" role="alert">Tree data cannot be read: {{ parsed.error }}</p>
     <template v-if="graph && layout">
@@ -594,7 +640,7 @@ function edgePath(edge: TreeEdge): string | null {
       <p v-if="status" class="field-sublabel" role="status">{{ status }}</p>
       <p v-if="source && !readonly" class="tree-link-hint" role="status">Connecting from {{ label(source) }}. Open another node's options to connect. <button type="button" @click="source = ''">Cancel</button></p>
       <div class="tree-meta"><span>{{ graph.nodes.length }} items</span><span>{{ graph.edges.length }} connections</span><span>{{ roots.size }} roots</span></div>
-      <div :id="canvasId" ref="treeScroll" class="tree-scroll" :class="{ 'hide-grid': !showGrid }" :style="{ backgroundColor: graph.appearance?.canvasBackground, backgroundPosition: `${panX}px ${panY}px`, backgroundSize: `${24 * zoomFactor}px ${24 * zoomFactor}px` }" tabindex="0" aria-label="Tree graph canvas; drag background to pan, use mouse wheel to zoom" @contextmenu="openContext($event)" @pointerdown="startPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @wheel.prevent="wheelZoom" @keydown="keyboardPan">
+      <div :id="canvasId" ref="treeScroll" class="tree-scroll" :class="{ 'hide-grid': !showGrid }" :style="{ backgroundColor: graph.appearance?.canvasBackground, backgroundPosition: `${panX}px ${panY}px`, backgroundSize: `${24 * zoomFactor}px ${24 * zoomFactor}px` }" tabindex="0" aria-label="Tree graph canvas; drag background to pan, use mouse wheel to zoom" @contextmenu="openContext($event)" @dblclick="wireDoubleClick" @pointerdown="startPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @wheel.prevent="wheelZoom" @keydown="keyboardPan">
         <component :is="'style'" v-if="customCanvasCss" v-text="customCanvasCss" />
         <input ref="imageInput" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" hidden @change="addImage" />
         <strong class="tree-canvas-title" :title="entity.name">{{ entity.name }}</strong>
@@ -630,13 +676,14 @@ function edgePath(edge: TreeEdge): string | null {
               <template v-for="(edge, index) in graph.edges" :key="`${edge.from}-${edge.to}-${index}`">
                 <path v-if="edgePath(edge) && edgeAppearance(edge).pattern === 'brush'" :d="edgePath(edge) ?? ''" class="tree-edge" :style="{ stroke: edgeAppearance(edge).color, strokeWidth: Math.max(1, (edgeAppearance(edge).width ?? 2) * .45) }" />
                 <path v-if="edgePath(edge)" :d="edgePath(edge) ?? ''" class="tree-edge" :class="`wire-${edgeAppearance(edge).pattern ?? 'solid'}`" :style="{ stroke: edgeAppearance(edge).color, strokeWidth: edgeAppearance(edge).width }" :marker-end="`url(#${markerId})`" />
-                <path v-if="edgePath(edge) && !readonly" :d="edgePath(edge) ?? ''" class="tree-edge-hit" :data-index="index" :aria-label="`Connection from ${label(edge.from)} to ${label(edge.to)}; press Enter for options`" role="button" tabindex="0" @pointerdown.stop="wireDown(index, $event)" @contextmenu.stop.prevent="openContext($event, undefined, index)" @keydown.enter.prevent.stop="openEdgeKeyboard($event, index)" />
+                <text v-if="edge.relationship && edgeGeometry(edge)" class="tree-edge-label" :x="edgeGeometry(edge)!.label.x" :y="edgeGeometry(edge)!.label.y" dy="-6">{{ edge.relationship }}</text>
+                <path v-if="edgePath(edge) && !readonly" :d="edgePath(edge) ?? ''" class="tree-edge-hit" :data-index="index" :aria-label="`Connection from ${label(edge.from)} to ${label(edge.to)}${edge.relationship ? `, ${edge.relationship}` : ''}; press Enter for options`" role="button" tabindex="0" @pointerdown.stop="wireDown(index, $event)" @contextmenu.stop.prevent="openContext($event, undefined, index)" @keydown.enter.prevent.stop="openEdgeKeyboard($event, index)" />
               </template>
               <path v-if="pendingLink" :d="pendingLink" class="tree-edge tree-edge-pending" />
               <path v-if="cutDrag" :d="`M ${cutDrag.start.x} ${cutDrag.start.y} L ${cutDrag.end.x} ${cutDrag.end.y}`" class="tree-cut-line" />
             </svg>
             <article v-for="id in graph.nodes" :key="id" class="tree-node" :data-tree-id="id" :class="[`shape-${nodeShape(id)}`, { 'is-movable': !readonly && !nodeAppearance(id).locked, 'is-locked': nodeAppearance(id).locked }]" :style="{ left: `${layout.positions[id]?.x ?? 0}px`, top: `${layout.positions[id]?.y ?? 0}px`, width: `${nodeSize(id).width}px`, height: `${nodeSize(id).height}px`, '--node-bg': nodeAppearance(id).background, '--node-outline': nodeAppearance(id).outline, '--node-outline-width': `${nodeAppearance(id).outlineWidth ?? 1}px` }" :tabindex="readonly ? undefined : 0" :aria-label="`${label(id)}${roots.has(id) ? ', root' : ''}${nodeAppearance(id).locked ? ', locked' : '. Use arrow keys to move'}.`" @contextmenu.stop="openContext($event, id)" @pointerdown="startDrag(id, $event)" @pointermove="dragNode" @pointerup="endDrag" @pointercancel="endDrag" @keydown="keyboardMove(id, $event)">
-              <template v-if="!readonly"><span v-for="side in ['top', 'right', 'bottom', 'left']" :key="side" class="tree-connect-zone" :class="`zone-${side}`" title="Drag to connect" @pointerdown.stop="beginLink(id, $event)" /></template>
+              <template v-if="!readonly"><span v-for="side in ['top', 'right', 'bottom', 'left']" :key="side" class="tree-connect-zone" :class="`zone-${side}`" title="Drag to connect" @pointerdown.stop="beginLink(id, $event)" @contextmenu.stop.prevent="openZoneContext(id, $event)" /></template>
               <span class="tree-node-art" aria-hidden="true"><img v-if="showThumbnails && thumbnailUrl(byId.get(id)?.thumbnail)" :src="thumbnailUrl(byId.get(id)?.thumbnail) ?? ''" width="164" height="68" alt="" /></span>
               <span class="tree-node-copy"><strong :title="label(id)">{{ label(id) }}</strong><small :title="description(id)">{{ roots.has(id) ? 'Root' : 'Tree item' }}{{ nodeAppearance(id).locked ? ' · Locked' : '' }}</small></span>
               <button v-if="!readonly" type="button" class="tree-remove" :disabled="creatingExample" :aria-label="`Options for ${label(id)}`" @click.stop="openContext($event, id)">⋯</button>
@@ -668,6 +715,14 @@ function edgePath(edge: TreeEdge): string | null {
           </template>
           <template v-else-if="menu.edge !== undefined && graph.edges[menu.edge]">
             <strong>{{ label(graph.edges[menu.edge]!.from) }} → {{ label(graph.edges[menu.edge]!.to) }}</strong>
+            <template v-if="editingRelationship">
+              <label for="tree-relationship-name">Relationship name</label>
+              <input id="tree-relationship-name" v-model="relationshipDraft" class="form-input tree-relationship-name" aria-label="Relationship name" placeholder="Relationship name" @keydown.enter.prevent.stop="setRelationship(menu.edge, relationshipDraft)" />
+              <button type="button" :disabled="!relationshipDraft.trim()" @click="setRelationship(menu.edge, relationshipDraft)">Save relationship</button>
+              <button type="button" @click="editingRelationship = false">Cancel</button>
+            </template>
+            <button v-else type="button" @click="editRelationship(menu.edge)">{{ graph.edges[menu.edge]!.relationship ? 'Edit relationship' : 'Add relationship' }}</button>
+            <button v-if="graph.edges[menu.edge]!.relationship" type="button" @click="setRelationship(menu.edge)">Remove relationship</button>
             <label>Wire color <ColorWheelPicker label="Wire color" :model-value="edgeAppearance(graph.edges[menu.edge]!).color ?? '#06b6d4'" @update:model-value="updateEdgeAppearance(menu.edge, { color: $event })" /></label>
             <label>Wire thickness <input type="number" min="1" max="12" :value="edgeAppearance(graph.edges[menu.edge]!).width ?? 2" @change="updateEdgeAppearance(menu.edge, { width: Math.max(1, Math.min(12, Number(($event.target as HTMLInputElement).value) || 1)) })" /></label>
             <span class="tree-pattern-label">Wire style</span>
@@ -765,6 +820,7 @@ function edgePath(edge: TreeEdge): string | null {
 .tree-patterns button { padding: 4px; border: 1px solid var(--border-subtle); }
 .tree-patterns button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .tree-edges .tree-edge-hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: grab; }
+.tree-edges .tree-edge-label { fill: var(--text-main); stroke: var(--bg-card); stroke-width: 4px; paint-order: stroke; font-size: 14px; font-weight: 600; text-anchor: middle; pointer-events: none; }
 .tree-edges .tree-edge-hit:focus-visible { stroke: var(--accent); stroke-opacity: .35; }
 .tree-edges .tree-cut-line { fill: none; stroke: var(--status-danger); stroke-width: 2; stroke-dasharray: 5 4; pointer-events: none; }
 .tree-edges .tree-edge-pending { stroke-dasharray: 5 4; }

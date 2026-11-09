@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { TraitInstance } from "../../src/web/studio/contracts.ts";
 import type { AnyEntity } from "../../src/web/studio/plugins/runtime.ts";
 import { TREE_EXAMPLES } from "../../src/web/studio/plugins/tree/examples.ts";
-import { CARD_HEIGHT, CARD_WIDTH, isValidImageSrc, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, type TreeCanvasImage, type TreeDirection, type TreeGraph, type TreeShape } from "../../src/web/studio/plugins/tree/model.ts";
+import { CARD_HEIGHT, CARD_WIDTH, isValidImageSrc, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, type TreeCanvasImage, type TreeDirection, type TreeEdge, type TreeGraph, type TreeShape } from "../../src/web/studio/plugins/tree/model.ts";
 
 const graph: TreeGraph = {
   nodes: ["start-a", "start-b", "shared", "end"],
@@ -567,4 +567,177 @@ test("layoutTree precedence: per-node overrides take precedence over defaults", 
   // Width must accommodate end node with width 450 (which is larger than default 300)
   const endPos = layout.positions.end!;
   expect(layout.width).toBeGreaterThanOrEqual(Math.ceil(endPos.x + 450 + 40));
+});
+
+test("named and unnamed edges roundtrip through setTreeGraph and treeGraphOf", () => {
+  const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const mixedGraph: TreeGraph = {
+    nodes: ["start-a", "start-b", "shared", "end"],
+    edges: [
+      { from: "start-a", to: "shared" },
+      { from: "start-b", to: "shared", relationship: "unlocks" },
+      { from: "shared", to: "end", relationship: "  leads to  " },
+    ],
+    direction: "right",
+  };
+
+  const patch = setTreeGraph(entity, trait, mixedGraph);
+  const serializedEdges = patch.traits![0]!.values.edges as string[];
+  expect(serializedEdges).toEqual([
+    JSON.stringify(["start-a", "shared"]),
+    JSON.stringify(["start-b", "shared", "unlocks"]),
+    JSON.stringify(["shared", "end", "  leads to  "]),
+  ]);
+
+  const restored = treeGraphOf(patch.traits![0]!);
+  expect(restored.edges).toEqual([
+    { from: "start-a", to: "shared" },
+    { from: "start-b", to: "shared", relationship: "unlocks" },
+    { from: "shared", to: "end", relationship: "  leads to  " },
+  ]);
+  expect(restored.edges[0]?.relationship).toBeUndefined();
+  expect(restored.edges[1]?.relationship).toBe("unlocks");
+  expect(restored.edges[2]?.relationship).toBe("  leads to  ");
+
+  // Existing 2-element edges remain unchanged without migration
+  const legacyTrait: TraitInstance = {
+    id: "legacy",
+    template_id: "tree_graph",
+    values: {
+      nodes: ["start-a", "shared"],
+      edges: [JSON.stringify(["start-a", "shared"])],
+    },
+  };
+  const legacyRestored = treeGraphOf(legacyTrait);
+  expect(legacyRestored.edges).toEqual([{ from: "start-a", to: "shared" }]);
+  const legacySaved = setTreeGraph({ ...entity, traits: [legacyTrait] }, legacyTrait, legacyRestored);
+  expect(legacySaved.traits![0]!.values.edges).toEqual([JSON.stringify(["start-a", "shared"])]);
+});
+
+test("treeGraphOf rejects bad third value in edges", () => {
+  const baseTrait = (rawEdge: string): TraitInstance => ({
+    id: "g",
+    template_id: "tree_graph",
+    values: { nodes: ["start-a", "shared"], edges: [rawEdge] },
+  });
+
+  // Non-string third values (number, boolean, null, object, array)
+  expect(() => treeGraphOf(baseTrait('["start-a", "shared", 42]'))).toThrow();
+  expect(() => treeGraphOf(baseTrait('["start-a", "shared", true]'))).toThrow();
+  expect(() => treeGraphOf(baseTrait('["start-a", "shared", null]'))).toThrow();
+  expect(() => treeGraphOf(baseTrait('["start-a", "shared", {"name":"rel"}]'))).toThrow();
+  expect(() => treeGraphOf(baseTrait('["start-a", "shared", ["nested"]]'))).toThrow();
+});
+
+test("missing and blank relationship names are rejected in parsing and treeErrors", () => {
+  const baseTrait = (rawEdge: string): TraitInstance => ({
+    id: "g",
+    template_id: "tree_graph",
+    values: { nodes: ["start-a", "shared"], edges: [rawEdge] },
+  });
+
+  // Empty or whitespace-only names in treeGraphOf
+  expect(() => treeGraphOf(baseTrait('["start-a", "shared", ""]'))).toThrow();
+  expect(() => treeGraphOf(baseTrait('["start-a", "shared", "   "]'))).toThrow();
+  expect(() => treeGraphOf(baseTrait('["start-a", "shared", "\\t\\n  "]'))).toThrow();
+
+  // treeErrors validation
+  const eligible = new Set(["start-a", "shared"]);
+  const validGraph: TreeGraph = {
+    nodes: ["start-a", "shared"],
+    edges: [{ from: "start-a", to: "shared", relationship: "unlocks" }],
+    direction: "right",
+  };
+  expect(treeErrors(validGraph, eligible)).toEqual([]);
+
+  const emptyNameGraph: TreeGraph = {
+    nodes: ["start-a", "shared"],
+    edges: [{ from: "start-a", to: "shared", relationship: "" }],
+    direction: "right",
+  };
+  expect(treeErrors(emptyNameGraph, eligible)).toContain("Edge relationship must be a nonempty string.");
+
+  const whitespaceNameGraph: TreeGraph = {
+    nodes: ["start-a", "shared"],
+    edges: [{ from: "start-a", to: "shared", relationship: "   " }],
+    direction: "right",
+  };
+  expect(treeErrors(whitespaceNameGraph, eligible)).toContain("Edge relationship must be a nonempty string.");
+
+  const nonStringNameGraph: TreeGraph = {
+    nodes: ["start-a", "shared"],
+    edges: [{ from: "start-a", to: "shared", relationship: 123 as unknown as string }],
+    direction: "right",
+  };
+  expect(treeErrors(nonStringNameGraph, eligible)).toContain("Edge relationship must be a nonempty string.");
+});
+
+test("treeGraphOf rejects malformed edge arrays", () => {
+  const baseTrait = (rawEdge: string): TraitInstance => ({
+    id: "g",
+    template_id: "tree_graph",
+    values: { nodes: ["start-a", "shared"], edges: [rawEdge] },
+  });
+
+  // Empty array
+  expect(() => treeGraphOf(baseTrait("[]"))).toThrow();
+  // 1-element array
+  expect(() => treeGraphOf(baseTrait('["start-a"]'))).toThrow();
+  // 4-element array
+  expect(() => treeGraphOf(baseTrait('["start-a", "shared", "rel", "extra"]'))).toThrow();
+  // Object instead of array
+  expect(() => treeGraphOf(baseTrait('{"from":"start-a","to":"shared"}'))).toThrow();
+  // Endpoints not strings
+  expect(() => treeGraphOf(baseTrait('[1, 2]'))).toThrow();
+  expect(() => treeGraphOf(baseTrait('["start-a", 2]'))).toThrow();
+  expect(() => treeGraphOf(baseTrait('[1, "shared"]'))).toThrow();
+});
+
+test("treeErrors duplicate edge detection remains based only on endpoints regardless of relationship", () => {
+  const eligible = new Set(["start-a", "shared", "end"]);
+
+  // Same endpoints with different relationships
+  const differentRels: TreeGraph = {
+    nodes: ["start-a", "shared"],
+    edges: [
+      { from: "start-a", to: "shared", relationship: "ally" },
+      { from: "start-a", to: "shared", relationship: "rival" },
+    ],
+    direction: "right",
+  };
+  expect(treeErrors(differentRels, eligible)).toContain("Duplicate edges are not allowed.");
+
+  // Same endpoints with one unnamed and one named
+  const unnamedAndNamed: TreeGraph = {
+    nodes: ["start-a", "shared"],
+    edges: [
+      { from: "start-a", to: "shared" },
+      { from: "start-a", to: "shared", relationship: "ally" },
+    ],
+    direction: "right",
+  };
+  expect(treeErrors(unnamedAndNamed, eligible)).toContain("Duplicate edges are not allowed.");
+
+  // Distinct endpoints with same relationship are valid (not duplicates)
+  const distinctEndpoints: TreeGraph = {
+    nodes: ["start-a", "shared", "end"],
+    edges: [
+      { from: "start-a", to: "shared", relationship: "ally" },
+      { from: "shared", to: "end", relationship: "ally" },
+    ],
+    direction: "right",
+  };
+  expect(treeErrors(distinctEndpoints, eligible)).toEqual([]);
+
+  // Reversed directed edges with same relationship are valid (directed edges)
+  const reversedEdges: TreeGraph = {
+    nodes: ["start-a", "shared"],
+    edges: [
+      { from: "start-a", to: "shared", relationship: "ally" },
+      { from: "shared", to: "start-a", relationship: "ally" },
+    ],
+    direction: "right",
+  };
+  expect(treeErrors(reversedEdges, eligible)).toEqual([]);
 });

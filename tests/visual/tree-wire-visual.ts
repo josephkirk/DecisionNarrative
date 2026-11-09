@@ -90,6 +90,19 @@ async function getInlinePositions(nodes: Record<string, Locator>) {
   }
   return result;
 }
+async function getEdgeMidpoint(locator: Locator) {
+  return await locator.evaluate((el) => {
+    const path = el as SVGPathElement;
+    const pt = path.getPointAtLength(path.getTotalLength() / 2);
+    const matrix = path.getScreenCTM();
+    if (matrix) {
+      const screenPt = pt.matrixTransform(matrix);
+      return { x: screenPt.x, y: screenPt.y };
+    }
+    const rect = path.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+}
 
 let browser;
 try {
@@ -221,17 +234,7 @@ try {
   check("initial edge target verified via accessible label", (await initialEdge.count()) === 1);
 
   // 7. Wire drag reconnect: drag edge from Item B to Item C using real mouse
-  const edgeMidpoint = await initialEdge.evaluate((el) => {
-    const path = el as SVGPathElement;
-    const pt = path.getPointAtLength(path.getTotalLength() / 2);
-    const matrix = path.getScreenCTM();
-    if (matrix) {
-      const screenPt = pt.matrixTransform(matrix);
-      return { x: screenPt.x, y: screenPt.y };
-    }
-    const rect = path.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-  });
+  const edgeMidpoint = await getEdgeMidpoint(initialEdge);
 
   const nodeCBox = (await nodeC.boundingBox())!;
   await page.mouse.move(edgeMidpoint.x, edgeMidpoint.y);
@@ -280,6 +283,132 @@ try {
   for (const id of Object.keys(allNodes)) {
     assertPositionsEqual(positionsAfterNewConnect[id]!, positionsBeforeNewConnect[id]!, `${id} after new connection`);
   }
+
+  // 9. Double-click wire to name relationship
+  const newEdgeMidpoint = await getEdgeMidpoint(newEdge);
+  await page.mouse.dblclick(newEdgeMidpoint.x, newEdgeMidpoint.y);
+
+  const relInput = page.locator("#tree-relationship-name");
+  await relInput.waitFor({ state: "visible" });
+  check("double-click wire opens relationship name input", await relInput.isVisible());
+
+  const saveRelBtn = page.getByRole("button", { name: "Save relationship" });
+  check("save relationship button initially disabled for empty name", await saveRelBtn.isDisabled());
+
+  await relInput.fill("causes");
+  check("save relationship button enabled after entering non-blank name", !(await saveRelBtn.isDisabled()));
+  await saveRelBtn.click();
+
+  // 10. Visible relationship label rendered on wire
+  const edgeLabel = page.locator(".tree-edge-label", { hasText: "causes" });
+  await edgeLabel.waitFor({ state: "visible" });
+  check("visible relationship label rendered on wire", await edgeLabel.isVisible());
+
+  const namedEdge = page.locator('.tree-edge-hit[aria-label*="Connection from Item B to Item D, causes"]');
+  await namedEdge.waitFor({ state: "attached" });
+  check("wire accessible label includes relationship name", (await namedEdge.count()) === 1);
+
+  // 11. Reconnect preservation: drag named wire from Item D to Item C
+  const namedEdgeMidpoint = await getEdgeMidpoint(namedEdge);
+  await page.mouse.move(namedEdgeMidpoint.x, namedEdgeMidpoint.y);
+  await page.mouse.down();
+  await page.mouse.move(nodeCBox.x + nodeCBox.width / 2, nodeCBox.y + nodeCBox.height / 2, { steps: 10 });
+  await page.mouse.up();
+
+  const reconnectedNamedEdge = page.locator('.tree-edge-hit[aria-label*="Connection from Item B to Item C, causes"]');
+  await reconnectedNamedEdge.waitFor({ state: "attached" });
+  check("reconnected edge preserves relationship name in accessible label", (await reconnectedNamedEdge.count()) === 1);
+  check("reconnected edge preserves visible relationship label", await edgeLabel.isVisible());
+
+  // 12. Contextual edit: right-click wire opens context menu with Edit/Remove options
+  const reconnectedEdgeMidpoint = await getEdgeMidpoint(reconnectedNamedEdge);
+  await page.mouse.click(reconnectedEdgeMidpoint.x, reconnectedEdgeMidpoint.y, { button: "right" });
+
+  const editRelBtn = page.getByRole("button", { name: "Edit relationship" });
+  const removeRelBtn = page.getByRole("button", { name: "Remove relationship" });
+  await editRelBtn.waitFor({ state: "visible" });
+  await removeRelBtn.waitFor({ state: "visible" });
+  check("context menu offers Edit relationship", await editRelBtn.isVisible());
+  check("context menu offers Remove relationship", await removeRelBtn.isVisible());
+
+  await editRelBtn.click();
+  await relInput.waitFor({ state: "visible" });
+  check("edit relationship shows current name", (await relInput.inputValue()) === "causes");
+
+  await relInput.fill("triggers");
+  await saveRelBtn.click();
+
+  const editedLabel = page.locator(".tree-edge-label", { hasText: "triggers" });
+  await editedLabel.waitFor({ state: "visible" });
+  check("visible relationship label updated after contextual edit", await editedLabel.isVisible());
+
+  const editedEdge = page.locator('.tree-edge-hit[aria-label*="Connection from Item B to Item C, triggers"]');
+  await editedEdge.waitFor({ state: "attached" });
+  check("wire accessible label updated after contextual edit", (await editedEdge.count()) === 1);
+
+  // 13. Contextual removal: Remove relationship removes label but keeps wire
+  const editedEdgeMidpoint = await getEdgeMidpoint(editedEdge);
+  await page.mouse.click(editedEdgeMidpoint.x, editedEdgeMidpoint.y, { button: "right" });
+  await removeRelBtn.waitFor({ state: "visible" });
+  await removeRelBtn.click();
+
+  const unnamedEdge = page.locator('.tree-edge-hit[aria-label="Connection from Item B to Item C; press Enter for options"]');
+  await unnamedEdge.waitFor({ state: "attached" });
+  check("wire remains after relationship removal", (await unnamedEdge.count()) === 1);
+  check("relationship label removed after contextual removal", (await page.locator(".tree-edge-label").count()) === 0);
+
+  // 14. Assert persisted data after saving and reloading
+  const unnamedMidpoint = await getEdgeMidpoint(unnamedEdge);
+  await page.mouse.dblclick(unnamedMidpoint.x, unnamedMidpoint.y);
+  await relInput.waitFor({ state: "visible" });
+  await relInput.fill("leads to");
+  await saveRelBtn.click();
+
+  const leadsToLabel = page.locator(".tree-edge-label", { hasText: "leads to" });
+  await leadsToLabel.waitFor({ state: "visible" });
+  check("relationship label set before save", await leadsToLabel.isVisible());
+
+  const saveLayoutBtn = page.getByRole("button", { name: "Save layout" });
+  const [saveResponse] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/api/v3/content/entity_templates") && r.request().method() === "POST"),
+    saveLayoutBtn.click(),
+  ]);
+  check("relationship save accepted by service", saveResponse.status() === 201, `status ${saveResponse.status()}`);
+
+  // Reload page to verify persisted state in UI
+  await page.reload();
+  const reloadTreeTab = page.getByRole("button", { name: "Tree", exact: true });
+  await reloadTreeTab.waitFor();
+  await reloadTreeTab.click();
+  await page.locator('.tree-node[data-tree-id="item-a"]').waitFor();
+
+  const persistedLabel = page.locator(".tree-edge-label", { hasText: "leads to" });
+  await persistedLabel.waitFor({ state: "visible" });
+  check("persisted relationship label visible after reload", await persistedLabel.isVisible());
+
+  const persistedEdge = page.locator('.tree-edge-hit[aria-label*="Connection from Item B to Item C, leads to"]');
+  await persistedEdge.waitFor({ state: "attached" });
+  check("persisted wire accessible label preserved after reload", (await persistedEdge.count()) === 1);
+
+  // Assert persisted data in the backend database
+  const savedEntity = await api("GET", "/api/v3/content/entity_templates/tree-owner");
+  const ownerTrait = savedEntity.traits.find((t: { template_id: string }) => t.template_id === graphTrait!.id);
+  const persistedEdges = (ownerTrait?.values?.edges ?? []).map((e: string) => JSON.parse(e));
+  const hasNamedEdge = persistedEdges.some((e: unknown[]) => Array.isArray(e) && e[0] === "item-b" && e[1] === "item-c" && e[2] === "leads to");
+  const hasUnnamedEdge = persistedEdges.some((e: unknown[]) => Array.isArray(e) && e[0] === "item-a" && e[1] === "item-b" && e.length === 2);
+  check("persisted entity template contains encoded 3-element named edge", hasNamedEdge);
+  check("persisted entity template contains encoded 2-element unnamed edge", hasUnnamedEdge);
+
+  await page.locator(".tree-options summary").click();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Export JSON" }).click(),
+  ]);
+  const exportPath = await download.path();
+  if (!exportPath) throw new Error("Tree graph export did not produce a file");
+  const exported = JSON.parse(fs.readFileSync(exportPath, "utf8"));
+  check("export contains named relationship", exported.graph.edges.some((edge: { from: string; to: string; relationship?: string }) =>
+    edge.from === "item-b" && edge.to === "item-c" && edge.relationship === "leads to"));
 
   if (errors.length) console.log("console errors:\n" + errors.join("\n"));
   check("no console errors", errors.length === 0);

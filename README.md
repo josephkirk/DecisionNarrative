@@ -119,7 +119,9 @@ Use **Canvas actions → Add image** to place a PNG or JPEG under nodes and wire
 
 In the entity's **Traits** tab, TreeGraph settings define default node and wire styles. Individual node and wire settings override those defaults; choose **Use tree defaults** to clear an override. Import a CSS file or edit CSS there to customize that tree's canvas. Styles are scoped to the canvas; CSS `@import` is not supported. Only import CSS from sources you trust.
 
-Right-click a wire to choose a normal, dashed, dotted, or brush style, change its color or thickness, or remove it. Drag a wire to reconnect its target; drop it on empty canvas to choose a target from a menu. Alt-drag across wires to cut them. Focus a wire and press Enter to open its options by keyboard.
+Double-click a wire to name its relationship; the name appears at the wire's midpoint. Right-click a wire to add, edit, or remove its relationship without removing the wire. Relationship names are saved and exported with the graph, and remain attached when the target is reconnected. These names describe graph connections; they do not change runtime relationship scores.
+
+The wire menu also offers normal, dashed, dotted, or brush styles, color, thickness, and removal. Drag a wire to reconnect its target; drop it on empty canvas to choose a target from a menu. Alt-drag across wires to cut them. Focus a wire and press Enter to open its options by keyboard.
 
 Expand **View options** to customize the grid and thumbnails; these preferences are stored in the local browser, separate from the saved graph.
 

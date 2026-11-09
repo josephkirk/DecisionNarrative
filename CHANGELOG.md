@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   canvas title, in-canvas view controls and JSON export, local display
   preferences, and three example graphs.
 - Tree canvas image layers with move, resize and lock controls, and node locks.
+- Named tree-wire relationships, editable by double-click or the wire menu and
+  retained when wires are reconnected, saved, or exported.
 - Shared color wheel picker for tree graph and vector canvas colors.
 
 ### Fixed

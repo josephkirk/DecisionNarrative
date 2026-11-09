@@ -159,7 +159,7 @@ The built-in inventory plugin provisions `inventory_owner` (displayed as Invento
 
 ## Tree Graph plugin
 
-The built-in Tree Graph plugin provisions `tree_graph` (displayed as TreeGraph) and `tree_item` (TreeItem) traits. A TreeGraph entity exposes a Tree tab; only entities with TreeItem may be added as nodes. The trait stores `nodes` as typed entity references, `edges` as JSON-encoded `[source, target]` pairs in a string array, `direction` as one of `right`, `left`, `down`, `up`, or `radial`, and `positions` as a JSON string mapping view directions to per-node coordinates. Entity thumbnails are displayed when available.
+The built-in Tree Graph plugin provisions `tree_graph` (displayed as TreeGraph) and `tree_item` (TreeItem) traits. A TreeGraph entity exposes a Tree tab; only entities with TreeItem may be added as nodes. The trait stores `nodes` as typed entity references and `edges` as JSON-encoded `[source, target]` or `[source, target, relationship]` arrays in a string array. Relationship names are nonblank graph metadata, not runtime relationship scores. Edge identity remains the directed endpoint pair. `direction` is one of `right`, `left`, `down`, `up`, or `radial`; `positions` is a JSON string mapping view directions to per-node coordinates. Entity thumbnails are displayed when available.
 
 The optional `shapes` property is a JSON string mapping node IDs to `card`, `rounded`, `ellipse`, or `diamond`. It is shared across views and saved with the graph. Node backgrounds use the referenced entity's thumbnail when enabled; thumbnail edits remain on the entity itself. Existing TreeGraph trait templates are extended with the new property on workspace load.
 
