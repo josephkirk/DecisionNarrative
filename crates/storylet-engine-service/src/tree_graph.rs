@@ -24,6 +24,90 @@ pub fn requires_validation(
     graph_changed || item_removed
 }
 
+/// Validates TreeItem trait instances on an entity or entity template.
+///
+/// Specifically: for any trait instance belonging to the `tree_item` trait template,
+/// if `level` or `cost` is declared on that template as a scalar integer (`PropertyType::Int && !is_array`),
+/// then if the field is present in `instance.values`, it must be a nonnegative integer (>= 0).
+/// Absent values remain valid.
+/// If `level` or `cost` is declared as a non-int or array type, or not declared on the template,
+/// unsigned integer validation is not enforced (preserving existing user-authored definitions).
+/// Other properties are not required to exist and unrelated fields are not rejected.
+pub fn validate_tree_item_traits(
+    traits: &[crate::contracts::TraitInstance],
+    templates: &[crate::contracts::TraitTemplateRecord],
+    owner: &str,
+) -> Result<(), String> {
+    for instance in traits {
+        let Some(template) = templates.iter().find(|t| t.id == instance.template_id) else {
+            continue;
+        };
+
+        if template.key != TREE_ITEM_KEY {
+            continue;
+        }
+
+        for field_name in ["level", "cost"] {
+            let Some(prop_def) = template.properties.iter().find(|p| p.key() == field_name) else {
+                continue;
+            };
+
+            // Only enforce when currently declared TreeItem property is scalar int
+            if prop_def.property.property_type != crate::contracts::PropertyType::Int
+                || prop_def.property.is_array
+            {
+                continue;
+            }
+
+            if let Some(val) = instance.values.get(field_name) {
+                let is_nonnegative_int = val.as_i64().is_some_and(|i| i >= 0);
+
+                if !is_nonnegative_int {
+                    return Err(format!(
+                        "{owner}: TreeItem '{field_name}' must be a nonnegative integer, got {val}"
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Validates defaults on TreeItem trait templates.
+/// Specifically: for the `tree_item` trait template, if `level` or `cost` is declared
+/// as a scalar int, its default value (if provided and not null) must not be a negative number.
+pub fn validate_tree_item_template(
+    template: &crate::contracts::TraitTemplateRecord,
+    prefix: &str,
+) -> Result<(), String> {
+    if template.key != TREE_ITEM_KEY {
+        return Ok(());
+    }
+
+    for prop in &template.properties {
+        let key = prop.key();
+        if key == "level" || key == "cost" {
+            if prop.property.property_type == crate::contracts::PropertyType::Int
+                && !prop.property.is_array
+            {
+                if !prop.property.default.is_null() {
+                    let is_nonnegative_int = prop.property.default.as_i64().is_some_and(|i| i >= 0);
+
+                    if !is_nonnegative_int {
+                        return Err(format!(
+                            "{prefix}: TreeItem '{key}' default must be a nonnegative integer, got {}",
+                            prop.property.default
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 
 /// Validates all `tree_graph` trait instances in the workspace index.
 ///
@@ -2053,5 +2137,229 @@ mod tests {
         let dup_issues: Vec<&String> = issues.iter().filter(|i| i.contains("Graph Duplicate")).collect();
         assert_eq!(dup_issues.len(), 1);
         assert!(dup_issues[0].contains("duplicate edge from 'item-1' to 'item-2'"));
+    }
+
+    #[test]
+    fn test_tree_item_unsigned_level_and_cost_validation() {
+        let templates: Vec<TraitTemplateRecord> = serde_json::from_value(json!([
+            {
+                "id": "tree-item-id",
+                "key": "tree_item",
+                "name": "TreeItem",
+                "properties": [
+                    { "key": "level", "name": "Level", "type": "int", "is_array": false, "default": 0 },
+                    { "key": "cost", "name": "Cost", "type": "int", "is_array": false, "default": 0 },
+                    { "key": "rank", "name": "Rank", "type": "string", "is_array": false, "default": "" }
+                ]
+            }
+        ])).unwrap();
+
+        // 1. Valid nonnegative integers pass
+        let valid_traits: Vec<TraitInstance> = serde_json::from_value(json!([
+            {
+                "id": "t1",
+                "template_id": "tree-item-id",
+                "values": { "level": 0, "cost": 100, "rank": "Gold" }
+            }
+        ])).unwrap();
+        assert!(validate_tree_item_traits(&valid_traits, &templates, "owner").is_ok());
+
+        // 2. Absent values remain valid
+        let absent_traits: Vec<TraitInstance> = serde_json::from_value(json!([
+            {
+                "id": "t1",
+                "template_id": "tree-item-id",
+                "values": { "rank": "Silver" }
+            }
+        ])).unwrap();
+        assert!(validate_tree_item_traits(&absent_traits, &templates, "owner").is_ok());
+
+        // 3. Negative level is rejected
+        let neg_level: Vec<TraitInstance> = serde_json::from_value(json!([
+            {
+                "id": "t1",
+                "template_id": "tree-item-id",
+                "values": { "level": -1, "cost": 0 }
+            }
+        ])).unwrap();
+        let err = validate_tree_item_traits(&neg_level, &templates, "owner").unwrap_err();
+        assert!(err.contains("TreeItem 'level' must be a nonnegative integer"), "got {err}");
+
+        // 4. Negative cost is rejected
+        let neg_cost: Vec<TraitInstance> = serde_json::from_value(json!([
+            {
+                "id": "t1",
+                "template_id": "tree-item-id",
+                "values": { "level": 1, "cost": -5 }
+            }
+        ])).unwrap();
+        let err = validate_tree_item_traits(&neg_cost, &templates, "owner").unwrap_err();
+        assert!(err.contains("TreeItem 'cost' must be a nonnegative integer"), "got {err}");
+
+        // 5. Non-integer level is rejected
+        let float_level: Vec<TraitInstance> = serde_json::from_value(json!([
+            {
+                "id": "t1",
+                "template_id": "tree-item-id",
+                "values": { "level": 2.5 }
+            }
+        ])).unwrap();
+        let err = validate_tree_item_traits(&float_level, &templates, "owner").unwrap_err();
+        assert!(err.contains("TreeItem 'level' must be a nonnegative integer"), "got {err}");
+
+        // 6. Non-int declared type on TreeItem template is preserved (no unsigned int enforcement)
+        let string_templates: Vec<TraitTemplateRecord> = serde_json::from_value(json!([
+            {
+                "id": "tree-item-id",
+                "key": "tree_item",
+                "name": "TreeItem",
+                "properties": [
+                    { "key": "level", "name": "Level", "type": "string", "is_array": false }
+                ]
+            }
+        ])).unwrap();
+        let string_level: Vec<TraitInstance> = serde_json::from_value(json!([
+            {
+                "id": "t1",
+                "template_id": "tree-item-id",
+                "values": { "level": "advanced" }
+            }
+        ])).unwrap();
+        assert!(validate_tree_item_traits(&string_level, &string_templates, "owner").is_ok());
+
+        // 7. Array declared type is preserved
+        let array_templates: Vec<TraitTemplateRecord> = serde_json::from_value(json!([
+            {
+                "id": "tree-item-id",
+                "key": "tree_item",
+                "name": "TreeItem",
+                "properties": [
+                    { "key": "cost", "name": "Cost", "type": "int", "is_array": true }
+                ]
+            }
+        ])).unwrap();
+        let array_cost: Vec<TraitInstance> = serde_json::from_value(json!([
+            {
+                "id": "t1",
+                "template_id": "tree-item-id",
+                "values": { "cost": [-1, 2] }
+            }
+        ])).unwrap();
+        assert!(validate_tree_item_traits(&array_cost, &array_templates, "owner").is_ok());
+
+        // 8. Template with no properties does not require other properties to exist
+        let empty_templates: Vec<TraitTemplateRecord> = serde_json::from_value(json!([
+            {
+                "id": "tree-item-id",
+                "key": "tree_item",
+                "name": "TreeItem",
+                "properties": []
+            }
+        ])).unwrap();
+        let empty_instance: Vec<TraitInstance> = serde_json::from_value(json!([
+            {
+                "id": "t1",
+                "template_id": "tree-item-id",
+                "values": {}
+            }
+        ])).unwrap();
+        assert!(validate_tree_item_traits(&empty_instance, &empty_templates, "owner").is_ok());
+
+        // 9. Out-of-range value exceeding i64::MAX is rejected to align with value_shape_matches(PropertyType::Int)
+        let out_of_range: Vec<TraitInstance> = serde_json::from_value(json!([
+            {
+                "id": "t1",
+                "template_id": "tree-item-id",
+                "values": { "level": 18446744073709551615u64 }
+            }
+        ])).unwrap();
+        let err = validate_tree_item_traits(&out_of_range, &templates, "owner").unwrap_err();
+        assert!(err.contains("TreeItem 'level' must be a nonnegative integer"), "got {err}");
+    }
+
+    #[test]
+    fn test_tree_item_template_default_guard() {
+        // Valid nonnegative defaults
+        let valid_tpl: TraitTemplateRecord = serde_json::from_value(json!({
+            "id": "tree-item-id",
+            "key": "tree_item",
+            "name": "TreeItem",
+            "properties": [
+                { "key": "level", "name": "Level", "type": "int", "is_array": false, "default": 0 },
+                { "key": "cost", "name": "Cost", "type": "int", "is_array": false, "default": 10 }
+            ]
+        })).unwrap();
+        assert!(validate_tree_item_template(&valid_tpl, "prefix").is_ok());
+
+        // Negative default for level fails
+        let neg_level_tpl: TraitTemplateRecord = serde_json::from_value(json!({
+            "id": "tree-item-id",
+            "key": "tree_item",
+            "name": "TreeItem",
+            "properties": [
+                { "key": "level", "name": "Level", "type": "int", "is_array": false, "default": -1 }
+            ]
+        })).unwrap();
+        let err = validate_tree_item_template(&neg_level_tpl, "prefix").unwrap_err();
+        assert!(err.contains("TreeItem 'level' default must be a nonnegative integer"), "got {err}");
+
+        // Negative default for cost fails
+        let neg_cost_tpl: TraitTemplateRecord = serde_json::from_value(json!({
+            "id": "tree-item-id",
+            "key": "tree_item",
+            "name": "TreeItem",
+            "properties": [
+                { "key": "cost", "name": "Cost", "type": "int", "is_array": false, "default": -5 }
+            ]
+        })).unwrap();
+        let err = validate_tree_item_template(&neg_cost_tpl, "prefix").unwrap_err();
+        assert!(err.contains("TreeItem 'cost' default must be a nonnegative integer"), "got {err}");
+
+        // Null default passes (unset)
+        let null_default_tpl: TraitTemplateRecord = serde_json::from_value(json!({
+            "id": "tree-item-id",
+            "key": "tree_item",
+            "name": "TreeItem",
+            "properties": [
+                { "key": "level", "name": "Level", "type": "int", "is_array": false, "default": null }
+            ]
+        })).unwrap();
+        assert!(validate_tree_item_template(&null_default_tpl, "prefix").is_ok());
+
+        // Positive fractional default fails
+        let frac_default_tpl: TraitTemplateRecord = serde_json::from_value(json!({
+            "id": "tree-item-id",
+            "key": "tree_item",
+            "name": "TreeItem",
+            "properties": [
+                { "key": "level", "name": "Level", "type": "int", "is_array": false, "default": 2.5 }
+            ]
+        })).unwrap();
+        let err = validate_tree_item_template(&frac_default_tpl, "prefix").unwrap_err();
+        assert!(err.contains("TreeItem 'level' default must be a nonnegative integer"), "got {err}");
+
+        // String default fails
+        let str_default_tpl: TraitTemplateRecord = serde_json::from_value(json!({
+            "id": "tree-item-id",
+            "key": "tree_item",
+            "name": "TreeItem",
+            "properties": [
+                { "key": "level", "name": "Level", "type": "int", "is_array": false, "default": "zero" }
+            ]
+        })).unwrap();
+        let err = validate_tree_item_template(&str_default_tpl, "prefix").unwrap_err();
+        assert!(err.contains("TreeItem 'level' default must be a nonnegative integer"), "got {err}");
+
+        // Object default fails
+        let obj_default_tpl: TraitTemplateRecord = serde_json::from_value(json!({
+            "id": "tree-item-id",
+            "key": "tree_item",
+            "name": "TreeItem",
+            "properties": [
+                { "key": "cost", "name": "Cost", "type": "int", "is_array": false, "default": {} }
+            ]
+        })).unwrap();
+        let err = validate_tree_item_template(&obj_default_tpl, "prefix").unwrap_err();
+        assert!(err.contains("TreeItem 'cost' default must be a nonnegative integer"), "got {err}");
     }
 }

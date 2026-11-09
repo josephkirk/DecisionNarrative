@@ -14,15 +14,13 @@ export const treeGraphPlugin = definePlugin({
     let creating = false;
     async function ensureTraits() {
       if (creating || !studioState.project) return;
-      const graphTemplate = treeGraphTemplate();
-      const existing = studioState.traitTemplates.find((template) => template.key === TREE_GRAPH_KEY);
-      const templates = [graphTemplate, treeItemTemplate()].filter((template) => !studioState.traitTemplates.some((candidate) => candidate.key === template.key));
-      if (existing) {
-        const missing = graphTemplate.properties.filter((property) => !existing.properties.some((candidate) => candidate.key === property.key));
-        if (missing.length) {
-          templates.push({ ...existing, properties: [...existing.properties, ...missing] });
-        }
-      }
+      const defaults = [treeGraphTemplate(), treeItemTemplate()];
+      const templates = defaults.flatMap((template) => {
+        const existing = studioState.traitTemplates.find((candidate) => candidate.key === template.key);
+        if (!existing) return [template];
+        const missing = template.properties.filter((property) => !existing.properties.some((candidate) => candidate.key === property.key));
+        return missing.length ? [{ ...existing, properties: [...existing.properties, ...missing] }] : [];
+      });
       if (!templates.length) return;
       creating = true;
       try {

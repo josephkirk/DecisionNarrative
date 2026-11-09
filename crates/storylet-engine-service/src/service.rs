@@ -465,6 +465,17 @@ impl StudioService {
                         entities::validate_unique_traits(&record.traits, &templates, &format!("entity template '{}'", record.name))?;
                     }
                 }
+                if prepared.key == crate::tree_graph::TREE_ITEM_KEY {
+                    let mut templates = inner.store.list_trait_templates().map_err(|error| error.to_string())?;
+                    templates.retain(|template| template.id != prepared.id);
+                    templates.push(prepared.clone());
+                    for record in inner.store.list_entities().map_err(|error| error.to_string())? {
+                        crate::tree_graph::validate_tree_item_traits(&record.traits, &templates, &format!("entity '{}'", record.name))?;
+                    }
+                    for record in inner.store.list_entity_templates().map_err(|error| error.to_string())? {
+                        crate::tree_graph::validate_tree_item_traits(&record.traits, &templates, &format!("entity template '{}'", record.name))?;
+                    }
+                }
                 serde_json::to_value(prepared).map_err(|e| e.to_string())?
             }
             "gameplay_tags" => {
