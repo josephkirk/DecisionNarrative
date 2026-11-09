@@ -19,6 +19,7 @@ export interface TreeNodeAppearance {
   outlineWidth?: number;
   width?: number;
   height?: number;
+  locked?: boolean;
 }
 
 export type TreeWirePattern = "solid" | "dash" | "dot" | "brush";
@@ -31,9 +32,19 @@ export interface TreeEdgeAppearance {
 }
 
 export interface TreeAppearanceDefaults {
-  node?: TreeNodeAppearance & { shape?: TreeShape };
+  node?: Omit<TreeNodeAppearance, "locked"> & { shape?: TreeShape };
   edge?: TreeEdgeAppearance;
   customCss?: string;
+}
+
+export interface TreeCanvasImage {
+  id: string;
+  src: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  locked: boolean;
 }
 
 export interface TreeAppearance {
@@ -41,6 +52,7 @@ export interface TreeAppearance {
   defaults?: TreeAppearanceDefaults;
   nodes: Record<string, TreeNodeAppearance>;
   edges: Record<string, TreeEdgeAppearance>;
+  images?: TreeCanvasImage[];
 }
 
 export interface TreeGraph {
@@ -69,6 +81,25 @@ export const MAX_NODE_HEIGHT = 400;
 export const MIN_WIRE_WIDTH = 1;
 export const MAX_WIRE_WIDTH = 12;
 const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
+
+export function isValidImageSrc(reference: string): boolean {
+  const trimmed = reference.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return true;
+  }
+  if (trimmed.startsWith("/") || trimmed.includes("\\")) {
+    return false;
+  }
+  const segments = trimmed.split("/");
+  for (const segment of segments) {
+    if (!segment || segment === "." || segment === "..") {
+      return false;
+    }
+  }
+  const lower = trimmed.toLowerCase();
+  return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg");
+}
 
 const VALID_DIRECTIONS: readonly TreeDirection[] = ["right", "left", "down", "up", "radial"];
 
@@ -195,7 +226,7 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
     try { data = JSON.parse(values.appearance); } catch { throw new Error("Malformed appearance: invalid JSON."); }
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Malformed appearance: expected an object.");
     for (const key of Object.keys(data)) {
-      if (key !== "nodes" && key !== "edges" && key !== "canvasBackground" && key !== "defaults") throw new Error(`Malformed appearance: unexpected field '${key}'.`);
+      if (key !== "nodes" && key !== "edges" && key !== "canvasBackground" && key !== "defaults" && key !== "images") throw new Error(`Malformed appearance: unexpected field '${key}'.`);
     }
     const appearanceMap = data as Record<string, unknown>;
     const canvasBackground = appearanceMap.canvasBackground;
@@ -316,7 +347,7 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
         if (!nodeIds.has(id)) throw new Error(`Invalid appearance: unknown node '${id}'.`);
         if (!style || typeof style !== "object" || Array.isArray(style)) throw new Error(`Invalid appearance for node '${id}': expected an object.`);
         for (const key of Object.keys(style)) {
-          if (!["background", "outline", "outlineWidth", "width", "height"].includes(key)) {
+          if (!["background", "outline", "outlineWidth", "width", "height", "locked"].includes(key)) {
             throw new Error(`Invalid appearance for node '${id}': unexpected field '${key}'.`);
           }
         }
@@ -351,6 +382,12 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
             throw new Error(`Invalid appearance for node '${id}': height must be a finite number between ${MIN_NODE_HEIGHT} and ${MAX_NODE_HEIGHT}.`);
           }
           nodeAppearance.height = s.height;
+        }
+        if (s.locked !== undefined) {
+          if (typeof s.locked !== "boolean") {
+            throw new Error(`Invalid appearance for node '${id}': locked must be a boolean.`);
+          }
+          nodeAppearance.locked = s.locked;
         }
         parsedNodes[id] = nodeAppearance;
       }
@@ -396,11 +433,65 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
         parsedEdges[edgeKey] = edgeAppearance;
       }
     }
+    const rawImages = appearanceMap.images;
+    let parsedImages: TreeCanvasImage[] | undefined;
+    if (rawImages !== undefined) {
+      if (!Array.isArray(rawImages)) {
+        throw new Error("Malformed appearance: images must be an array.");
+      }
+      const seenImageIds = new Set<string>();
+      parsedImages = rawImages.map((rawImage, index) => {
+        if (!rawImage || typeof rawImage !== "object" || Array.isArray(rawImage)) {
+          throw new Error(`Invalid appearance image at index ${index}: expected an object.`);
+        }
+        for (const key of Object.keys(rawImage)) {
+          if (!["id", "src", "x", "y", "width", "height", "locked"].includes(key)) {
+            throw new Error(`Invalid appearance image at index ${index}: unexpected field '${key}'.`);
+          }
+        }
+        const img = rawImage as Record<string, unknown>;
+        if (typeof img.id !== "string" || !img.id.trim()) {
+          throw new Error(`Invalid appearance image at index ${index}: id must be a nonempty string.`);
+        }
+        if (seenImageIds.has(img.id)) {
+          throw new Error(`Invalid appearance image: duplicate image id '${img.id}'.`);
+        }
+        seenImageIds.add(img.id);
+        if (typeof img.src !== "string" || !isValidImageSrc(img.src)) {
+          throw new Error(`Invalid appearance image '${img.id}': src must be a valid image path or URL.`);
+        }
+        if (typeof img.x !== "number" || !Number.isFinite(img.x)) {
+          throw new Error(`Invalid appearance image '${img.id}': x must be a finite number.`);
+        }
+        if (typeof img.y !== "number" || !Number.isFinite(img.y)) {
+          throw new Error(`Invalid appearance image '${img.id}': y must be a finite number.`);
+        }
+        if (typeof img.width !== "number" || !Number.isFinite(img.width) || img.width <= 0) {
+          throw new Error(`Invalid appearance image '${img.id}': width must be a positive number.`);
+        }
+        if (typeof img.height !== "number" || !Number.isFinite(img.height) || img.height <= 0) {
+          throw new Error(`Invalid appearance image '${img.id}': height must be a positive number.`);
+        }
+        if (typeof img.locked !== "boolean") {
+          throw new Error(`Invalid appearance image '${img.id}': locked must be a boolean.`);
+        }
+        return {
+          id: img.id,
+          src: img.src,
+          x: img.x,
+          y: img.y,
+          width: img.width,
+          height: img.height,
+          locked: img.locked,
+        };
+      });
+    }
     appearance = {
       nodes: parsedNodes,
       edges: parsedEdges,
       ...(canvasBackground !== undefined ? { canvasBackground: canvasBackground as string } : {}),
       ...(parsedDefaults !== undefined ? { defaults: parsedDefaults } : {}),
+      ...(parsedImages !== undefined ? { images: parsedImages } : {}),
     };
 
   }
@@ -410,33 +501,36 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
 export function setTreeGraph(entity: AnyEntity, instance: TraitInstance, graph: TreeGraph): Partial<AnyEntity> {
   const encodedEdges = graph.edges.map((edge) => JSON.stringify([edge.from, edge.to]));
   return {
-    traits: (entity.traits ?? []).map((trait) =>
-      trait.id === instance.id
-        ? {
-            ...trait,
-            values: {
-              ...trait.values,
-              nodes: [...graph.nodes],
-              edges: encodedEdges,
-              direction: graph.direction,
-              positions: JSON.stringify(graph.positions ?? {}),
-              ...(graph.shapes !== undefined || "shapes" in trait.values || "shapes" in instance.values
-                ? { shapes: JSON.stringify(graph.shapes ?? {}) }
-                : {}),
-              ...(graph.appearance !== undefined || "appearance" in trait.values || "appearance" in instance.values
-                ? {
-                    appearance: JSON.stringify({
-                      ...(graph.appearance?.canvasBackground !== undefined ? { canvasBackground: graph.appearance.canvasBackground } : {}),
-                      ...(graph.appearance?.defaults !== undefined ? { defaults: graph.appearance.defaults } : {}),
-                      nodes: graph.appearance?.nodes ?? {},
-                      edges: graph.appearance?.edges ?? {},
-                    }),
-                  }
-                : {}),
-            },
-          }
-        : trait,
-    ),
+    traits: (entity.traits ?? []).map((trait) => {
+      if (trait.id !== instance.id) {
+        return trait;
+      }
+
+      return {
+        ...trait,
+        values: {
+          ...trait.values,
+          nodes: [...graph.nodes],
+          edges: encodedEdges,
+          direction: graph.direction,
+          positions: JSON.stringify(graph.positions ?? {}),
+          ...(graph.shapes !== undefined || "shapes" in trait.values || "shapes" in instance.values
+            ? { shapes: JSON.stringify(graph.shapes ?? {}) }
+            : {}),
+          ...(graph.appearance !== undefined || "appearance" in trait.values || "appearance" in instance.values
+            ? {
+                appearance: JSON.stringify({
+                  ...(graph.appearance?.canvasBackground !== undefined ? { canvasBackground: graph.appearance.canvasBackground } : {}),
+                  ...(graph.appearance?.defaults !== undefined ? { defaults: graph.appearance.defaults } : {}),
+                  nodes: graph.appearance?.nodes ?? {},
+                  edges: graph.appearance?.edges ?? {},
+                  ...(graph.appearance?.images !== undefined ? { images: graph.appearance.images } : {}),
+                }),
+              }
+            : {}),
+        },
+      };
+    }),
   };
 }
 
@@ -503,6 +597,9 @@ export function treeErrors(graph: TreeGraph, eligibleIds: ReadonlySet<string>): 
         if (node.shape !== undefined && !TREE_SHAPES.includes(node.shape)) {
           errors.push("Invalid appearance default shape for node.");
         }
+        if ((node as unknown as Record<string, unknown>).locked !== undefined) {
+          errors.push("Appearance default node cannot define locked.");
+        }
       }
       if (graph.appearance.defaults.edge) {
         const edge = graph.appearance.defaults.edge;
@@ -540,6 +637,9 @@ export function treeErrors(graph: TreeGraph, eligibleIds: ReadonlySet<string>): 
         if (style.height !== undefined && (!Number.isFinite(style.height) || style.height < MIN_NODE_HEIGHT || style.height > MAX_NODE_HEIGHT)) {
           errors.push(`Invalid appearance height for node '${id}'.`);
         }
+        if (style.locked !== undefined && typeof style.locked !== "boolean") {
+          errors.push(`Invalid appearance locked for node '${id}'.`);
+        }
       }
     }
     if (graph.appearance.edges) {
@@ -556,6 +656,39 @@ export function treeErrors(graph: TreeGraph, eligibleIds: ReadonlySet<string>): 
         }
         if (style.pattern !== undefined && !TREE_WIRE_PATTERNS.includes(style.pattern)) {
           errors.push(`Invalid appearance pattern for edge '${edgeKey}'.`);
+        }
+      }
+    }
+    if (graph.appearance.images !== undefined) {
+      if (!Array.isArray(graph.appearance.images)) {
+        errors.push("Appearance images must be an array.");
+      } else {
+        const seenImageIds = new Set<string>();
+        for (const image of graph.appearance.images) {
+          if (!image || typeof image !== "object" || Array.isArray(image)) {
+            errors.push("Invalid appearance image.");
+            continue;
+          }
+          if (typeof image.id !== "string" || !image.id.trim()) {
+            errors.push("Appearance image ID must be a nonempty string.");
+          } else if (seenImageIds.has(image.id)) {
+            errors.push(`Duplicate appearance image ID '${image.id}'.`);
+          } else {
+            seenImageIds.add(image.id);
+          }
+          if (typeof image.src !== "string" || !isValidImageSrc(image.src)) {
+            errors.push(`Invalid appearance image src '${image?.src}'.`);
+          }
+          if (typeof image.x !== "number" || !Number.isFinite(image.x) || typeof image.y !== "number" || !Number.isFinite(image.y)) {
+            errors.push(`Appearance image '${image.id || "unknown"}' coordinates must be finite numbers.`);
+          }
+          if (typeof image.width !== "number" || !Number.isFinite(image.width) || image.width <= 0 ||
+              typeof image.height !== "number" || !Number.isFinite(image.height) || image.height <= 0) {
+            errors.push(`Appearance image '${image.id || "unknown"}' dimensions must be positive numbers.`);
+          }
+          if (typeof image.locked !== "boolean") {
+            errors.push(`Appearance image '${image.id || "unknown"}' locked must be a boolean.`);
+          }
         }
       }
     }

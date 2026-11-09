@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backgrounds, graph-wide defaults and scoped CSS customization, a responsive
   canvas title, in-canvas view controls and JSON export, local display
   preferences, and three example graphs.
+- Tree canvas image layers with move, resize and lock controls, and node locks.
 - Shared color wheel picker for tree graph and vector canvas colors.
 
 ### Fixed

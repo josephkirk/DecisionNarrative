@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { TraitInstance } from "../../src/web/studio/contracts.ts";
 import type { AnyEntity } from "../../src/web/studio/plugins/runtime.ts";
 import { TREE_EXAMPLES } from "../../src/web/studio/plugins/tree/examples.ts";
-import { CARD_HEIGHT, CARD_WIDTH, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, type TreeDirection, type TreeGraph, type TreeShape } from "../../src/web/studio/plugins/tree/model.ts";
+import { CARD_HEIGHT, CARD_WIDTH, isValidImageSrc, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, type TreeCanvasImage, type TreeDirection, type TreeGraph, type TreeShape } from "../../src/web/studio/plugins/tree/model.ts";
 
 const graph: TreeGraph = {
   nodes: ["start-a", "start-b", "shared", "end"],
@@ -143,6 +143,214 @@ test("treeErrors flags unknown nodes and edges in appearance", () => {
       edges: { [JSON.stringify(["start-a", "end"])]: { color: "#112233" } },
     },
   }, eligible)).not.toEqual([]);
+});
+
+test("node locked and canvas images round-trip and preserve image order", () => {
+  const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const images: TreeCanvasImage[] = [
+    { id: "img-1", src: "project-files/thumbnails/map.png", x: 100, y: 150, width: 300, height: 200, locked: false },
+    { id: "img-2", src: "https://example.com/art.jpg", x: -50, y: 0, width: 120, height: 80, locked: true },
+    { id: "img-3", src: "assets/badge.jpeg", x: 0, y: 0, width: 64, height: 64, locked: false },
+  ];
+  const fullGraph: TreeGraph = {
+    ...graph,
+    appearance: {
+      canvasBackground: "#112233",
+      nodes: {
+        shared: { width: 200, height: 100, locked: true },
+        "start-a": { locked: false },
+      },
+      edges: {},
+      images,
+    },
+  };
+  const patched = setTreeGraph(entity, trait, fullGraph);
+  const restored = treeGraphOf(patched.traits![0]!);
+  expect(restored.appearance?.images).toEqual(images);
+  expect(restored.appearance?.nodes.shared?.locked).toBe(true);
+  expect(restored.appearance?.nodes["start-a"]?.locked).toBe(false);
+  expect(treeErrors(restored, new Set(restored.nodes))).toEqual([]);
+});
+
+test("updating node appearance preserves canvas images", () => {
+  const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const initialImages: TreeCanvasImage[] = [
+    { id: "img-1", src: "project-files/thumbnails/map.png", x: 50, y: 60, width: 200, height: 150, locked: true },
+  ];
+  const initialGraph: TreeGraph = {
+    ...graph,
+    appearance: {
+      canvasBackground: "#111111",
+      nodes: {},
+      edges: {},
+      images: initialImages,
+    },
+  };
+  const step1 = setTreeGraph(entity, trait, initialGraph);
+  const currentTrait = step1.traits![0]!;
+
+  // Node edits retain the graph's image layer.
+  const updatedAppearanceGraph: TreeGraph = {
+    ...graph,
+    appearance: {
+      ...initialGraph.appearance,
+      canvasBackground: "#222222",
+      nodes: { shared: { width: 250 } },
+      edges: {},
+    },
+  };
+  const step2 = setTreeGraph({ ...entity, traits: [currentTrait] }, currentTrait, updatedAppearanceGraph);
+  const restored2 = treeGraphOf(step2.traits![0]!);
+  expect(restored2.appearance?.images).toEqual(initialImages);
+  expect(restored2.appearance?.canvasBackground).toBe("#222222");
+  expect(restored2.appearance?.nodes.shared?.width).toBe(250);
+
+  // Explicitly passing empty array updates images to empty
+  const clearedImagesGraph: TreeGraph = {
+    ...graph,
+    appearance: {
+      nodes: {},
+      edges: {},
+      images: [],
+    },
+  };
+  const step3 = setTreeGraph({ ...entity, traits: [step2.traits![0]!] }, currentTrait, clearedImagesGraph);
+  const restored3 = treeGraphOf(step3.traits![0]!);
+  expect(restored3.appearance?.images).toEqual([]);
+});
+
+test("appearance rejects invalid node locked and images payloads in treeGraphOf", () => {
+  const base = { id: "graph", template_id: "tree_graph", values: { nodes: ["a"], edges: [] } };
+
+  // node locked must be boolean
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { locked: "true" } } }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ nodes: { a: { locked: 1 } } }) } })).toThrow();
+
+  // default node cannot specify locked
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ defaults: { node: { locked: true } } }) } })).toThrow();
+
+  // images must be array
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: "not-an-array" }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: {} }) } })).toThrow();
+
+  // image item must be object
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [null] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: ["string"] }) } })).toThrow();
+
+  // unexpected image fields
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "a.png", x: 0, y: 0, width: 10, height: 10, locked: false, extra: true }] }) } })).toThrow();
+
+  // empty or duplicate id
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "", src: "a.png", x: 0, y: 0, width: 10, height: 10, locked: false }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "   ", src: "a.png", x: 0, y: 0, width: 10, height: 10, locked: false }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [
+    { id: "dup", src: "a.png", x: 0, y: 0, width: 10, height: 10, locked: false },
+    { id: "dup", src: "b.png", x: 0, y: 0, width: 10, height: 10, locked: false },
+  ] }) } })).toThrow();
+
+  // invalid image src (empty, backslash, traversal, absolute, wrong extension)
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "", x: 0, y: 0, width: 10, height: 10, locked: false }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "/abs/path.png", x: 0, y: 0, width: 10, height: 10, locked: false }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "folder\\file.png", x: 0, y: 0, width: 10, height: 10, locked: false }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "../secret.png", x: 0, y: 0, width: 10, height: 10, locked: false }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "a/./b.png", x: 0, y: 0, width: 10, height: 10, locked: false }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "image.gif", x: 0, y: 0, width: 10, height: 10, locked: false }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "image.svg", x: 0, y: 0, width: 10, height: 10, locked: false }] }) } })).toThrow();
+
+  // non-finite coordinates
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "a.png", x: "0", y: 0, width: 10, height: 10, locked: false }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "a.png", x: 0, y: null, width: 10, height: 10, locked: false }] }) } })).toThrow();
+
+  // non-positive or non-finite dimensions
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "a.png", x: 0, y: 0, width: 0, height: 10, locked: false }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "a.png", x: 0, y: 0, width: -10, height: 10, locked: false }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "a.png", x: 0, y: 0, width: 10, height: 0, locked: false }] }) } })).toThrow();
+
+  // locked must be boolean
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "a.png", x: 0, y: 0, width: 10, height: 10, locked: 1 }] }) } })).toThrow();
+  expect(() => treeGraphOf({ ...base, values: { ...base.values, appearance: JSON.stringify({ images: [{ id: "1", src: "a.png", x: 0, y: 0, width: 10, height: 10, locked: "no" }] }) } })).toThrow();
+});
+
+test("treeErrors flags invalid node locked and images", () => {
+  const eligible = new Set(graph.nodes);
+
+  // default node locked error
+  expect(treeErrors({
+    ...graph,
+    appearance: {
+      defaults: { node: { locked: true } as unknown as NonNullable<NonNullable<TreeGraph["appearance"]>["defaults"]>["node"] },
+      nodes: {},
+      edges: {},
+    },
+  }, eligible)).toContain("Appearance default node cannot define locked.");
+
+  // node appearance locked error
+  expect(treeErrors({
+    ...graph,
+    appearance: {
+      nodes: { shared: { locked: "yes" as unknown as boolean } },
+      edges: {},
+    },
+  }, eligible)).toContain("Invalid appearance locked for node 'shared'.");
+
+  // invalid image src error
+  expect(treeErrors({
+    ...graph,
+    appearance: {
+      nodes: {},
+      edges: {},
+      images: [
+        { id: "img-1", src: "/invalid/abs.png", x: 0, y: 0, width: 10, height: 10, locked: false },
+      ],
+    },
+  }, eligible).length).toBeGreaterThan(0);
+
+  // non-positive dimensions error
+  expect(treeErrors({
+    ...graph,
+    appearance: {
+      nodes: {},
+      edges: {},
+      images: [
+        { id: "img-1", src: "valid.png", x: 0, y: 0, width: -5, height: 10, locked: false },
+      ],
+    },
+  }, eligible).length).toBeGreaterThan(0);
+
+  // duplicate image id error
+  expect(treeErrors({
+    ...graph,
+    appearance: {
+      nodes: {},
+      edges: {},
+      images: [
+        { id: "dup", src: "a.png", x: 0, y: 0, width: 10, height: 10, locked: false },
+        { id: "dup", src: "b.jpg", x: 10, y: 10, width: 20, height: 20, locked: true },
+      ],
+    },
+  }, eligible)).toContain("Duplicate appearance image ID 'dup'.");
+});
+
+test("isValidImageSrc validates image references matching validate_image_ref", () => {
+  expect(isValidImageSrc("path/to/image.png")).toBe(true);
+  expect(isValidImageSrc("thumb.jpg")).toBe(true);
+  expect(isValidImageSrc("thumb.jpeg")).toBe(true);
+  expect(isValidImageSrc("THUMB.PNG")).toBe(true);
+  expect(isValidImageSrc("https://cdn.example.com/image.png")).toBe(true);
+  expect(isValidImageSrc("http://example.com/test")).toBe(true);
+
+  expect(isValidImageSrc("")).toBe(false);
+  expect(isValidImageSrc("   ")).toBe(false);
+  expect(isValidImageSrc("/root/image.png")).toBe(false);
+  expect(isValidImageSrc("folder\\image.png")).toBe(false);
+  expect(isValidImageSrc("folder/../image.png")).toBe(false);
+  expect(isValidImageSrc("folder/./image.png")).toBe(false);
+  expect(isValidImageSrc("folder//image.png")).toBe(false);
+  expect(isValidImageSrc("image.gif")).toBe(false);
+  expect(isValidImageSrc("image.webp")).toBe(false);
+  expect(isValidImageSrc("image")).toBe(false);
 });
 
 

@@ -397,7 +397,7 @@ fn validate_appearance_map(
     issues: &mut Vec<String>,
 ) {
     for key in map.keys() {
-        if key != "nodes" && key != "edges" && key != "canvasBackground" && key != "defaults" {
+        if key != "nodes" && key != "edges" && key != "canvasBackground" && key != "defaults" && key != "images" {
             issues.push(format!(
                 "owner '{display_name}': tree_graph appearance contains unknown key '{key}'"
             ));
@@ -451,6 +451,19 @@ fn validate_appearance_map(
             }
         }
     }
+
+    if let Some(images_val) = map.get("images") {
+        match images_val {
+            Value::Array(images_arr) => {
+                validate_appearance_images(images_arr, display_name, issues);
+            }
+            other => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance 'images' must be an array, got {other}"
+                ));
+            }
+        }
+    }
 }
 
 fn validate_appearance_nodes(
@@ -474,7 +487,7 @@ fn validate_appearance_nodes(
         };
 
         for key in node_obj.keys() {
-            if !["background", "outline", "outlineWidth", "width", "height"].contains(&key.as_str()) {
+            if !["background", "outline", "outlineWidth", "width", "height", "locked"].contains(&key.as_str()) {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph appearance for node '{node_id}' contains unknown key '{key}'"
                 ));
@@ -522,6 +535,162 @@ fn validate_appearance_nodes(
             if !valid {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph appearance for node '{node_id}' has invalid height, must be a finite number between 60 and 400"
+                ));
+            }
+        }
+
+        if let Some(locked_val) = node_obj.get("locked") {
+            if locked_val.as_bool().is_none() {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance for node '{node_id}' has invalid locked, must be a boolean"
+                ));
+            }
+        }
+    }
+}
+
+fn validate_appearance_images(
+    images_arr: &[Value],
+    display_name: &str,
+    issues: &mut Vec<String>,
+) {
+    let mut seen_ids: BTreeSet<&str> = BTreeSet::new();
+
+    for (idx, img_val) in images_arr.iter().enumerate() {
+        let Some(img_obj) = img_val.as_object() else {
+            issues.push(format!(
+                "owner '{display_name}': tree_graph appearance image at index {idx} must be an object, got {img_val}"
+            ));
+            continue;
+        };
+
+        for key in img_obj.keys() {
+            if !["id", "src", "x", "y", "width", "height", "locked"].contains(&key.as_str()) {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance image at index {idx} contains unknown key '{key}'"
+                ));
+            }
+        }
+
+        match img_obj.get("id") {
+            Some(Value::String(id_str)) => {
+                if id_str.trim().is_empty() {
+                    issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance image at index {idx} has empty id"
+                    ));
+                } else if !seen_ids.insert(id_str.as_str()) {
+                    issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance duplicate image id '{id_str}'"
+                    ));
+                }
+            }
+            Some(other) => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance image at index {idx} 'id' must be a string, got {other}"
+                ));
+            }
+            None => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance image at index {idx} missing 'id'"
+                ));
+            }
+        }
+
+        match img_obj.get("src") {
+            Some(Value::String(src_str)) => {
+                if src_str.trim().is_empty() {
+                    issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance image at index {idx} has empty src"
+                    ));
+                } else if let Err(err) = crate::files::validate_image_ref(src_str) {
+                    issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance image at index {idx} has invalid src: {err}"
+                    ));
+                }
+            }
+            Some(other) => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance image at index {idx} 'src' must be a string, got {other}"
+                ));
+            }
+            None => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance image at index {idx} missing 'src'"
+                ));
+            }
+        }
+
+        match img_obj.get("x") {
+            Some(x_val) => {
+                if !x_val.as_f64().is_some_and(|v| v.is_finite()) {
+                    issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance image at index {idx} has invalid x, must be a finite number"
+                    ));
+                }
+            }
+            None => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance image at index {idx} missing 'x'"
+                ));
+            }
+        }
+
+        match img_obj.get("y") {
+            Some(y_val) => {
+                if !y_val.as_f64().is_some_and(|v| v.is_finite()) {
+                    issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance image at index {idx} has invalid y, must be a finite number"
+                    ));
+                }
+            }
+            None => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance image at index {idx} missing 'y'"
+                ));
+            }
+        }
+
+        match img_obj.get("width") {
+            Some(w_val) => {
+                if !w_val.as_f64().is_some_and(|w| w.is_finite() && w > 0.0) {
+                    issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance image at index {idx} has invalid width, must be a positive finite number"
+                    ));
+                }
+            }
+            None => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance image at index {idx} missing 'width'"
+                ));
+            }
+        }
+
+        match img_obj.get("height") {
+            Some(h_val) => {
+                if !h_val.as_f64().is_some_and(|h| h.is_finite() && h > 0.0) {
+                    issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance image at index {idx} has invalid height, must be a positive finite number"
+                    ));
+                }
+            }
+            None => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance image at index {idx} missing 'height'"
+                ));
+            }
+        }
+
+        match img_obj.get("locked") {
+            Some(locked_val) => {
+                if locked_val.as_bool().is_none() {
+                    issues.push(format!(
+                        "owner '{display_name}': tree_graph appearance image at index {idx} has invalid locked, must be a boolean"
+                    ));
+                }
+            }
+            None => {
+                issues.push(format!(
+                    "owner '{display_name}': tree_graph appearance image at index {idx} missing 'locked'"
                 ));
             }
         }
@@ -1127,9 +1296,12 @@ mod tests {
                                     "outline": "#445566",
                                     "outlineWidth": 4,
                                     "width": 250,
-                                    "height": 120
+                                    "height": 120,
+                                    "locked": true
                                 },
-                                "item-2": {}
+                                "item-2": {
+                                    "locked": false
+                                }
                             },
                             "edges": {
                                 "[\"item-1\",\"item-2\"]": {
@@ -1137,7 +1309,27 @@ mod tests {
                                     "width": 3.5,
                                     "pattern": "dash"
                                 }
-                            }
+                            },
+                            "images": [
+                                {
+                                    "id": "img-1",
+                                    "src": "project-files/thumbnails/sample.png",
+                                    "x": -100.5,
+                                    "y": 50.0,
+                                    "width": 200.0,
+                                    "height": 150.0,
+                                    "locked": false
+                                },
+                                {
+                                    "id": "img-2",
+                                    "src": "https://example.com/asset.jpg",
+                                    "x": 300.0,
+                                    "y": -40.0,
+                                    "width": 80.0,
+                                    "height": 80.0,
+                                    "locked": true
+                                }
+                            ]
                         }).to_string()
                     }
                 }]
@@ -1481,5 +1673,287 @@ mod tests {
         assert!(issues.iter().any(|i| i.contains("appearance default edge has invalid color")));
         assert!(issues.iter().any(|i| i.contains("appearance default edge has invalid width")));
         assert!(issues.iter().any(|i| i.contains("appearance default edge has invalid pattern, expected solid, dash, dot, or brush")));
+    }
+
+    #[test]
+    fn test_appearance_node_locked_valid_and_invalid() {
+        let templates = standard_templates();
+
+        // 1. Valid locked booleans
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
+            { "id": "item-2", "name": "Item 2", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1", "item-2"],
+                        "edges": [],
+                        "appearance": json!({
+                            "nodes": {
+                                "item-1": { "locked": true },
+                                "item-2": { "locked": false }
+                            }
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.is_empty(), "expected valid node locked, got: {issues:?}");
+
+        // 2. Invalid locked on node (non-boolean)
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1"],
+                        "edges": [],
+                        "appearance": json!({
+                            "nodes": {
+                                "item-1": { "locked": "true" }
+                            }
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.iter().any(|i| i.contains("appearance for node 'item-1' has invalid locked, must be a boolean")));
+
+        // 3. Invalid locked in defaults.node (only allowed on per-node appearance)
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1"],
+                        "edges": [],
+                        "appearance": json!({
+                            "defaults": {
+                                "node": { "locked": true }
+                            }
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+        let index = make_test_index(templates, entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.iter().any(|i| i.contains("appearance default node contains unknown key 'locked'")));
+    }
+
+    #[test]
+    fn test_appearance_images_valid() {
+        let templates = standard_templates();
+
+        // 1. Empty images array survives validation
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1"],
+                        "edges": [],
+                        "appearance": json!({
+                            "images": []
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.is_empty(), "expected empty images to be valid, got: {issues:?}");
+
+        // 2. Multiple valid images with various accepted file references and coordinates
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1"],
+                        "edges": [],
+                        "appearance": json!({
+                            "images": [
+                                {
+                                    "id": "img-png",
+                                    "src": "project-files/thumbnails/sample.png",
+                                    "x": -500.25,
+                                    "y": 120.75,
+                                    "width": 320.0,
+                                    "height": 240.0,
+                                    "locked": true
+                                },
+                                {
+                                    "id": "img-jpg",
+                                    "src": "project-files/thumbnails/photo.jpg",
+                                    "x": 0.0,
+                                    "y": 0.0,
+                                    "width": 100.0,
+                                    "height": 100.0,
+                                    "locked": false
+                                },
+                                {
+                                    "id": "img-jpeg",
+                                    "src": "project-files/thumbnails/photo.jpeg",
+                                    "x": 10.0,
+                                    "y": -20.0,
+                                    "width": 50.0,
+                                    "height": 50.0,
+                                    "locked": true
+                                },
+                                {
+                                    "id": "img-http",
+                                    "src": "http://example.com/asset.png",
+                                    "x": 200.0,
+                                    "y": 300.0,
+                                    "width": 150.0,
+                                    "height": 75.0,
+                                    "locked": false
+                                },
+                                {
+                                    "id": "img-https",
+                                    "src": "https://example.com/asset.jpg",
+                                    "x": 400.0,
+                                    "y": -300.0,
+                                    "width": 10.0,
+                                    "height": 10.0,
+                                    "locked": true
+                                }
+                            ]
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+        let index = make_test_index(templates, entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.is_empty(), "expected valid images to pass, got: {issues:?}");
+    }
+
+    #[test]
+    fn test_appearance_images_malformed_and_invalid_values() {
+        let templates = standard_templates();
+
+        // Non-array images
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1"],
+                        "edges": [],
+                        "appearance": json!({
+                            "images": "not-an-array"
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.iter().any(|i| i.contains("appearance 'images' must be an array")));
+
+        // Malformed image items
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
+            { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
+            {
+                "id": "graph-owner",
+                "name": "Graph Owner",
+                "traits": [{
+                    "template_id": "tid-tree-graph",
+                    "values": {
+                        "nodes": ["item-1"],
+                        "edges": [],
+                        "appearance": json!({
+                            "images": [
+                                "not-an-object",
+                                {
+                                    "id": "img-dup",
+                                    "src": "project-files/thumbnails/pic.png",
+                                    "x": 0.0,
+                                    "y": 0.0,
+                                    "width": 100.0,
+                                    "height": 100.0,
+                                    "locked": true,
+                                    "unknown_image_prop": 42
+                                },
+                                {
+                                    "id": "img-dup",
+                                    "src": "project-files/thumbnails/pic.png",
+                                    "x": 0.0,
+                                    "y": 0.0,
+                                    "width": 100.0,
+                                    "height": 100.0,
+                                    "locked": false
+                                },
+                                {
+                                    "id": "   ",
+                                    "src": "   ",
+                                    "x": "not-a-number",
+                                    "width": -10.0,
+                                    "height": 0.0,
+                                    "locked": "false"
+                                },
+                                {
+                                    "src": "../traversal.png",
+                                    "x": 10.0,
+                                    "y": 10.0,
+                                    "width": 50.0,
+                                    "height": 50.0
+                                },
+                                {
+                                    "id": 123,
+                                    "src": "not-image.gif",
+                                    "x": 1.0,
+                                    "y": 1.0,
+                                    "width": 10.0,
+                                    "height": 10.0,
+                                    "locked": true
+                                }
+                            ]
+                        }).to_string()
+                    }
+                }]
+            }
+        ])).unwrap();
+        let index = make_test_index(templates, entities, Vec::new());
+        let issues = validate_tree_graphs(&index, None, None);
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 0 must be an object")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 1 contains unknown key 'unknown_image_prop'")));
+        assert!(issues.iter().any(|i| i.contains("appearance duplicate image id 'img-dup'")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has empty id")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has empty src")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has invalid x")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 missing 'y'")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has invalid width")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has invalid height")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has invalid locked")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 4 missing 'id'")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 4 has invalid src")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 4 missing 'locked'")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 5 'id' must be a string")));
+        assert!(issues.iter().any(|i| i.contains("appearance image at index 5 has invalid src")));
     }
 }

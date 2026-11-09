@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import ColorWheelPicker from "../../components/ColorWheelPicker.vue";
+import TreeImageLayer from "./TreeImageLayer.vue";
 import { StudioApi } from "../../api.ts";
 import type { EntityTemplateRecord } from "../../contracts.ts";
 import { studioState } from "../../state.ts";
@@ -8,7 +9,7 @@ import { thumbnailUrl } from "../../thumbnails.ts";
 import { refreshWorkspace } from "../../view-models/workspace.ts";
 import type { AnyEntity } from "../runtime.ts";
 import { TREE_EXAMPLES } from "./examples.ts";
-import { TREE_GRAPH_KEY, TREE_ITEM_KEY, TREE_SHAPES, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, treeTrait, type TreeDirection, type TreeEdge, type TreeGraph, type TreePoint, type TreePositions, type TreeShape } from "./model.ts";
+import { TREE_GRAPH_KEY, TREE_ITEM_KEY, TREE_SHAPES, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, treeTrait, type TreeCanvasImage, type TreeDirection, type TreeEdge, type TreeGraph, type TreePoint, type TreePositions, type TreeShape } from "./model.ts";
 
 const props = defineProps<{ entity: AnyEntity; readonly?: boolean }>();
 const emit = defineEmits<{ (event: "patch", patch: Partial<AnyEntity>): void; (event: "save"): void }>();
@@ -30,10 +31,12 @@ const resizeDrag = ref<{ id: string; pointer: number; x: number; y: number; widt
 const cutDrag = ref<{ pointer: number; start: TreePoint; end: TreePoint } | null>(null);
 const zoom = ref(100);
 const treeScroll = ref<HTMLElement | null>(null);
+const imageInput = ref<HTMLInputElement | null>(null);
+let imagePoint: TreePoint | null = null;
 const panX = ref(40);
 const panY = ref(40);
 let pan: { pointer: number; x: number; y: number } | null = null;
-const menu = ref<{ x: number; y: number; node?: string; edge?: number; reconnect?: number; point: TreePoint } | null>(null);
+const menu = ref<{ x: number; y: number; node?: string; edge?: number; image?: string; reconnect?: number; point: TreePoint } | null>(null);
 const menuSearch = ref("");
 const showGrid = ref(true);
 const showThumbnails = ref(true);
@@ -98,6 +101,7 @@ const matchingNodes = computed(() => {
   return (graph.value?.nodes ?? []).filter((id) => `${label(id)} ${id}`.toLocaleLowerCase().includes(query));
 });
 const edgeKey = (edge: TreeEdge) => JSON.stringify([edge.from, edge.to]);
+const menuImage = computed(() => graph.value?.appearance?.images?.find((image) => image.id === menu.value?.image));
 const nodeAppearance = (id: string) => ({ ...graph.value?.appearance?.defaults?.node, ...graph.value?.appearance?.nodes[id] });
 const edgeAppearance = (edge: TreeEdge) => ({ ...graph.value?.appearance?.defaults?.edge, ...graph.value?.appearance?.edges[edgeKey(edge)] });
 const nodeShape = (id: string) => graph.value?.shapes?.[id] ?? graph.value?.appearance?.defaults?.node?.shape ?? "card";
@@ -106,10 +110,11 @@ function worldPoint(event: { clientX: number; clientY: number }): TreePoint {
   const rect = treeScroll.value!.getBoundingClientRect();
   return { x: (event.clientX - rect.left - panX.value) / zoomFactor.value, y: (event.clientY - rect.top - panY.value) / zoomFactor.value };
 }
-function updateNodeAppearance(id: string, update: Record<string, string | number>) {
+function updateNodeAppearance(id: string, update: Record<string, string | number | boolean>) {
   if (!graph.value || props.readonly) return;
   const appearance = graph.value.appearance ?? { nodes: {}, edges: {} };
-  const positions = ("width" in update || "height" in update) && layout.value
+  if (appearance.nodes[id]?.locked && ("width" in update || "height" in update)) return;
+  const positions = ("width" in update || "height" in update || update.locked === true) && layout.value
     ? { ...graph.value.positions, [graph.value.direction]: { ...layout.value.positions } }
     : graph.value.positions;
   patch({ ...graph.value, positions, appearance: { ...appearance, nodes: { ...appearance.nodes, [id]: { ...appearance.nodes[id], ...update } } } });
@@ -120,7 +125,11 @@ function resetNodeAppearance(id: string) {
   const shapes = { ...current.shapes };
   const appearance = current.appearance && { ...current.appearance, nodes: { ...current.appearance.nodes } };
   delete shapes[id];
-  if (appearance) delete appearance.nodes[id];
+  if (appearance) {
+    const locked = appearance.nodes[id]?.locked;
+    if (locked) appearance.nodes[id] = { locked: true };
+    else delete appearance.nodes[id];
+  }
   const positions = { ...current.positions, [current.direction]: { ...layout.value?.positions } };
   patch({ ...current, positions, shapes, appearance });
 }
@@ -148,7 +157,7 @@ async function fitGraph() {
   await nextTick();
   const viewport = treeScroll.value;
   const current = layout.value;
-  if (!viewport || !current || !graph.value?.nodes.length) return;
+  if (!viewport || !current || !graph.value || (!graph.value.nodes.length && !graph.value.appearance?.images?.length)) return;
   let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
   for (const [id, point] of Object.entries(current.positions)) {
     const size = nodeSize(id);
@@ -156,6 +165,12 @@ async function fitGraph() {
     top = Math.min(top, point.y - 40);
     right = Math.max(right, point.x + size.width + 40);
     bottom = Math.max(bottom, point.y + size.height + 40);
+  }
+  for (const image of graph.value.appearance?.images ?? []) {
+    left = Math.min(left, image.x - 40);
+    top = Math.min(top, image.y - 40);
+    right = Math.max(right, image.x + image.width + 40);
+    bottom = Math.max(bottom, image.y + image.height + 40);
   }
   zoom.value = Math.max(10, Math.min(100, Math.floor(Math.min(viewport.clientWidth / (right - left), viewport.clientHeight / (bottom - top)) * 100)));
   panX.value = Math.round((viewport.clientWidth - (right - left) * zoomFactor.value) / 2 - left * zoomFactor.value);
@@ -259,6 +274,56 @@ function addAtContext(id: string) {
   const positions = { ...current.positions, [current.direction]: { ...current.positions?.[current.direction], [id]: position } };
   patch({ ...current, nodes: [...current.nodes, id], positions });
   menu.value = null;
+}
+function openImageContext(id: string, event: MouseEvent) {
+  openContext(event);
+  if (menu.value) menu.value.image = id;
+}
+function changeImage(id: string, update: Partial<TreeCanvasImage>) {
+  const current = graph.value;
+  if (!current || props.readonly) return;
+  const appearance = current.appearance ?? { nodes: {}, edges: {} };
+  const existing = appearance.images?.find((image) => image.id === id);
+  if (!existing || (existing.locked && ("x" in update || "y" in update || "width" in update || "height" in update))) return;
+  const images = (appearance.images ?? []).map((image) => image.id === id ? { ...image, ...update } : image);
+  patch({ ...current, appearance: { ...appearance, images } });
+}
+function removeImage(id: string) {
+  const current = graph.value;
+  if (!current?.appearance || props.readonly) return;
+  patch({ ...current, appearance: { ...current.appearance, images: (current.appearance.images ?? []).filter((image) => image.id !== id) } });
+  menu.value = null;
+}
+function chooseImage() {
+  if (props.readonly || !menu.value) return;
+  imagePoint = { ...menu.value.point };
+  menu.value = null;
+  imageInput.value?.click();
+}
+async function addImage(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0], point = imagePoint, entityId = props.entity.id;
+  input.value = "";
+  imagePoint = null;
+  if (!file || !point || props.readonly) return;
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    if (!image.naturalWidth || !image.naturalHeight) throw new Error("The selected image has no dimensions.");
+    const uploaded = await StudioApi.uploadThumbnail(file);
+    if (!mounted || props.entity.id !== entityId || !graph.value || props.readonly) return;
+    const scale = Math.min(1, 320 / Math.max(image.naturalWidth, image.naturalHeight));
+    const appearance = graph.value.appearance ?? { nodes: {}, edges: {} };
+    const width = Math.max(24, Math.round(image.naturalWidth * scale)), height = Math.max(24, Math.round(image.naturalHeight * scale));
+    const entry: TreeCanvasImage = { id: crypto.randomUUID(), src: uploaded.path, x: Math.round(point.x - width / 2), y: Math.round(point.y - height / 2), width, height, locked: false };
+    patch({ ...graph.value, appearance: { ...appearance, images: [...(appearance.images ?? []), entry] } });
+  } catch (error) {
+    notice.value = `Could not add image: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function patch(next: TreeGraph) {
@@ -394,7 +459,7 @@ function finishCut() {
 }
 function startResize(id: string, direction: string, event: PointerEvent) {
   if (event.altKey) { startPan(event); return; }
-  if (props.readonly || creatingExample.value || event.button !== 0) return;
+  if (props.readonly || creatingExample.value || nodeAppearance(id).locked || event.button !== 0) return;
   const point = layout.value?.positions[id];
   if (!point) return;
   const size = nodeSize(id);
@@ -408,14 +473,14 @@ function changeDirection(event: Event) {
   patch({ ...graph.value, direction: (event.target as HTMLSelectElement).value as TreeDirection });
 }
 function moveNode(id: string, point: TreePoint) {
-  if (!graph.value || props.readonly) return;
+  if (!graph.value || props.readonly || nodeAppearance(id).locked) return;
   const direction = graph.value.direction;
   const positions = { ...graph.value.positions, [direction]: { ...graph.value.positions?.[direction], [id]: point } };
   patch({ ...graph.value, positions });
 }
 function startDrag(id: string, event: PointerEvent) {
   if (event.altKey && event.button === 0) { startPan(event); event.stopPropagation(); return; }
-  if (props.readonly || creatingExample.value || event.button !== 0 || (event.target as Element).closest("button")) return;
+  if (props.readonly || creatingExample.value || nodeAppearance(id).locked || event.button !== 0 || (event.target as Element).closest("button")) return;
   const point = layout.value?.positions[id];
   if (!point) return;
   drag = { id, pointer: event.pointerId, startX: event.clientX, startY: event.clientY, point: { ...point } };
@@ -430,7 +495,7 @@ function endDrag(event: PointerEvent) {
   if (drag?.pointer === event.pointerId) drag = null;
 }
 function keyboardMove(id: string, event: KeyboardEvent) {
-  if (props.readonly || event.target !== event.currentTarget) return;
+  if (props.readonly || nodeAppearance(id).locked || event.target !== event.currentTarget) return;
   const delta: Record<string, TreePoint> = { ArrowLeft: { x: -10, y: 0 }, ArrowRight: { x: 10, y: 0 }, ArrowUp: { x: 0, y: -10 }, ArrowDown: { x: 0, y: 10 } };
   const change = delta[event.key];
   const point = layout.value?.positions[id];
@@ -441,7 +506,9 @@ function keyboardMove(id: string, event: KeyboardEvent) {
 function resetLayout() {
   if (!graph.value) return;
   const positions = { ...graph.value.positions };
-  delete positions[graph.value.direction];
+  const locked = Object.fromEntries(graph.value.nodes.filter((id) => nodeAppearance(id).locked && layout.value?.positions[id]).map((id) => [id, layout.value!.positions[id]!]));
+  if (Object.keys(locked).length) positions[graph.value.direction] = locked;
+  else delete positions[graph.value.direction];
   patch({ ...graph.value, positions });
 }
 function exportJson() {
@@ -529,6 +596,7 @@ function edgePath(edge: TreeEdge): string | null {
       <div class="tree-meta"><span>{{ graph.nodes.length }} items</span><span>{{ graph.edges.length }} connections</span><span>{{ roots.size }} roots</span></div>
       <div :id="canvasId" ref="treeScroll" class="tree-scroll" :class="{ 'hide-grid': !showGrid }" :style="{ backgroundColor: graph.appearance?.canvasBackground, backgroundPosition: `${panX}px ${panY}px`, backgroundSize: `${24 * zoomFactor}px ${24 * zoomFactor}px` }" tabindex="0" aria-label="Tree graph canvas; drag background to pan, use mouse wheel to zoom" @contextmenu="openContext($event)" @pointerdown="startPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @wheel.prevent="wheelZoom" @keydown="keyboardPan">
         <component :is="'style'" v-if="customCanvasCss" v-text="customCanvasCss" />
+        <input ref="imageInput" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" hidden @change="addImage" />
         <strong class="tree-canvas-title" :title="entity.name">{{ entity.name }}</strong>
         <div class="tree-canvas-toolbar" @pointerdown.stop @wheel.stop>
           <button v-if="!readonly" type="button" class="btn btn-secondary" @click.stop="openContext($event)">Canvas actions</button>
@@ -538,7 +606,7 @@ function edgePath(edge: TreeEdge): string | null {
               <option value="down">Top to bottom</option><option value="up">Bottom to top</option><option value="radial">Radial</option>
             </select>
           </label>
-          <button type="button" class="btn btn-secondary" :disabled="!graph.nodes.length" @click="fitGraph">Fit graph</button>
+          <button type="button" class="btn btn-secondary" :disabled="!graph.nodes.length && !graph.appearance?.images?.length" @click="fitGraph">Fit graph</button>
           <button v-if="!readonly" type="button" class="btn btn-primary" :disabled="creatingExample || !!issues.length" title="Saves all entity changes" @click="emit('save')">Save layout</button>
           <details class="tree-options">
             <summary>View options</summary>
@@ -548,14 +616,15 @@ function edgePath(edge: TreeEdge): string | null {
               <label><input v-model="showGrid" type="checkbox" /> Show grid</label>
               <label><input v-model="showThumbnails" type="checkbox" /> Show thumbnails</label>
               <button v-if="!readonly" type="button" class="btn btn-secondary" :disabled="creatingExample" @click="resetLayout">Reset view layout</button>
-              <button type="button" class="btn btn-secondary" :disabled="!graph.nodes.length" @click="exportJson">Export JSON</button>
+              <button type="button" class="btn btn-secondary" :disabled="!graph.nodes.length && !graph.appearance?.images?.length" @click="exportJson">Export JSON</button>
             </div>
             <p class="field-sublabel">Grid and thumbnail preferences are saved on this device. Saving layout also saves other entity changes.</p>
             </div>
           </details>
         </div>
-        <div v-if="!graph.nodes.length" class="tree-empty"><strong>Start with an item</strong><span>Right-click the canvas or use Canvas actions to add a TreeItem.</span></div>
-        <div v-else class="tree-world" :style="{ transform: `translate(${panX}px, ${panY}px) scale(${zoomFactor})` }">
+        <div v-if="!graph.nodes.length && !graph.appearance?.images?.length" class="tree-empty"><strong>Start with an item or image</strong><span>Right-click the canvas or use Canvas actions to add content.</span></div>
+        <div class="tree-world" :style="{ transform: `translate(${panX}px, ${panY}px) scale(${zoomFactor})` }">
+            <TreeImageLayer :images="graph.appearance?.images ?? []" :readonly="readonly" :zoom="zoomFactor" @change="changeImage" @context="openImageContext" />
             <svg class="tree-edges" aria-label="Tree connections">
               <defs><marker :id="markerId" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" /></marker></defs>
               <template v-for="(edge, index) in graph.edges" :key="`${edge.from}-${edge.to}-${index}`">
@@ -566,17 +635,18 @@ function edgePath(edge: TreeEdge): string | null {
               <path v-if="pendingLink" :d="pendingLink" class="tree-edge tree-edge-pending" />
               <path v-if="cutDrag" :d="`M ${cutDrag.start.x} ${cutDrag.start.y} L ${cutDrag.end.x} ${cutDrag.end.y}`" class="tree-cut-line" />
             </svg>
-            <article v-for="id in graph.nodes" :key="id" class="tree-node" :data-tree-id="id" :class="[`shape-${nodeShape(id)}`, { 'is-movable': !readonly }]" :style="{ left: `${layout.positions[id]?.x ?? 0}px`, top: `${layout.positions[id]?.y ?? 0}px`, width: `${nodeSize(id).width}px`, height: `${nodeSize(id).height}px`, '--node-bg': nodeAppearance(id).background, '--node-outline': nodeAppearance(id).outline, '--node-outline-width': `${nodeAppearance(id).outlineWidth ?? 1}px` }" :tabindex="readonly ? undefined : 0" :aria-label="`${label(id)}${roots.has(id) ? ', root' : ''}. Use arrow keys to move.`" @contextmenu.stop="openContext($event, id)" @pointerdown="startDrag(id, $event)" @pointermove="dragNode" @pointerup="endDrag" @pointercancel="endDrag" @keydown="keyboardMove(id, $event)">
+            <article v-for="id in graph.nodes" :key="id" class="tree-node" :data-tree-id="id" :class="[`shape-${nodeShape(id)}`, { 'is-movable': !readonly && !nodeAppearance(id).locked, 'is-locked': nodeAppearance(id).locked }]" :style="{ left: `${layout.positions[id]?.x ?? 0}px`, top: `${layout.positions[id]?.y ?? 0}px`, width: `${nodeSize(id).width}px`, height: `${nodeSize(id).height}px`, '--node-bg': nodeAppearance(id).background, '--node-outline': nodeAppearance(id).outline, '--node-outline-width': `${nodeAppearance(id).outlineWidth ?? 1}px` }" :tabindex="readonly ? undefined : 0" :aria-label="`${label(id)}${roots.has(id) ? ', root' : ''}${nodeAppearance(id).locked ? ', locked' : '. Use arrow keys to move'}.`" @contextmenu.stop="openContext($event, id)" @pointerdown="startDrag(id, $event)" @pointermove="dragNode" @pointerup="endDrag" @pointercancel="endDrag" @keydown="keyboardMove(id, $event)">
               <template v-if="!readonly"><span v-for="side in ['top', 'right', 'bottom', 'left']" :key="side" class="tree-connect-zone" :class="`zone-${side}`" title="Drag to connect" @pointerdown.stop="beginLink(id, $event)" /></template>
               <span class="tree-node-art" aria-hidden="true"><img v-if="showThumbnails && thumbnailUrl(byId.get(id)?.thumbnail)" :src="thumbnailUrl(byId.get(id)?.thumbnail) ?? ''" width="164" height="68" alt="" /></span>
-              <span class="tree-node-copy"><strong :title="label(id)">{{ label(id) }}</strong><small :title="description(id)">{{ roots.has(id) ? 'Root' : 'Tree item' }}</small></span>
+              <span class="tree-node-copy"><strong :title="label(id)">{{ label(id) }}</strong><small :title="description(id)">{{ roots.has(id) ? 'Root' : 'Tree item' }}{{ nodeAppearance(id).locked ? ' · Locked' : '' }}</small></span>
               <button v-if="!readonly" type="button" class="tree-remove" :disabled="creatingExample" :aria-label="`Options for ${label(id)}`" @click.stop="openContext($event, id)">⋯</button>
-              <template v-if="!readonly"><span v-for="direction in ['n','ne','e','se','s','sw','w','nw']" :key="direction" class="tree-resize" :class="`resize-${direction}`" :title="`Resize ${label(id)}`" aria-hidden="true" @pointerdown.stop="startResize(id, direction, $event)" /></template>
+              <template v-if="!readonly && !nodeAppearance(id).locked"><span v-for="direction in ['n','ne','e','se','s','sw','w','nw']" :key="direction" class="tree-resize" :class="`resize-${direction}`" :title="`Resize ${label(id)}`" aria-hidden="true" @pointerdown.stop="startResize(id, direction, $event)" /></template>
             </article>
           </div>
         <div v-if="menu" class="tree-context" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" @pointerdown.stop @wheel.stop @keydown.esc.stop="menu = null">
           <template v-if="menu.node">
             <strong>{{ label(menu.node) }}</strong>
+            <button type="button" @click="updateNodeAppearance(menu.node, { locked: !nodeAppearance(menu.node).locked })">{{ nodeAppearance(menu.node).locked ? 'Unlock node' : 'Lock node' }}</button>
             <label :for="`shape-${menu.node}`">Node shape</label>
             <select :id="`shape-${menu.node}`" class="form-select" aria-label="Node shape" :value="nodeShape(menu.node)" @change="setShape(menu.node, $event)">
               <option value="card">Card</option><option value="rounded">Rounded</option><option value="ellipse">Ellipse</option><option value="diamond">Diamond</option>
@@ -584,12 +654,17 @@ function edgePath(edge: TreeEdge): string | null {
             <label>Background <ColorWheelPicker label="Node background" :model-value="nodeAppearance(menu.node).background ?? '#1a1c20'" @update:model-value="updateNodeAppearance(menu.node, { background: $event })" /></label>
             <label>Outline <ColorWheelPicker label="Node outline" :model-value="nodeAppearance(menu.node).outline ?? '#06b6d4'" @update:model-value="updateNodeAppearance(menu.node, { outline: $event })" /></label>
             <label>Outline size <input type="number" min="1" max="12" :value="nodeAppearance(menu.node).outlineWidth ?? 1" @change="updateNodeAppearance(menu.node, { outlineWidth: Math.max(1, Math.min(12, Number(($event.target as HTMLInputElement).value) || 1)) })" /></label>
-            <label>Width <input type="number" min="100" max="600" :value="nodeSize(menu.node).width" @change="updateNodeAppearance(menu.node, { width: Math.max(100, Math.min(600, Number(($event.target as HTMLInputElement).value) || 100)) })" /></label>
-            <label>Height <input type="number" min="60" max="400" :value="nodeSize(menu.node).height" @change="updateNodeAppearance(menu.node, { height: Math.max(60, Math.min(400, Number(($event.target as HTMLInputElement).value) || 60)) })" /></label>
-            <button v-if="graph.shapes?.[menu.node] || graph.appearance?.nodes[menu.node]" type="button" @click="resetNodeAppearance(menu.node)">Use tree defaults</button>
+            <label>Width <input type="number" min="100" max="600" :disabled="nodeAppearance(menu.node).locked" :value="nodeSize(menu.node).width" @change="updateNodeAppearance(menu.node, { width: Math.max(100, Math.min(600, Number(($event.target as HTMLInputElement).value) || 100)) })" /></label>
+            <label>Height <input type="number" min="60" max="400" :disabled="nodeAppearance(menu.node).locked" :value="nodeSize(menu.node).height" @change="updateNodeAppearance(menu.node, { height: Math.max(60, Math.min(400, Number(($event.target as HTMLInputElement).value) || 60)) })" /></label>
+            <button v-if="graph.shapes?.[menu.node] || graph.appearance?.nodes[menu.node]" type="button" :disabled="nodeAppearance(menu.node).locked" @click="resetNodeAppearance(menu.node)">Use tree defaults</button>
             <button v-if="source && source !== menu.node" type="button" @click="connect(source, menu.node); menu = null">Connect from {{ label(source) }}</button>
             <button type="button" @click="source = menu.node; menu = null">Start connection</button>
             <button type="button" class="tree-context-danger" @click="removeItem(menu.node); menu = null">Remove from tree</button>
+          </template>
+          <template v-else-if="menuImage">
+            <strong>Image{{ menuImage.locked ? ' (locked)' : '' }}</strong>
+            <button type="button" @click="changeImage(menuImage.id, { locked: !menuImage.locked }); menu = null">{{ menuImage.locked ? 'Unlock image' : 'Lock image' }}</button>
+            <button type="button" class="tree-context-danger" @click="removeImage(menuImage.id)">Remove image</button>
           </template>
           <template v-else-if="menu.edge !== undefined && graph.edges[menu.edge]">
             <strong>{{ label(graph.edges[menu.edge]!.from) }} → {{ label(graph.edges[menu.edge]!.to) }}</strong>
@@ -623,6 +698,8 @@ function edgePath(edge: TreeEdge): string | null {
           <template v-else>
             <label>Canvas background <ColorWheelPicker label="Canvas background" :model-value="graph.appearance?.canvasBackground ?? '#1a1c20'" @update:model-value="setCanvasBackground($event)" /></label>
             <button v-if="graph.appearance?.canvasBackground" type="button" @click="setCanvasBackground()">Reset background</button>
+            <button type="button" @click="chooseImage">Add image…</button>
+            <button v-for="(image, index) in graph.appearance?.images ?? []" :key="image.id" type="button" @click="menu.image = image.id">Image {{ index + 1 }}{{ image.locked ? ' (locked)' : '' }} options</button>
             <label for="tree-context-search">Add TreeItem</label>
             <input id="tree-context-search" v-model="menuSearch" class="form-input" aria-label="Search TreeItem entities" placeholder="Search items…" />
             <div class="tree-context-results">
@@ -677,8 +754,8 @@ function edgePath(edge: TreeEdge): string | null {
 .tree-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tree-empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 8px; padding: 16px; color: var(--text-muted); pointer-events: none; }
 .tree-empty strong { color: var(--text-primary); }
-.tree-world { position: absolute; left: 0; top: 0; transform-origin: top left; }
-.tree-edges { position: absolute; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.tree-world { position: absolute; z-index: 1; left: 0; top: 0; transform-origin: top left; }
+.tree-edges { position: absolute; z-index: 1; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .tree-edges .tree-edge { fill: none; stroke: var(--accent); stroke-width: 2; }
 .wire-dash { stroke-dasharray: 10 6; }
 .wire-dot { stroke-dasharray: 1 6; stroke-linecap: round; }
@@ -692,7 +769,7 @@ function edgePath(edge: TreeEdge): string | null {
 .tree-edges .tree-cut-line { fill: none; stroke: var(--status-danger); stroke-width: 2; stroke-dasharray: 5 4; pointer-events: none; }
 .tree-edges .tree-edge-pending { stroke-dasharray: 5 4; }
 .tree-edges marker path { fill: context-stroke; }
-.tree-node { position: absolute; box-sizing: border-box; width: 164px; height: 68px; display: flex; align-items: center; gap: 8px; padding: 8px; }
+.tree-node { position: absolute; z-index: 2; box-sizing: border-box; width: 164px; height: 68px; display: flex; align-items: center; gap: 8px; padding: 8px; }
 .tree-node-art { position: absolute; inset: 0; overflow: hidden; background: var(--node-bg, var(--bg-card)); border: var(--node-outline-width, 1px) solid var(--node-outline, var(--accent)); pointer-events: none; }
 .tree-node-art img { width: 100%; height: 100%; object-fit: cover; opacity: .75; }
 .tree-node-art:has(img)::after { content: ""; position: absolute; inset: 0; background: rgb(0 0 0 / 30%); }
