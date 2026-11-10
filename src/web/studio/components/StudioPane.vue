@@ -17,14 +17,20 @@ import { dropSide, MAIN_PANE, type DropSide, type PaneLeaf } from "../paneModel.
 import {
   canSplit,
   closeStudioPane,
+  dockPane,
+  draggingPaneId,
   focusPane,
+  isPaneDrag,
   isTreeDrag,
   openSplit,
+  PANE_DRAG_TYPE,
   paneCount,
+  paneDragId,
   paneHeading,
   paneState,
   recordPanePath,
   registerPaneRouter,
+  setDraggingPane,
   toggleMaximize,
   treeDragPath,
   unregisterPaneRouter,
@@ -62,15 +68,20 @@ const active = computed(() => paneState.activeId === props.pane.id);
 const maximized = computed(() => paneState.maximizedId === props.pane.id);
 
 const zone = ref<DropSide | "center" | null>(null);
+const zoneKind = ref<"tree" | "pane">("tree");
 const body = ref<HTMLElement | null>(null);
+const dragging = ref(false);
 
 function onDragOver(event: DragEvent) {
-  if (!isTreeDrag(event) || event.defaultPrevented || !body.value) { zone.value = null; return; }
+  const pane = isPaneDrag(event);
+  if ((!pane && !isTreeDrag(event)) || event.defaultPrevented || !body.value || (pane && draggingPaneId() === props.pane.id)) { zone.value = null; return; }
   event.preventDefault();
   const rect = body.value.getBoundingClientRect();
   const side = dropSide(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
-  zone.value = side !== "center" && !canSplit() ? "center" : side;
-  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  // Moving a pane never adds one, so it may dock on an edge even at the pane limit.
+  zone.value = !pane && side !== "center" && !canSplit() ? "center" : side;
+  zoneKind.value = pane ? "pane" : "tree";
+  if (event.dataTransfer) event.dataTransfer.dropEffect = pane ? "move" : "copy";
 }
 function onDragLeave(event: DragEvent) {
   if (!(event.relatedTarget instanceof Node) || !body.value?.contains(event.relatedTarget)) zone.value = null;
@@ -79,12 +90,41 @@ function onDrop(event: DragEvent) {
   const side = zone.value;
   zone.value = null;
   if (!side || event.defaultPrevented) return;
+  const moving = isPaneDrag(event) ? paneDragId(event) : null;
+  if (moving) {
+    event.preventDefault();
+    dockPane(moving, props.pane.id, side);
+    return;
+  }
   const path = treeDragPath(event);
   if (!path) return;
   event.preventDefault();
   focusPane(props.pane.id);
   if (side === "center") void router.push(path);
   else openSplit(props.pane.id, side, path);
+}
+
+const dropLabel = computed(() => {
+  if (!zone.value) return "";
+  if (zoneKind.value === "pane") return zone.value === "center" ? "Swap panes" : `Move ${zone.value}`;
+  return zone.value === "center" ? "Open here" : `Split ${zone.value}`;
+});
+
+/** Header drag repositions the pane; drags that start on a header button stay clicks. */
+let pressedOnAction = false;
+function onHeadPointerDown(event: PointerEvent) {
+  pressedOnAction = event.target instanceof Element && !!event.target.closest(".studio-pane__actions");
+}
+function onHeadDragStart(event: DragEvent) {
+  if (pressedOnAction || !split.value || !event.dataTransfer) { event.preventDefault(); return; }
+  event.dataTransfer.setData(PANE_DRAG_TYPE, props.pane.id);
+  event.dataTransfer.effectAllowed = "move";
+  setDraggingPane(props.pane.id);
+  dragging.value = true;
+}
+function onHeadDragEnd() {
+  setDraggingPane(null);
+  dragging.value = false;
 }
 
 function splitHere(side: DropSide) {
@@ -95,13 +135,20 @@ function splitHere(side: DropSide) {
 <template>
   <section
     class="studio-pane"
-    :class="{ 'is-main': isMain, 'is-active': active && split, 'is-maximized': maximized, 'is-split': split }"
+    :class="{ 'is-main': isMain, 'is-active': active && split, 'is-maximized': maximized, 'is-split': split, 'is-dragging': dragging }"
     :data-pane-id="pane.id"
     :aria-label="`${heading.title} pane`"
     @pointerdown.capture="focusPane(pane.id)"
     @focusin="focusPane(pane.id)"
   >
-    <header class="studio-pane__head">
+    <header
+      class="studio-pane__head"
+      :draggable="split && !maximized"
+      :title="split && !maximized ? 'Drag to move this pane' : undefined"
+      @pointerdown="onHeadPointerDown"
+      @dragstart="onHeadDragStart"
+      @dragend="onHeadDragEnd"
+    >
       <span class="studio-pane__title"><StudioIcon :name="heading.icon" /><span>{{ heading.title }}</span></span>
       <div class="studio-pane__actions">
         <IconButton icon="split-right" label="Split right" hint="or drag a project item onto a pane edge" size="sm" :disabled="!canSplit()" @click="splitHere('right')" />
@@ -118,7 +165,7 @@ function splitHere(side: DropSide) {
         <component :is="Component" v-if="Component" :key="route.fullPath" />
       </RouterView>
       <div v-if="zone" class="studio-pane__drop" :class="`is-${zone}`" aria-hidden="true">
-        <span>{{ zone === 'center' ? 'Open here' : `Split ${zone}` }}</span>
+        <span>{{ dropLabel }}</span>
       </div>
     </div>
   </section>

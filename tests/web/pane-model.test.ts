@@ -4,12 +4,14 @@ import {
   dropSide,
   MAIN_PANE,
   MAX_PANES,
+  movePane,
   paneGeometry,
   panes,
   parseLayout,
   setRatio,
   singlePane,
   splitPane,
+  swapPanes,
   type PaneNode,
 } from "../../src/web/studio/paneModel.ts";
 
@@ -35,6 +37,28 @@ test("closing a pane gives its space to the sibling; the main and last pane stay
   expect(closePane(closePane(nested, "c"), "b")).toEqual({ kind: "pane", id: MAIN_PANE, path: "" });
   expect(closePane(nested, MAIN_PANE)).toBe(nested);
   expect(closePane(singlePane(), MAIN_PANE)).toEqual(singlePane());
+});
+
+test("moving a pane docks it beside the target, keeps ids and paths, and leaves split ids unique", () => {
+  // main | (b / c)
+  const layout = splitPane(splitPane(singlePane(), MAIN_PANE, "right", "/b", "b"), "b", "bottom", "/c", "c");
+  const moved = movePane(layout, "c", MAIN_PANE, "top");
+  expect(moved).toMatchObject({ kind: "split", direction: "row", children: [{ kind: "split", direction: "column", children: [{ id: "c", path: "/c" }, { id: MAIN_PANE }] }, { id: "b", path: "/b" }] });
+  // The main pane can move too.
+  const back = movePane(moved, MAIN_PANE, "b", "right");
+  expect(panes(back).map((pane) => pane.id)).toEqual(["c", "b", MAIN_PANE]);
+  const ids: string[] = [];
+  const walk = (node: PaneNode) => { if (node.kind === "split") { ids.push(node.id); node.children.forEach(walk); } };
+  walk(movePane(movePane(back, "c", "b", "left"), "c", MAIN_PANE, "bottom"));
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(movePane(layout, "b", "b", "left")).toBe(layout);
+  expect(movePane(layout, "missing", "b", "left")).toBe(layout);
+});
+
+test("swapping exchanges two panes in place", () => {
+  const layout = splitPane(singlePane(), MAIN_PANE, "right", "/b", "b");
+  expect(swapPanes(layout, MAIN_PANE, "b")).toMatchObject({ direction: "row", children: [{ id: "b", path: "/b" }, { id: MAIN_PANE }] });
+  expect(swapPanes(layout, "b", "b")).toBe(layout);
 });
 
 test("split ratios are clamped so no pane collapses", () => {

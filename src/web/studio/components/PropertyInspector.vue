@@ -450,8 +450,8 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
     <!-- 1. NODE PROPERTIES (when a node is selected) -->
     <div v-if="selectedNode" class="inspector-content">
       <div class="panel-header">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span :class="['type-badge', selectedNode.type]">{{ selectedNode.type === 'condition' ? 'CONDITION NODE' : selectedNode.type.toUpperCase() }}</span>
+        <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+          <span :class="['type-badge', selectedNode.type]">{{ selectedNode.type === 'condition' ? 'condition node' : selectedNode.type.replaceAll('_', ' ') }}</span>
           <h3 class="panel-title">{{ selectedNode.title }}</h3>
         </div>
         <button class="btn btn-danger" style="font-size:11px; padding:3px 8px;" @click="$emit('delete-node', selectedNode.id)">
@@ -476,7 +476,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         <div v-for="(sec, sIdx) in selectedNode.sections" :key="sec.id" class="dialogue-section-card">
           <div class="section-card-header">
             <input v-model="sec.title" class="section-title-input" aria-label="Dialogue section title" @input="emitGraphUpdate(selectedNode)" />
-            <div style="display:flex; gap:4px;">
+            <div style="display:flex; gap:4px; flex:none; white-space:nowrap;">
               <button class="btn-micro" aria-label="Add dialogue line" @click="addDialogueLine(sec)">+ Line</button>
               <button class="btn-micro" aria-label="Add idle action" @click="addIdleAction(sec)">+ Idle Action</button>
               <button class="btn-micro danger" aria-label="Remove dialogue section" title="Remove dialogue section" @click="removeSection(selectedNode, sIdx)"><StudioIcon name="close" /></button>
@@ -492,7 +492,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
                   <button class="btn-micro danger" aria-label="Remove dialogue item" title="Remove dialogue item" @click="removeItem(sec, iIdx)"><StudioIcon name="close" /></button>
                 </div>
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;">
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; margin-bottom:6px;">
                   <div>
                     <label class="field-sublabel">Speaker Role</label>
                     <TagEditor v-model="item.speaker_role" :options="roleTagOptions" :allow-create="false" :multiple="false" label="Speaker role" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
@@ -508,7 +508,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
                   <textarea :id="'dialogue-text-' + item.id" v-model="item.content" aria-label="Dialogue text" class="form-textarea" style="min-height:48px; font-size:11px; padding:4px;" @input="emitGraphUpdate(selectedNode)"></textarea>
                 </div>
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;">
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; margin-bottom:6px;">
                   <div>
                     <label class="field-sublabel">Emotion Tag</label>
                     <TagEditor v-model="item.emotion_tag" :options="emotionTagOptions" :allow-create="false" :multiple="false" label="Emotion tag" placeholder="Choose emotion" @update:model-value="emitGraphUpdate(selectedNode)" />
@@ -548,7 +548,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
                   <button class="btn-micro danger" aria-label="Remove idle action" title="Remove idle action" @click="removeItem(sec, iIdx)"><StudioIcon name="close" /></button>
                 </div>
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:4px;">
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; margin-bottom:4px;">
                   <div>
                     <label class="field-sublabel">Action Type</label>
                     <select v-model="item.action_type" class="form-select micro" @change="emitGraphUpdate(selectedNode)">
@@ -562,7 +562,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
                   </div>
                 </div>
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px;">
                   <div>
                     <label class="field-sublabel">Target</label>
                     <TagEditor v-model="item.target" :options="targetRoles" :allow-create="false" :multiple="false" label="Target role" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
@@ -1093,7 +1093,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         <small class="field-sublabel">Leave empty for any human. A rule participant plays its storylets on its own at the start of each slot.</small>
       </fieldset>
 
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px;">
         <div class="form-group">
           <label class="field-label">Cluster Type</label>
           <select v-model="storylet.cluster_type" class="form-select" @change="$emit('update-storylet')">
@@ -1174,26 +1174,39 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
   letter-spacing: -0.01em;
   margin: 0;
   color: var(--text-main);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* Untyped (plugin and logic) nodes get a neutral chip; typed ones keep their pin colour with dark ink. */
 .type-badge {
+  flex: none;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   padding: 2px 8px;
   border-radius: 999px;
-  color: #003640;
+  background: var(--bg-badge);
+  color: var(--text-main);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
 }
 
 .type-badge.start { background: var(--status-success); color: #04160f; }
 .type-badge.dialog { background: var(--secondary); color: #0b0e2a; }
 .type-badge.choice { background: var(--tertiary); color: #1f1300; }
 .type-badge.condition { background: var(--status-warning); color: #1f1300; }
-.type-badge.image { background: #ec4899; color: #fff; }
+.type-badge.image { background: #f472b6; color: #2a0716; }
 .type-badge.teleport { background: var(--accent); color: var(--accent-ink); }
 .type-badge.end { background: var(--status-danger); color: #1a0308; }
-.type-badge.graph_transform { background: #2563eb; color: #fff; }
-.type-badge.passion_mutation { background: #db2777; color: #fff; }
+.type-badge.graph_transform { background: #60a5fa; color: #04122b; }
+.type-badge.passion_mutation { background: #f472b6; color: #2a0716; }
 
 .field-label {
   font-size: 12px;
@@ -1240,6 +1253,8 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
   font-weight: 700;
   outline: none;
   flex: 1;
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 
 .section-items {
@@ -1252,7 +1267,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 
 .field-help { color: var(--text-muted); font-size: 12px; }
 .field-row-heading { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
-.choice-editor-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 5px; margin-bottom: 6px; }
+.choice-editor-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 5px; margin-bottom: 6px; }
 .dialogue-item-card {
   background: var(--bg-input, #141720);
   border: 1px solid var(--border-subtle);

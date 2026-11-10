@@ -65,7 +65,9 @@ function preset(spec: PresetSpec): ThemePreset {
       "--surface-container-high": mix(spec.surface, "white", 91),
       "--surface-container-highest": mix(spec.surface, "white", 85),
       "--bg-input": mix(spec.bg, spec.surface, 55),
-      "--bg-elevated": fade(mix(spec.surface, "white", 94), 97),
+      // Opaque: menus, popovers and the graph toolbar float over dense content, and nested
+      // backdrop-filters can't blur what lies behind them, so any translucency shows text through.
+      "--bg-elevated": mix(spec.surface, "white", 94),
       "--bg-pane": fade(mix(spec.bg, spec.surface, 70), 88),
       "--bg-sidebar": fade(mix(spec.bg, spec.surface, 60), 84),
       "--border-subtle": `rgba(${spec.border}, 0.13)`,

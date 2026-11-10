@@ -255,8 +255,8 @@ function setFacts(value: string | string[]) {
 .codex__form { max-width: 640px; }
 .codex__form-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; }
 .codex__form-head h2 { margin: 0; }
-.codex__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
-.codex__pair--wide { grid-template-columns: 1fr 2fr; }
+.codex__pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
+.codex__pair--wide { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
 .codex__check { display: flex; align-items: center; gap: 8px; min-height: 34px; font-size: 13px; font-weight: 500; color: var(--text-main); }
 .canon-fields { border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 12px 16px; margin: 0 0 16px; }
 .canon-fields legend { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); padding: 0 4px; }

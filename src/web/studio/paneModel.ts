@@ -62,6 +62,50 @@ export function closePane(node: PaneNode, id: string): PaneNode {
   return visit(node);
 }
 
+/** Takes a leaf out of the tree (main included); its sibling takes the freed space. */
+function detachPane(node: PaneNode, id: string): PaneNode {
+  if (node.kind === "pane") return node;
+  const [a, b] = node.children;
+  if (a.kind === "pane" && a.id === id) return b;
+  if (b.kind === "pane" && b.id === id) return a;
+  return { ...node, children: [detachPane(a, id), detachPane(b, id)] };
+}
+
+/** Moves an existing pane to one side of another, keeping its id (and so its live view). */
+export function movePane(node: PaneNode, movingId: string, targetId: string, side: DropSide): PaneNode {
+  const moving = findPane(node, movingId);
+  if (!moving || movingId === targetId || !findPane(node, targetId)) return node;
+  const rest = detachPane(node, movingId);
+  const direction: SplitDirection = side === "left" || side === "right" ? "row" : "column";
+  const first = side === "left" || side === "top";
+  const taken = new Set(splitIds(rest));
+  let splitId = `split-${movingId}`;
+  for (let n = 2; taken.has(splitId); n++) splitId = `split-${movingId}-${n}`;
+  const visit = (current: PaneNode): PaneNode => {
+    if (current.kind === "pane") {
+      if (current.id !== targetId) return current;
+      return { kind: "split", id: splitId, direction, ratio: 0.5, children: first ? [moving, current] : [current, moving] };
+    }
+    return { ...current, children: [visit(current.children[0]), visit(current.children[1])] };
+  };
+  return visit(rest);
+}
+
+function splitIds(node: PaneNode): string[] {
+  return node.kind === "pane" ? [] : [node.id, ...splitIds(node.children[0]), ...splitIds(node.children[1])];
+}
+
+/** Exchanges the places of two panes; both keep their ids and views. */
+export function swapPanes(node: PaneNode, aId: string, bId: string): PaneNode {
+  const a = findPane(node, aId), b = findPane(node, bId);
+  if (!a || !b || aId === bId) return node;
+  const visit = (current: PaneNode): PaneNode => {
+    if (current.kind === "pane") return current.id === aId ? b : current.id === bId ? a : current;
+    return { ...current, children: [visit(current.children[0]), visit(current.children[1])] };
+  };
+  return visit(node);
+}
+
 export function setPanePath(node: PaneNode, id: string, path: string): PaneNode {
   if (node.kind === "pane") return node.id === id ? { ...node, path } : node;
   return { ...node, children: [setPanePath(node.children[0], id, path), setPanePath(node.children[1], id, path)] };

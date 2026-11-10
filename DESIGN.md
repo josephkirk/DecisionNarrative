@@ -161,9 +161,10 @@ The toolbar Appearance panel swaps whole-app themes; each is one token set in `s
 - **Semantic colors stay fixed** across themes (status, node types, dialog iris) so logic signals keep their meaning.
 - **Presets**: Kojima Productions (default), Mass Effect, Cyberpunk, RPG, Death Stranding, Anime, Modern Warfare. Each must keep main text ≥ 7:1, muted text ≥ 4.5:1 and dim text ≥ 5:1 on cards, and accent ink ≥ 4.5:1 on the accent (`tests/web/theme.test.ts`).
 - **Background image**: optional, downscaled to 1920px and stored locally; dimmed by the theme backdrop, optionally blurred, and panes turn translucent over it.
+- **Popovers are opaque**: menus, pickers and the graph toolbar use the solid `--bg-elevated` surface so content underneath never shows through.
 
 ## Layout & Workspace
 - **Top Shell Bar**: Sleek 44px glass strip with brand identity, breadcrumbs/tabs, play action, and workspace status.
 - **Floating Document Navigator**: Translucent collapsible floating panel on the left with rounded corners and search.
-- **Split-Pane Workspace**: Multi-pane subdivision system allowing any entity, storylet, or browse view to be opened side-by-side or split horizontally/vertically via drag-and-drop or pane controls.
+- **Split-Pane Workspace**: Multi-pane subdivision system allowing any entity, storylet, or browse view to be opened side-by-side or split horizontally/vertically via drag-and-drop or pane controls. A pane's title bar is its drag handle (never selectable text): drop it on another pane's edge to move it there, or on its middle to swap the two.
 - **Floating Controls**: Pill-style toolbars with grouped actions, 14px padding, and 44px touch targets.

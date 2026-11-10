@@ -324,7 +324,7 @@ onBeforeRouteUpdate(confirmDiscard);
             <label class="form-label">File path</label>
             <input class="form-input" :value="versionForm.file_path" @input="patchVersionForm({ file_path: ($event.target as HTMLInputElement).value })" />
           </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px;">
             <div class="form-group">
               <label class="form-label">Creator</label>
               <input class="form-input" :value="versionForm.creator" @input="patchVersionForm({ creator: ($event.target as HTMLInputElement).value })" />

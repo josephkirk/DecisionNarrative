@@ -207,10 +207,9 @@ try {
   await pluginNode.waitFor();
   const editor = page.getByTestId("modify-canvas-editor");
   check("disconnected node requires an entity input", await page.getByTestId("open-modify-canvas").isDisabled());
-  const sourceHeader = (await page.locator(".graph-node.get_entity .node-header").boundingBox())!;
-  await page.mouse.move(sourceHeader.x + 30, sourceHeader.y + 15); await page.mouse.down();
-  await page.mouse.move(sourceHeader.x - 180, sourceHeader.y + 120, { steps: 8 }); await page.mouse.up();
   await connect(page.locator(".graph-node.get_entity .output-socket"), pluginNode.locator('[title="Entity data input"]'));
+  // The new node is still selected; select Get Entity first so clicking the plugin node is a fresh selection.
+  await page.locator(".graph-node.get_entity .node-body").click();
   await pluginNode.locator(".node-body").click();
   await editor.waitFor();
   check("connected node opens the entity canvas without a selector", await editor.isVisible() && await editor.getByLabel("Canvas entity").count() === 0);

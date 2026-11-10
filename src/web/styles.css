@@ -17,7 +17,7 @@
   --bg-hover: rgba(255, 255, 255, 0.05);
   --bg-input: #10141e;
   --bg-badge: #222a3d;
-  --bg-elevated: rgba(24, 30, 46, 0.97);
+  --bg-elevated: #181e2e;
   --surface-container-high: #222a3d;
   --surface-container-highest: #2c3549;
 
@@ -651,6 +651,7 @@ a { color: var(--accent-hover); }
   right: 4px;
   transform-origin: top right;
 }
+.project-tree__menu.is-up { top: auto; bottom: calc(100% + 4px); transform-origin: bottom right; }
 .project-tree__context-menu {
   position: fixed;
   z-index: 9999;
@@ -763,7 +764,16 @@ a { color: var(--accent-hover); }
   padding: 0 6px 0 12px;
   border-bottom: 1px solid var(--border-faint);
   background: rgba(255, 255, 255, 0.015);
+  /* The header is a drag handle, never text to select. */
+  user-select: none;
+  -webkit-user-select: none;
 }
+.studio-pane__head[draggable="true"] { cursor: grab; }
+.studio-pane__head[draggable="true"]:active { cursor: grabbing; }
+.studio-pane__head[draggable="true"]:hover { background: rgba(255, 255, 255, 0.035); }
+.studio-pane__actions { cursor: default; }
+/* The pane being moved dims so the drop target reads as the destination. */
+.studio-pane.is-dragging { opacity: 0.55; }
 .studio-pane__title {
   display: inline-flex;
   align-items: center;
@@ -841,13 +851,20 @@ a { color: var(--accent-hover); }
   gap: 6px;
   font-size: 13px;
   min-width: 0;
+  flex: 1 1 12rem;
   overflow: hidden;
+  /* Room for the first link's hover pill, which sits 4px outside the text. */
+  padding: 0 4px;
+  margin: 0 -4px;
 }
 
 .folder-breadcrumb__link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 28px;
   padding: 0 8px;
   margin: 0 -4px;
   border-radius: var(--radius-sm);
@@ -873,6 +890,7 @@ a { color: var(--accent-hover); }
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .folder-empty {
@@ -1385,14 +1403,15 @@ a { color: var(--accent-hover); }
 }
 
 .view-header {
-  height: 56px;
+  /* Grows and wraps in narrow panes: a fixed 56px pushed wrapped actions out of the top edge. */
   min-height: 56px;
   flex: none;
-  padding: 0 20px;
+  padding: 10px 20px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px 12px;
   border-bottom: 1px solid var(--border-faint);
   background: transparent;
 }
@@ -1592,6 +1611,8 @@ a { color: var(--accent-hover); }
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
 .form-input::placeholder, .form-textarea::placeholder { color: var(--text-dim); }
+/* Long values end in an ellipsis instead of a hard cut while the field is not being edited. */
+.form-input, .form-select { text-overflow: ellipsis; }
 .form-input:hover:not(:disabled):not(:focus), .form-select:hover:not(:disabled):not(:focus), .form-textarea:hover:not(:disabled):not(:focus) { border-color: var(--border-muted); }
 
 .form-input:focus, .form-select:focus, .form-textarea:focus {

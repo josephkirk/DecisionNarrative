@@ -109,6 +109,14 @@ onMounted(() => { void loadReferences(); });
 const confirmDiscard = () => !dirty.value || window.confirm("Discard unsaved changes?");
 onBeforeRouteLeave(confirmDiscard);
 onBeforeRouteUpdate(confirmDiscard);
+
+/** Mouse wheels scroll the tab strip sideways when plugin tabs overflow a narrow pane. */
+function scrollTabs(event: WheelEvent) {
+  const strip = event.currentTarget as HTMLElement;
+  if (strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+  event.preventDefault();
+  strip.scrollLeft += event.deltaY;
+}
 </script>
 <template>
   <div v-if="!loading && draft" class="entity-page-surface scroll-fade-mask">
@@ -167,7 +175,7 @@ onBeforeRouteUpdate(confirmDiscard);
     </header>
 
     <!-- Tab Navigation matching Image #2 -->
-    <nav class="entity-tabs" aria-label="Entity sections">
+    <nav class="entity-tabs" aria-label="Entity sections" @wheel="scrollTabs">
       <button :class="['entity-tab', activeTab === 'properties' && 'is-active']" @click="activeTab = 'properties'">
         <svg aria-hidden="true" class="tab-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="3" y1="6" x2="21" y2="6"/>
@@ -387,8 +395,11 @@ onBeforeRouteUpdate(confirmDiscard);
 .entity-title-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
 }
+.entity-id-tag { flex: none; }
 
 .entity-hero-input {
   font-size: 20px;
@@ -404,6 +415,7 @@ onBeforeRouteUpdate(confirmDiscard);
   field-sizing: content;
   min-width: 6ch;
   max-width: 100%;
+  text-overflow: ellipsis;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
@@ -550,6 +562,8 @@ onBeforeRouteUpdate(confirmDiscard);
   padding: 0 4px;
   overflow-x: auto;
   scrollbar-width: none;
+  /* Tabs that don't fit fade out at the edge instead of ending in a hard cut. */
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
 }
 
 .entity-tab {
@@ -577,6 +591,13 @@ onBeforeRouteUpdate(confirmDiscard);
   color: var(--text-main);
   font-weight: 600;
   border-bottom-color: var(--accent);
+}
+
+/* Narrow panes: tighter tabs so the built-in three fit; plugin tabs scroll in from the faded edge. */
+@container pane (max-width: 420px) {
+  .entity-tabs { gap: 0; padding: 0; }
+  .entity-tab { padding: 10px 6px; gap: 4px; font-size: 12px; }
+  .entity-tab .tab-glyph { display: none; }
 }
 
 .tab-glyph {

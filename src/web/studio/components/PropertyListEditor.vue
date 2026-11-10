@@ -140,7 +140,8 @@ function add() {
 
 <template>
   <div class="property-list">
-    <div class="property-list__head">
+    <!-- Column heads only label rows; an empty list shows just its empty state, so it never scrolls sideways. -->
+    <div v-if="rows.length" class="property-list__head">
       <span>Name</span>
       <span>Key</span>
       <span>Type</span>

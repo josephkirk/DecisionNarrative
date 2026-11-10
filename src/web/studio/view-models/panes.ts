@@ -12,6 +12,8 @@ import {
   setRatio,
   singlePane,
   splitPane,
+  movePane,
+  swapPanes,
   type DropSide,
   type PaneNode,
 } from "../paneModel.ts";
@@ -19,6 +21,7 @@ import { studioState } from "../state.ts";
 
 const STORAGE_KEY = "dn.studio.panes";
 export const TREE_DRAG_TYPE = "application/x-dn-tree";
+export const PANE_DRAG_TYPE = "application/x-dn-pane";
 
 function readLayout(): PaneNode {
   try {
@@ -94,6 +97,13 @@ export function resizeSplit(splitId: string, ratio: number) {
   paneState.layout = setRatio(paneState.layout, splitId, ratio);
 }
 
+/** Drops pane `movingId` onto `targetId`: an edge docks it on that side, the center swaps the two. */
+export function dockPane(movingId: string, targetId: string, side: DropSide | "center") {
+  paneState.layout = side === "center" ? swapPanes(paneState.layout, movingId, targetId) : movePane(paneState.layout, movingId, targetId, side);
+  paneState.maximizedId = null;
+  paneState.activeId = movingId;
+}
+
 export function toggleMaximize(id: string) {
   paneState.maximizedId = paneState.maximizedId === id ? null : id;
 }
@@ -135,6 +145,21 @@ export function treeDragPath(event: DragEvent): string | null {
 export function isTreeDrag(event: DragEvent): boolean {
   return !!event.dataTransfer?.types.includes(TREE_DRAG_TYPE);
 }
+
+/** Id of the pane whose header is being dragged, or null for other drags. */
+export function paneDragId(event: DragEvent): string | null {
+  const id = event.dataTransfer?.getData(PANE_DRAG_TYPE) || draggingPane;
+  return id && findPane(paneState.layout, id) ? id : null;
+}
+
+export function isPaneDrag(event: DragEvent): boolean {
+  return !!event.dataTransfer?.types.includes(PANE_DRAG_TYPE);
+}
+
+/** dragover can't read drag data, so the source pane is remembered here to hide self-drops. */
+let draggingPane: string | null = null;
+export function setDraggingPane(id: string | null) { draggingPane = id; }
+export function draggingPaneId(): string | null { return draggingPane; }
 
 const STATIC_TITLES: Record<string, string> = {
   storylets: "Storylets",

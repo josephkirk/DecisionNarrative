@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { learnNodeDefaults, graphNodeTypes, graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, GRAPH_PIN_COLORS, type GraphValueType, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType } from "../narrativeGraphTypes.ts";
 import { studioState, notify } from "../state.ts";
 import { hasTraitKey } from "../entityModel.ts";
@@ -212,12 +212,22 @@ function onCanvasContextMenu(e: MouseEvent) {
   openMenu(e, "canvas");
 }
 
+const contextMenuRef = ref<HTMLElement | null>(null);
+
 function openMenu(e: MouseEvent, kind: "canvas" | "node" | "edge", targetId?: string) {
   const rect = containerRef.value?.getBoundingClientRect();
   if (!rect) return;
   contextMenu.value = { kind, targetId, x: e.clientX - rect.left, y: e.clientY - rect.top };
   contextWorld.value = eventToWorld(e);
   nodeSearch.value = "";
+  // The canvas clips its children, so a menu opened near an edge flips back inside it.
+  void nextTick(() => {
+    const menu = contextMenuRef.value, menuState = contextMenu.value;
+    if (!menu || !menuState) return;
+    const gap = 8;
+    if (menuState.x + menu.offsetWidth > rect.width - gap) menuState.x = Math.max(gap, menuState.x - menu.offsetWidth);
+    if (menuState.y + menu.offsetHeight > rect.height - gap) menuState.y = Math.max(gap, rect.height - gap - menu.offsetHeight);
+  });
 }
 
 function selectNode(node: NarrativeNode) {
@@ -244,10 +254,22 @@ function startNodeDrag(e: MouseEvent, node: NarrativeNode) {
   };
 }
 
+/** Stored widths can be tiny (imported or hand-written graphs); below this the header and choices clip. */
+const MIN_NODE_WIDTH = 140;
+const nodeWidth = (node: NarrativeNode) => Math.max(node.width ?? 0, MIN_NODE_WIDTH);
+
+/** Mouse wheels only scroll vertically; turn that into sideways scrolling so hidden node types are reachable. */
+function scrollPalette(e: WheelEvent) {
+  const palette = e.currentTarget as HTMLElement;
+  if (palette.scrollWidth <= palette.clientWidth) return;
+  e.preventDefault();
+  palette.scrollLeft += Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+}
+
 // Socket Connection Dragging
 function startConnection(e: MouseEvent, node: NarrativeNode, port: string, socketYOffset: number) {
   e.stopPropagation();
-  let startX = node.x + node.width;
+  let startX = node.x + nodeWidth(node);
   let startY = node.y + socketYOffset;
 
   const targetEl = e.currentTarget as HTMLElement | null;
@@ -357,30 +379,38 @@ function removeNode(nodeId: string) {
   emitUpdate();
 }
 
+/** Footprint used to keep toolbar-inserted nodes off existing cards. */
+const NEW_NODE_SIZE = { w: 260, h: 160 } as const;
+
 // Create new node of type
 function addNode(type: NodeType, pluginType?: string) {
   const nextId = `node_${pluginType ? pluginType.replace(/[^a-z0-9]/gi, "_") : type}_${Date.now().toString(36)}`;
   const fromCanvasMenu = contextMenu.value?.kind === "canvas" && contextWorld.value !== null;
+  // Toolbar inserts land in the middle of the visible canvas (below the toolbar), whatever the pane width.
+  const view = containerRef.value?.getBoundingClientRect();
+  const screenX = view ? Math.max(24, view.width / 2 - NEW_NODE_SIZE.w / 2) : 400;
+  const screenY = view ? Math.max(toolbarClearance.value, view.height / 2 - NEW_NODE_SIZE.h / 2) : 250;
   let x = fromCanvasMenu
     ? contextWorld.value!.x
-    : Math.round((-panX.value + 400) / zoom.value);
+    : Math.round((-panX.value + screenX) / zoom.value);
   let y = fromCanvasMenu
     ? contextWorld.value!.y
-    : Math.round((-panY.value + 250) / zoom.value);
+    : Math.round((-panY.value + screenY) / zoom.value);
 
-  // Toolbar inserts would otherwise stack exactly on top of each other; walk a
-  // diagonal cascade until the slot is free.
+  // Toolbar inserts would otherwise land on top of existing cards; step below
+  // whichever card the slot overlaps until it is free.
   if (!fromCanvasMenu) {
-    let attempts = 0;
-    const maxAttempts = nodes.value.length + 2;
-    while (
-      attempts < maxAttempts &&
-      nodes.value.some((node) => Math.abs(node.x - x) < 24 && Math.abs(node.y - y) < 24)
-    ) {
-      x += 48;
-      y += 48;
-      attempts += 1;
+    const gap = 24;
+    for (let attempts = 0; attempts <= nodes.value.length; attempts += 1) {
+      const blocker = nodes.value.find((node) =>
+        x < node.x + nodeWidth(node) + gap && node.x < x + NEW_NODE_SIZE.w + gap
+        && y < node.y + (node.height || NEW_NODE_SIZE.h) + gap && node.y < y + NEW_NODE_SIZE.h + gap);
+      if (!blocker) break;
+      y = blocker.y + (blocker.height || NEW_NODE_SIZE.h) + gap;
     }
+    // A slot pushed below the visible area scrolls into view so the new card is never placed unseen.
+    const bottom = (y + NEW_NODE_SIZE.h) * zoom.value + panY.value;
+    if (view && bottom > view.height - gap) panY.value -= bottom - (view.height - gap);
   }
 
   const baseNode: NarrativeNode = {
@@ -552,7 +582,7 @@ const computedEdges = computed(() => {
       if (idx >= 0) fromY = fromNode.y + 58 + idx * 30;
     }
 
-    const startX = fromNode.x + fromNode.width;
+    const startX = fromNode.x + nodeWidth(fromNode);
     const startY = fromY;
     const endX = toNode.x;
     const inputOffset = edge.kind === "data"
@@ -585,7 +615,7 @@ const computedEdges = computed(() => {
   >
     <!-- Top Floating Toolbar -->
     <div ref="toolbarRef" class="graph-toolbar">
-      <div class="graph-toolbar__palette" role="toolbar" aria-label="Add node">
+      <div class="graph-toolbar__palette" role="toolbar" aria-label="Add node" @wheel.stop="scrollPalette">
         <button class="node-tool-btn" @click="addNode('start')">Start</button>
         <button class="node-tool-btn" @click="addNode('get_entity')">Get entity</button>
         <button class="node-tool-btn" @click="addNode('get_entity_property')">Get property</button>
@@ -674,7 +704,7 @@ const computedEdges = computed(() => {
         :style="{
           left: `${node.x}px`,
           top: `${node.y}px`,
-          width: `${node.width}px`,
+          width: `${nodeWidth(node)}px`,
           minHeight: node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.itemInput ? '120px' : undefined,
         }"
         @click.stop="selectNode(node)"
@@ -728,7 +758,7 @@ const computedEdges = computed(() => {
           <div v-else-if="node.type === 'choice'">
             <div class="field-label" style="margin-bottom:8px;">Choices & Branching:</div>
             <div v-for="(opt, idx) in node.choices" :key="opt.id" class="choice-option-row">
-              <input v-model="opt.text" class="form-input" style="font-size:11px; padding:4px 6px; flex:1;" @input="emitUpdate" />
+              <input v-model="opt.text" class="form-input" style="font-size:11px; padding:4px 6px; flex:1; min-width:0; text-overflow:ellipsis;" :title="opt.text" @input="emitUpdate" />
               <!-- Sockets on each choice item -->
               <div
                 class="socket output-socket choice-socket"
@@ -775,7 +805,7 @@ const computedEdges = computed(() => {
             <div class="field-label">Topic graph</div>
             <div style="font-size:11px;">{{ node.topic_nodes?.length ?? 0 }} topics · {{ node.topic_edges?.length ?? 0 }} transitions</div>
             <div v-for="(pin, index) in waypointExitPins(node)" :key="pin.id" class="choice-option-row">
-              <span style="font-size:11px; flex:1;">{{ pin.label }}</span>
+              <span style="font-size:11px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="pin.label">{{ pin.label }}</span>
               <div class="socket output-socket choice-socket" :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }" :title="`Connect ${pin.label} exit`" @mousedown="startConnection($event, node, pin.id, 72 + index * 30)"></div>
             </div>
           </div>
@@ -790,7 +820,7 @@ const computedEdges = computed(() => {
           <div v-else-if="node.type === 'condition'">
             <div class="field-label">Condition Node · Boolean switch input</div>
             <div v-for="(pin, index) in conditionalBranchPins" :key="pin.id" class="choice-option-row">
-              <span style="font-size:11px; flex:1;">{{ pin.label }}</span>
+              <span style="font-size:11px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="pin.label">{{ pin.label }}</span>
               <div class="socket output-socket choice-socket" :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }" :title="`Connect ${pin.label} branch`" @mousedown="startConnection($event, node, pin.id, 58 + index * 30)"></div>
             </div>
           </div>
@@ -867,7 +897,7 @@ const computedEdges = computed(() => {
         ></div>
       </div>
     </div>
-    <div v-if="contextMenu" class="graph-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @mousedown.stop @click.stop>
+    <div v-if="contextMenu" ref="contextMenuRef" class="graph-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @mousedown.stop @click.stop>
       <template v-if="contextMenu.kind === 'canvas'">
         <input v-model="nodeSearch" class="form-input" placeholder="Search node types" autofocus @keydown.esc="contextMenu = null" />
         <button v-for="type in matchingNodeTypes" :key="type" class="context-menu-item" @click="addNode(type)">+ {{ nodeTypeLabel(type) }}</button>
@@ -1174,9 +1204,15 @@ const computedEdges = computed(() => {
   top: 35px;
 }
 
+/* In-row sockets stay positioned so their hit area wraps the dot, not the whole row
+   (a row-sized hit area made the choice text field start a wire instead of taking focus). */
 .choice-socket {
-  position: static;
+  position: relative;
+  top: auto;
+  right: auto;
+  flex: none;
   margin-left: 6px;
 }
+.choice-socket::after { inset: -8px; }
 
 </style>

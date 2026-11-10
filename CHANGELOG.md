@@ -27,7 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split-pane studio workspace: drag any project-tree entry onto a pane edge (or use
   the pane header, or the tree's "Open in split view") to open it beside or below
   the current view; panes resize, maximize, close, and restore after reload, and
-  each pane keeps its own navigation and unsaved-change guard.
+  each pane keeps its own navigation and unsaved-change guard. Drag a pane's
+  title bar onto another pane's edge to move it there, or onto its middle to swap
+  the two; moved panes keep their unsaved edits.
 - Appearance settings in the toolbar: seven game-inspired themes (Kojima
   Productions, the default; Mass Effect, Cyberpunk, RPG, Death Stranding, Anime,
   Modern Warfare) that retune surfaces, borders, text, corner radii, heading type
@@ -47,6 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Choice text fields in story graph nodes take focus again; their wire handle's hit
+  area covered the whole row and started a connection instead.
+- Graph context menus stay inside the canvas, story nodes keep a readable minimum
+  width, and toolbar-added nodes land in view without covering existing cards.
+- Menus, pickers and the graph toolbar are opaque, so text underneath no longer
+  shows through.
+- Narrow panes: inspector field pairs, folder headers, entity titles and entity
+  tabs no longer overflow or clip; empty property lists hide their column heads.
+- Node type badges and tag placeholders meet text contrast in every theme;
+  project-tree menus near the bottom open upward.
 - Entity headers keep their names and actions visible on narrow screens.
 - Deleting tree trait templates checks both entities and entity templates in use.
 - Storylet precondition graphs now lower and raise plugin nodes, including Is Tree Position.

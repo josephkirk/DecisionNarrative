@@ -117,9 +117,15 @@ function menuDefinition(row: TreeRow): ContentRootDefinition | undefined {
   return roots.find((definition) => definition.root === row.root);
 }
 
-function toggleMenu(row: TreeRow) {
+/** Rows near the bottom of the tree open their menu upward so it never runs off-screen. */
+const menuUp = ref(false);
+const MENU_ROOM = 200;
+
+function toggleMenu(row: TreeRow, event?: Event) {
   menuKey.value = menuKey.value === row.key ? null : row.key;
   contextMenu.value = null;
+  const anchor = event?.currentTarget instanceof Element ? event.currentTarget.getBoundingClientRect() : null;
+  menuUp.value = !!anchor && anchor.bottom + MENU_ROOM > window.innerHeight;
 }
 
 function runMenu(row: TreeRow, action: "folder" | "item" | "rename" | "delete") {
@@ -292,12 +298,12 @@ onBeforeUnmount(() => {
           aria-haspopup="menu"
           :aria-expanded="menuKey === row.key"
           :aria-label="`Actions for ${row.label}`"
-          @click.stop="toggleMenu(row)"
-          @keydown.enter.stop="toggleMenu(row)"
-          @keydown.space.stop.prevent="toggleMenu(row)"
+          @click.stop="toggleMenu(row, $event)"
+          @keydown.enter.stop="toggleMenu(row, $event)"
+          @keydown.space.stop.prevent="toggleMenu(row, $event)"
         ><StudioIcon name="plus" /></button>
 
-        <div v-if="menuKey === row.key" class="project-tree__menu" role="menu" @click.stop>
+        <div v-if="menuKey === row.key" class="project-tree__menu" :class="{ 'is-up': menuUp }" role="menu" @click.stop>
           <template v-if="menuDefinition(row)?.newLabel">
             <button type="button" class="project-tree__menu-item" role="menuitem" @click="runMenu(row, 'item')">
               <StudioIcon :name="row.root ?? 'file'" /> {{ menuDefinition(row)?.newLabel ?? "New item" }}
