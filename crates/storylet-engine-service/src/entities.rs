@@ -322,6 +322,15 @@ pub fn collect_template_properties(
     let _ = templates;
 }
 
+/// Numeric bounds declared on a trait property apply to every number in the value.
+fn value_within_bounds(property: &TraitPropertyDefinition, value: &Value) -> bool {
+    let within = |number: &Value| number.as_f64().is_none_or(|n| property.min.is_none_or(|min| n >= min) && property.max.is_none_or(|max| n <= max));
+    match value {
+        Value::Array(items) => items.iter().all(within),
+        other => within(other),
+    }
+}
+
 /// Flattened runtime attributes: `prop.<key>` and trait property namespaces.
 fn property_value_matches(property_type: PropertyType, is_array: bool, value: &Value) -> bool {
     value_shape_matches(property_type, is_array, value)
@@ -332,7 +341,7 @@ pub fn runtime_attributes(entity: &EntityTemplateRecord, templates: &[TraitTempl
     let mut properties = Map::new();
     let mut traits = Map::new();
     let has_inventory_trait = entity.traits.iter().any(|instance| templates.iter().any(|template|
-        template.id == instance.template_id && matches!(template.key.as_str(), "inventory_owner" | "item")));
+        template.id == instance.template_id && matches!(template.key.as_str(), crate::inventory::INVENTORY_OWNER_KEY | crate::inventory::ITEM_KEY)));
     for property in &entity.properties {
         // Inventory's typed runtime projection is inserted separately; flattening
         // its array into indexed JSON attributes would leave stale entries after mutation.
@@ -347,7 +356,7 @@ pub fn runtime_attributes(entity: &EntityTemplateRecord, templates: &[TraitTempl
     for instance in &entity.traits {
         let Some(template) = templates.iter().find(|t| t.id == instance.template_id) else { continue };
         // The mutable inventory state lives in the typed runtime projection.
-        if template.key == "inventory_owner" { continue; }
+        if template.key == crate::inventory::INVENTORY_OWNER_KEY { continue; }
         let mut all_properties = Vec::new();
         collect_template_properties(template, templates, &mut BTreeSet::new(), &mut all_properties);
         let trait_values = traits.entry(template.key.clone()).or_insert_with(|| Value::Object(Map::new()));
@@ -539,6 +548,7 @@ pub fn prepare_entity(
     entity.name = entity.name.trim().into();
     if entity.name.is_empty() { return Err(format!("{PREFIX}: name cannot be empty")); }
     entity.tags = trim_tags(&entity.tags);
+    validate_trait_value_bounds(&entity.traits, &index.templates, PREFIX)?;
     validate_unique_traits(&entity.traits, &index.templates, "Entity validation failed")?;
     crate::tree_graph::validate_tree_item_traits(&entity.traits, &index.templates, PREFIX)?;
     for tag in &entity.tags {
@@ -591,6 +601,7 @@ pub fn prepare_entity_record(
     entity.created_at = Some(stored.and_then(|s| s.created_at).or(entity.created_at).unwrap_or_else(now_ms));
     entity.description = entity.description.trim().into();
     entity.tags = trim_tags(&entity.tags);
+    validate_trait_value_bounds(&entity.traits, &index.templates, PREFIX)?;
     validate_unique_traits(&entity.traits, &index.templates, "Entity validation failed")?;
     crate::tree_graph::validate_tree_item_traits(&entity.traits, &index.templates, PREFIX)?;
     for tag in &entity.tags {
@@ -599,6 +610,21 @@ pub fn prepare_entity_record(
         }
     }
     Ok(entity)
+}
+
+/// Reject authored trait values outside the numeric bounds their property declares.
+pub fn validate_trait_value_bounds(traits: &[crate::contracts::TraitInstance], templates: &[TraitTemplateRecord], prefix: &str) -> Result<(), String> {
+    for instance in traits {
+        let Some(template) = templates.iter().find(|template| template.id == instance.template_id) else { continue };
+        for (key, value) in &instance.values {
+            if let Some(property) = template.properties.iter().find(|property| property.key() == key) {
+                if !value_within_bounds(property, value) {
+                    return Err(format!("{prefix}: trait '{}' property '{key}' is outside its allowed range", template.key));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn validate_unique_traits(traits: &[crate::contracts::TraitInstance], templates: &[TraitTemplateRecord], owner: &str) -> Result<(), String> {
@@ -630,6 +656,28 @@ pub fn validate_trait_properties(
         definition.property.name = definition.property.name.trim().to_string();
         if definition.property.key.is_empty() || !seen.insert(definition.property.key.clone()) {
             return Err(format!("{prefix}: property keys must be non-empty and unique"));
+        }
+        if (definition.min.is_some() || definition.max.is_some()) && !matches!(definition.property.property_type, PropertyType::Int | PropertyType::Float) {
+            return Err(format!("{prefix}: numeric bounds require a numeric property"));
+        }
+        if matches!((definition.min, definition.max), (Some(min), Some(max)) if min > max) {
+            return Err(format!("{prefix}: property minimum cannot exceed maximum"));
+        }
+        if !value_within_bounds(definition, &definition.property.default) {
+            return Err(format!("{prefix}: property default is outside its allowed range"));
+        }
+        if let Some(editor) = &definition.editor {
+            if editor.selection_only && (definition.property.property_type != PropertyType::String || definition.property.is_array || editor.option_source.is_none()) {
+                return Err(format!("{prefix}: selection-only editor requires a scalar string and an option source"));
+            }
+            if editor.option_source.is_some() && !matches!(definition.property.property_type, PropertyType::String | PropertyType::Tag) {
+                return Err(format!("{prefix}: editor option source requires a string or tag property"));
+            }
+            if let Some(key) = &editor.entity_trait_key {
+                if definition.property.property_type != PropertyType::Entity || key.trim().is_empty() {
+                    return Err(format!("{prefix}: entity trait filter requires an entity property and a non-empty trait key"));
+                }
+            }
         }
     }
     Ok(())
@@ -1107,6 +1155,8 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
                     };
                     if !value_shape_matches(property.property.property_type, property.property.is_array, value) {
                         issues.push(format!("entity '{}': trait '{}' property '{}' value does not match its type", entity.name, template.key, key));
+                    } else if !value_within_bounds(property, value) {
+                        issues.push(format!("entity '{}': trait '{}' property '{}' is outside its allowed range", entity.name, template.key, key));
                     } else if let Err(error) = validate_property_refs(property.property.property_type, property.property.is_array, value, &index, "reference") {
                         issues.push(format!("entity '{}': trait '{}' {error}", entity.name, template.key));
                     }
@@ -1275,6 +1325,10 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
                         "entity '{}': trait '{}' property '{}' value does not match its type",
                         entity.name, template.key, key
                     ));
+                    continue;
+                }
+                if !value_within_bounds(property, value) {
+                    issues.push(format!("entity '{}': trait '{}' property '{}' is outside its allowed range", entity.name, template.key, key));
                     continue;
                 }
                 if let Err(error) = validate_property_refs(

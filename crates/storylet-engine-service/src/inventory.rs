@@ -6,6 +6,10 @@ use serde_json::{json, Value};
 use crate::contracts::{EntityProperty, EntityRecord, EntityTemplateRecord, PropertyType, TraitTemplateRecord};
 use crate::narrative_graph::{NarrativeEdgeKind, NarrativeGraph, NarrativeNodeData};
 
+/// Stable trait keys whose runtime schema (`ITEMS`/`ITEM` projections) is owned by this module.
+pub const INVENTORY_OWNER_KEY: &str = "inventory_owner";
+pub const ITEM_KEY: &str = "item";
+
 const ITEMS: &str = "__inventory_items";
 const ROWS: &str = "__inventory_rows";
 const COLUMNS: &str = "__inventory_columns";
@@ -22,8 +26,8 @@ pub fn project_inventory_entities(
     instances: &[EntityRecord],
     templates: &[TraitTemplateRecord],
 ) -> Result<(), String> {
-    let owner_id = templates.iter().find(|t| t.key == "inventory_owner").map(|t| t.id.as_str());
-    let item_id = templates.iter().find(|t| t.key == "item").map(|t| t.id.as_str());
+    let owner_id = templates.iter().find(|t| t.key == INVENTORY_OWNER_KEY).map(|t| t.id.as_str());
+    let item_id = templates.iter().find(|t| t.key == ITEM_KEY).map(|t| t.id.as_str());
     let has_trait = |traits: &[crate::contracts::TraitInstance], id: Option<&str>| id.is_some_and(|id| traits.iter().any(|t| t.template_id == id));
     // The engine normally projects templates. Include concrete inventory entities
     // too so an explicit Get Entity input can refer to either authoring kind.

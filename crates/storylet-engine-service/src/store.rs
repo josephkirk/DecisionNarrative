@@ -989,14 +989,24 @@ fn sync_system_trait_uniqueness(conn: &rusqlite::Connection) -> Result<(), rusql
 
 fn seed_system_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
     for template in SYSTEM_TRAIT_TEMPLATES {
-        let properties: Vec<Value> = template.properties.iter().map(|spec| json!({
+        let properties: Vec<Value> = template.properties.iter().map(|spec| {
+            let mut property = json!({
             "key": spec.key,
             "name": spec.name,
             "type": spec.property_type,
             "is_array": spec.is_array,
             "default": serde_json::from_str::<Value>(spec.default_json)
                 .expect("system trait default JSON must be valid"),
-        })).collect();
+            });
+            if let Some(editor) = template.editors.iter().find(|editor| editor.property_key == spec.key) {
+                property["editor"] = json!({
+                    "option_source": editor.option_source,
+                    "selection_only": editor.selection_only,
+                    "entity_trait_key": editor.entity_trait_key,
+                });
+            }
+            property
+        }).collect();
         let id = format!("system.{}", template.key);
         let record = json!({
             "id": id,

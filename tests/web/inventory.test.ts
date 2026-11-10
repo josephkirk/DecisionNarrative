@@ -70,3 +70,27 @@ test("inventory nodes validate traits and round-trip entity inputs and boolean o
     }
   } finally { ctx.dispose(); studioState.traitTemplates = previous; }
 });
+
+test("inventory plugin creates only missing traits and never rewrites an existing trait", async () => {
+  const { StudioApi } = await import("../../src/web/studio/api.ts");
+  const { inventoryPlugin } = await import("../../src/web/studio/plugins/inventory/index.ts");
+  const saved: any[] = [];
+  const original = { saveContent: StudioApi.saveContent, getProject: StudioApi.getProject, listContent: StudioApi.listContent };
+  (StudioApi as any).saveContent = async (_kind: string, payload: any) => { saved.push(payload); return payload; };
+  (StudioApi as any).getProject = async () => studioState.project;
+  (StudioApi as any).listContent = async () => [];
+  const priorProject = studioState.project; const priorTraits = studioState.traitTemplates;
+  try {
+    studioState.project = { id: "p", name: "P" } as any;
+    studioState.traitTemplates = [{ id: "user-item", key: "item", name: "My Item", unique: false, properties: [] } as any];
+    const ctx = new Context("inventory-test");
+    inventoryPlugin.apply(ctx);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(saved.map((template) => template.key)).toEqual(["inventory_owner"]);
+    expect(saved.some((template) => template.key === "item")).toBe(false);
+    ctx.dispose();
+  } finally {
+    Object.assign(StudioApi, original);
+    studioState.project = priorProject; studioState.traitTemplates = priorTraits;
+  }
+});

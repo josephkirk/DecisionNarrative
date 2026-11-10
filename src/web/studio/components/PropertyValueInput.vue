@@ -16,6 +16,8 @@ const props = defineProps<{
   tagOptions?: string[];
   selectionOnly?: boolean;
   traitKeyFilter?: string;
+  min?: number | null;
+  max?: number | null;
 }>();
 const emit = defineEmits<{ "update:modelValue": [value: PropertyValue] }>();
 
@@ -74,16 +76,21 @@ function textValue(value: PropertyScalar): string {
   if (typeof value === "number") return String(value);
   return "";
 }
+// Declared trait bounds apply to typed, stepped and keyboard-adjusted values alike.
+function clampNumber(value: number): number {
+  const lower = props.min == null ? value : Math.max(value, props.min);
+  return props.max == null ? lower : Math.min(lower, props.max);
+}
 function onNumber(event: Event, write: (value: number) => void, integer: boolean) {
   const raw = (event.target as HTMLInputElement).value.trim();
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return; // Partial input such as "-" or "1e"
-  write(integer ? Math.trunc(parsed) : parsed);
+  write(clampNumber(integer ? Math.trunc(parsed) : parsed));
 }
 function stepNumber(current: PropertyScalar, delta: number, integer: boolean): number {
   const base = typeof current === "number" && Number.isFinite(current) ? current : 0;
   const next = base + delta;
-  return integer ? Math.trunc(next) : next;
+  return clampNumber(integer ? Math.trunc(next) : next);
 }
 
 let repeatDelay: ReturnType<typeof setTimeout> | null = null;
@@ -107,7 +114,7 @@ function onNumKey(event: KeyboardEvent, write: (value: number) => void, integer:
   const parsed = Number((event.target as HTMLInputElement).value.trim());
   const base = Number.isFinite(parsed) ? parsed : 0;
   const delta = event.key === "ArrowUp" ? 1 : -1;
-  write(integer ? Math.trunc(base + delta) : base + delta);
+  write(clampNumber(integer ? Math.trunc(base + delta) : base + delta));
 }
 
 // Tag properties use the same multi-chip editor as entity Gameplay tags.

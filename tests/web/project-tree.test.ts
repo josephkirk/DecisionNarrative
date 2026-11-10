@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { buildTreeItems, defaultExpandedKeys, flattenTree, itemRoute } from "../../src/web/studio/projectTree.ts";
-const source = buildTreeItems({ projectName: "Demo", folders: [{ id: "f", name: "Templates", root: "entity_templates", parent_id: null }], entities: [{ id: "world", name: "World", tags: [], traits: [] }], entityTemplates: [{ id: "guard", object_id: "o", game_id: "guard", game_id_auto: false, name: "Guard", description: "", folder_id: "f", tags: [], properties: [], traits: [{ id: "t", template_id: "character-trait", values: {} }] }], traitTemplates: [{ id: "character-trait", key: "system.character", name: "Character", properties: [] }], assets: [], storylets: [] });
+import { buildTreeItems, defaultExpandedKeys, flattenTree, folderContents, itemRoute } from "../../src/web/studio/projectTree.ts";
+const source = buildTreeItems({
+  projectName: "Demo",
+  folders: [{ id: "f", name: "Templates", root: "entity_templates", parent_id: null }],
+  entities: [{ id: "world", name: "World", tags: [], traits: [] }],
+  entityTemplates: [{ id: "guard", object_id: "o", game_id: "guard", game_id_auto: false, name: "Guard", description: "", folder_id: "f", tags: [], properties: [], traits: [{ id: "t", template_id: "character-trait", values: {} }] }],
+  traitTemplates: [{ id: "character-trait", key: "system.character", name: "Character", properties: [] }],
+  assets: [],
+  storylets: [],
+});
 describe("entity template project tree", () => {
  test("shows applied trait labels and supports entities without traits", () => { const rows = flattenTree({ ...source, expanded: [...defaultExpandedKeys(), "folder:f"] }); expect(rows.some((r) => r.key === "item:entity_templates:guard")).toBe(true); expect(rows.find((r) => r.key === "item:entity_templates:guard")?.detail).toBe("Character"); expect(source.items.find((item) => item.id === "world")?.detail).toBe("No traits"); });
  test("routes entity templates to editor", () => { expect(itemRoute("entity_templates", "guard")).toBe("/entity-templates/guard"); });

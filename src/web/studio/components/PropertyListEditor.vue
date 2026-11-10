@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, nextTick, onBeforeUnmount, toRaw } from "vue";
-import type { EntityProperty, PropertyDefinition, PropertyValue } from "../contracts.ts";
+import type { EntityProperty, PropertyDefinition, PropertyValue, TraitPropertyDefinition } from "../contracts.ts";
 import {
   isValidPropertyKey,
   newEntityProperty,
@@ -13,6 +13,7 @@ import PropertyValueInput from "./PropertyValueInput.vue";
 import { propertyEditorFor } from "../plugins/runtime.ts";
 import StudioIcon from "./StudioIcon.vue";
 import { reorderProperties } from "../traitPropertyGroups.ts";
+import { studioState } from "../state.ts";
 
 type Row = EntityProperty | PropertyDefinition;
 
@@ -271,6 +272,11 @@ function add() {
           :type="row.type"
           :is-array="row.is_array === true"
           :multiline="row.multiline === true"
+          :tag-options="(row as TraitPropertyDefinition).editor?.option_source === 'gameplay_tags' ? studioState.gameplayTags.map(tag => tag.name) : undefined"
+          :selection-only="(row as TraitPropertyDefinition).editor?.selection_only === true"
+          :trait-key-filter="(row as TraitPropertyDefinition).editor?.entity_trait_key ?? undefined"
+          :min="(row as TraitPropertyDefinition).min"
+          :max="(row as TraitPropertyDefinition).max"
           :disabled="props.disabled"
           @update:model-value="patchValue(index, $event)"
         />

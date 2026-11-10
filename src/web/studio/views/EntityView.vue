@@ -37,10 +37,7 @@ const pendingTraitThumbnail = computed(() => thumbnailUrl(availableTemplates.val
 const appliedTraits = computed(() => (draft.value?.traits ?? []).map((instance: TraitInstance) => ({ instance, template: studioState.traitTemplates.find((t) => t.id === instance.template_id) })).filter((e) => e.template));
 const hasAppliedUniqueTrait = computed(() => appliedTraits.value.some((entry) => entry.template?.unique));
 const appliedTraitLabels = computed(() => draft.value ? traitLabels(draft.value, studioState.traitTemplates) : []);
-const characterRoleOptions = computed<string[]>(() => studioState.gameplayTags.map((tag) => tag.name));
-function roleTagOptions(templateKey: string | undefined, propertyKey: string): string[] | undefined {
-  return templateKey === "character_settings" && propertyKey === "role" ? characterRoleOptions.value : undefined;
-}
+const gameplayTagOptions = computed<string[]>(() => studioState.gameplayTags.map((tag) => tag.name));
 function traitInspectorComponent(traitKey: string) { return traitInspectorFor(traitKey)?.component; }
 function updateProperties(rows: Array<EntityProperty | PropertyDefinition>) { patch({ properties: rows as EntityProperty[] }); }
 function updateTags(value: string | string[]) { patch({ tags: Array.isArray(value) ? value : value ? [value] : [] }); }
@@ -326,9 +323,11 @@ function scrollTabs(event: WheelEvent) {
                 :model-value="traitPropertyDisplayValue(entry.instance, property)"
                 :type="property.type"
                 :is-array="property.is_array"
-                :tag-options="roleTagOptions(entry.template?.key ?? entry.template?.id, property.key)"
-                :selection-only="entry.template?.key === 'character_settings' && property.key === 'role'"
-                :trait-key-filter="entry.template?.key === 'character_settings' && (property.key === 'home_location' || property.key === 'current_location') ? 'location' : undefined"
+                :tag-options="property.editor?.option_source === 'gameplay_tags' ? gameplayTagOptions : undefined"
+                :selection-only="property.editor?.selection_only === true"
+                :trait-key-filter="property.editor?.entity_trait_key ?? undefined"
+                :min="property.min"
+                :max="property.max"
                 :disabled="intrinsic"
                 @update:model-value="setTraitValue(entry.instance.id, property.key, $event)"
               />

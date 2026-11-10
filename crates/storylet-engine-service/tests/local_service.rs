@@ -663,3 +663,48 @@ async fn trait_property_categories_survive_save_and_bundle_round_trip() {
     assert_eq!(restored["properties"][0]["category"], "Combat");
     assert_eq!(restored["properties"][1]["key"], "b");
 }
+
+#[tokio::test]
+async fn trait_property_editor_metadata_round_trips_and_is_seeded() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    let settings = service.get_content_item("trait_templates", "system.character_settings").await.unwrap();
+    let properties = settings["properties"].as_array().unwrap();
+    assert_eq!(properties[0]["editor"]["option_source"], "gameplay_tags");
+    assert_eq!(properties[0]["editor"]["selection_only"], true);
+    assert_eq!(properties[1]["editor"]["entity_trait_key"], "location");
+    service.save_content_item("trait_templates", &json!({
+        "id":"editor_rules", "key":"editor_rules", "name":"Editor rules", "properties":[
+            {"key":"custom_role", "name":"Custom role", "type":"string", "default":"", "editor":{"option_source":"gameplay_tags", "selection_only":true}},
+            {"key":"custom_place", "name":"Custom place", "type":"entity", "default":null, "editor":{"entity_trait_key":"location"}},
+            {"key":"score", "name":"Score", "type":"int", "default":0, "min":0, "max":10}
+        ]
+    })).await.unwrap();
+    let bundle = serde_json::to_value(service.export_project_bundle().await.unwrap()).unwrap();
+    let imported = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    imported.import_bundle(&bundle).await.unwrap();
+    let restored = imported.get_content_item("trait_templates", "editor_rules").await.unwrap();
+    assert_eq!(restored["properties"][0]["editor"]["option_source"], "gameplay_tags");
+    assert_eq!(restored["properties"][1]["editor"]["entity_trait_key"], "location");
+    assert_eq!(restored["properties"][2]["min"], 0.0);
+    assert_eq!(restored["properties"][2]["max"], 10.0);
+    let mut invalid = restored.clone();
+    invalid["properties"][0]["editor"]["entity_trait_key"] = json!("location");
+    assert!(service.save_content_item("trait_templates", &invalid).await.is_err());
+    let mut invalid_bounds = restored.clone();
+    invalid_bounds["properties"][2]["min"] = json!(11);
+    assert!(service.save_content_item("trait_templates", &invalid_bounds).await.is_err());
+}
+
+#[tokio::test]
+async fn trait_numeric_bounds_reject_out_of_range_instance_values() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id":"bounded", "key":"bounded", "name":"Bounded", "properties":[
+            {"key":"score", "name":"Score", "type":"int", "default":0, "min":0, "max":10}
+        ]
+    })).await.unwrap();
+    let entity = |score: i64| json!({"id":"hero","name":"Hero","tags":[],"traits":[{"template_id":"bounded","values":{"score":score}}]});
+    service.save_content_item("entity_templates", &entity(10)).await.unwrap();
+    assert!(service.save_content_item("entity_templates", &entity(11)).await.is_err());
+    assert!(service.save_content_item("entity_templates", &entity(-1)).await.is_err());
+}

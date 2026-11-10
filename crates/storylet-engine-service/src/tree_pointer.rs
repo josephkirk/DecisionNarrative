@@ -116,7 +116,7 @@ pub fn project_tree_entities(entities: &mut Vec<EntityTemplateRecord>, instances
     for entity in instances.iter().filter(|entity| entity.id != "world" && entity.traits.iter().any(|instance| instance.template_id == id)) {
         if let Some(existing) = entities.iter().find(|existing| existing.id == entity.id) {
             // Inventory projection may already have added this concrete entity.
-            let inventory = templates.iter().any(|template| matches!(template.key.as_str(), "inventory_owner" | "item")
+            let inventory = templates.iter().any(|template| matches!(template.key.as_str(), crate::inventory::INVENTORY_OWNER_KEY | crate::inventory::ITEM_KEY)
                 && entity.traits.iter().any(|instance| instance.template_id == template.id));
             if inventory && existing.traits == entity.traits {
                 continue;
