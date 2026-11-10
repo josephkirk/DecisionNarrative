@@ -173,3 +173,17 @@ The toolbar Appearance panel swaps whole-app themes; each is one token set in `s
   bordered content cards. In narrow panes the padding contracts and controls
   wrap or scroll rather than clipping.
 - **Floating Controls**: Pill-style toolbars with grouped actions, 14px padding, and 44px touch targets.
+
+## Record thumbnails and selection
+
+Thumbnails are part of a record's visual identity. When an entity, entity template, trait, asset, or storylet has a thumbnail, carry it through to every UI representation of that record, including picker results, selected references, cards, lists, tree items, graph nodes, and compact badges. Resolve stored references with `thumbnailUrl` and keep the name visible; a thumbnail does not replace the accessible text label. When there is no thumbnail, use the surface's existing initial or icon fallback. Preserve the record's own thumbnail rather than substituting an unrelated image.
+
+Native `<select>` options cannot reliably display thumbnails. When choosing records with thumbnails, provide an accessible visual picker for the options, and show the selected record's thumbnail next to the control. Preserve keyboard operation, search where appropriate, and a clear empty selection. In split workspaces, center the picker over the pane that opened it, constrain it to the visible pane, and keep it usable in narrow panes.
+
+### Thumbnail review checklist
+
+- Trace thumbnail data from each record through view models and picker item mappings to the rendered image; do not assume a shared picker receives it.
+- Check each record type with and without an image, including list and grid results, selected values, arrays, cards, references, navigation, graph nodes, and compact representations. Check long names and missing or unavailable images.
+- Inspect selection and display at desktop, narrow, and split-pane sizes. Open the picker from more than one pane and verify its position, sizing, scrolling, focus, and closing behavior.
+- Use fixtures with actual thumbnails in visual checks. A fixture containing only records without images cannot prove that thumbnails render.
+- Check native selectors and graph labels explicitly for missing images. Existing native menus and some graph labels still need visual thumbnail support; treat these as known gaps rather than evidence that the contract is already met everywhere.
