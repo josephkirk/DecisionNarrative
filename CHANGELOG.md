@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Custom thumbnails for editable traits, using the same image picker as entities.
+- Custom thumbnails for editable traits, using the entity image picker; saved
+  images appear in the trait editor, project tree, and folder views. Existing
+  traits without images remain compatible.
 - Tree Graph plugin with TreeGraph and TreeItem traits, an infinite pan-and-zoom
   canvas, editable entity connections, multiple roots, directional and radial
   layouts, configurable canvas backgrounds, nodes resizable from any edge or
@@ -54,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   container-query layouts so every view adapts to narrow split panes.
 - Trait and asset editors share the entity editor's centered layout, header,
   section navigation, and content-card spacing.
+- Rebranded the README around Erzählstudio's vision, with a plain-language
+  dungeon example and screenshots of the studio and built-in plugins.
 
 ### Fixed
 
