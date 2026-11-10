@@ -119,7 +119,7 @@ export function buildTreeItems(input: BuildTreeInput): TreeSource {
       id: template.id,
       label: template.name,
       folderId: template.folder_id ?? null,
-      thumbnail: null,
+      thumbnail: template.thumbnail ?? null,
       detail: templateDetail(template),
     });
   }

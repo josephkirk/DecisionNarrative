@@ -645,11 +645,18 @@ pub fn prepare_trait_template(
         .map_err(|error| format!("{PREFIX}: {error}"))?;
     if let Some(previous) = stored {
         if previous.system && (template.id != previous.id || template.key != previous.key || !template.system
-            || template.allow_multiple != previous.allow_multiple || template.unique != previous.unique || template.properties != previous.properties) {
+            || template.allow_multiple != previous.allow_multiple || template.unique != previous.unique || template.properties != previous.properties
+            || template.thumbnail != previous.thumbnail) {
             return Err(format!("{PREFIX}: system traits are immutable"));
         }
     } else {
         template.system = false;
+    }
+    if template.thumbnail.as_deref().is_some_and(|value| value.trim().is_empty()) {
+        template.thumbnail = None;
+    } else if let Some(thumb) = &template.thumbnail {
+        files::validate_image_ref(thumb).map_err(|error| format!("{PREFIX}: {error}"))?;
+        template.thumbnail = Some(thumb.trim().to_string());
     }
     if template.id.trim().is_empty() {
         template.id = match stored {
@@ -739,6 +746,10 @@ pub fn canonicalize_content(content: &mut ProjectBundleContent) {
     }
     for template in &mut content.trait_templates {
         normalize_optional_id(&mut template.folder_id);
+        normalize_optional_id(&mut template.thumbnail);
+        if let Some(thumbnail) = &mut template.thumbnail {
+            *thumbnail = thumbnail.trim().to_string();
+        }
     }
     for folder in &mut content.folders {
         normalize_optional_id(&mut folder.parent_id);
@@ -1289,6 +1300,11 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
         if let Err(error) = crate::tree_graph::validate_tree_item_template(template, &format!("trait '{}'", template.name)) {
             issues.push(error);
         }
+        if let Some(thumb) = template.thumbnail.as_deref().filter(|t| !t.trim().is_empty()) {
+            if let Err(error) = files::validate_image_ref(thumb) {
+                issues.push(format!("trait '{}': {error}", template.name));
+            }
+        }
     }
 
     let mut template_ids = BTreeSet::new();
@@ -1511,5 +1527,139 @@ mod tests {
             vec!["entity 'guard': generic playtests cannot represent typed custom properties; use Chrono playtests"]
         );
         assert!(generic_playtest_projection_issues(&[]).is_empty());
+    }
+
+    #[test]
+    fn trait_template_thumbnail_normalization_and_validation() {
+        let index = WorkspaceIndex::default();
+        // 1. Valid project-relative path
+        let payload = json!({
+            "id": "t1",
+            "key": "skill",
+            "name": "Skill",
+            "thumbnail": "project-files/thumbnails/skill.png",
+            "properties": []
+        });
+        let prepared = prepare_trait_template(&payload, None, &index).unwrap();
+        assert_eq!(prepared.thumbnail.as_deref(), Some("project-files/thumbnails/skill.png"));
+
+        // 2. Valid web URL
+        let payload_url = json!({
+            "id": "t2",
+            "key": "buff",
+            "name": "Buff",
+            "thumbnail": "https://example.com/buff.jpg",
+            "properties": []
+        });
+        let prepared_url = prepare_trait_template(&payload_url, None, &index).unwrap();
+        assert_eq!(prepared_url.thumbnail.as_deref(), Some("https://example.com/buff.jpg"));
+
+        // 3. Empty string normalizes to None
+        let payload_empty = json!({
+            "id": "t3",
+            "key": "spell",
+            "name": "Spell",
+            "thumbnail": "   ",
+            "properties": []
+        });
+        let prepared_empty = prepare_trait_template(&payload_empty, None, &index).unwrap();
+        assert_eq!(prepared_empty.thumbnail, None);
+
+        // 4. Null normalizes to None
+        let payload_null = json!({
+            "id": "t4",
+            "key": "aura",
+            "name": "Aura",
+            "thumbnail": null,
+            "properties": []
+        });
+        let prepared_null = prepare_trait_template(&payload_null, None, &index).unwrap();
+        assert_eq!(prepared_null.thumbnail, None);
+
+        // 5. Omitted field defaults to None
+        let payload_omitted = json!({
+            "id": "t5",
+            "key": "curse",
+            "name": "Curse",
+            "properties": []
+        });
+        let prepared_omitted = prepare_trait_template(&payload_omitted, None, &index).unwrap();
+        assert_eq!(prepared_omitted.thumbnail, None);
+
+        // 6. Invalid paths are rejected
+        for invalid in [
+            "project-files/../secret.png",
+            "/thumbnails/skill.png",
+            "thumbnails\\skill.png",
+            "thumbnails/skill.gif",
+            "thumbnails//skill.png",
+        ] {
+            let payload_invalid = json!({
+                "id": "t_inv",
+                "key": "invalid_trait",
+                "name": "Invalid",
+                "thumbnail": invalid,
+                "properties": []
+            });
+            assert!(prepare_trait_template(&payload_invalid, None, &index).is_err());
+        }
+
+        // 7. System traits cannot modify thumbnail
+        let system_trait: TraitTemplateRecord = serde_json::from_value(json!({
+            "id": "system.character",
+            "key": "character",
+            "name": "Character",
+            "system": true,
+            "allow_multiple": false,
+            "properties": []
+        })).unwrap();
+        let modify_system = json!({
+            "id": "system.character",
+            "key": "character",
+            "name": "Character",
+            "system": true,
+            "thumbnail": "project-files/thumbnails/char.png",
+            "properties": []
+        });
+        assert!(prepare_trait_template(&modify_system, Some(&system_trait), &index).unwrap_err().contains("system traits are immutable"));
+    }
+
+    #[test]
+    fn bundle_validation_checks_trait_thumbnails() {
+        let mut content = ProjectBundleContent::default();
+        for spec in SYSTEM_TRAIT_TEMPLATES {
+            content.trait_templates.push(serde_json::from_value(json!({
+                "id": format!("system.{}", spec.key),
+                "key": spec.key,
+                "name": spec.name,
+                "system": true,
+                "allow_multiple": spec.allow_multiple,
+                "properties": spec.properties.iter().map(|p| json!({
+                    "key": p.key, "name": p.name, "type": p.property_type, "is_array": p.is_array, "default": null
+                })).collect::<Vec<_>>()
+            })).unwrap());
+        }
+        content.entities.push(default_world_entity());
+
+        // Valid custom trait with thumbnail
+        content.trait_templates.push(serde_json::from_value(json!({
+            "id": "custom.valid",
+            "key": "valid_trait",
+            "name": "Valid Trait",
+            "thumbnail": "project-files/thumbnails/icon.png",
+            "properties": []
+        })).unwrap());
+        assert!(validate_bundle_content(&content).is_empty());
+
+        // Invalid custom trait with thumbnail
+        content.trait_templates.push(serde_json::from_value(json!({
+            "id": "custom.invalid",
+            "key": "invalid_trait",
+            "name": "Invalid Trait",
+            "thumbnail": "../escape.png",
+            "properties": []
+        })).unwrap());
+        let issues = validate_bundle_content(&content);
+        assert!(issues.iter().any(|i| i.contains("trait 'Invalid Trait'") && i.contains("cannot contain empty, '.' or '..' segments")));
     }
 }

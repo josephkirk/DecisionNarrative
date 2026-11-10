@@ -518,3 +518,95 @@ async fn canvas_reference_properties_are_tracked_as_references() {
     let (status, _) = request(&app, "GET", "/api/v3/content/storylets/missing/references", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn trait_template_thumbnail_persists_clears_rejects_invalids_and_roundtrips_bundle() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+
+    // 1. Save trait template with valid image path and reload it
+    let trait_payload = json!({
+        "id": "skill_tree",
+        "key": "skill_tree",
+        "name": "Skill Tree",
+        "thumbnail": "project-files/thumbnails/skill-tree.png",
+        "properties": []
+    });
+    service.save_content_item("trait_templates", &trait_payload).await.unwrap();
+    let loaded = service.get_content_item("trait_templates", "skill_tree").await.unwrap();
+    assert_eq!(loaded["thumbnail"], "project-files/thumbnails/skill-tree.png");
+
+    // 2. Also accepts valid web URL
+    let mut update_url = loaded.clone();
+    update_url["thumbnail"] = json!("https://example.com/tree.jpg");
+    service.save_content_item("trait_templates", &update_url).await.unwrap();
+    let loaded_url = service.get_content_item("trait_templates", "skill_tree").await.unwrap();
+    assert_eq!(loaded_url["thumbnail"], "https://example.com/tree.jpg");
+
+    // 3. Clearing thumbnail (null or whitespace empty string)
+    let mut update_null = loaded_url.clone();
+    update_null["thumbnail"] = json!(null);
+    service.save_content_item("trait_templates", &update_null).await.unwrap();
+    let loaded_null = service.get_content_item("trait_templates", "skill_tree").await.unwrap();
+    assert!(loaded_null.get("thumbnail").is_none() || loaded_null["thumbnail"].is_null());
+
+    let mut update_empty = loaded_null.clone();
+    update_empty["thumbnail"] = json!("   ");
+    service.save_content_item("trait_templates", &update_empty).await.unwrap();
+    let loaded_empty = service.get_content_item("trait_templates", "skill_tree").await.unwrap();
+    assert!(loaded_empty.get("thumbnail").is_none() || loaded_empty["thumbnail"].is_null());
+
+    // 4. Pre-existing records without thumbnail field deserialize cleanly
+    let legacy_json = json!({
+        "id": "legacy_trait",
+        "key": "legacy_trait",
+        "name": "Legacy Trait",
+        "description": "Created before thumbnail existed",
+        "folder_id": null,
+        "properties": [],
+        "allow_multiple": false,
+        "unique": false,
+        "system": false,
+        "created_at": 1000
+    });
+    service.save_content_item("trait_templates", &legacy_json).await.unwrap();
+    let loaded_legacy = service.get_content_item("trait_templates", "legacy_trait").await.unwrap();
+    assert_eq!(loaded_legacy["name"], "Legacy Trait");
+    assert!(loaded_legacy.get("thumbnail").is_none() || loaded_legacy["thumbnail"].is_null());
+
+    // Can subsequently add thumbnail to legacy record
+    let mut add_thumb = loaded_legacy.clone();
+    add_thumb["thumbnail"] = json!("project-files/thumbnails/legacy.png");
+    service.save_content_item("trait_templates", &add_thumb).await.unwrap();
+    let reloaded_legacy = service.get_content_item("trait_templates", "legacy_trait").await.unwrap();
+    assert_eq!(reloaded_legacy["thumbnail"], "project-files/thumbnails/legacy.png");
+
+    // 5. Invalid thumbnail rejection
+    for invalid_thumb in [
+        "/absolute/path.png",
+        "project-files\\thumbnails\\escape.png",
+        "project-files/../escape.png",
+        "project-files/thumbnails/unsupported.gif",
+        "project-files/thumbnails/unsupported.svg",
+        "project-files//thumbnails/double-slash.png",
+    ] {
+        let mut invalid = loaded.clone();
+        invalid["thumbnail"] = json!(invalid_thumb);
+        assert!(service.save_content_item("trait_templates", &invalid).await.is_err(), "should reject {invalid_thumb}");
+    }
+
+    // 6. System trait immutability preserved
+    let system_char = service.get_content_item("trait_templates", "system.character").await.unwrap();
+    let mut modify_system = system_char.clone();
+    modify_system["thumbnail"] = json!("project-files/thumbnails/char.png");
+    let err = service.save_content_item("trait_templates", &modify_system).await.unwrap_err();
+    assert!(err.contains("System traits cannot be modified") || err.contains("system traits are immutable"), "expected immutability error, got {err}");
+
+    // 7. Bundle round-trip preserves trait thumbnail
+    let bundle = serde_json::to_value(service.export_project_bundle().await.unwrap()).unwrap();
+    assert!(service.validate_bundle(&bundle).await.unwrap().is_empty());
+
+    let imported_service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    imported_service.import_bundle(&bundle).await.unwrap();
+    let imported_trait = imported_service.get_content_item("trait_templates", "legacy_trait").await.unwrap();
+    assert_eq!(imported_trait["thumbnail"], "project-files/thumbnails/legacy.png");
+}

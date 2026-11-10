@@ -38,6 +38,8 @@ An **entity template** is a reusable starting point for similar entities. A *Dun
 
 You can also add traits directly to an entity without using an entity template. Use templates for shared starting points, traits for reusable details, and entities for the individual things in your world.
 
+To give an editable trait its own picture, open the trait, click its image in the header, choose an image, and save. Click an existing picture to replace or remove it. Built-in system traits remain read-only.
+
 **World** is the studio’s built-in entity, not a character template. Keep your people, places, and items separate from it.
 
 ## Let stories respond to the world

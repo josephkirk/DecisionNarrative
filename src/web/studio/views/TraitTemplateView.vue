@@ -6,7 +6,7 @@ import type { TraitPropertyDefinition, TraitTemplateRecord } from "../contracts.
 import { notify, studioState } from "../state.ts";
 import { currentFolderId, refreshWorkspace } from "../view-models/workspace.ts";
 import PropertyListEditor from "../components/PropertyListEditor.vue";
-import StudioIcon from "../components/StudioIcon.vue";
+import ThumbnailPicker from "../components/ThumbnailPicker.vue";
 import { countLabel } from "../countLabel.ts";
 const route = useRoute();
 const router = useRouter();
@@ -192,10 +192,13 @@ function scrollTabs(event: WheelEvent) {
     <!-- Hero Card matching EntityView -->
     <header class="entity-hero-card">
       <div class="entity-hero-left">
-        <div class="editor-hero-avatar-placeholder" aria-hidden="true">
-          <StudioIcon name="trait_templates" style="font-size: 26px; color: var(--accent);" />
-        </div>
-
+        <ThumbnailPicker
+          :model-value="draft.thumbnail ?? null"
+          :label="draft.name"
+          :size="56"
+          :disabled="draft.system"
+          @update:model-value="patch({ thumbnail: $event })"
+        />
         <div class="entity-hero-meta">
           <div class="entity-title-row">
             <input

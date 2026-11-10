@@ -1505,18 +1505,6 @@ a { color: var(--accent-hover); }
   min-width: 0;
 }
 
-.editor-hero-avatar-placeholder {
-  width: 56px;
-  height: 56px;
-  border-radius: var(--radius-lg, 12px);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border-subtle);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
 .editor-hero-meta,
 .entity-hero-meta {
   display: flex;

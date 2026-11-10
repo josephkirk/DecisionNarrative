@@ -197,6 +197,7 @@ export interface TraitInstance { id: string; template_id: string; values: Record
 export interface TraitPropertyDefinition extends PropertyDefinition { min?: number | null; max?: number | null; }
 export interface TraitTemplateRecord {
   id: string; key: string; key_auto?: boolean; name: string; description?: string;
+  thumbnail?: string | null;
   folder_id?: string | null; includes?: string[]; properties: TraitPropertyDefinition[];
   allow_multiple?: boolean; unique?: boolean; system?: boolean; created_at?: number;
 }
