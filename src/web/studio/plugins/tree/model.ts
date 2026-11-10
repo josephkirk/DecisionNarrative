@@ -127,8 +127,8 @@ export function treeItemTemplate(): TraitTemplateRecord {
     key: TREE_ITEM_KEY,
     name: "TreeItem",
     properties: [
-      { id: "level", key: "level", name: "Level", type: "int", default: 0 },
-      { id: "cost", key: "cost", name: "Cost", type: "int", default: 0 },
+      { id: "level", key: "level", name: "Level", type: "int", default: 0, min: 0 },
+      { id: "cost", key: "cost", name: "Cost", type: "int", default: 0, min: 0 },
       { id: "cost_entity", key: "cost_entity", name: "Cost entity", type: "entity", default: null },
       { id: "gameplay_tags_add", key: "gameplay_tags_add", name: "Gameplay tags added", type: "tag", is_array: true, default: [] },
       { id: "gameplay_tags_remove", key: "gameplay_tags_remove", name: "Gameplay tags removed", type: "tag", is_array: true, default: [] },

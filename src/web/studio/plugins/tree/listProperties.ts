@@ -1,5 +1,5 @@
 import type {
-  PropertyDefinition,
+  TraitPropertyDefinition,
   PropertyValue,
   TraitInstance,
   TraitTemplateRecord,
@@ -10,7 +10,7 @@ import type { AnyEntity } from "../runtime.ts";
 export interface TreeListColumn {
   id: string;
   label: string;
-  property: PropertyDefinition;
+  property: TraitPropertyDefinition;
   traitTemplateId: string;
 }
 

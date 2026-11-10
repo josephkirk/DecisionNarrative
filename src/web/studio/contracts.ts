@@ -194,7 +194,10 @@ export interface PropertyDefinition {
 }
 export interface EntityProperty extends PropertyDefinition { value?: PropertyValue; }
 export interface TraitInstance { id: string; template_id: string; values: Record<string, PropertyValue>; }
-export interface TraitPropertyDefinition extends PropertyDefinition { min?: number | null; max?: number | null; }
+export interface TraitPropertyDefinition extends PropertyDefinition {
+  min?: number | null; max?: number | null; category?: string | null;
+  editor?: { option_source?: "gameplay_tags" | null; selection_only?: boolean; entity_trait_key?: string | null } | null;
+}
 export interface TraitTemplateRecord {
   id: string; key: string; key_auto?: boolean; name: string; description?: string;
   thumbnail?: string | null;

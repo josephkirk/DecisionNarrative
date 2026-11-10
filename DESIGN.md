@@ -173,3 +173,37 @@ The toolbar Appearance panel swaps whole-app themes; each is one token set in `s
   bordered content cards. In narrow panes the padding contracts and controls
   wrap or scroll rather than clipping.
 - **Floating Controls**: Pill-style toolbars with grouped actions, 14px padding, and 44px touch targets.
+
+## Property editors and inspectors
+
+Property editing should make the available space useful and make related fields easy to scan. Apply these rules to trait editors and other schema-driven inspectors:
+
+- Group properties under a clear, collapsible record or trait header. Give the header a readable name and useful summary such as a property count; keep destructive actions clearly labeled and separate from field values.
+- Lay out fields in a responsive grid when the pane has room, and stack them in narrow panes. Let text, reference, and tag controls use the available field width instead of confining them to a small fixed column. Keep numeric controls practical to edit without forcing every control to the same small width.
+- Place each label close to its own control and allow long labels to wrap. Keep more space between field rows than between a label and its control, so labels cannot be mistaken for the field above. Do not reserve empty label height solely to align controls; proximity takes priority when labels have different lengths. Use spacing and grouping to establish hierarchy; avoid a divider on every property and large unused areas beside tiny controls.
+- Preserve the full range of property types and states: scalar and array values, tags, references, empty values, disabled or read-only fields, and custom trait inspectors. Labels and controls must remain legible and usable with long names and in narrow split panes.
+- Check inherited and global styles as well as component styles. A new grid must not inherit an older row's fixed columns, padding, or separators.
+
+## Picker and editor review
+
+Before considering an editor or picker change complete, inspect the rendered interface, not just its source or build output:
+
+- Review a populated editor at wide and narrow widths, including a realistic multi-field trait and long labels. Check alignment, usable control widths, spacing, hierarchy, wrapping, and clipping; compare the result with surrounding record editors.
+- Open a picker from the actual control in each relevant pane. Verify it is centered over that pane, fits the visible area, keeps its header and controls reachable, scrolls its results, and remains usable when the workspace is resized. It must not be clipped by a transformed or scrolling ancestor.
+- Check search, selection, empty results, selected state, list and grid views where offered, keyboard focus, Escape and close behavior, and long result names. Verify both the picker and the field after selection.
+- Use realistic fixtures for each relevant field type, multiple traits, long names, empty and populated values, and records with and without thumbnails. Exercise arrays and read-only states where supported.
+- Run the relevant visual checks and inspect their screenshots at each target size. Treat automated overlap or occlusion reports behind a modal as possible false positives, but inspect the modal and background interaction rather than ignoring the report. Record any unverified state or remaining gap.
+
+## Record thumbnails and selection
+
+Thumbnails are part of a record's visual identity. When an entity, entity template, trait, asset, or storylet has a thumbnail, carry it through to every UI representation of that record, including picker results, selected references, cards, lists, tree items, graph nodes, and compact badges. Resolve stored references with `thumbnailUrl` and keep the name visible; a thumbnail does not replace the accessible text label. When there is no thumbnail, use the surface's existing initial or icon fallback. Preserve the record's own thumbnail rather than substituting an unrelated image.
+
+Native `<select>` options cannot reliably display thumbnails. When choosing records with thumbnails, provide an accessible visual picker for the options, and show the selected record's thumbnail next to the control. Preserve keyboard operation, search where appropriate, and a clear empty selection. In split workspaces, center the picker over the pane that opened it, constrain it to the visible pane, and keep it usable in narrow panes.
+
+### Thumbnail review checklist
+
+- Trace thumbnail data from each record through view models and picker item mappings to the rendered image; do not assume a shared picker receives it.
+- Check each record type with and without an image, including list and grid results, selected values, arrays, cards, references, navigation, graph nodes, and compact representations. Check long names and missing or unavailable images.
+- Inspect selection and display at desktop, narrow, and split-pane sizes. Open the picker from more than one pane and verify its position, sizing, scrolling, focus, and closing behavior.
+- Use fixtures with actual thumbnails in visual checks. A fixture containing only records without images cannot prove that thumbnails render.
+- Check native selectors and graph labels explicitly for missing images. Existing native menus and some graph labels still need visual thumbnail support; treat these as known gaps rather than evidence that the contract is already met everywhere.

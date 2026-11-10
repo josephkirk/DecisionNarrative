@@ -8,6 +8,7 @@ import { currentFolderId, refreshWorkspace } from "../view-models/workspace.ts";
 import PropertyListEditor from "../components/PropertyListEditor.vue";
 import ThumbnailPicker from "../components/ThumbnailPicker.vue";
 import { countLabel } from "../countLabel.ts";
+import { thumbnailUrl } from "../thumbnails.ts";
 const route = useRoute();
 const router = useRouter();
 const templateId = typeof route.params.id === "string" ? route.params.id : "";
@@ -206,6 +207,7 @@ function scrollTabs(event: WheelEvent) {
               :value="draft.name"
               placeholder="Trait name…"
               aria-label="Trait name"
+              :disabled="draft.system"
               @input="patch({ name: ($event.target as HTMLInputElement).value })"
             />
             <span class="entity-id-tag">#{{ (draft.id || '').slice(-6) }}</span>
@@ -213,6 +215,8 @@ function scrollTabs(event: WheelEvent) {
 
           <div class="entity-subtitle-row">
             <span class="entity-type-label">trait.{{ draft.key || 'key' }}</span>
+            <span v-if="draft.system" class="badge system-trait-badge">Built-in system trait</span>
+            <span v-if="!draft.allow_multiple" class="badge">One per entity</span>
             <span class="entity-bullet-sep" aria-hidden="true">•</span>
             <span v-if="draft.unique" class="entity-standalone-text" style="color: var(--accent);">Unique Trait</span>
             <span v-else class="entity-standalone-text">Standard Trait</span>
@@ -230,7 +234,7 @@ function scrollTabs(event: WheelEvent) {
         <div class="entity-hero-buttons">
           <button
             class="btn btn-primary"
-            :disabled="saving || !dirty || !!propertiesProblem"
+            :disabled="saving || !dirty || !!propertiesProblem || draft.system"
             :title="propertiesProblem ?? 'Save'"
             @click="save"
           >
@@ -238,7 +242,8 @@ function scrollTabs(event: WheelEvent) {
           </button>
           <button
             class="btn btn-secondary btn-danger-hover"
-            :disabled="saving"
+            :disabled="saving || draft.system"
+            :title="draft.system ? 'Built-in system traits cannot be deleted' : 'Delete trait'"
             @click="remove"
           >
             Delete
@@ -272,6 +277,7 @@ function scrollTabs(event: WheelEvent) {
     <section v-show="activeTab === 'properties'" class="entity-content-stack">
       <!-- 1. Identity & Rules -->
       <div class="content-block">
+        <p v-if="draft.system" class="system-trait-notice">This built-in trait is required by the project and cannot be changed or deleted. You can create a separate trait for custom rules.</p>
         <div class="content-block-head">
           <span class="block-title">Trait identity & rules</span>
           <span class="block-hint">Attribute prefix & entity constraints</span>
@@ -283,22 +289,27 @@ function scrollTabs(event: WheelEvent) {
             class="form-input"
             aria-label="Trait key"
             :value="draft.key"
+            :disabled="draft.system"
             placeholder="Generated from the name"
             @input="patch({ key: ($event.target as HTMLInputElement).value })"
           />
-          <span class="form-hint">Runtime attribute prefix: trait.&lt;Key&gt;.&lt;property_key&gt;. A generated key follows the template name until you edit it.</span>
+          <span class="form-hint">Runtime attribute prefix: trait.&lt;Key&gt;.&lt;property_key&gt;.<template v-if="!draft.system"> A generated key follows the template name until you edit it.</template></span>
         </div>
         <div class="form-group" style="margin-bottom:0;">
-          <label class="form-label" :for="`${fieldId}-unique`">Unique trait</label>
+          <label class="form-label" :for="`${fieldId}-unique`">Unique trait (exclusive)</label>
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
             <input
               :id="`${fieldId}-unique`"
               type="checkbox"
               :checked="draft.unique ?? false"
+              :disabled="draft.system"
+              :aria-describedby="draft.system ? `${fieldId}-system-unique-help` : undefined"
               @change="patch({ unique: ($event.target as HTMLInputElement).checked })"
             />
             <span>Only one unique trait may be applied to an entity</span>
           </label>
+          <span v-if="draft.system" :id="`${fieldId}-system-unique-help`" class="form-hint">This built-in trait's uniqueness cannot be changed.</span>
+          <span v-if="!draft.allow_multiple" class="form-hint">An entity can have only one instance of this trait. Different trait types may coexist, subject to the exclusive trait rule above.</span>
         </div>
       </div>
 
@@ -311,6 +322,7 @@ function scrollTabs(event: WheelEvent) {
         <textarea
           class="lore-textarea"
           :value="draft.description ?? ''"
+          :disabled="draft.system"
           rows="3"
           aria-label="Trait description"
           placeholder="Describe this trait's purpose and game mechanics…"
@@ -334,6 +346,8 @@ function scrollTabs(event: WheelEvent) {
         <PropertyListEditor
           :model-value="draft.properties"
           mode="definition"
+          :categories="true"
+          :disabled="draft.system"
           @update:model-value="draft.properties = $event as TraitPropertyDefinition[]"
         />
       </div>
@@ -376,13 +390,13 @@ function scrollTabs(event: WheelEvent) {
         </div>
 
         <div class="include-controls-row">
-          <select v-model="pendingIncludeId" class="form-select include-select" aria-label="Trait to include">
+          <select v-model="pendingIncludeId" class="form-select include-select" aria-label="Trait to include" :disabled="draft.system">
             <option value="">Choose a trait to include…</option>
             <option v-for="t in availableIncludes" :key="t.id" :value="t.id">
               {{ t.name }} ({{ countLabel(t.properties.length, "property", "properties") }})
             </option>
           </select>
-          <button class="btn btn-secondary include-btn" type="button" :disabled="!pendingIncludeId" @click="addInclude">
+          <button class="btn btn-secondary include-btn" type="button" :disabled="draft.system || !pendingIncludeId" @click="addInclude">
             + Include Trait
           </button>
         </div>
@@ -397,11 +411,12 @@ function scrollTabs(event: WheelEvent) {
             class="included-trait-row"
           >
             <div class="included-trait-meta">
+              <img v-if="thumbnailUrl(inc.thumbnail)" :src="thumbnailUrl(inc.thumbnail) ?? undefined" alt="" width="32" height="32" style="object-fit:cover; border-radius:4px;" />
               <span style="font-weight:600; font-size:13px; color:var(--text-main);">{{ inc.name }}</span>
               <span class="badge" style="font-size:10px;">{{ countLabel(inc.properties.length, "property", "properties") }}</span>
               <router-link :to="`/trait-templates/${inc.id}`" style="font-size:12px; color:var(--accent);">View</router-link>
             </div>
-            <button class="btn btn-secondary btn-danger-hover btn-compact" type="button" :aria-label="`Remove ${inc.name}`" @click="removeInclude(inc.id)">
+            <button class="btn btn-secondary btn-danger-hover btn-compact" type="button" :disabled="draft.system" :aria-label="`Remove ${inc.name}`" @click="removeInclude(inc.id)">
               Remove
             </button>
           </div>
@@ -427,7 +442,7 @@ function scrollTabs(event: WheelEvent) {
             class="usage-list__row"
             style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255, 255, 255, 0.02); border:1px solid var(--border-subtle); border-radius:6px; text-decoration:none;"
           >
-            <span style="color:var(--accent); font-weight:500;">{{ entity.name }}</span>
+            <span style="display:flex; align-items:center; gap:8px; color:var(--accent); font-weight:500;"><img v-if="thumbnailUrl(entity.thumbnail)" :src="thumbnailUrl(entity.thumbnail) ?? undefined" alt="" width="32" height="32" style="object-fit:cover; border-radius:4px;" />{{ entity.name }}</span>
             <span class="entity-id-tag">#{{ entity.id.slice(-6) }}</span>
           </router-link>
         </div>
@@ -453,3 +468,8 @@ function scrollTabs(event: WheelEvent) {
     <div class="skeleton-block" style="height: 160px;"></div>
   </div>
 </template>
+
+<style scoped>
+.system-trait-badge { color: var(--text-main); }
+.system-trait-notice { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 6px); background: var(--bg-input); color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+</style>

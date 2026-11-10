@@ -48,6 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Trait property editors are now driven by typed `editor` metadata
+  (`option_source`, `selection_only`, `entity_trait_key`) and optional numeric
+  `min`/`max` on property definitions, instead of trait or property names.
+  Bounds are validated on definitions, defaults, entity saves and bundles, and
+  clamped in the numeric editor. Built-in Character Settings, TreeItem
+  (`level`, `cost`) and InventoryOwner (`columns`, `rows`) declare their own.
+  Start a fresh project to pick up changed built-in definitions.
+- The inventory plugin only creates missing traits and never rewrites an
+  existing user trait. Inventory trait keys are named constants in the service.
 - The studio is now branded Erzählstudio, with a new logo (an "E" whose middle arm
   forks into two outcomes) used as the toolbar mark and favicon.
 - Reworked studio visual system: floating rounded panes on an atmospheric

@@ -132,6 +132,8 @@ impl Store {
                 "INSERT INTO project_metadata (singleton, project_id, name, revision)
                  VALUES (1, 'workspace-project', 'Workspace', 0)", [])?;
             seed_system_records(&self.conn)?;
+        } else {
+            sync_system_trait_uniqueness(&self.conn)?;
         }
         ensure_world_entity(&self.conn)?;
         Ok(())
@@ -970,16 +972,41 @@ fn chrono_now_ms() -> i64 {
 }
 
 
+fn sync_system_trait_uniqueness(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
+    let tx = conn.unchecked_transaction()?;
+    let mut changed = 0;
+    for template in SYSTEM_TRAIT_TEMPLATES {
+        let id = format!("system.{}", template.key);
+        changed += tx.execute(
+            "UPDATE content_records SET data_json = json_set(data_json, '$.unique', json(?1)), revision = revision + 1 WHERE entity = 'trait_templates' AND id = ?2 AND COALESCE(json_extract(data_json, '$.unique'), 0) != ?3",
+            params![if template.unique { "true" } else { "false" }, id, template.unique],
+        )?;
+    }
+    if changed > 0 { tx.execute("UPDATE project_metadata SET revision = revision + 1 WHERE singleton = 1", [])?; }
+    tx.commit()?;
+    Ok(())
+}
+
 fn seed_system_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
     for template in SYSTEM_TRAIT_TEMPLATES {
-        let properties: Vec<Value> = template.properties.iter().map(|spec| json!({
+        let properties: Vec<Value> = template.properties.iter().map(|spec| {
+            let mut property = json!({
             "key": spec.key,
             "name": spec.name,
             "type": spec.property_type,
             "is_array": spec.is_array,
             "default": serde_json::from_str::<Value>(spec.default_json)
                 .expect("system trait default JSON must be valid"),
-        })).collect();
+            });
+            if let Some(editor) = template.editors.iter().find(|editor| editor.property_key == spec.key) {
+                property["editor"] = json!({
+                    "option_source": editor.option_source,
+                    "selection_only": editor.selection_only,
+                    "entity_trait_key": editor.entity_trait_key,
+                });
+            }
+            property
+        }).collect();
         let id = format!("system.{}", template.key);
         let record = json!({
             "id": id,
@@ -990,7 +1017,7 @@ fn seed_system_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Erro
             "folder_id": null,
             "properties": properties,
             "allow_multiple": template.allow_multiple,
-            "unique": false,
+            "unique": template.unique,
             "system": true,
             "created_at": 0
         });

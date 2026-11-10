@@ -161,6 +161,40 @@ async fn trait_uniqueness_is_enforced_on_save_and_definition_changes() {
 }
 
 #[tokio::test]
+async fn core_entity_type_traits_are_mutually_exclusive() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id":"item", "key":"item", "name":"Item", "unique":true, "allow_multiple":false, "properties":[]
+    })).await.unwrap();
+    let ids = ["system.fact", "item", "system.character", "system.location"];
+    for (index, id) in ids.iter().enumerate() {
+        let entity = json!({"id":format!("capabilities-{index}"), "name":"Capabilities", "traits":[
+            {"id":"first", "template_id":id, "values":{}}
+        ]});
+        service.save_content_item("entity_templates", &entity).await.unwrap();
+        for other in ids {
+            let mut invalid = entity.clone();
+            invalid["traits"].as_array_mut().unwrap().push(json!({"id":"second", "template_id":other, "values":{}}));
+            assert!(service.save_content_item("entity_templates", &invalid).await.unwrap_err().contains("only one unique trait"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn existing_system_trait_uniqueness_is_updated_on_open() {
+    let path = std::env::temp_dir().join(format!("trait-unique-{}.db", uuid::Uuid::new_v4()));
+    drop(StudioService::open(&path, ".").unwrap());
+    let connection = Connection::open(&path).unwrap();
+    connection.execute("UPDATE content_records SET data_json = json_set(data_json, '$.unique', json('false')) WHERE entity = 'trait_templates' AND id = 'system.fact'", []).unwrap();
+    drop(connection);
+    let service = StudioService::open(&path, ".").unwrap();
+    let fact = service.get_content_item("trait_templates", "system.fact").await.unwrap();
+    assert_eq!(fact["unique"], true);
+    drop(service);
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
 async fn disabling_multiple_rejects_existing_duplicate_traits() {
     let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
     let mut trait_definition = service.save_content_item("trait_templates", &json!({
@@ -609,4 +643,68 @@ async fn trait_template_thumbnail_persists_clears_rejects_invalids_and_roundtrip
     imported_service.import_bundle(&bundle).await.unwrap();
     let imported_trait = imported_service.get_content_item("trait_templates", "legacy_trait").await.unwrap();
     assert_eq!(imported_trait["thumbnail"], "project-files/thumbnails/legacy.png");
+}
+
+#[tokio::test]
+async fn trait_property_categories_survive_save_and_bundle_round_trip() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    let payload = json!({"id":"category_test", "key":"category_test", "name":"Category test", "properties":[
+        {"id":"a", "key":"a", "name":"A", "type":"string", "default":"", "category":"Combat"},
+        {"id":"b", "key":"b", "name":"B", "type":"int", "default":0}
+    ]});
+    service.save_content_item("trait_templates", &payload).await.unwrap();
+    let saved = service.get_content_item("trait_templates", "category_test").await.unwrap();
+    assert_eq!(saved["properties"][0]["category"], "Combat");
+    assert!(saved["properties"][1].get("category").is_none());
+    let bundle = serde_json::to_value(service.export_project_bundle().await.unwrap()).unwrap();
+    let imported = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    imported.import_bundle(&bundle).await.unwrap();
+    let restored = imported.get_content_item("trait_templates", "category_test").await.unwrap();
+    assert_eq!(restored["properties"][0]["category"], "Combat");
+    assert_eq!(restored["properties"][1]["key"], "b");
+}
+
+#[tokio::test]
+async fn trait_property_editor_metadata_round_trips_and_is_seeded() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    let settings = service.get_content_item("trait_templates", "system.character_settings").await.unwrap();
+    let properties = settings["properties"].as_array().unwrap();
+    assert_eq!(properties[0]["editor"]["option_source"], "gameplay_tags");
+    assert_eq!(properties[0]["editor"]["selection_only"], true);
+    assert_eq!(properties[1]["editor"]["entity_trait_key"], "location");
+    service.save_content_item("trait_templates", &json!({
+        "id":"editor_rules", "key":"editor_rules", "name":"Editor rules", "properties":[
+            {"key":"custom_role", "name":"Custom role", "type":"string", "default":"", "editor":{"option_source":"gameplay_tags", "selection_only":true}},
+            {"key":"custom_place", "name":"Custom place", "type":"entity", "default":null, "editor":{"entity_trait_key":"location"}},
+            {"key":"score", "name":"Score", "type":"int", "default":0, "min":0, "max":10}
+        ]
+    })).await.unwrap();
+    let bundle = serde_json::to_value(service.export_project_bundle().await.unwrap()).unwrap();
+    let imported = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    imported.import_bundle(&bundle).await.unwrap();
+    let restored = imported.get_content_item("trait_templates", "editor_rules").await.unwrap();
+    assert_eq!(restored["properties"][0]["editor"]["option_source"], "gameplay_tags");
+    assert_eq!(restored["properties"][1]["editor"]["entity_trait_key"], "location");
+    assert_eq!(restored["properties"][2]["min"], 0.0);
+    assert_eq!(restored["properties"][2]["max"], 10.0);
+    let mut invalid = restored.clone();
+    invalid["properties"][0]["editor"]["entity_trait_key"] = json!("location");
+    assert!(service.save_content_item("trait_templates", &invalid).await.is_err());
+    let mut invalid_bounds = restored.clone();
+    invalid_bounds["properties"][2]["min"] = json!(11);
+    assert!(service.save_content_item("trait_templates", &invalid_bounds).await.is_err());
+}
+
+#[tokio::test]
+async fn trait_numeric_bounds_reject_out_of_range_instance_values() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id":"bounded", "key":"bounded", "name":"Bounded", "properties":[
+            {"key":"score", "name":"Score", "type":"int", "default":0, "min":0, "max":10}
+        ]
+    })).await.unwrap();
+    let entity = |score: i64| json!({"id":"hero","name":"Hero","tags":[],"traits":[{"template_id":"bounded","values":{"score":score}}]});
+    service.save_content_item("entity_templates", &entity(10)).await.unwrap();
+    assert!(service.save_content_item("entity_templates", &entity(11)).await.is_err());
+    assert!(service.save_content_item("entity_templates", &entity(-1)).await.is_err());
 }

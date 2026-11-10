@@ -168,7 +168,7 @@ function onFilterChange() {
                 </span>
                 <span v-if="item.ending" class="badge ending">Ending</span>
                 <span v-if="windowBadge(item.window, slots)" class="badge">{{ windowBadge(item.window, slots) }}</span>
-                <span v-for="id in item.played_by ?? []" :key="id" class="badge" :aria-label="`Played by ${participantName(id)}`" :title="`Played by ${participantName(id)}`">{{ participantName(id).slice(0, 1).toUpperCase() }}</span>
+                <span v-for="id in item.played_by ?? []" :key="id" class="badge" :aria-label="`Played by ${participantName(id)}`" :title="`Played by ${participantName(id)}`"><img v-if="thumbnailUrl(studioState.entityTemplates.find(entity => entity.id === id)?.thumbnail)" :src="thumbnailUrl(studioState.entityTemplates.find(entity => entity.id === id)?.thumbnail) ?? undefined" alt="" width="20" height="20" style="object-fit:cover; border-radius:3px; vertical-align:middle;" /><template v-else>{{ participantName(id).slice(0, 1).toUpperCase() }}</template></span>
                 <span v-if="originBadge(item)" class="badge">{{ originBadge(item) }}</span>
               </div>
 

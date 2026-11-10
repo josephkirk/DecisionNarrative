@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type { EntityProperty, PropertyDefinition, PropertyValue } from "../contracts.ts";
+import { computed, ref, nextTick, onBeforeUnmount, toRaw } from "vue";
+import type { EntityProperty, PropertyDefinition, PropertyValue, TraitPropertyDefinition } from "../contracts.ts";
 import {
   isValidPropertyKey,
   newEntityProperty,
@@ -12,6 +12,8 @@ import {
 import PropertyValueInput from "./PropertyValueInput.vue";
 import { propertyEditorFor } from "../plugins/runtime.ts";
 import StudioIcon from "./StudioIcon.vue";
+import { reorderProperties } from "../traitPropertyGroups.ts";
+import { studioState } from "../state.ts";
 
 type Row = EntityProperty | PropertyDefinition;
 
@@ -19,6 +21,7 @@ const props = defineProps<{
   modelValue: Row[];
   mode: "instance" | "definition";
   disabled?: boolean;
+  categories?: boolean;
 }>();
 const emit = defineEmits<{ "update:modelValue": [value: Row[]] }>();
 
@@ -63,6 +66,7 @@ function patch(index: number, changes: Partial<Row>) {
   const next = rows.value.map((row, position) => {
     if (position !== index) return row;
     const updated = { ...row, ...changes } as Row & Record<string, unknown>;
+    if (!row.id) rowKeys.set(toRaw(updated), rowKey(row) as number);
     // Keep a single canonical value key per mode: the backend rejects
     // payloads that carry both `value` and its `default` alias.
     if (props.mode === "definition") delete updated.value;
@@ -113,13 +117,61 @@ function toggleMultiline(index: number) {
   if (!row) return;
   patch(index, { multiline: !(row.multiline === true) });
 }
-function move(index: number, delta: number) {
-  const target = index + delta;
+const dragIndex = ref<number | null>(null);
+const pointerReordering = ref(false);
+let resetMotion: ReturnType<typeof setTimeout> | undefined;
+const rowKeys = new WeakMap<object, number>();
+let nextRowKey = 0;
+function rowKey(row: Row): string | number {
+  if (row.id) return row.id;
+  const raw = toRaw(row);
+  if (!rowKeys.has(raw)) rowKeys.set(raw, ++nextRowKey);
+  return rowKeys.get(raw)!;
+}
+onBeforeUnmount(() => clearTimeout(resetMotion));
+function move(from: number, to: number) {
+  if (props.disabled || from < 0 || to < 0 || from >= rows.value.length || to >= rows.value.length) return;
+  emit("update:modelValue", reorderProperties(rows.value, from, to));
+}
+function onDragStart(event: DragEvent, index: number) {
+  const handle = event.currentTarget as HTMLElement;
+  const row = handle.closest<HTMLElement>(".property-list__row");
+  if (event.dataTransfer && row) {
+    const preview = row.cloneNode(true) as HTMLElement;
+    const originalFields = row.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input, select, textarea");
+    preview.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input, select, textarea").forEach((field, i) => {
+      const original = originalFields[i];
+      if (original) field.value = original.value;
+    });
+    const bounds = row.getBoundingClientRect();
+    Object.assign(preview.style, { position: "fixed", left: "-10000px", top: "0", width: `${bounds.width}px`, boxSizing: "border-box", opacity: "1", pointerEvents: "none", background: "var(--bg-elevated)", zIndex: "9999" });
+    preview.setAttribute("aria-hidden", "true");
+    row.parentElement?.appendChild(preview);
+    event.dataTransfer.setDragImage(preview, Math.min(event.clientX - bounds.left, bounds.width), event.clientY - bounds.top);
+    requestAnimationFrame(() => preview.remove());
+  }
+  clearTimeout(resetMotion);
+  pointerReordering.value = true;
+  dragIndex.value = index;
+  if (event.dataTransfer) { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(index)); }
+}
+function onDragEnd() {
+  dragIndex.value = null;
+  resetMotion = setTimeout(() => { pointerReordering.value = false; }, 200);
+}
+function onDrop(event: DragEvent, index: number) {
+  event.preventDefault();
+  if (dragIndex.value !== null) move(dragIndex.value, index);
+  dragIndex.value = null;
+}
+function onHandleKey(event: KeyboardEvent, index: number) {
+  if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+  event.preventDefault();
+  const target = index + (event.key === "ArrowUp" ? -1 : 1);
   if (target < 0 || target >= rows.value.length) return;
-  const next = [...rows.value];
-  const [row] = next.splice(index, 1);
-  next.splice(target, 0, row);
-  emit("update:modelValue", next);
+  const handle = event.currentTarget as HTMLElement;
+  move(index, target);
+  void nextTick(() => handle.focus());
 }
 
 function remove(index: number) {
@@ -139,11 +191,13 @@ function add() {
 </script>
 
 <template>
-  <div class="property-list">
+  <div class="property-list" :class="{ 'has-categories': categories, 'is-pointer-reordering': pointerReordering }">
     <!-- Column heads only label rows; an empty list shows just its empty state, so it never scrolls sideways. -->
     <div v-if="rows.length" class="property-list__head">
+      <span></span>
       <span>Name</span>
       <span>Key</span>
+      <span v-if="categories">Category</span>
       <span>Type</span>
       <span>Array</span>
       <span>{{ props.mode === "instance" ? "Value" : "Default" }}</span>
@@ -155,13 +209,16 @@ function add() {
       <button v-if="!props.disabled" class="btn btn-primary" type="button" @click="add"><StudioIcon name="plus" /> Add property</button>
     </div>
 
-    <div v-for="(row, index) in rows" :key="`${row.id || index}-${row.type}-${row.is_array}-${row.multiline}`" class="property-list__row">
+    <TransitionGroup name="property-reorder" tag="div">
+    <div v-for="(row, index) in rows" :key="rowKey(row)" class="property-list__row" :class="{ 'is-dragging': dragIndex === index }" @dragover.prevent @drop="onDrop($event, index)">
+      <button class="property-drag" type="button" :draggable="!props.disabled" :disabled="props.disabled" :aria-label="`Reorder ${row.name || row.key || 'property'}; use arrow keys or drag`" title="Drag to reorder; use arrow keys to move" @dragstart="onDragStart($event, index)" @dragend="onDragEnd" @keydown="onHandleKey($event, index)"><svg viewBox="0 0 12 16" aria-hidden="true"><circle cx="4" cy="3" r="1"/><circle cx="8" cy="3" r="1"/><circle cx="4" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="4" cy="13" r="1"/><circle cx="8" cy="13" r="1"/></svg></button>
       <div class="property-list__cell property-list__cell--name">
         <span class="property-type-dot" :class="`type-${row.type}`" :title="`Type: ${row.type}`"></span>
         <input
           class="form-input property-name-input"
           :value="row.name"
           placeholder="Property name"
+          :aria-label="`Name for ${row.name || row.key || 'property'}`"
           :disabled="props.disabled"
           @input="patch(index, { name: ($event.target as HTMLInputElement).value })"
         />
@@ -172,13 +229,15 @@ function add() {
           :class="{ 'is-invalid': rowProblem(row) }"
           :value="row.key"
           placeholder="key_name"
+          :aria-label="`Key for ${row.name || row.key || 'property'}`"
           :disabled="props.disabled"
           @input="patch(index, { key: ($event.target as HTMLInputElement).value })"
         />
         <span v-if="rowProblem(row)" class="property-list__error">{{ rowProblem(row) }}</span>
       </div>
+      <div v-if="categories" class="property-list__cell"><input class="form-input" :value="(row as any).category ?? ''" :aria-label="`Category for ${row.name || row.key || 'property'}`" placeholder="Uncategorized" :disabled="props.disabled" @input="patch(index, { category: ($event.target as HTMLInputElement).value } as Partial<Row>)" /></div>
       <div class="property-list__cell property-list__cell--type">
-        <select class="form-select property-type-select" :value="row.type" :disabled="props.disabled" @change="changeType(index, $event)">
+        <select class="form-select property-type-select" :aria-label="`Type for ${row.name || row.key || 'property'}`" :value="row.type" :disabled="props.disabled" @change="changeType(index, $event)">
           <option v-for="option in PROPERTY_TYPES" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </div>
@@ -213,17 +272,21 @@ function add() {
           :type="row.type"
           :is-array="row.is_array === true"
           :multiline="row.multiline === true"
+          :tag-options="(row as TraitPropertyDefinition).editor?.option_source === 'gameplay_tags' ? studioState.gameplayTags.map(tag => tag.name) : undefined"
+          :selection-only="(row as TraitPropertyDefinition).editor?.selection_only === true"
+          :trait-key-filter="(row as TraitPropertyDefinition).editor?.entity_trait_key ?? undefined"
+          :min="(row as TraitPropertyDefinition).min"
+          :max="(row as TraitPropertyDefinition).max"
           :disabled="props.disabled"
           @update:model-value="patchValue(index, $event)"
         />
       </div>
       <div class="property-list__actions">
         <button v-if="row.type === 'string'" class="btn-micro" type="button" title="Multiline text" :aria-label="`Multiline text for ${row.name || row.key || 'property'}`" :aria-pressed="row.multiline === true" :class="{ 'is-active': row.multiline === true }" :disabled="props.disabled" @click="toggleMultiline(index)">Aa</button>
-        <button class="btn-micro" type="button" title="Move property up" aria-label="Move property up" :disabled="props.disabled || index === 0" @click="move(index, -1)"><svg class="btn-micro__icon" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 7.5 6 4l3.5 3.5"/></svg></button>
-        <button class="btn-micro" type="button" title="Move property down" aria-label="Move property down" :disabled="props.disabled || index === rows.length - 1" @click="move(index, 1)"><svg class="btn-micro__icon" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg></button>
         <button class="btn-micro danger" type="button" title="Delete property" aria-label="Delete property" :disabled="props.disabled" @click="remove(index)"><StudioIcon name="close" /></button>
       </div>
     </div>
+    </TransitionGroup>
 
     <div v-if="rows.length" class="property-list__footer">
       <button v-if="!props.disabled" class="btn btn-secondary property-add-btn" type="button" @click="add">
@@ -245,7 +308,7 @@ function add() {
 
 .property-list__head {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 115px 84px 1.2fr 118px;
+  grid-template-columns: 24px 1.2fr 1fr 115px 84px 1.2fr 64px;
   gap: 8px;
   min-width: 620px;
   padding: 8px 12px;
@@ -266,7 +329,7 @@ function add() {
 
 .property-list__row {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 115px 84px 1.2fr 118px;
+  grid-template-columns: 24px 1.2fr 1fr 115px 84px 1.2fr 64px;
   gap: 8px;
   min-width: 620px;
   align-items: center;
@@ -274,6 +337,15 @@ function add() {
   border-bottom: 1px solid var(--border-subtle);
   transition: background-color 0.12s ease-out;
 }
+.has-categories .property-list__head, .has-categories .property-list__row { grid-template-columns: 24px 1.2fr 1fr 1fr 115px 84px 1.2fr 64px; min-width: 820px; }
+.property-drag { width: 24px; height: 32px; padding: 5px; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: grab; }
+.property-drag:active { cursor: grabbing; }
+.property-drag:hover, .property-drag:focus-visible { color: var(--text-main); background: var(--bg-badge); }
+.property-drag:disabled { opacity: .35; cursor: default; }
+.property-drag svg { width: 12px; height: 16px; fill: currentColor; }
+.property-list__row.is-dragging { opacity: .5; }
+.is-pointer-reordering .property-reorder-move { transition: transform 180ms ease-in-out; }
+@media (prefers-reduced-motion: reduce) { .is-pointer-reordering .property-reorder-move { transition: none; } }
 
 .property-list__row:hover {
   background: var(--bg-card-hover, rgba(255, 255, 255, 0.02));

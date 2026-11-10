@@ -107,16 +107,16 @@ function itemRoute(item: Item): string {
   return `/${item.kind === "entities" ? "entities" : "entity-templates"}/${encodeURIComponent(item.record.id)}`;
 }
 function isUnsigned(column: TreeListColumn): boolean {
-  return column.property.type === "int" && !column.property.is_array && (column.property.key === "level" || column.property.key === "cost");
+  return column.property.type === "int" && !column.property.is_array && (column.property.min != null || column.property.max != null);
 }
 function inputUnsigned(item: Item, column: TreeListColumn, event: Event): void {
   const key = draftKey(item.record.id, column);
   const input = event.target as HTMLInputElement;
   const raw = input.value;
   const number = input.valueAsNumber;
-  if (!raw || !Number.isSafeInteger(number) || number < 0) {
+  if (!raw || !Number.isSafeInteger(number) || (column.property.min != null && number < column.property.min) || (column.property.max != null && number > column.property.max)) {
     drafts.value[key] = raw;
-    errors.value[key] = "Enter a non-negative whole number.";
+    errors.value[key] = `Enter a whole number${column.property.min != null ? ` ≥ ${column.property.min}` : ""}${column.property.max != null ? ` and ≤ ${column.property.max}` : ""}.`;
     return;
   }
   delete drafts.value[key];
@@ -202,7 +202,7 @@ function commitJson(item: Item, column: TreeListColumn): void {
               <td v-for="column in columns" :key="column.id" :data-property="column.property.key">
                 <template v-if="items.get(row.nodeId) && hasItemTrait(items.get(row.nodeId)!)">
                   <div class="tree-cell-editor" role="group" :aria-label="`${column.label} for ${nameOf(row.nodeId)}`" @focusout="focusOut($event, items.get(row.nodeId)!)">
-                    <input v-if="isUnsigned(column)" type="number" min="0" step="1" :aria-label="`${column.label} for ${nameOf(row.nodeId)}`" :aria-invalid="!!errors[draftKey(row.nodeId, column)]" :value="unsignedValue(items.get(row.nodeId)!, column)" :disabled="readonly" @input="inputUnsigned(items.get(row.nodeId)!, column, $event)" />
+                    <input v-if="isUnsigned(column)" type="number" :min="column.property.min ?? undefined" :max="column.property.max ?? undefined" step="1" :aria-label="`${column.label} for ${nameOf(row.nodeId)}`" :aria-invalid="!!errors[draftKey(row.nodeId, column)]" :value="unsignedValue(items.get(row.nodeId)!, column)" :disabled="readonly" @input="inputUnsigned(items.get(row.nodeId)!, column, $event)" />
                     <textarea v-else-if="column.property.type === 'json'" rows="1" :aria-label="`${column.label} for ${nameOf(row.nodeId)}`" :aria-invalid="!!errors[draftKey(row.nodeId, column)]" :value="jsonValue(items.get(row.nodeId)!, column)" :disabled="readonly" @input="inputJson(items.get(row.nodeId)!, column, $event)" @change="commitJson(items.get(row.nodeId)!, column)" />
                     <PropertyValueInput v-else :model-value="cellValue(items.get(row.nodeId)!, column)" :type="column.property.type" :is-array="column.property.is_array" :multiline="column.property.multiline" :disabled="readonly" @update:model-value="updateValue(items.get(row.nodeId)!, column, $event)" />
                     <small v-if="errors[draftKey(row.nodeId, column)]" class="tree-cell-error" role="alert">{{ errors[draftKey(row.nodeId, column)] }}</small>

@@ -12,6 +12,9 @@ import TagEditor from "../components/TagEditor.vue";
 import ThumbnailPicker from "../components/ThumbnailPicker.vue";
 import { entityPanelsFor, traitInspectorFor } from "../plugins/runtime.ts";
 import { countLabel } from "../countLabel.ts";
+import { thumbnailUrl } from "../thumbnails.ts";
+import ReferencePicker from "../components/ReferencePicker.vue";
+import { groupTraitProperties } from "../traitPropertyGroups.ts";
 const route = useRoute(); const router = useRouter(); const entityId = typeof route.params.id === "string" ? route.params.id : "";
 const editor = useEntityEditor(entityId); const { draft, dirty, loading, saving, activeTab, references, referencesLoading, isWorld, isEntityRoute, loadReferences, patch, addTrait, removeTrait, setTraitValue, traitPropertyDisplayValue, save, remove } = editor;
 const intrinsic = computed(() => isWorld.value);
@@ -23,18 +26,18 @@ const parentTemplate = computed(() => {
   return tid ? studioState.entityTemplates.find((t) => t.id === tid) : undefined;
 });
 const pendingTraitId = ref("");
+const traitPickerOpen = ref(false);
+const traitPickerAnchor = ref<HTMLElement | null>(null);
 const availableTemplates = computed(() => studioState.traitTemplates.filter((t) => {
   const traits = draft.value?.traits ?? [];
   if (!t.allow_multiple && traits.some((instance) => instance.template_id === t.id)) return false;
   return !t.unique || !traits.some((instance) => studioState.traitTemplates.some((applied) => applied.id === instance.template_id && applied.unique));
 }));
+const pendingTraitThumbnail = computed(() => thumbnailUrl(availableTemplates.value.find((t) => t.id === pendingTraitId.value)?.thumbnail));
 const appliedTraits = computed(() => (draft.value?.traits ?? []).map((instance: TraitInstance) => ({ instance, template: studioState.traitTemplates.find((t) => t.id === instance.template_id) })).filter((e) => e.template));
 const hasAppliedUniqueTrait = computed(() => appliedTraits.value.some((entry) => entry.template?.unique));
 const appliedTraitLabels = computed(() => draft.value ? traitLabels(draft.value, studioState.traitTemplates) : []);
-const characterRoleOptions = computed<string[]>(() => studioState.gameplayTags.map((tag) => tag.name));
-function roleTagOptions(templateKey: string | undefined, propertyKey: string): string[] | undefined {
-  return templateKey === "character_settings" && propertyKey === "role" ? characterRoleOptions.value : undefined;
-}
+const gameplayTagOptions = computed<string[]>(() => studioState.gameplayTags.map((tag) => tag.name));
 function traitInspectorComponent(traitKey: string) { return traitInspectorFor(traitKey)?.component; }
 function updateProperties(rows: Array<EntityProperty | PropertyDefinition>) { patch({ properties: rows as EntityProperty[] }); }
 function updateTags(value: string | string[]) { patch({ tags: Array.isArray(value) ? value : value ? [value] : [] }); }
@@ -287,18 +290,21 @@ function scrollTabs(event: WheelEvent) {
 
     <section v-else-if="activeTab === 'traits'" class="editor-column">
       <div v-if="!intrinsic" class="trait-add">
+        <img v-if="pendingTraitThumbnail" class="trait-thumbnail" :src="pendingTraitThumbnail" alt="" width="32" height="32" />
         <select v-model="pendingTraitId" class="form-select" aria-label="Trait to add">
           <option value="">Choose trait…</option>
           <option v-for="template in availableTemplates" :key="template.id" :value="template.id">{{ template.name }}</option>
         </select>
+        <button type="button" class="btn btn-secondary" @click="traitPickerAnchor = $event.currentTarget as HTMLElement; traitPickerOpen = true">Browse</button>
         <button class="btn btn-secondary" :disabled="!pendingTraitId" @click="addSelectedTrait">Add</button>
       </div>
+      <ReferencePicker :open="traitPickerOpen" :anchor="traitPickerAnchor" title="Choose trait" :items="availableTemplates.map(t => ({ id: t.id, title: t.name, thumbnail: t.thumbnail }))" :selected-id="pendingTraitId || null" @select="pendingTraitId = $event; traitPickerOpen = false" @close="traitPickerOpen = false" />
       <p v-if="hasAppliedUniqueTrait" class="form-hint" style="margin:0 0 12px;">This entity already has a unique trait. Remove it before adding another unique trait.</p>
       <div v-if="intrinsic && !appliedTraits.length" class="form-hint" style="color:var(--text-muted); margin-bottom:12px;">
         No traits applied to intrinsic entity.
       </div>
       <details v-for="entry in appliedTraits" :key="entry.instance.id" class="trait-card" open>
-        <summary>{{ entry.template?.name }}</summary>
+        <summary><img v-if="thumbnailUrl(entry.template?.thumbnail)" class="trait-thumbnail" :src="thumbnailUrl(entry.template?.thumbnail) ?? undefined" alt="" width="32" height="32" /><span class="trait-name">{{ entry.template?.name }}</span><span v-if="entry.template?.unique" class="trait-unique" title="Only one unique trait may be applied to an entity">Unique</span><span class="trait-count">{{ countLabel((entry.template?.properties ?? []).length, 'property', 'properties') }}</span></summary>
         <component
           v-if="traitInspectorComponent(entry.template?.key ?? '')"
           :is="traitInspectorComponent(entry.template?.key ?? '')"
@@ -306,24 +312,31 @@ function scrollTabs(event: WheelEvent) {
           :readonly="intrinsic"
           @patch="patch"
         />
-        <template v-else>
-          <div v-for="property in entry.template?.properties ?? []" :key="property.key" class="trait-row">
+        <div v-else class="trait-groups">
+          <section v-for="group in groupTraitProperties(entry.template?.properties ?? [])" :key="group.category" class="trait-group" :class="{ 'is-categorized': group.category }">
+          <h3 v-if="group.category" class="trait-group-title">{{ group.category }}</h3>
+          <div class="trait-fields">
+          <div v-for="property in group.properties" :key="property.key" class="trait-row">
             <label>
               <span class="field-label">{{ property.name }}</span>
               <PropertyValueInput
                 :model-value="traitPropertyDisplayValue(entry.instance, property)"
                 :type="property.type"
                 :is-array="property.is_array"
-                :tag-options="roleTagOptions(entry.template?.key ?? entry.template?.id, property.key)"
-                :selection-only="entry.template?.key === 'character_settings' && property.key === 'role'"
-                :trait-key-filter="entry.template?.key === 'character_settings' && (property.key === 'home_location' || property.key === 'current_location') ? 'location' : undefined"
+                :tag-options="property.editor?.option_source === 'gameplay_tags' ? gameplayTagOptions : undefined"
+                :selection-only="property.editor?.selection_only === true"
+                :trait-key-filter="property.editor?.entity_trait_key ?? undefined"
+                :min="property.min"
+                :max="property.max"
                 :disabled="intrinsic"
                 @update:model-value="setTraitValue(entry.instance.id, property.key, $event)"
               />
             </label>
           </div>
-        </template>
-        <button v-if="!intrinsic" class="btn btn-danger" @click="removeTrait(entry.instance.id)">Remove</button>
+          </div>
+          </section>
+        </div>
+        <div v-if="!intrinsic" class="trait-footer"><button class="btn btn-danger" @click="removeTrait(entry.instance.id)">Remove trait</button></div>
       </details>
     </section>
 
@@ -374,6 +387,33 @@ function scrollTabs(event: WheelEvent) {
 }
 
 /* Traits tab */
+.editor-column { display: flex; flex-direction: column; gap: 12px; min-width: 0; container-type: inline-size; }
+.trait-add { display: flex; gap: 8px; margin: 0; }
+.trait-add select { flex: 1; min-width: 0; }
+.trait-card { min-width: 0; overflow: hidden; margin: 0; padding: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); background: var(--bg-card); }
+.trait-card > summary { display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; font-size: 14px; font-weight: 600; list-style: none; }
+.trait-card > summary::-webkit-details-marker { display: none; }
+.trait-card > summary::before { content: '›'; color: var(--text-muted); font-size: 18px; line-height: 1; }
+.trait-card[open] > summary::before { transform: rotate(90deg); }
+.trait-card[open] > summary { border-bottom: 1px solid var(--border-subtle); }
+.trait-name { min-width: 0; overflow-wrap: anywhere; }
+.trait-unique { flex: none; padding: 2px 7px; border: 1px solid var(--accent); border-radius: var(--radius-sm, 4px); background: var(--accent-subtle); color: var(--accent); font-size: 11px; font-weight: 600; line-height: 1.4; }
+.trait-count { margin-left: auto; color: var(--text-muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
+.trait-thumbnail { flex: none; width: 32px; height: 32px; object-fit: cover; border-radius: var(--radius-sm, 4px); }
+.trait-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); column-gap: 16px; row-gap: 24px; padding: 16px; }
+.trait-groups { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.trait-groups:empty { display: none; }
+.trait-group { min-width: 0; }
+.trait-group.is-categorized { border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); background: var(--bg-input); }
+.trait-group-title { margin: 0; padding: 12px 16px 0; color: var(--text-main); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.trait-group .trait-fields { padding: 16px; }
+.trait-group:not(.is-categorized) .trait-fields { padding: 0; }
+.trait-row { display: block; min-width: 0; padding: 0; border: 0; }
+.trait-row label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.trait-row .field-label { color: var(--text-muted); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.trait-row :deep(.form-input), .trait-row :deep(.form-select), .trait-row :deep(.form-textarea) { width: 100%; min-width: 0; }
+.trait-footer { display: flex; justify-content: flex-end; padding: 0 16px 16px; }
+.trait-groups:empty + .trait-footer { padding-top: 16px; }
 .traits-container {
   display: flex;
   flex-direction: column;
