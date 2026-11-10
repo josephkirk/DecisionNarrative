@@ -46,6 +46,8 @@ A **storylet** is a small playable scene: a conversation, an encounter, a discov
 
 Think of a simple Zelda-style dungeon: **find a key → unlock a door → reach the boss room**.
 
+![Dungeon example: open a chest to get a key, use it to unlock a door, then enter the boss room. Entities, traits, the Inventory plugin, and storylets work together.](docs/images/dungeon-example.svg)
+
 1. **Find the key.** A storylet in the chest room offers “Open the chest.” That choice gives the player a small key.
 2. **Check the door.** Another storylet at the locked door offers “Use the key” only when the player carries it.
 3. **Change the world.** That choice sets the door’s *Is locked* property to false.
