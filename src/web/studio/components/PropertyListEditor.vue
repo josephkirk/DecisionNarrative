@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, nextTick } from "vue";
+import { computed, ref, nextTick, onBeforeUnmount } from "vue";
 import type { EntityProperty, PropertyDefinition, PropertyValue } from "../contracts.ts";
 import {
   isValidPropertyKey,
@@ -116,13 +116,45 @@ function toggleMultiline(index: number) {
   patch(index, { multiline: !(row.multiline === true) });
 }
 const dragIndex = ref<number | null>(null);
+const pointerReordering = ref(false);
+let resetMotion: ReturnType<typeof setTimeout> | undefined;
+const rowKeys = new WeakMap<object, number>();
+let nextRowKey = 0;
+function rowKey(row: Row): string | number {
+  if (row.id) return row.id;
+  if (!rowKeys.has(row)) rowKeys.set(row, ++nextRowKey);
+  return rowKeys.get(row)!;
+}
+onBeforeUnmount(() => clearTimeout(resetMotion));
 function move(from: number, to: number) {
   if (props.disabled || from < 0 || to < 0 || from >= rows.value.length || to >= rows.value.length) return;
   emit("update:modelValue", reorderProperties(rows.value, from, to));
 }
 function onDragStart(event: DragEvent, index: number) {
+  const handle = event.currentTarget as HTMLElement;
+  const row = handle.closest<HTMLElement>(".property-list__row");
+  if (event.dataTransfer && row) {
+    const preview = row.cloneNode(true) as HTMLElement;
+    const originalFields = row.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input, select, textarea");
+    preview.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input, select, textarea").forEach((field, i) => {
+      const original = originalFields[i];
+      if (original) field.value = original.value;
+    });
+    const bounds = row.getBoundingClientRect();
+    Object.assign(preview.style, { position: "fixed", left: "-10000px", top: "0", width: `${bounds.width}px`, boxSizing: "border-box", opacity: "1", pointerEvents: "none", background: "var(--bg-elevated)", zIndex: "9999" });
+    preview.setAttribute("aria-hidden", "true");
+    row.parentElement?.appendChild(preview);
+    event.dataTransfer.setDragImage(preview, Math.min(event.clientX - bounds.left, bounds.width), event.clientY - bounds.top);
+    requestAnimationFrame(() => preview.remove());
+  }
+  clearTimeout(resetMotion);
+  pointerReordering.value = true;
   dragIndex.value = index;
   if (event.dataTransfer) { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(index)); }
+}
+function onDragEnd() {
+  dragIndex.value = null;
+  resetMotion = setTimeout(() => { pointerReordering.value = false; }, 200);
 }
 function onDrop(event: DragEvent, index: number) {
   event.preventDefault();
@@ -156,7 +188,7 @@ function add() {
 </script>
 
 <template>
-  <div class="property-list" :class="{ 'has-categories': categories }">
+  <div class="property-list" :class="{ 'has-categories': categories, 'is-pointer-reordering': pointerReordering }">
     <!-- Column heads only label rows; an empty list shows just its empty state, so it never scrolls sideways. -->
     <div v-if="rows.length" class="property-list__head">
       <span></span>
@@ -174,8 +206,9 @@ function add() {
       <button v-if="!props.disabled" class="btn btn-primary" type="button" @click="add"><StudioIcon name="plus" /> Add property</button>
     </div>
 
-    <div v-for="(row, index) in rows" :key="`${row.id || index}-${row.type}-${row.is_array}-${row.multiline}`" class="property-list__row" :class="{ 'is-dragging': dragIndex === index }" @dragover.prevent @drop="onDrop($event, index)">
-      <button class="property-drag" type="button" :draggable="!props.disabled" :disabled="props.disabled" :aria-label="`Reorder ${row.name || row.key || 'property'}; use arrow keys or drag`" title="Drag to reorder; use arrow keys to move" @dragstart="onDragStart($event, index)" @dragend="dragIndex = null" @keydown="onHandleKey($event, index)"><svg viewBox="0 0 12 16" aria-hidden="true"><circle cx="4" cy="3" r="1"/><circle cx="8" cy="3" r="1"/><circle cx="4" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="4" cy="13" r="1"/><circle cx="8" cy="13" r="1"/></svg></button>
+    <TransitionGroup name="property-reorder" tag="div">
+    <div v-for="(row, index) in rows" :key="rowKey(row)" class="property-list__row" :class="{ 'is-dragging': dragIndex === index }" @dragover.prevent @drop="onDrop($event, index)">
+      <button class="property-drag" type="button" :draggable="!props.disabled" :disabled="props.disabled" :aria-label="`Reorder ${row.name || row.key || 'property'}; use arrow keys or drag`" title="Drag to reorder; use arrow keys to move" @dragstart="onDragStart($event, index)" @dragend="onDragEnd" @keydown="onHandleKey($event, index)"><svg viewBox="0 0 12 16" aria-hidden="true"><circle cx="4" cy="3" r="1"/><circle cx="8" cy="3" r="1"/><circle cx="4" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="4" cy="13" r="1"/><circle cx="8" cy="13" r="1"/></svg></button>
       <div class="property-list__cell property-list__cell--name">
         <span class="property-type-dot" :class="`type-${row.type}`" :title="`Type: ${row.type}`"></span>
         <input
@@ -245,6 +278,7 @@ function add() {
         <button class="btn-micro danger" type="button" title="Delete property" aria-label="Delete property" :disabled="props.disabled" @click="remove(index)"><StudioIcon name="close" /></button>
       </div>
     </div>
+    </TransitionGroup>
 
     <div v-if="rows.length" class="property-list__footer">
       <button v-if="!props.disabled" class="btn btn-secondary property-add-btn" type="button" @click="add">
@@ -302,6 +336,8 @@ function add() {
 .property-drag:disabled { opacity: .35; cursor: default; }
 .property-drag svg { width: 12px; height: 16px; fill: currentColor; }
 .property-list__row.is-dragging { opacity: .5; }
+.is-pointer-reordering .property-reorder-move { transition: transform 180ms ease-in-out; }
+@media (prefers-reduced-motion: reduce) { .is-pointer-reordering .property-reorder-move { transition: none; } }
 
 .property-list__row:hover {
   background: var(--bg-card-hover, rgba(255, 255, 255, 0.02));
