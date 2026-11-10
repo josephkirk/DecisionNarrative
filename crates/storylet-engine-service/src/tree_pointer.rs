@@ -1,6 +1,6 @@
 //! Runtime projection for TreeGraph position nodes.
 use serde_json::{json, Value};
-use crate::contracts::{EntityProperty, EntityRecord, EntityTemplateRecord, PropertyType, TraitTemplateRecord};
+use crate::contracts::{EntityProperty, EntityRecord, PropertyType, TraitTemplateRecord};
 
 pub const POSITION: &str = "__tree_position";
 pub const NODES: &str = "__tree_nodes";
@@ -14,7 +14,7 @@ pub fn uses_pointer(graph: &crate::narrative_graph::NarrativeGraph) -> bool {
     })
 }
 
-pub fn validate_pointer_graph(graph: &crate::narrative_graph::NarrativeGraph, entities: &[EntityTemplateRecord], templates: &[TraitTemplateRecord]) -> Result<(), String> {
+pub fn validate_pointer_graph(graph: &crate::narrative_graph::NarrativeGraph, entities: &[EntityRecord], templates: &[TraitTemplateRecord]) -> Result<(), String> {
     use crate::narrative_graph::{NarrativeEdgeKind, NarrativeNodeData};
     for node in &graph.nodes {
         let (value_type, command) = match &node.data {
@@ -111,23 +111,8 @@ fn project(properties: &mut Vec<EntityProperty>, values: &std::collections::BTre
     Ok(())
 }
 
-pub fn project_tree_entities(entities: &mut Vec<EntityTemplateRecord>, instances: &[EntityRecord], templates: &[TraitTemplateRecord]) -> Result<(), String> {
+pub fn project_tree_entities(entities: &mut [EntityRecord], templates: &[TraitTemplateRecord]) -> Result<(), String> {
     let Some(id) = templates.iter().find(|template| template.key == "tree_graph").map(|template| template.id.as_str()) else { return Ok(()) };
-    for entity in instances.iter().filter(|entity| entity.id != "world" && entity.traits.iter().any(|instance| instance.template_id == id)) {
-        if let Some(existing) = entities.iter().find(|existing| existing.id == entity.id) {
-            // Inventory projection may already have added this concrete entity.
-            let inventory = templates.iter().any(|template| matches!(template.key.as_str(), crate::inventory::INVENTORY_OWNER_KEY | crate::inventory::ITEM_KEY)
-                && entity.traits.iter().any(|instance| instance.template_id == template.id));
-            if inventory && existing.traits == entity.traits {
-                continue;
-            }
-            return Err(format!("tree entity '{}' has a duplicate ID", entity.id));
-        }
-        entities.push(EntityTemplateRecord {
-            id: entity.id.clone(), object_id: entity.object_id.clone().unwrap_or_default(), game_id: entity.game_id.clone().unwrap_or_default(), game_id_auto: false,
-            name: entity.name.clone(), description: entity.description.clone(), tags: entity.tags.clone(), thumbnail: entity.thumbnail.clone(), folder_id: entity.folder_id.clone(), properties: entity.properties.clone(), traits: entity.traits.clone(), created_at: entity.created_at,
-        });
-    }
     for entity in entities.iter_mut() {
         if let Some(instance) = entity.traits.iter().find(|instance| instance.template_id == id) {
             project(&mut entity.properties, &instance.values, &entity.id)?;
@@ -177,12 +162,12 @@ mod tests {
         let templates: Vec<TraitTemplateRecord> = serde_json::from_value(json!([
             {"id":"tree-trait","key":"tree_graph","name":"TreeGraph","properties":[]}
         ])).unwrap();
-        let original: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
+        let original: Vec<EntityRecord> = serde_json::from_value(json!([
             {"id":"tree","name":"Tree","traits":[{"id":"t","template_id":"tree-trait","values":{"nodes":["a","b"]}}]},
             {"id":"other","name":"Other"}
         ])).unwrap();
         let mut projected = original.clone();
-        project_tree_entities(&mut projected, &[], &templates).unwrap();
+        project_tree_entities(&mut projected, &templates).unwrap();
         assert!(original[0].properties.is_empty());
         assert!(validate_pointer_graph(&graph("a"), &projected, &templates).is_ok());
         assert!(validate_pointer_graph(&graph("missing"), &projected, &templates).unwrap_err().contains("outside tree"));
@@ -218,17 +203,12 @@ mod tests {
                 {"id":"i","template_id":"inventory-trait","values":{"items":[]}}
             ]}
         ])).unwrap();
-        let mut projected = Vec::new();
-        crate::inventory::project_inventory_entities(&mut projected, &instances, &templates).unwrap();
-        project_tree_entities(&mut projected, &instances, &templates).unwrap();
+        let mut projected = instances;
+        crate::inventory::project_inventory_entities(&mut projected, &templates).unwrap();
+        project_tree_entities(&mut projected, &templates).unwrap();
         assert_eq!(projected.len(), 1);
         assert!(projected[0].properties.iter().any(|property| property.key == POSITION));
         assert!(projected[0].properties.iter().any(|property| property.key == "__inventory_items"));
-        let mut conflicting: Vec<EntityTemplateRecord> = serde_json::from_value(json!([{"id":"tree","name":"Duplicate"}])).unwrap();
-        assert!(crate::inventory::project_inventory_entities(&mut conflicting, &instances, &templates).is_err());
-        let mut tree_only = instances.clone();
-        tree_only[0].traits.retain(|instance| instance.template_id == "tree-trait");
-        assert!(project_tree_entities(&mut conflicting, &tree_only, &templates).is_err());
     }
 
     #[test]

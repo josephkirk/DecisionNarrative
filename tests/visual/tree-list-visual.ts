@@ -16,7 +16,7 @@
 //    and expand/collapse toggle buttons for nodes that have children.
 // 6. Relationships: incoming named edge relationships (e.g. "commands", "mentors") displayed per child row.
 // 7. Property editing: PropertyValueInput inputs (e.g. .form-input for strings, .num-stepper__input for numbers),
-//    saving asynchronously to the backend entity template record with debouncing and status reporting.
+//    saving asynchronously to the backend entity record with debouncing and status reporting.
 // 8. Unsigned / Nonnegative validation: TreeItem level and cost must be nonnegative; negative values are
 //    rejected by backend validation and handled/clamped/flagged by the UI.
 // 9. Switching: toggling between Canvas and List preserves canvas pan/zoom/layout and rendered node text.
@@ -176,7 +176,7 @@ try {
   for (const key of ["level", "cost"]) {
     let rejection = "";
     try {
-      await api("POST", "/api/v3/content/entity_templates", {
+      await api("POST", "/api/v3/content/entities", {
         id: `item-negative-${key}`,
         name: `Invalid ${key}`,
         traits: [{ id: `ti-negative-${key}`, template_id: itemTrait.id, values: { [key]: -1 } }],
@@ -187,9 +187,9 @@ try {
     check(`service rejects negative TreeItem ${key}`, rejection.includes(key), rejection || "save succeeded");
   }
 
-  // 4. Create gameplay entity target and three TreeItem entity templates: item-alpha, item-beta, item-gamma
+  // 4. Create gameplay entity target and three TreeItem entities: item-alpha, item-beta, item-gamma
   // Note: item-alpha has a direct entity property `direct_secret` which MUST NOT appear as a list column!
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "gameplay-target",
     name: "Gameplay Target Sword",
     traits: [],
@@ -199,7 +199,7 @@ try {
   await api("POST", "/api/v3/content/gameplay_tags", { id: "skill.fire", name: "skill.fire" });
   await api("POST", "/api/v3/content/gameplay_tags", { id: "skill.ice", name: "skill.ice" });
 
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-alpha",
     name: "Alpha Leader",
     traits: [
@@ -226,7 +226,7 @@ try {
     ],
   });
 
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-beta",
     name: "Beta Specialist",
     traits: [
@@ -243,7 +243,7 @@ try {
     ],
   });
 
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-gamma",
     name: "Gamma Cadet",
     traits: [
@@ -263,7 +263,7 @@ try {
   // 5. Create graph owner with directed named edges forming a 3-tier hierarchy:
   // Alpha -> Beta ("commands")
   // Beta -> Gamma ("mentors")
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "tree-owner",
     name: "Fleet Hierarchy Owner",
     traits: [
@@ -283,8 +283,8 @@ try {
     ],
   });
 
-  // 6. Open owner entity template and switch to Tree tab
-  await page.goto(`${base}/#/entity-templates/tree-owner`);
+  // 6. Open owner entity and switch to Tree tab
+  await page.goto(`${base}/#/entities/tree-owner`);
   await page.reload();
   const treeTab = page.getByRole("button", { name: "Tree", exact: true });
   await treeTab.waitFor();
@@ -468,11 +468,11 @@ try {
   const levelInput = rowAlpha.locator('td[data-property="level"] input');
   await levelInput.fill("-15");
   check("negative level is marked invalid", await levelInput.getAttribute("aria-invalid") === "true");
-  const unchanged = await api("GET", "/api/v3/content/entity_templates/item-alpha");
+  const unchanged = await api("GET", "/api/v3/content/entities/item-alpha");
   check("invalid level does not reach storage", unchanged.traits.find((t: { template_id: string }) => t.template_id === itemTrait!.id).values.level === 3);
   await rowBeta.locator(".tree-item-name a").click();
   check("invalid TreeItem input blocks navigation to another entity",
-    page.url().includes("/entity-templates/tree-owner"));
+    page.url().includes("/entities/tree-owner"));
   await page.getByRole("button", { name: "Properties", exact: true }).click();
   await page.getByRole("button", { name: "Tree", exact: true }).click();
   await page.locator(".tree-view-switch").getByRole("button", { name: "List", exact: true }).click();
@@ -495,14 +495,14 @@ try {
   await powerInput.dispatchEvent("change");
   await powerInput.dispatchEvent("blur");
 
-  // Wait for asynchronous item save to persist back to entity template via StudioApi
+  // Wait for asynchronous item save to persist back to entity via StudioApi
   // Observe save status or poll backend until persisted
   let persistedRank = "";
   let persistedPower = 0;
   for (let attempt = 0; attempt < 50; attempt++) {
     await sleep(200);
     try {
-      const alphaTemplate = await api("GET", "/api/v3/content/entity_templates/item-alpha");
+      const alphaTemplate = await api("GET", "/api/v3/content/entities/item-alpha");
       const trait = alphaTemplate?.traits?.find((t: { template_id: string }) => t.template_id === itemTrait!.id);
       if (trait?.values?.rank === "Fleet Admiral" && (trait?.values?.power === 99 || trait?.values?.power === "99")) {
         persistedRank = trait.values.rank;
@@ -515,17 +515,17 @@ try {
   }
 
   check(
-    "asynchronous save persisted updated rank to backend entity template",
+    "asynchronous save persisted updated rank to backend entity",
     persistedRank === "Fleet Admiral",
     `persisted rank: ${persistedRank}`,
   );
   check(
-    "asynchronous save persisted updated power to backend entity template",
+    "asynchronous save persisted updated power to backend entity",
     persistedPower === 99,
     `persisted power: ${persistedPower}`,
   );
   // Gameplay entity references are independent of TreeGraph relationships.
-  const ownerBefore = await api("GET", "/api/v3/content/entity_templates/tree-owner");
+  const ownerBefore = await api("GET", "/api/v3/content/entities/tree-owner");
   const entitySelect = rowAlpha.locator('td[data-property="entity"] select');
   await entitySelect.selectOption("item-gamma");
   await rowAlpha.locator('td[data-property="cost_entity"] select').selectOption("gameplay-target");
@@ -539,7 +539,7 @@ try {
   await rowAlpha.locator('td[data-property="description"] textarea').fill("Unlocks a special ability.");
   let savedValues: Record<string, unknown> = {};
   for (let attempt = 0; attempt < 50; attempt++) {
-    const record = await api("GET", "/api/v3/content/entity_templates/item-alpha");
+    const record = await api("GET", "/api/v3/content/entities/item-alpha");
     savedValues = record.traits.find((t: { template_id: string }) => t.template_id === itemTrait!.id).values;
     if (savedValues.entity === "item-gamma" && savedValues.cost_entity === "gameplay-target" &&
         assetId(savedValues.asset) === "skill-icon" &&
@@ -548,7 +548,7 @@ try {
         savedValues.description === "Unlocks a special ability.") break;
     await sleep(200);
   }
-  const ownerAfter = await api("GET", "/api/v3/content/entity_templates/tree-owner");
+  const ownerAfter = await api("GET", "/api/v3/content/entities/tree-owner");
   check("gameplay entity reference saves on the TreeItem", savedValues.entity === "item-gamma");
   check("cost entity and asset references save on the TreeItem",
     savedValues.cost_entity === "gameplay-target" && assetId(savedValues.asset) === "skill-icon");
@@ -636,7 +636,7 @@ try {
   check("edited property value intact after round-trip view switch", (await rankInputFinal.inputValue()) === "Fleet Admiral");
 
   // A failed save must survive panel unmount and remain retryable.
-  await page.route("**/api/v3/content/entity_templates", async (route) => {
+  await page.route("**/api/v3/content/entities", async (route) => {
     if (route.request().method() === "POST" && route.request().postDataJSON()?.id === "item-beta") {
       await route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"Save unavailable"}' });
     } else {
@@ -649,26 +649,26 @@ try {
   await page.getByRole("button", { name: "Properties", exact: true }).click();
   await page.evaluate(async () => {
     const app = (document.querySelector("#app") as HTMLElement & { __vue_app__: { config: { globalProperties: { $router: { push(path: string): Promise<unknown> } } } } }).__vue_app__;
-    await app.config.globalProperties.$router.push("/entity-templates/item-beta");
+    await app.config.globalProperties.$router.push("/entities/item-beta");
   });
   check("failed TreeItem save blocks navigation after the tree panel unmounts",
-    page.url().includes("/entity-templates/tree-owner"));
+    page.url().includes("/entities/tree-owner"));
   await page.getByRole("button", { name: "Tree", exact: true }).click();
   await page.locator('.tree-view-switch').getByRole("button", { name: "List", exact: true }).click();
   check("failed edit survives leaving and returning to the tree panel",
     await locateRow("item-beta").locator('td[data-property="rank"] input').inputValue() === "Captain");
-  const storedBeta = await api("GET", "/api/v3/content/entity_templates/item-beta");
+  const storedBeta = await api("GET", "/api/v3/content/entities/item-beta");
   const storedRank = storedBeta.traits.find((trait: { template_id: string }) => trait.template_id === itemTrait!.id).values.rank;
   await page.getByRole("button", { name: "Discard failed edits" }).click();
   check("discarding failed edits restores the saved value",
     await locateRow("item-beta").locator('td[data-property="rank"] input').inputValue() === storedRank);
   await betaRank.fill("Captain");
   await locateRow("item-beta").getByRole("button", { name: "Retry" }).waitFor();
-  await page.unroute("**/api/v3/content/entity_templates");
+  await page.unroute("**/api/v3/content/entities");
   await locateRow("item-beta").getByRole("button", { name: "Retry" }).click();
   let retried = "";
   for (let attempt = 0; attempt < 50; attempt++) {
-    const record = await api("GET", "/api/v3/content/entity_templates/item-beta");
+    const record = await api("GET", "/api/v3/content/entities/item-beta");
     retried = record.traits.find((trait: { template_id: string }) => trait.template_id === itemTrait!.id).values.rank;
     if (retried === "Captain") break;
     await sleep(200);
@@ -676,25 +676,25 @@ try {
   check("retry persists the preserved edit", retried === "Captain");
   await betaRank.fill("Navigator");
   await locateRow("item-beta").locator(".tree-item-name a").click();
-  await page.waitForURL("**/entity-templates/item-beta");
-  check("item link navigates to the selected entity", page.url().includes("/entity-templates/item-beta"));
-  const navigatedBeta = await api("GET", "/api/v3/content/entity_templates/item-beta");
+  await page.waitForURL("**/entities/item-beta");
+  check("item link navigates to the selected entity", page.url().includes("/entities/item-beta"));
+  const navigatedBeta = await api("GET", "/api/v3/content/entities/item-beta");
   check("navigation flushes pending item edits",
     navigatedBeta.traits.find((trait: { template_id: string }) => trait.template_id === itemTrait!.id).values.rank === "Navigator");
 
   // A graph owner can itself be a TreeItem. Editing it must preserve the owner draft.
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "self-owner", name: "Self Owner", traits: [
       { id: "self-item", template_id: itemTrait.id, values: { level: 1 } },
       { id: "self-tree", template_id: graphTrait.id, values: { nodes: ["self-owner"], edges: [], direction: "right", positions: "{}" } },
     ],
   });
-  await page.goto(`${base}/#/entity-templates/self-owner`);
+  await page.goto(`${base}/#/entities/self-owner`);
   await page.reload();
   await page.getByRole("button", { name: "Tree", exact: true }).click();
   await page.locator(".tree-view-switch").getByRole("button", { name: "List", exact: true }).click();
   await page.locator('tr[data-node-id="self-owner"] td[data-property="level"] input').fill("4");
-  const beforeOwnerSave = await api("GET", "/api/v3/content/entity_templates/self-owner");
+  const beforeOwnerSave = await api("GET", "/api/v3/content/entities/self-owner");
   check("owner TreeItem edit remains in the owner draft",
     beforeOwnerSave.traits.find((trait: { template_id: string }) => trait.template_id === itemTrait!.id).values.level === 1);
   let discardPrompt = false;
@@ -702,17 +702,17 @@ try {
   page.once("dialog", async (dialog) => { discardPrompt = true; await dialog.dismiss(); });
   await page.evaluate(async () => {
     const app = (document.querySelector("#app") as HTMLElement & { __vue_app__: { config: { globalProperties: { $router: { push(path: string): Promise<unknown> } } } } }).__vue_app__;
-    await app.config.globalProperties.$router.push("/entity-templates/item-alpha");
+    await app.config.globalProperties.$router.push("/entities/item-alpha");
   });
   check("owner draft prompts before navigating to another entity",
-    discardPrompt && page.url().includes("/entity-templates/self-owner"));
+    discardPrompt && page.url().includes("/entities/self-owner"));
   page.on("dialog", (dialog) => void dialog.accept());
   const saveOwner = page.getByRole("button", { name: "Save", exact: true });
   await Promise.all([
-    page.waitForResponse((response) => response.url().endsWith("/api/v3/content/entity_templates") && response.request().method() === "POST" && response.status() === 201),
+    page.waitForResponse((response) => response.url().endsWith("/api/v3/content/entities") && response.request().method() === "POST" && response.status() === 201),
     saveOwner.click(),
   ]);
-  const savedOwner = await api("GET", "/api/v3/content/entity_templates/self-owner");
+  const savedOwner = await api("GET", "/api/v3/content/entities/self-owner");
   check("saving owner persists TreeItem field without changing its graph",
     savedOwner.traits.find((trait: { template_id: string }) => trait.template_id === itemTrait!.id).values.level === 4 &&
     savedOwner.traits.find((trait: { template_id: string }) => trait.template_id === graphTrait!.id).values.nodes[0] === "self-owner");

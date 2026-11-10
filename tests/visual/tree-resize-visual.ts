@@ -116,18 +116,18 @@ try {
   check("tree traits created on app load", !!graphTrait && !!itemTrait);
   if (!graphTrait || !itemTrait) throw new Error("TreeGraph or TreeItem trait template not found");
 
-  // 2. POST two entity templates plus TreeGraph owner
-  await api("POST", "/api/v3/content/entity_templates", {
+  // 2. POST two entities plus TreeGraph owner
+  await api("POST", "/api/v3/content/entities", {
     id: "item-a",
     name: "Item A",
     traits: [{ id: "ti-a", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-b",
     name: "Item B",
     traits: [{ id: "ti-b", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "tree-owner",
     name: "Tree Owner",
     traits: [
@@ -145,7 +145,7 @@ try {
   });
 
   // 3. Open Tree tab
-  await page.goto(`${base}/#/entity-templates/tree-owner`);
+  await page.goto(`${base}/#/entities/tree-owner`);
   const treeTab = page.getByRole("button", { name: "Tree", exact: true });
   await treeTab.waitFor();
   await treeTab.click();

@@ -5,7 +5,7 @@ import type {
   TraitTemplateRecord,
 } from "../../contracts.ts";
 import { defaultPropertyValue } from "../../propertyModel.ts";
-import type { AnyEntity } from "../runtime.ts";
+import type { EntityRecord } from "../../contracts.ts";
 
 export interface TreeListColumn {
   id: string;
@@ -35,7 +35,7 @@ export function treeItemColumns(template: TraitTemplateRecord | undefined): Tree
  * Preserves explicitly defined null, false, 0, empty string, etc.
  * Falls back to property.default when the value is undefined, and then to defaultPropertyValue.
  */
-export function treeColumnValue(item: AnyEntity, column: TreeListColumn): PropertyValue {
+export function treeColumnValue(item: EntityRecord, column: TreeListColumn): PropertyValue {
   const traits = item.traits ?? [];
   const instance = traits.find((t) => t.template_id === column.traitTemplateId);
 
@@ -63,10 +63,10 @@ export function treeColumnValue(item: AnyEntity, column: TreeListColumn): Proper
  * Preserves other traits, other properties, and other values on the instance.
  */
 export function setTreeColumnValue(
-  item: AnyEntity,
+  item: EntityRecord,
   column: TreeListColumn,
   value: PropertyValue
-): AnyEntity {
+): EntityRecord {
   const traits = item.traits ? [...item.traits] : [];
   const matchIndex = traits.findIndex((t) => t.template_id === column.traitTemplateId);
 
@@ -89,5 +89,5 @@ export function setTreeColumnValue(
   return {
     ...item,
     traits,
-  } as AnyEntity;
+  } as EntityRecord;
 }

@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import ColorWheelPicker from "../../components/ColorWheelPicker.vue";
 import { studioState } from "../../state.ts";
-import type { AnyEntity } from "../runtime.ts";
+import type { EntityRecord } from "../../contracts.ts";
 import {
   CARD_HEIGHT,
   CARD_WIDTH,
@@ -29,12 +29,12 @@ import {
 } from "./model.ts";
 
 const props = defineProps<{
-  entity: AnyEntity;
+  entity: EntityRecord;
   readonly?: boolean;
 }>();
 
 const emit = defineEmits<{
-  (event: "patch", patch: Partial<AnyEntity>): void;
+  (event: "patch", patch: Partial<EntityRecord>): void;
 }>();
 
 const fileInputRef = ref<HTMLInputElement | null>(null);

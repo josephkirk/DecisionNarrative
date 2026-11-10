@@ -25,7 +25,7 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    await refreshWorkspace(["entities", "entity_templates", "storylets", "trait_templates", "gameplay_tags"]);
+    await refreshWorkspace(["entities", "storylets", "trait_templates", "gameplay_tags"]);
   } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to load tag references."; }
   finally { loading.value = false; }
 }
@@ -34,7 +34,6 @@ onMounted(load);
 const allTags = computed(() => buildTagIndex({
   gameplayTags: studioState.gameplayTags,
   entities: studioState.entities,
-  entityTemplates: studioState.entityTemplates,
   storylets: studioState.storylets,
   traitTemplates: studioState.traitTemplates,
 }));
@@ -102,7 +101,6 @@ function openReference(reference: { entityType: string; entityId: string; nodeId
   if (reference.entityType === "entity") router.push(`/entities/${encodeURIComponent(reference.entityId)}`);
   else if (reference.entityType === "storylet") router.push({ path: `/storylets/${encodeURIComponent(reference.entityId)}/edit`, query: reference.nodeId ? { node: reference.nodeId } : {} });
   else if (reference.entityType === "trait_template") router.push(`/trait-templates/${encodeURIComponent(reference.entityId)}`);
-  else router.push(`/entity-templates/${encodeURIComponent(reference.entityId)}`);
 }
 </script>
 

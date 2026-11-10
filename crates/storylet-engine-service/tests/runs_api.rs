@@ -56,7 +56,7 @@ fn fixture() -> (std::path::PathBuf, Value) {
     let store = storylet_engine_service::store::Store::open(&path).unwrap();
     let location = json!({"id":"harbor","name":"Harbor","tags":["location.harbor"],"traits":[{"id":"location","template_id":"system.location","values":{}}]});
     store
-        .save_content("entity_templates", "harbor", &location.to_string(), 1, None)
+        .save_content("entities", "harbor", &location.to_string(), 1, None)
         .unwrap();
     let scenario = json!({"id":"scenario","name":"Scenario","seed":7,"start_location_policy":{"mode":"fixed","location_id":"harbor"}});
     store
@@ -658,7 +658,7 @@ async fn replay_participant_configuration_survives_reload() {
     let store = storylet_engine_service::store::Store::open(&path).unwrap();
     for (id, seat) in [("mara", 0), ("teodor", 1)] {
         let value = json!({"id":id,"name":id,"traits":[{"id":"character","template_id":"system.character","values":{}},{"template_id":"system.participant","values":{"controller":"human","seat":seat,"start_location":"harbor"}},{"template_id":"system.character_settings","values":{"home_location":"harbor","current_location":"harbor"}}]});
-        store.save_content("entity_templates", id, &value.to_string(), 1, None).unwrap();
+        store.save_content("entities", id, &value.to_string(), 1, None).unwrap();
     }
     let revision = store.get_project_metadata().unwrap().revision;
     drop(store);

@@ -24,7 +24,7 @@ pub fn requires_validation(
     graph_changed || item_removed
 }
 
-/// Validates TreeItem trait instances on an entity or entity template.
+/// Validates TreeItem trait instances on an entity.
 ///
 /// Specifically: for any trait instance belonging to the `tree_item` trait template,
 /// if `level` or `cost` is declared on that template as a scalar integer (`PropertyType::Int && !is_array`),
@@ -140,13 +140,6 @@ pub fn validate_tree_graphs(
         effective_entities.insert(entity.id.as_str(), (entity.name.as_str(), entity.traits.as_slice()));
     }
 
-    for template in &index.entity_templates {
-        if Some(template.id.as_str()) == removed_id {
-            continue;
-        }
-        effective_entities.insert(template.id.as_str(), (template.name.as_str(), template.traits.as_slice()));
-    }
-
     if let Some((rep_id, rep_name, rep_traits)) = replacement {
         if Some(rep_id) != removed_id {
             effective_entities.insert(rep_id, (rep_name, rep_traits));
@@ -178,14 +171,6 @@ pub fn validate_tree_graphs(
         }
     }
 
-    for template in &index.entity_templates {
-        if Some(template.id.as_str()) == removed_id || rep_id_opt == Some(template.id.as_str()) {
-            continue;
-        }
-        if template.traits.iter().any(|t| t.template_id == *tree_graph_template_id) {
-            owners.push((template.id.as_str(), template.name.as_str(), template.traits.as_slice()));
-        }
-    }
 
     if let Some((rep_id, rep_name, rep_traits)) = replacement {
         if Some(rep_id) != removed_id && rep_traits.iter().any(|t| t.template_id == *tree_graph_template_id) {
@@ -1028,19 +1013,17 @@ fn validate_appearance_default_edge(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::{EntityRecord, EntityTemplateRecord, TraitInstance, TraitTemplateRecord};
+    use crate::contracts::{EntityRecord, TraitInstance, TraitTemplateRecord};
     use crate::entities::WorkspaceIndex;
     use serde_json::json;
 
     fn make_test_index(
         templates: Vec<TraitTemplateRecord>,
         entities: Vec<EntityRecord>,
-        entity_templates: Vec<EntityTemplateRecord>,
     ) -> WorkspaceIndex {
         WorkspaceIndex {
             templates,
             entities,
-            entity_templates,
             gameplay_tags: Vec::new(),
             assets: Vec::new(),
             folders: Vec::new(),
@@ -1067,7 +1050,7 @@ mod tests {
 
     #[test]
     fn test_missing_tree_graph_template_returns_empty() {
-        let index = make_test_index(Vec::new(), Vec::new(), Vec::new());
+        let index = make_test_index(Vec::new(), Vec::new());
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.is_empty());
     }
@@ -1111,7 +1094,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.is_empty(), "Expected no issues, got: {issues:?}");
     }
@@ -1130,7 +1113,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.is_empty(), "Expected defaults to pass, got: {issues:?}");
     }
@@ -1156,7 +1139,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert_eq!(issues.len(), 2);
         assert!(issues[0].contains("Graph Owner") && issues[0].contains("plain-entity") && issues[0].contains("TreeItem"));
@@ -1193,7 +1176,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert_eq!(issues.len(), 2);
         assert!(issues[0].contains("duplicate node 'item-1'"));
@@ -1226,7 +1209,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert_eq!(issues.len(), 3);
         assert!(issues[0].contains("malformed edge 'not-json'"));
@@ -1250,7 +1233,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert_eq!(issues.len(), 1);
         assert!(issues[0].contains("invalid direction 'diagonal'"));
@@ -1282,7 +1265,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
 
         // Test 1: removed_id removes item-2
         let issues_removed = validate_tree_graphs(&index, None, Some("item-2"));
@@ -1311,7 +1294,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
 
         let new_traits: Vec<TraitInstance> = serde_json::from_value(json!([
             {
@@ -1353,7 +1336,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert_eq!(issues.len(), 4);
         assert!(issues.iter().any(|i| i.contains("invalid direction key 'diagonal'")));
@@ -1432,7 +1415,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.is_empty(), "unexpected issues: {issues:?}");
     }
@@ -1483,7 +1466,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.iter().any(|i| i.contains("appearance contains unknown key 'unknown_root'")));
         assert!(issues.iter().any(|i| i.contains("invalid canvasBackground color")));
@@ -1536,7 +1519,7 @@ mod tests {
                     }]
                 }
             ])).unwrap();
-            let index = make_test_index(templates.clone(), entities, Vec::new());
+            let index = make_test_index(templates.clone(), entities);
             let issues = validate_tree_graphs(&index, None, None);
             assert!(issues.is_empty(), "pattern {valid_pat} produced issues: {issues:?}");
         }
@@ -1572,7 +1555,7 @@ mod tests {
                     }]
                 }
             ])).unwrap();
-            let index = make_test_index(templates.clone(), entities, Vec::new());
+            let index = make_test_index(templates.clone(), entities);
             let issues = validate_tree_graphs(&index, None, None);
             assert!(
                 issues.iter().any(|i| i.contains("invalid pattern, expected solid, dash, dot, or brush")),
@@ -1626,7 +1609,7 @@ mod tests {
                     }]
                 }
             ])).unwrap();
-            let index = make_test_index(templates.clone(), entities, Vec::new());
+            let index = make_test_index(templates.clone(), entities);
             let issues = validate_tree_graphs(&index, None, None);
             assert!(issues.is_empty(), "shape {shape} produced issues: {issues:?}");
         }
@@ -1652,7 +1635,7 @@ mod tests {
                 }]
             }
         ])).unwrap();
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.is_empty(), "empty defaults produced issues: {issues:?}");
     }
@@ -1687,7 +1670,7 @@ mod tests {
                 }]
             }
         ])).unwrap();
-        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.iter().any(|i| i.contains("appearance defaults contains unknown key 'unknown_defaults_key'")));
         assert!(issues.iter().any(|i| i.contains("appearance defaults 'node' must be an object")));
@@ -1715,7 +1698,7 @@ mod tests {
                 }]
             }
         ])).unwrap();
-        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.iter().any(|i| i.contains("appearance 'defaults' must be an object")));
 
@@ -1756,7 +1739,7 @@ mod tests {
                 }]
             }
         ])).unwrap();
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.iter().any(|i| i.contains("appearance default node contains unknown key 'extra_node_key'")));
         assert!(issues.iter().any(|i| i.contains("appearance default node has invalid background color")));
@@ -1797,7 +1780,7 @@ mod tests {
                 }]
             }
         ])).unwrap();
-        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.is_empty(), "expected valid node locked, got: {issues:?}");
 
@@ -1821,7 +1804,7 @@ mod tests {
                 }]
             }
         ])).unwrap();
-        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.iter().any(|i| i.contains("appearance for node 'item-1' has invalid locked, must be a boolean")));
 
@@ -1845,7 +1828,7 @@ mod tests {
                 }]
             }
         ])).unwrap();
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.iter().any(|i| i.contains("appearance default node contains unknown key 'locked'")));
     }
@@ -1872,7 +1855,7 @@ mod tests {
                 }]
             }
         ])).unwrap();
-        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.is_empty(), "expected empty images to be valid, got: {issues:?}");
 
@@ -1940,7 +1923,7 @@ mod tests {
                 }]
             }
         ])).unwrap();
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.is_empty(), "expected valid images to pass, got: {issues:?}");
     }
@@ -1967,7 +1950,7 @@ mod tests {
                 }]
             }
         ])).unwrap();
-        let index = make_test_index(templates.clone(), entities, Vec::new());
+        let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.iter().any(|i| i.contains("appearance 'images' must be an array")));
 
@@ -2034,7 +2017,7 @@ mod tests {
                 }]
             }
         ])).unwrap();
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.iter().any(|i| i.contains("appearance image at index 0 must be an object")));
         assert!(issues.iter().any(|i| i.contains("appearance image at index 1 contains unknown key 'unknown_image_prop'")));
@@ -2123,7 +2106,7 @@ mod tests {
             }
         ])).unwrap();
 
-        let index = make_test_index(templates, entities, Vec::new());
+        let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
 
         assert!(!issues.iter().any(|i| i.contains("Graph Valid")));

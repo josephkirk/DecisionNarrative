@@ -101,17 +101,17 @@ try {
   if (!graphTrait || !itemTrait) throw new Error("TreeGraph or TreeItem trait template not found");
 
   // 2. Browser fixture has two TreeItem nodes and a connected edge; Item B has an explicit override
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-a",
     name: "Item A",
     traits: [{ id: "ti-a", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-b",
     name: "Item B",
     traits: [{ id: "ti-b", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "tree-owner",
     name: "Tree Owner",
     traits: [
@@ -134,7 +134,7 @@ try {
   });
 
   // 3. Open owner Traits tab
-  await page.goto(`${base}/#/entity-templates/tree-owner`);
+  await page.goto(`${base}/#/entities/tree-owner`);
   const traitsTab = page.locator(".entity-tab", { hasText: "Traits" });
   await traitsTab.waitFor();
   await traitsTab.click();

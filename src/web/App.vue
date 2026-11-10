@@ -6,6 +6,7 @@ import { studioState, notify } from "./studio/state.ts";
 import { StudioApi } from "./studio/api.ts";
 import { refreshWorkspace } from "./studio/view-models/workspace.ts";
 import ProjectTree from "./studio/components/ProjectTree.vue";
+import TemplatePickerHost from "./studio/components/TemplatePickerHost.vue";
 import PaneWorkspace from "./studio/components/PaneWorkspace.vue";
 import StudioIcon from "./studio/components/StudioIcon.vue";
 import { buildInteractionContext, interactionContextKey, type InteractionFocus } from "./studio/interactionContext.ts";
@@ -190,5 +191,6 @@ onMounted(async () => {
         </div>
       </main>
     </div>
+    <TemplatePickerHost />
   </div>
 </template>

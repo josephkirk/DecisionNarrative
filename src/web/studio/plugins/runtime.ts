@@ -9,11 +9,10 @@
  * declared here; it never imports a concrete plugin.
  */
 import { markRaw, reactive, type Component } from "vue";
-import type { EntityProperty, EntityRecord, EntityTemplateRecord, PropertyDefinition } from "../contracts.ts";
+import type { EntityProperty, EntityRecord, PropertyDefinition } from "../contracts.ts";
 import type { NarrativeEdge, NarrativeGraph, NarrativeNode } from "../narrativeGraphTypes.ts";
 
 export type Disposer = () => void;
-export type AnyEntity = EntityRecord | EntityTemplateRecord;
 
 /** UI attached to a whole entity; shown as an extra tab in the entity editor. */
 export interface EntityPanelContribution {
@@ -22,7 +21,7 @@ export interface EntityPanelContribution {
   owner?: string;
   label: string;
   /** Return false to hide the panel for this entity. */
-  appliesTo(entity: AnyEntity): boolean;
+  appliesTo(entity: EntityRecord): boolean;
   /** Receives props `{ entity, readonly }`; emits `patch(Partial<entity>)` or `save()` for the entity draft. */
   component: Component;
   order?: number;
@@ -33,7 +32,7 @@ export interface PropertyEditorContribution {
   id: string;
   /** Set by the runtime: name of the plugin that registered it. */
   owner?: string;
-  matches(property: PropertyDefinition | EntityProperty, entity?: AnyEntity): boolean;
+  matches(property: PropertyDefinition | EntityProperty, entity?: EntityRecord): boolean;
   /** Receives props `{ property, entity, modelValue, disabled }`, emits `update:modelValue`. */
   component: Component;
 }
@@ -44,7 +43,7 @@ export interface TraitInspectorContribution {
   traitKey: string;
   /** Set by the runtime: name of the plugin that registered it. */
   owner?: string;
-  /** Receives props `{ entity, readonly }`; emits `patch(Partial<AnyEntity>)`. */
+  /** Receives props `{ entity, readonly }`; emits `patch(Partial<EntityRecord>)`. */
   component: Component;
 }
 
@@ -63,7 +62,7 @@ export interface LoweredFragment {
 export interface LowerContext {
   /** Unique, deterministic ID for a lowered node. */
   id(suffix: string): string;
-  entity(id: string): AnyEntity | undefined;
+  entity(id: string): EntityRecord | undefined;
   graph: NarrativeGraph;
   node: NarrativeNode;
 }
@@ -97,7 +96,7 @@ export interface NodeTypeContribution<Config = Record<string, unknown>> {
 }
 
 export interface StudioEvents {
-  "entity/saved": (entity: AnyEntity) => void;
+  "entity/saved": (entity: EntityRecord) => void;
   "graph/lowered": (graph: NarrativeGraph) => void;
   /** Workspace rows were (re)loaded from the service. */
   "workspace/loaded": () => void;
@@ -223,11 +222,11 @@ export async function pluginNodeDeleted(node: NarrativeNode | undefined): Promis
   }
 }
 
-export function entityPanelsFor(entity: AnyEntity): EntityPanelContribution[] {
+export function entityPanelsFor(entity: EntityRecord): EntityPanelContribution[] {
   return registry.entityPanels.filter((panel) => panel.appliesTo(entity)).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
-export function propertyEditorFor(property: PropertyDefinition | EntityProperty, entity?: AnyEntity): PropertyEditorContribution | undefined {
+export function propertyEditorFor(property: PropertyDefinition | EntityProperty, entity?: EntityRecord): PropertyEditorContribution | undefined {
   return registry.propertyEditors.find((editor) => editor.matches(property, entity));
 }
 

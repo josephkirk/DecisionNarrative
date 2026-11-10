@@ -1,13 +1,13 @@
-//! Incoming-reference discovery for authored entity templates, assets, and trait templates.
+//! Incoming-reference discovery for authored entities, assets, and trait templates.
 use serde_json::Value;
 use crate::contracts::{
-    AssetRecord, ContentReference, EntityTemplateRecord, GameplayTagRecord, PropertyType,
+    AssetRecord, ContentReference, EntityRecord, GameplayTagRecord, PropertyType,
     ReferenceVia, ScenarioRecord, StoryletRecord, TraitTemplateRecord,
 };
 use crate::narrative_graph::{DialogueItem, NarrativeGraph, NarrativeNode, NarrativeNodeData};
 
 pub struct ReferenceContext<'a> {
-    pub entities: &'a [EntityTemplateRecord],
+    pub entities: &'a [EntityRecord],
     pub templates: &'a [TraitTemplateRecord],
     pub assets: &'a [AssetRecord],
     pub storylets: &'a [StoryletRecord],
@@ -26,7 +26,7 @@ fn strings(v: &Value, out: &mut Vec<String>) { match v { Value::String(s)=>out.p
 fn value_has(v: &Value, needle: &str) -> bool { let mut ss=Vec::new(); strings(v,&mut ss); ss.iter().any(|s|s==needle) }
 
 pub fn entity_references(
-    target: &EntityTemplateRecord,
+    target: &EntityRecord,
     ctx: &ReferenceContext,
 ) -> Vec<ContentReference> {
     let mut out = Vec::new();
@@ -102,7 +102,7 @@ pub fn entity_references(
         if let Some(field) = direct_reference.or(trait_reference) {
             record(
                 &mut out,
-                "entity_template",
+                "entity",
                 &source.id,
                 &source.name,
                 None,
@@ -110,10 +110,21 @@ pub fn entity_references(
                 ReferenceVia::Id,
             );
         }
+        if source.template_id.as_deref() == Some(target.id.as_str()) {
+            record(
+                &mut out,
+                "entity",
+                &source.id,
+                &source.name,
+                None,
+                "template_id".into(),
+                ReferenceVia::Id,
+            );
+        }
         if source.tags.iter().any(|tag| target.tags.iter().any(|other| other == tag)) {
             record(
                 &mut out,
-                "entity_template",
+                "entity",
                 &source.id,
                 &source.name,
                 None,
@@ -141,7 +152,7 @@ pub fn entity_references(
 /// A direct entity property of `property_type` whose value contains `needle`;
 /// returns the property name as the reference field.
 fn direct_property_reference(
-    entity: &EntityTemplateRecord,
+    entity: &EntityRecord,
     property_type: PropertyType,
     needle: &str,
 ) -> Option<String> {
@@ -171,14 +182,14 @@ pub fn storylet_references(storylet_id: &str, ctx: &ReferenceContext) -> Vec<Con
         let direct = direct_property_reference(entity, PropertyType::Storylet, storylet_id);
         let via_trait = typed_trait_reference(entity, ctx, PropertyType::Storylet, storylet_id);
         if let Some(field) = direct.or(via_trait) {
-            record(&mut out, "entity_template", &entity.id, &entity.name, None, field, ReferenceVia::Id);
+            record(&mut out, "entity", &entity.id, &entity.name, None, field, ReferenceVia::Id);
         }
     }
     sorted(out)
 }
 
 fn typed_trait_reference(
-    entity: &EntityTemplateRecord,
+    entity: &EntityRecord,
     ctx: &ReferenceContext,
     property_type: PropertyType,
     needle: &str,
@@ -222,7 +233,7 @@ pub fn asset_references(asset_id: &str, ctx: &ReferenceContext) -> Vec<ContentRe
         if direct_reference || trait_reference.is_some() {
             record(
                 &mut out,
-                "entity_template",
+                "entity",
                 &entity.id,
                 &entity.name,
                 None,
@@ -237,7 +248,7 @@ pub fn trait_template_references(id: &str, ctx: &ReferenceContext) -> Vec<Conten
     let mut out=Vec::new();
     for s in ctx.entities {
         if s.traits.iter().any(|t|t.template_id==id) {
-            record(&mut out,"entity_template",&s.id,&s.name,None,format!("Trait {id}"),ReferenceVia::Id);
+            record(&mut out,"entity",&s.id,&s.name,None,format!("Trait {id}"),ReferenceVia::Id);
         }
     }
     sorted(out)
@@ -263,7 +274,7 @@ pub fn gameplay_tag_references(target: &GameplayTagRecord, ctx: &ReferenceContex
     let mut out = Vec::new();
     for entity in ctx.entities {
         if entity.tags.iter().any(|tag| tag == &target.name) {
-            record(&mut out, "entity_template", &entity.id, &entity.name, None, "Gameplay tag".into(), ReferenceVia::Tag);
+            record(&mut out, "entity", &entity.id, &entity.name, None, "Gameplay tag".into(), ReferenceVia::Tag);
         }
         for trait_instance in &entity.traits {
         let Some(template) = ctx.templates.iter().find(|template| template.id == trait_instance.template_id) else {
@@ -288,7 +299,7 @@ pub fn gameplay_tag_references(target: &GameplayTagRecord, ctx: &ReferenceContex
                 .get(property.key())
                 .unwrap_or(&definition.default);
             if tagged_value(value, &target.name) {
-                record(&mut out, "entity_template", &entity.id, &entity.name, None,
+                record(&mut out, "entity", &entity.id, &entity.name, None,
                     format!("Trait {} {}", template.key, definition.name), ReferenceVia::Tag);
             }
         }

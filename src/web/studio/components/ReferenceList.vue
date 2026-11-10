@@ -7,7 +7,7 @@ import { studioState } from "../state.ts";
 import { thumbnailUrl } from "../thumbnails.ts";
 
 function referenceThumbnail(reference: ContentReference) {
-  const records = reference.source_kind === "storylet" ? studioState.storylets : reference.source_kind === "trait_template" ? studioState.traitTemplates : reference.source_kind === "entity_template" ? studioState.entityTemplates : studioState.entities;
+  const records = reference.source_kind === "storylet" ? studioState.storylets : reference.source_kind === "trait_template" ? studioState.traitTemplates : studioState.entities;
   return thumbnailUrl(records.find((record) => record.id === reference.source_id)?.thumbnail);
 }
 
@@ -25,7 +25,7 @@ const props = withDefaults(
 const router = useRouter();
 
 const GROUPS: Array<{ kind: string; label: string; color: string }> = [
-  { kind: "entity_template", label: "Entity Templates", color: "#3b82f6" },
+  { kind: "entity", label: "Entities", color: "#3b82f6" },
   { kind: "storylet", label: "Storylets", color: "#10b981" },
   { kind: "trait_template", label: "Traits", color: "#a855f7" },
 ];
@@ -99,8 +99,8 @@ function open(reference: ContentReference) {
       path: `/storylets/${encodeURIComponent(reference.source_id)}/edit`,
       query: reference.node_id ? { node: reference.node_id } : {},
     });
-  } else if (reference.source_kind === "entity_template") {
-    router.push(`/entity-templates/${encodeURIComponent(reference.source_id)}`);
+  } else if (reference.source_kind === "entity") {
+    router.push(`/entities/${encodeURIComponent(reference.source_id)}`);
   } else if (reference.source_kind === "trait_template") {
     router.push(`/trait-templates/${encodeURIComponent(reference.source_id)}`);
 }

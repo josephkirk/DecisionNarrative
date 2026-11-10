@@ -171,7 +171,7 @@ export interface AuthoringOptions {
   event_types: string[];
 }
 
-export const CONTENT_ROOT_KEYS = ["storylets", "entity_templates", "entities", "trait_templates", "assets"] as const;
+export const CONTENT_ROOT_KEYS = ["storylets", "entities", "trait_templates", "assets"] as const;
 export type ContentRoot = (typeof CONTENT_ROOT_KEYS)[number];
 
 export interface FolderRecord {
@@ -211,27 +211,15 @@ export interface GameplayTagRecord {
   protected: boolean;
   created_at?: number;
 }
-export interface EntityTemplateRecord {
+export interface EntityRecord {
   id: string;
   object_id: string;
   game_id: string;
   game_id_auto?: boolean;
-  name: string;
-  description?: string;
-  thumbnail?: string | null;
-  folder_id?: string | null;
-  tags: string[];
-  properties: EntityProperty[];
-  traits: TraitInstance[];
-  created_at?: number;
-}
-
-export interface EntityRecord {
-  id: string;
-  template_id?: string | null;
-  object_id?: string;
-  game_id?: string;
-  game_id_auto?: boolean;
+  /** Entity this one was created from; the referenced entity must have `is_template`. */
+  template_id: string | null;
+  /** Whether other entities may be created from this one. */
+  is_template: boolean;
   name: string;
   description?: string;
   thumbnail?: string | null;

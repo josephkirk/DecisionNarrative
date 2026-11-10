@@ -8,7 +8,6 @@ export const STUDIO_ROUTES: RouteRecordRaw[] = [
   { path: "/storylets/new", name: "new-storylet", component: () => import("./views/StoryletEditorView.vue") },
   { path: "/storylets/:id/edit", name: "edit-storylet", component: () => import("./views/StoryletEditorView.vue") },
   { path: "/entities/:id", name: "entity", component: () => import("./views/EntityView.vue") },
-  { path: "/entity-templates/:id", name: "entity-template", component: () => import("./views/EntityView.vue") },
   { path: "/trait-templates/:id", name: "trait-template", component: () => import("./views/TraitTemplateView.vue") },
   { path: "/assets/:id", name: "asset", component: () => import("./views/AssetView.vue") },
   { path: "/codex", name: "codex", component: () => import("./views/CodexView.vue") },

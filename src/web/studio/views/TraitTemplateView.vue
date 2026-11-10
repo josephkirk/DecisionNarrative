@@ -36,7 +36,7 @@ const propertiesProblem = computed(() => {
 });
 
 const usedBy = computed(() =>
-  studioState.entityTemplates.filter((entity) => entity.traits.some((trait) => trait.template_id === templateId)),
+  studioState.entities.filter((entity) => entity.traits.some((trait) => trait.template_id === templateId)),
 );
 // Included traits
 const includedTemplates = computed(() => {
@@ -147,7 +147,7 @@ async function save() {
     const saved = await StudioApi.saveContent<TraitTemplateRecord>("trait_templates", draft.value);
     draft.value = saved;
     savedJson.value = JSON.stringify(saved);
-    await refreshWorkspace(["trait_templates", "entity_templates"]);
+    await refreshWorkspace(["trait_templates", "entities"]);
     notify(`Trait '${saved.name}' saved`, "success");
   } catch (error) {
     notify(error instanceof Error ? error.message : String(error), "error");
@@ -428,17 +428,17 @@ function scrollTabs(event: WheelEvent) {
     <section v-show="activeTab === 'references'" class="entity-content-stack">
       <div class="content-block">
         <div class="content-block-head">
-          <span class="block-title">Entity templates using this trait</span>
-          <span class="defined-pill">{{ countLabel(usedBy.length, "entity template") }}</span>
+          <span class="block-title">Entities using this trait</span>
+          <span class="defined-pill">{{ countLabel(usedBy.length, "entity", "entities") }}</span>
         </div>
         <div v-if="!usedBy.length" class="form-hint" style="color:var(--text-muted);">
-          No entity template uses this template yet.
+          No entity uses this trait yet.
         </div>
         <div v-else class="usage-list" style="display:flex; flex-direction:column; gap:6px;">
           <router-link
             v-for="entity in usedBy"
             :key="entity.id"
-            :to="`/entity-templates/${entity.id}`"
+            :to="`/entities/${entity.id}`"
             class="usage-list__row"
             style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255, 255, 255, 0.02); border:1px solid var(--border-subtle); border-radius:6px; text-decoration:none;"
           >

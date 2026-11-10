@@ -175,7 +175,6 @@ const STATIC_TITLES: Record<string, string> = {
 const ROOT_TITLES: Record<string, string> = {
   storylets: "Storylets",
   entities: "Entities",
-  entity_templates: "Entity templates",
   trait_templates: "Traits",
   assets: "Assets",
 };
@@ -188,8 +187,6 @@ export function paneHeading(route: RouteLocationNormalizedLoaded | undefined): {
   switch (name) {
     case "entity":
       return { title: studioState.entities.find((entry) => entry.id === id)?.name || "Entity", icon: id === "world" ? "globe" : "entities" };
-    case "entity-template":
-      return { title: studioState.entityTemplates.find((entry) => entry.id === id)?.name || "Entity template", icon: "entity_templates" };
     case "trait-template":
       return { title: studioState.traitTemplates.find((entry) => entry.id === id)?.name || "Trait", icon: "trait_templates" };
     case "asset":

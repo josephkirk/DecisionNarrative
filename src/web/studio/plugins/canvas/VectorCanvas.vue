@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ColorWheelPicker from "../../components/ColorWheelPicker.vue";
 import { useRouter } from "vue-router";
 import { studioState } from "../../state.ts";
-import type { AnyEntity } from "../runtime.ts";
+import type { EntityRecord } from "../../contracts.ts";
 import {
   CANVAS_PROPERTY_KEY, DEFAULT_MARKER_ICON, MARKER_ICONS, NOTE_COLORS, UndoStack, isGameplay, newId, parseCanvas,
   pushRevision, restoreRevision, shapeDisplayName, snapshotOf, syncCanvasProperties, versionTempState,
@@ -18,8 +18,8 @@ import CanvasShapeView from "./CanvasShapeView.vue";
  * saved on the entity. `node` mode (a Modify Canvas node): edits a working
  * copy with undo only, no history; the caller saves it as one version.
  */
-const props = withDefaults(defineProps<{ entity?: AnyEntity; readonly?: boolean; mode?: "entity" | "node"; initialDoc?: CanvasDoc }>(), { mode: "entity" });
-const emit = defineEmits<{ (e: "patch", value: Partial<AnyEntity>): void; (e: "change", value: CanvasDoc): void }>();
+const props = withDefaults(defineProps<{ entity?: EntityRecord; readonly?: boolean; mode?: "entity" | "node"; initialDoc?: CanvasDoc }>(), { mode: "entity" });
+const emit = defineEmits<{ (e: "patch", value: Partial<EntityRecord>): void; (e: "change", value: CanvasDoc): void }>();
 const nodeMode = computed(() => props.mode === "node");
 const router = useRouter();
 
@@ -60,7 +60,7 @@ const drag = ref<Drag | null>(null);
 function propertyValue(): unknown { return props.entity?.properties.find((property) => property.key === CANVAS_PROPERTY_KEY)?.value; }
 watch(() => props.entity?.id, () => { if (nodeMode.value) return; doc.value = parseCanvas(propertyValue()); selectedId.value = null; });
 
-const allEntities = computed<AnyEntity[]>(() => listEntities());
+const allEntities = computed<EntityRecord[]>(() => listEntities());
 const storylets = computed(() => studioState.storylets);
 const layerById = computed(() => new Map(doc.value.layers.map((layer) => [layer.id, layer])));
 const orderedShapes = computed(() => {

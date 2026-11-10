@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { TraitInstance } from "../../src/web/studio/contracts.ts";
-import type { AnyEntity } from "../../src/web/studio/plugins/runtime.ts";
+import type { EntityRecord } from "../../src/web/studio/contracts.ts";
 import { TREE_EXAMPLES } from "../../src/web/studio/plugins/tree/examples.ts";
 import { CARD_HEIGHT, CARD_WIDTH, isValidImageSrc, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, type TreeCanvasImage, type TreeDirection, type TreeEdge, type TreeGraph, type TreeShape } from "../../src/web/studio/plugins/tree/model.ts";
 
@@ -12,7 +12,7 @@ const graph: TreeGraph = {
 
 test("tree topology survives encoding and view changes", () => {
   const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
-  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as EntityRecord;
   const patch = setTreeGraph(entity, trait, { ...graph, direction: "radial" });
   const restored = treeGraphOf(patch.traits![0]!);
   expect(treeRoots(restored)).toEqual(["start-a", "start-b"]);
@@ -21,7 +21,7 @@ test("tree topology survives encoding and view changes", () => {
 
 test("saved positions survive round-trip independently by direction", () => {
   const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
-  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as EntityRecord;
   const saved = { ...graph, positions: { right: { shared: { x: 510, y: 220 } }, radial: { shared: { x: 760, y: 340 } } } };
   const restored = treeGraphOf(setTreeGraph(entity, trait, saved).traits![0]!);
   expect(layoutTree(restored).positions.shared).toEqual({ x: 510, y: 220 });
@@ -31,7 +31,7 @@ test("saved positions survive round-trip independently by direction", () => {
 
 test("node shapes round-trip and reject unknown nodes or shapes", () => {
   const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
-  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as EntityRecord;
   const restored = treeGraphOf(setTreeGraph(entity, trait, { ...graph, shapes: { shared: "diamond", end: "ellipse" } }).traits![0]!);
   expect(restored.shapes).toEqual({ shared: "diamond", end: "ellipse" });
   expect(() => treeGraphOf({ ...trait, values: { nodes: ["shared"], shapes: '{"shared":"triangle"}' } })).toThrow();
@@ -42,7 +42,7 @@ test("node shapes round-trip and reject unknown nodes or shapes", () => {
 
 test("node and edge appearance round-trips and clears when omitted", () => {
   const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
-  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as EntityRecord;
   const edgeKey = JSON.stringify(["start-a", "shared"]);
   const appearanceGraph: TreeGraph = {
     ...graph,
@@ -147,7 +147,7 @@ test("treeErrors flags unknown nodes and edges in appearance", () => {
 
 test("node locked and canvas images round-trip and preserve image order", () => {
   const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
-  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as EntityRecord;
   const images: TreeCanvasImage[] = [
     { id: "img-1", src: "project-files/thumbnails/map.png", x: 100, y: 150, width: 300, height: 200, locked: false },
     { id: "img-2", src: "https://example.com/art.jpg", x: -50, y: 0, width: 120, height: 80, locked: true },
@@ -175,7 +175,7 @@ test("node locked and canvas images round-trip and preserve image order", () => 
 
 test("updating node appearance preserves canvas images", () => {
   const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
-  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as EntityRecord;
   const initialImages: TreeCanvasImage[] = [
     { id: "img-1", src: "project-files/thumbnails/map.png", x: 50, y: 60, width: 200, height: 150, locked: true },
   ];
@@ -409,7 +409,7 @@ test("crowded radial levels keep adjacent node cards apart", () => {
 
 test("global defaults round-trip through setTreeGraph and treeGraphOf", () => {
   const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
-  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as EntityRecord;
   const graphWithDefaults: TreeGraph = {
     ...graph,
     appearance: {
@@ -571,7 +571,7 @@ test("layoutTree precedence: per-node overrides take precedence over defaults", 
 
 test("named and unnamed edges roundtrip through setTreeGraph and treeGraphOf", () => {
   const trait: TraitInstance = { id: "graph", template_id: "tree_graph", values: {} };
-  const entity = { id: "owner", name: "Owner", traits: [trait] } as AnyEntity;
+  const entity = { id: "owner", name: "Owner", traits: [trait] } as EntityRecord;
   const mixedGraph: TreeGraph = {
     nodes: ["start-a", "start-b", "shared", "end"],
     edges: [

@@ -61,9 +61,9 @@ try {
     { id: "q1", key: "role", name: "Role", type: "string", default: "" },
     { id: "q2", key: "home_location", name: "Home Location", type: "entity", default: null },
   ] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "harbor", name: "Harbor", traits: [{ id: "l1", template_id: location.id, values: {} }] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "crate", name: "Crate", traits: [] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "hero", name: "Hero", traits: [
+  await api("POST", "/api/v3/content/entities", { id: "harbor", name: "Harbor", traits: [{ id: "l1", template_id: location.id, values: {} }] });
+  await api("POST", "/api/v3/content/entities", { id: "crate", name: "Crate", traits: [] });
+  await api("POST", "/api/v3/content/entities", { id: "hero", name: "Hero", traits: [
     { id: "c1", template_id: character.id, values: {} },
     { id: "s1", template_id: settings.id, values: {} },
     { id: "f1", template_id: "faction_rules", values: {} },
@@ -76,7 +76,7 @@ try {
   page.on("console", (m) => { if (m.type() === "error" && !m.text().startsWith("Failed to load resource")) errors.push(m.text()); });
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("dialog", (d) => void d.accept());
-  await page.goto(`${base}/#/entity-templates/hero`);
+  await page.goto(`${base}/#/entities/hero`);
   const tab = page.locator(".entity-tab", { hasText: "Traits" });
   await tab.waitFor(); await tab.click();
   const card = (name: string) => page.locator(".trait-card", { has: page.locator(".trait-name", { hasText: new RegExp(`^${name}$`) }) });
@@ -105,7 +105,7 @@ try {
   await page.screenshot({ path: path.join(outDir, "trait-editor-unsaved.png") });
   await page.getByRole("button", { name: /^Save/ }).first().click();
   await page.locator(".entity-unsaved-pill").waitFor({ state: "detached" });
-  const saved = await api("GET", "/api/v3/content/entity_templates/hero");
+  const saved = await api("GET", "/api/v3/content/entities/hero");
   const vals = saved.traits.find((t: { id: string }) => t.id === "s1").values;
   check("selection persisted to backend", vals.role === "thief" && vals.home_location === "harbor", JSON.stringify(vals));
   await page.reload(); await tab.waitFor(); await tab.click(); await card("Character Settings").waitFor();
@@ -129,11 +129,11 @@ try {
   await page.screenshot({ path: path.join(outDir, "trait-editor-bounds.png") });
   await page.getByRole("button", { name: /^Save/ }).first().click();
   await page.locator(".entity-unsaved-pill").waitFor({ state: "detached" });
-  const bounded = await api("GET", "/api/v3/content/entity_templates/hero");
+  const bounded = await api("GET", "/api/v3/content/entities/hero");
   check("clamped value saves successfully", bounded.traits.find((t: { id: string }) => t.id === "f1").values.score === 10);
 
   // Fresh-project inventory plugin: owns its two traits; bounded grid size clamps in the shared editor.
-  await page.goto(`${base}/#/entity-templates/crate`);
+  await page.goto(`${base}/#/entities/crate`);
   let inv: { id: string } | undefined, item: { id: string; unique?: boolean } | undefined;
   for (let i = 0; i < 50 && !(inv && item); i++) {
     const all = await api("GET", "/api/v3/content/trait_templates");
@@ -141,8 +141,8 @@ try {
     if (!(inv && item)) await sleep(200);
   }
   check("inventory plugin provisions fresh traits (Item unique)", !!inv && !!item && item.unique === true);
-  await api("POST", "/api/v3/content/entity_templates", { id: "bag", name: "Bag", traits: [{ id: "b1", template_id: inv.id, values: {} }] });
-  await page.goto(`${base}/#/entity-templates/bag`);
+  await api("POST", "/api/v3/content/entities", { id: "bag", name: "Bag", traits: [{ id: "b1", template_id: inv.id, values: {} }] });
+  await page.goto(`${base}/#/entities/bag`);
   await page.reload();
   await tab.waitFor(); await tab.click();
   const columns = card("InventoryOwner").locator(".trait-row", { hasText: "Columns" }).locator(".num-stepper__input");
@@ -151,10 +151,10 @@ try {
   await columns.fill("0");
   check("inventory columns clamp to declared min", (await columns.inputValue()) === "1", await columns.inputValue());
   await page.screenshot({ path: path.join(outDir, "trait-editor-inventory.png") });
-  await page.goto(`${base}/#/entity-templates/hero`);
+  await page.goto(`${base}/#/entities/hero`);
 
   // Backend rejects an out-of-range bounded value.
-  const bad = await fetch(`${base}/api/v3/content/entity_templates`, { method: "POST", headers: { "Content-Type": "application/json" },
+  const bad = await fetch(`${base}/api/v3/content/entities`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...saved, traits: saved.traits.map((t: { id: string }) => t.id === "f1" ? { ...t, values: { score: 11 } } : t) }) });
   check("out-of-range bounded value is rejected", bad.status >= 400, String(bad.status));
   check("no unexpected console errors", errors.length === 0, errors.join(" | "));

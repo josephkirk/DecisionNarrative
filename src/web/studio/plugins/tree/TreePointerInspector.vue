@@ -9,7 +9,7 @@ import { treeInputEntityId, type TreePointerConfig } from "./pointerNodes.ts";
 const props = defineProps<{ node: NarrativeNode; config: TreePointerConfig; graph: NarrativeGraph }>();
 const emit = defineEmits<{ (event: "update:config", value: TreePointerConfig): void }>();
 const entityId = computed(() => treeInputEntityId(props.graph, props.node.id));
-const entities = computed(() => [...studioState.entities, ...studioState.entityTemplates]);
+const entities = computed(() => studioState.entities);
 const owner = computed(() => entities.value.find((entity) => entity.id === entityId.value));
 const trait = computed(() => owner.value && treeTrait(owner.value, studioState.traitTemplates, TREE_GRAPH_KEY));
 const parsed = computed(() => {

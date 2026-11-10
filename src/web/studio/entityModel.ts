@@ -1,7 +1,35 @@
-import type { EntityTemplateRecord, PropertyValue, TraitTemplateRecord, TraitInstance } from "./contracts.ts";
+import type { EntityRecord, PropertyValue, TraitTemplateRecord, TraitInstance } from "./contracts.ts";
 
-export function newEntityTemplateDraft(folderId: string | null): EntityTemplateRecord {
-  return { id: "", object_id: "", game_id: "", game_id_auto: true, name: "New Entity Template", description: "", folder_id: folderId, tags: [], properties: [], traits: [] };
+/** Deep copy that also works on Vue reactive proxies, which `structuredClone` rejects. */
+function clone<T>(value: T): T {
+  return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T);
+}
+
+/**
+ * Draft for a new entity. With a template the description, thumbnail, tags, properties and traits are
+ * copied (traits get fresh instance ids) and `template_id` records the origin; without one the entity is empty.
+ */
+export function buildEntityDraft(template: EntityRecord | null, folderId: string | null): EntityRecord {
+  const base = { id: "", object_id: "", game_id: "", game_id_auto: true, is_template: false, folder_id: folderId };
+  if (!template) return { ...base, template_id: null, name: "New Entity", description: "", thumbnail: null, tags: [], properties: [], traits: [] };
+  return {
+    ...base,
+    template_id: template.id,
+    name: `New ${template.name}`,
+    description: template.description ?? "",
+    thumbnail: template.thumbnail ?? null,
+    tags: [...template.tags],
+    properties: template.properties.map((property) => ({
+      ...clone(property),
+      value: clone(property.value !== undefined && property.value !== null ? property.value : property.default),
+    })),
+    traits: template.traits.map((trait) => ({ ...clone(trait), id: crypto.randomUUID() })),
+  };
+}
+
+/** Save payload that flips only the template flag. */
+export function withTemplateFlag(entity: EntityRecord, isTemplate: boolean): EntityRecord {
+  return { ...entity, is_template: isTemplate };
 }
 
 export function newTraitInstance(template: TraitTemplateRecord): TraitInstance {
@@ -12,7 +40,7 @@ export function newTraitInstance(template: TraitTemplateRecord): TraitInstance {
   return { id: crypto.randomUUID(), template_id: template.id, values };
 }
 
-export function appliedTemplates(entity: Pick<EntityTemplateRecord, "traits">, templates: TraitTemplateRecord[]): TraitTemplateRecord[] {
+export function appliedTemplates(entity: Pick<EntityRecord, "traits">, templates: TraitTemplateRecord[]): TraitTemplateRecord[] {
   return entity.traits.map((instance) => templates.find((template) => template.id === instance.template_id)).filter((template): template is TraitTemplateRecord => !!template);
 }
 

@@ -454,9 +454,8 @@ pub struct AuthoringOptions {
     pub event_types: Vec<String>,
 }
 /// Authored content kinds addressable through the service.
-pub const CONTENT_KINDS: [&str; 9] = [
+pub const CONTENT_KINDS: [&str; 8] = [
     "entities",
-    "entity_templates",
     "gameplay_tags",
     "folders",
     "trait_templates",
@@ -467,9 +466,8 @@ pub const CONTENT_KINDS: [&str; 9] = [
 ];
 
 /// Project-tree roots that own folders.
-pub const FOLDER_ROOTS: [&str; 5] = [
+pub const FOLDER_ROOTS: [&str; 4] = [
     "storylets",
-    "entity_templates",
     "entities",
     "trait_templates",
     "assets",
@@ -483,7 +481,7 @@ pub const STORYLET_CLUSTER_TYPES: [&str; 4] = [
 ];
 
 /// The persisted project interchange schema.
-pub const PROJECT_BUNDLE_SCHEMA_VERSION: u32 = 6;
+pub const PROJECT_BUNDLE_SCHEMA_VERSION: u32 = 7;
 
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -696,41 +694,11 @@ pub struct GameplayTagRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
 }
-/// Concrete entity instances (e.g. David using Character template, or empty entities).
+/// Authored entity. Any entity may be marked as a template (`is_template`) and
+/// any entity may be created from a template (`template_id`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EntityRecord {
-    #[serde(default)]
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub object_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub game_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub template_id: Option<String>,
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub tags: Vec<String>,
-    #[serde(default)]
-    pub description: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thumbnail: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub folder_id: Option<String>,
-    #[serde(default)]
-    pub properties: Vec<EntityProperty>,
-    #[serde(default)]
-    pub traits: Vec<TraitInstance>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<i64>,
-}
-
-
-/// Authored entity consumed directly by runtime projection.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EntityTemplateRecord {
     #[serde(default)]
     pub id: String,
     #[serde(default)]
@@ -739,6 +707,11 @@ pub struct EntityTemplateRecord {
     pub game_id: String,
     #[serde(default)]
     pub game_id_auto: bool,
+    #[serde(default)]
+    pub template_id: Option<String>,
+    #[serde(default)]
+    pub is_template: bool,
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub description: String,
@@ -873,8 +846,6 @@ pub struct ContentReference {
 pub struct ProjectBundleContent {
     #[serde(default)]
     pub entities: Vec<EntityRecord>,
-    #[serde(default)]
-    pub entity_templates: Vec<EntityTemplateRecord>,
     #[serde(default)]
     pub gameplay_tags: Vec<GameplayTagRecord>,
     #[serde(default)]

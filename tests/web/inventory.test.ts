@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { studioState } from "../../src/web/studio/state.ts";
-import type { EntityTemplateRecord } from "../../src/web/studio/contracts.ts";
+import type { EntityRecord } from "../../src/web/studio/contracts.ts";
 import type { NarrativeGraph, NarrativeNode } from "../../src/web/studio/narrativeGraphTypes.ts";
 import { validateNarrativeGraph } from "../../src/web/studio/narrativeGraphTypes.ts";
 import { Context } from "../../src/web/studio/plugins/runtime.ts";
@@ -8,8 +8,8 @@ import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../../s
 import { inventoryErrors, inventoryOf, inventoryOwnerTemplate, itemTemplate, setInventory, traitInstance } from "../../src/web/studio/plugins/inventory/model.ts";
 import { inventoryNodes } from "../../src/web/studio/plugins/inventory/nodes.ts";
 
-function entity(id: string, trait: string): EntityTemplateRecord {
-  return { id, object_id: id, game_id: id, name: id, tags: [], properties: [], traits: [{ id: `${id}-trait`, template_id: trait, values: {} }] };
+function entity(id: string, trait: string): EntityRecord {
+  return { id, object_id: id, game_id: id, template_id: null, is_template: false, name: id, tags: [], properties: [], traits: [{ id: `${id}-trait`, template_id: trait, values: {} }] };
 }
 const node = (id: string, type: NarrativeNode["type"], rest: Partial<NarrativeNode> = {}): NarrativeNode =>
   ({ id, type, title: id, x: 0, y: 0, width: 120, height: 100, ...rest });
@@ -71,23 +71,25 @@ test("inventory nodes validate traits and round-trip entity inputs and boolean o
   } finally { ctx.dispose(); studioState.traitTemplates = previous; }
 });
 
-test("inventory plugin creates only missing traits and never rewrites an existing trait", async () => {
+test("inventory plugin decides from the stored traits, not possibly-unloaded workspace state", async () => {
   const { StudioApi } = await import("../../src/web/studio/api.ts");
   const { inventoryPlugin } = await import("../../src/web/studio/plugins/inventory/index.ts");
-  const saved: any[] = [];
+  const saved: Array<{ key: string }> = [];
+  const stored = [{ id: "user-item", key: "item", name: "My Item", unique: false, properties: [] }];
   const original = { saveContent: StudioApi.saveContent, getProject: StudioApi.getProject, listContent: StudioApi.listContent };
-  (StudioApi as any).saveContent = async (_kind: string, payload: any) => { saved.push(payload); return payload; };
-  (StudioApi as any).getProject = async () => studioState.project;
-  (StudioApi as any).listContent = async () => [];
+  Object.assign(StudioApi, {
+    saveContent: async (_kind: string, payload: { key: string }) => { saved.push(payload); return payload; },
+    getProject: async () => studioState.project,
+    listContent: async () => stored,
+  });
   const priorProject = studioState.project; const priorTraits = studioState.traitTemplates;
   try {
-    studioState.project = { id: "p", name: "P" } as any;
-    studioState.traitTemplates = [{ id: "user-item", key: "item", name: "My Item", unique: false, properties: [] } as any];
+    studioState.project = { id: "p", name: "P" } as unknown as typeof studioState.project;
+    studioState.traitTemplates = []; // workspace state has not loaded trait templates yet
     const ctx = new Context("inventory-test");
     inventoryPlugin.apply(ctx);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(saved.map((template) => template.key)).toEqual(["inventory_owner"]);
-    expect(saved.some((template) => template.key === "item")).toBe(false);
     ctx.dispose();
   } finally {
     Object.assign(StudioApi, original);

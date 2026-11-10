@@ -49,14 +49,12 @@ const availableRoles = computed(() => uniqueTagNames([
 const tagIndex = computed(() => buildTagIndex({
   gameplayTags: studioState.gameplayTags,
   entities: studioState.entities,
-  entityTemplates: studioState.entityTemplates,
   traitTemplates: studioState.traitTemplates,
   storylets: [...props.storylets.filter((storylet) => storylet.id !== props.storylet.id), { ...props.storylet, graph: props.graph }],
 }));
 
 const runtimeEntityOptions = computed(() => [
   ...studioState.entities.map((entity) => ({ path: entity.id, label: `${entity.name}${traitLabels(entity, studioState.traitTemplates).length ? ` (${traitLabels(entity, studioState.traitTemplates).join(" · ")})` : ""}` })),
-  ...studioState.entityTemplates.map((entity) => ({ path: entity.id, label: `${entity.name}${traitLabels(entity, studioState.traitTemplates).length ? ` (${traitLabels(entity, studioState.traitTemplates).join(" · ")})` : ""}` })),
 ]);
 type GraphPropertyType = Exclude<PropertyType, "json" | "storylet" | "tag">;
 type GraphPropertyOption = { key: string; name: string; type: GraphPropertyType };
@@ -67,7 +65,7 @@ function isGraphProperty(property: EntityProperty): property is EntityProperty &
 function entityForPath(path: string | undefined) {
   if (!path) return undefined;
   const normalized = path.trim();
-  return studioState.entities.find((entity) => entity.id === normalized) ?? studioState.entityTemplates.find((entity) => entity.id === normalized);
+  return studioState.entities.find((entity) => entity.id === normalized);
 }
 
 function incomingEntityNode(node: NarrativeNode): NarrativeNode | undefined {
@@ -91,7 +89,7 @@ function propertiesForEntitySource(node: NarrativeNode): EntityProperty[] {
       property.key === source.property_key && property.type === "entity" && !property.is_array,
     );
     if (!reference) return [];
-    const entities = studioState.entityTemplates;
+    const entities = studioState.entities;
     if (!entities.length) return [];
     const common = new Map(
       (entities[0]?.properties ?? [])
@@ -131,7 +129,7 @@ const entityPropertyUnavailableReason = computed(() => {
     const entity = entityForPath(path);
     if (!entity) return `Connected Entity "${path}" is not loaded in this workspace.`;
     if (!entity.properties.some((property) => !property.is_array)) {
-      return `Connected Entity Template "${entity.name}" has no scalar custom properties. Add one under Entity Templates → ${entity.name} → Properties.`;
+      return `Connected Entity "${entity.name}" has no scalar custom properties. Add one under Entities → ${entity.name} → Properties.`;
     }
   }
   if (source.type === "get_entity_property" && source.value_type === "entity") {
@@ -186,7 +184,7 @@ function setWindow(slot: number, checked: boolean) {
   props.storylet.window = [...selected].sort((a, b) => a - b);
   emit("update-storylet");
 }
-const playerOptions = computed(() => participantOptions(studioState.entityTemplates));
+const playerOptions = computed(() => participantOptions(studioState.entities));
 function setPlayedBy(id: string, checked: boolean) {
   props.storylet.played_by = togglePlayedBy(props.storylet.played_by ?? [], id, checked);
   emit("update-storylet");
@@ -213,7 +211,7 @@ const locationTags = computed({
   get: () => uniqueTagNames(props.storylet.location_tags ?? []),
   set: (values: string[]) => { props.storylet.location_tags = uniqueTagNames(values); emit("update-storylet"); },
 });
-const locationOptions = computed(() => studioState.entityTemplates.filter((entity) => hasTraitKey(entity, studioState.traitTemplates, "location")).sort((a, b) => a.name.localeCompare(b.name)));
+const locationOptions = computed(() => studioState.entities.filter((entity) => hasTraitKey(entity, studioState.traitTemplates, "location")).sort((a, b) => a.name.localeCompare(b.name)));
 
 
 // Dialogue Sections & Items
@@ -628,7 +626,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
           <div class="form-group"><label class="field-label" for="learn-visibility">Visibility</label><select id="learn-visibility" v-model="selectedNode.visibility" class="form-select" @change="emitGraphUpdate(selectedNode)"><option value="private">Private</option><option value="co_located">Co-located</option></select></div>
         </template>
         <template v-else>
-          <div class="form-group"><label class="field-label" for="knows-holder">Holder</label><select id="knows-holder" v-model="selectedNode.holder" class="form-select" @change="emitGraphUpdate(selectedNode)"><option value="acting">Acting participant</option><option v-for="entity in studioState.entityTemplates.filter((e) => e.traits?.some((t) => t.template_id === 'system.participant'))" :key="entity.id" :value="entity.id">{{ entity.name }}</option></select></div>
+          <div class="form-group"><label class="field-label" for="knows-holder">Holder</label><select id="knows-holder" v-model="selectedNode.holder" class="form-select" @change="emitGraphUpdate(selectedNode)"><option value="acting">Acting participant</option><option v-for="entity in studioState.entities.filter((e) => e.traits?.some((t) => t.template_id === 'system.participant'))" :key="entity.id" :value="entity.id">{{ entity.name }}</option></select></div>
           <div class="form-group"><label><input v-model="selectedNode.confirmed_only" type="checkbox" @change="emitGraphUpdate(selectedNode)" /> Confirmed only</label></div>
         </template>
       </div>
@@ -918,7 +916,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
           <label class="field-label">Target Entity</label>
           <select v-model="selectedNode.target_entity_id" class="form-select" @change="emitGraphUpdate()">
             <option value="world">World (Global)</option>
-            <option v-for="e in studioState.entityTemplates.filter(item => item.id !== 'world')" :key="e.id" :value="e.id">
+            <option v-for="e in studioState.entities.filter(item => item.id !== 'world')" :key="e.id" :value="e.id">
               {{ e.name }} ({{ e.id }}) {{ traitLabels(e, studioState.traitTemplates).join(" · ") }}
             </option>
           </select>
@@ -997,7 +995,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
           <label class="field-label">Target Entity</label>
           <select v-model="selectedNode.target_entity_id" class="form-select" @change="emitGraphUpdate()">
             <option value="world">World (Global)</option>
-            <option v-for="e in studioState.entityTemplates.filter(item => item.id !== 'world')" :key="e.id" :value="e.id">
+            <option v-for="e in studioState.entities.filter(item => item.id !== 'world')" :key="e.id" :value="e.id">
               {{ e.name }} ({{ e.id }}) {{ traitLabels(e, studioState.traitTemplates).join(" · ") }}
             </option>
           </select>

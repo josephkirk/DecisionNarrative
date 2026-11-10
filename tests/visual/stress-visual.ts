@@ -65,9 +65,9 @@ async function seed() {
   }
   const deepTag = DEEP_TAG.join(".");
 
-  await api("POST", "/api/v3/content/folders", { id: "f-long", name: FOLDER, root: "entity_templates", parent_id: null });
-  await api("POST", "/api/v3/content/folders", { id: "f-long-2", name: "Unsorted letters awaiting Aleksandra Wiśniewska-Kowalczyk's review", root: "entity_templates", parent_id: "f-long" });
-  await api("POST", "/api/v3/content/folders", { id: "f-jo", name: "Jo", root: "entity_templates", parent_id: "f-long-2" });
+  await api("POST", "/api/v3/content/folders", { id: "f-long", name: FOLDER, root: "entities", parent_id: null });
+  await api("POST", "/api/v3/content/folders", { id: "f-long-2", name: "Unsorted letters awaiting Aleksandra Wiśniewska-Kowalczyk's review", root: "entities", parent_id: "f-long" });
+  await api("POST", "/api/v3/content/folders", { id: "f-jo", name: "Jo", root: "entities", parent_id: "f-long-2" });
   await api("POST", "/api/v3/content/folders", { id: "f-story", name: FOLDER, root: "storylets", parent_id: null });
 
   await api("POST", "/api/v3/content/trait_templates", {
@@ -88,8 +88,8 @@ async function seed() {
     versions: [{ id: "v1", file_path: "assets/environments/northwind/lighthouse/exterior/Northwind_Lighthouse_Exterior_Dusk_Establishing_Shot_v12-final-FINAL.png",
       creator: PERSON, tool_version: "Blender 4.2.3 LTS (hash 0f8a2b1c9d) + Substance Painter 10.1.2", description: prose, created_at: 1_700_000_000_000, tags: [deepTag], custom_data: {}, thumbnail: null, storage: [] }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
-    id: "long-person", name: PERSON, description: prose, tags: [deepTag, "mood.melancholic", "x"], folder_id: "f-long", thumbnail: null,
+  await api("POST", "/api/v3/content/entities", {
+    id: "long-person", is_template: true, name: PERSON, description: prose, tags: [deepTag, "mood.melancholic", "x"], folder_id: "f-long", thumbnail: null,
     properties: [
       { id: "p1", key: "correspondence_archive_url", name: "Correspondence archive URL", type: "string", value: URL },
       { id: "p2", key: "letters_written_since_the_first_winter_of_the_flood", name: "Letters written since the first winter of the flood", type: "int", value: 1284000 },
@@ -101,10 +101,10 @@ async function seed() {
     traits: [{ id: "t1", template_id: "ledger", values: { archive_url: URL, letters_written_since_the_first_winter_of_the_flood: 1284000, topics: [deepTag] } }],
   });
   for (const [id, name] of [["jo", "Jo"], ["nguyen", "Nguyễn Thị Minh Khai"], ["sakura", "渡辺さくら（北風灯台の灯台守）"], ["kitsune", "🦊 Kitsune of the Ninth Tail"]]) {
-    await api("POST", "/api/v3/content/entity_templates", { id, name, description: "", tags: [], folder_id: "f-long-2", thumbnail: null, properties: [], traits: [] });
+    await api("POST", "/api/v3/content/entities", { id, name, description: "", tags: [], folder_id: "f-long-2", thumbnail: null, properties: [], traits: [] });
   }
   for (let i = 1; i <= 24; i++) {
-    await api("POST", "/api/v3/content/entity_templates", { id: `clerk-${i}`, name: `Archive clerk ${i}`, description: "", tags: [], folder_id: null, thumbnail: null, properties: [], traits: [] });
+    await api("POST", "/api/v3/content/entities", { id: `clerk-${i}`, name: `Archive clerk ${i}`, description: "", tags: [], folder_id: null, thumbnail: null, properties: [], traits: [] });
   }
   await api("POST", "/api/v3/content/entities", {
     id: "inst-long", template_id: "long-person", name: `${PERSON} (as she was in the winter of the flood)`, tags: [deepTag], description: prose, folder_id: null,
@@ -312,10 +312,10 @@ const steps: Step[] = [
     await p.locator(".graph-toolbar").getByRole("button", { name: "Fit", exact: true }).click();
     await p.locator(".graph-node.choice .node-body .field-label").first().click();
   } },
-  { name: "entity", path: "/entity-templates/long-person" },
-  { name: "entity-tab-2", path: "/entity-templates/long-person", act: async (p) => { await p.locator(".entity-tab").nth(1).click(); } },
-  { name: "entity-tab-3", path: "/entity-templates/long-person", act: async (p) => { await p.locator(".entity-tab").nth(2).click(); } },
-  { name: "entity-short", path: "/entity-templates/jo" },
+  { name: "entity", path: "/entities/long-person" },
+  { name: "entity-tab-2", path: "/entities/long-person", act: async (p) => { await p.locator(".entity-tab").nth(1).click(); } },
+  { name: "entity-tab-3", path: "/entities/long-person", act: async (p) => { await p.locator(".entity-tab").nth(2).click(); } },
+  { name: "entity-short", path: "/entities/jo" },
   { name: "instance", path: "/entities/inst-long" },
   { name: "trait", path: "/trait-templates/ledger", act: async (p) => {
     if (await p.getByRole("checkbox", { name: /Only one unique trait/ }).isDisabled()) throw new Error("Custom trait uniqueness must remain editable");
@@ -331,7 +331,7 @@ const steps: Step[] = [
     if (!await p.getByText("One per entity", { exact: true }).isVisible()) throw new Error("Single-instance constraint missing");
     if (!await p.getByText("This built-in trait's uniqueness cannot be changed.", { exact: true }).isVisible()) throw new Error("System trait restriction explanation missing");
   } },
-  { name: "exclusive-traits", path: "/entity-templates/long-person", act: async (p) => {
+  { name: "exclusive-traits", path: "/entities/long-person", act: async (p) => {
     await p.locator(".entity-tab").nth(1).click();
     const select = p.getByRole("combobox", { name: "Trait to add" });
     for (const id of ["system.location", "system.fact", "item"]) {
@@ -373,8 +373,8 @@ const steps: Step[] = [
     }
   } },
   { name: "asset", path: "/assets/asset-long" },
-  { name: "folder", path: "/browse/entity_templates/f-long-2" },
-  { name: "folder-root", path: "/browse/entity_templates" },
+  { name: "folder", path: "/browse/entities/f-long-2" },
+  { name: "folder-root", path: "/browse/entities" },
   { name: "codex", path: "/codex" },
   { name: "tags", path: "/tags" },
   { name: "project", path: "/project" },
@@ -390,7 +390,7 @@ const split3 = (main: string) => ({
   id: "root", kind: "split", direction: "row", ratio: 0.5, children: [
     { id: "main", kind: "pane", path: main },
     { id: "s2", kind: "split", direction: "column", ratio: 0.5, children: [
-      { id: "p2", kind: "pane", path: "/entity-templates/long-person" }, { id: "p3", kind: "pane", path: "/browse/entity_templates/f-long-2" },
+      { id: "p2", kind: "pane", path: "/entities/long-person" }, { id: "p3", kind: "pane", path: "/browse/entities/f-long-2" },
     ] },
   ],
 });

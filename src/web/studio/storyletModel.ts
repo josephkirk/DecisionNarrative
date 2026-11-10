@@ -1,10 +1,10 @@
 // Pure helpers for storylet authoring fields.
-import type { EntityTemplateRecord } from "./contracts.ts";
+import type { EntityRecord } from "./contracts.ts";
 
 export interface ParticipantOption { id: string; name: string }
 
 /** Entities that carry the participant trait, sorted by name. */
-export function participantOptions(templates: EntityTemplateRecord[]): ParticipantOption[] {
+export function participantOptions(templates: EntityRecord[]): ParticipantOption[] {
   return templates
     .filter((entity) => entity.traits?.some((t) => t.template_id === "system.participant"))
     .map((entity) => ({ id: entity.id, name: entity.name }))

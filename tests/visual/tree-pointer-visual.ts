@@ -36,10 +36,10 @@ try {
   assert(treeTrait && itemTrait, "tree traits available");
   const longName = "The Grandmaster Archivist of the Forgotten Constellation";
   for (const [id, name] of [["pointer-root", "Root"], ["pointer-child", "Child"], ["pointer-long", longName]]) {
-    await api("POST", "/api/v3/content/entity_templates", { id, name, thumbnail: id === "pointer-root" ? "docs/images/tree-pointer-inspector.png" : null, traits: [{ id: `${id}-trait`, template_id: itemTrait.id, values: {} }] });
+    await api("POST", "/api/v3/content/entities", { id, name, thumbnail: id === "pointer-root" ? "docs/images/tree-pointer-inspector.png" : null, traits: [{ id: `${id}-trait`, template_id: itemTrait.id, values: {} }] });
   }
-  await api("POST", "/api/v3/content/entity_templates", { id: "pointer-tree", name: "Skill tree", traits: [{ id: "tree-instance", template_id: treeTrait.id, values: { nodes: ["pointer-root", "pointer-child", "pointer-long"], edges: ['["pointer-root","pointer-child"]', '["pointer-root","pointer-long"]'], direction: "right", positions: JSON.stringify({ right: { "pointer-root": { x: -200, y: -100 }, "pointer-child": { x: 60, y: -100 }, "pointer-long": { x: 60, y: 30 } } }), appearance: JSON.stringify({ nodes: { "pointer-long": { background: "#ffffff" } }, edges: {}, defaults: { edge: { color: "#ff9900", width: 3, pattern: "dash" } } }) } }] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "second-tree", name: "Second tree", traits: [{ id: "second-tree-instance", template_id: treeTrait.id, values: { nodes: ["pointer-root"], edges: [], direction: "right" } }] });
+  await api("POST", "/api/v3/content/entities", { id: "pointer-tree", name: "Skill tree", traits: [{ id: "tree-instance", template_id: treeTrait.id, values: { nodes: ["pointer-root", "pointer-child", "pointer-long"], edges: ['["pointer-root","pointer-child"]', '["pointer-root","pointer-long"]'], direction: "right", positions: JSON.stringify({ right: { "pointer-root": { x: -200, y: -100 }, "pointer-child": { x: 60, y: -100 }, "pointer-long": { x: 60, y: 30 } } }), appearance: JSON.stringify({ nodes: { "pointer-long": { background: "#ffffff" } }, edges: {}, defaults: { edge: { color: "#ff9900", width: 3, pattern: "dash" } } }) } }] });
+  await api("POST", "/api/v3/content/entities", { id: "second-tree", name: "Second tree", traits: [{ id: "second-tree-instance", template_id: treeTrait.id, values: { nodes: ["pointer-root"], edges: [], direction: "right" } }] });
   const source = { id: "pointer", type: "plugin", title: "Set Tree Position", x: 300, y: 150, width: 220, height: 120, plugin_type: "tree.set_position", plugin_config: { entity_id: "pointer-tree", target_id: "pointer-root" } };
   const input = { id: "owner-input", kind: "data", from_node: "owner", from_port: "output", to_node: "pointer", to_port: "entity" };
   const n = (id: string, type: string, x: number, extra: object = {}) => ({ id, type, title: id, x, y: 150, width: 180, height: 100, ...extra });
@@ -52,7 +52,7 @@ try {
     { id: "flow-2", kind: "flow", from_node: "pointer__position", from_port: "output", to_node: "end", to_port: "input" },
     { ...input, to_node: "pointer__position" }
   ] } });
-  const before = await api("GET", "/api/v3/content/entity_templates/pointer-tree");
+  const before = await api("GET", "/api/v3/content/entities/pointer-tree");
   await page.goto(`${base}/#/storylets/pointer-story/edit?node=pointer`);
   await page.reload();
   const picker = page.getByRole("region", { name: "Tree positions" });
@@ -104,7 +104,7 @@ try {
   ]);
   const saved = await api("GET", "/api/v3/content/storylets/pointer-story");
   assert(saved.graph.nodes.find((node: { id: string; value?: unknown }) => node.id === "pointer__position")?.value === "pointer-child", "storylet saves the selected target");
-  const after = await api("GET", "/api/v3/content/entity_templates/pointer-tree");
+  const after = await api("GET", "/api/v3/content/entities/pointer-tree");
   assert(JSON.stringify(before.traits) === JSON.stringify(after.traits), "selection does not modify the tree");
   await page.locator(".node-title-input").nth(1).click();
   await page.locator("select.form-select").selectOption("second-tree");
@@ -118,13 +118,13 @@ try {
   removed.traits[0].values.edges = ['["pointer-root","pointer-long"]'];
   removed.traits[0].values.positions = "";
   let removeError = "";
-  try { await api("PUT", "/api/v3/content/entity_templates/pointer-tree", removed); } catch (error) { removeError = String(error); }
+  try { await api("PUT", "/api/v3/content/entities/pointer-tree", removed); } catch (error) { removeError = String(error); }
   assert(removeError.includes("storylet") && removeError.includes("removed"), "removing a referenced position is rejected");
   const noTrait = { ...after, traits: [] };
   let traitError = "";
-  try { await api("PUT", "/api/v3/content/entity_templates/pointer-tree", noTrait); } catch (error) { traitError = String(error); }
+  try { await api("PUT", "/api/v3/content/entities/pointer-tree", noTrait); } catch (error) { traitError = String(error); }
   assert(traitError.includes("storylet"), "removing a referenced TreeGraph trait is rejected");
-  await api("POST", "/api/v3/content/entity_templates", { id: "impostor", name: "Not a tree", properties: [
+  await api("POST", "/api/v3/content/entities", { id: "impostor", name: "Not a tree", properties: [
     { id: "p", key: "__tree_position", name: "position", type: "string", value: "" },
     { id: "n", key: "__tree_nodes", name: "nodes", type: "entity", is_array: true, value: ["pointer-root"] },
   ] });
@@ -156,7 +156,7 @@ try {
   await page.reload();
   await picker.waitFor();
   assert(await picker.getByRole("radio", { name: "Select Child" }).getAttribute("aria-checked") === "true", "selected position survives reload");
-  await api("POST", "/api/v3/content/entity_templates", { id: "pointer-location", name: "Location", traits: [{ id: "location", template_id: "system.location", values: {} }] });
+  await api("POST", "/api/v3/content/entities", { id: "pointer-location", name: "Location", traits: [{ id: "location", template_id: "system.location", values: {} }] });
   await api("POST", "/api/v3/content/scenarios", { id: "pointer-scenario", name: "Scenario", seed: 7, start_location_policy: { mode: "fixed", location_id: "pointer-location" } });
   let scenarioError = "";
   try {
@@ -211,18 +211,18 @@ try {
   removeChecked.traits[0].values.edges = [];
   removeChecked.traits[0].values.positions = "";
   let checkRemovalError = "";
-  try { await api("PUT", "/api/v3/content/entity_templates/pointer-tree", removeChecked); } catch (error) { checkRemovalError = String(error); }
+  try { await api("PUT", "/api/v3/content/entities/pointer-tree", removeChecked); } catch (error) { checkRemovalError = String(error); }
   assert(checkRemovalError.includes("checks a removed"), "removing a position used by a boolean check is rejected");
   const extraIds = Array.from({ length: 12 }, (_, index) => `skill-${index}`);
   for (const id of extraIds) {
-    await api("POST", "/api/v3/content/entity_templates", { id, name: `Skill ${id}`, traits: [{ id: `${id}-trait`, template_id: itemTrait.id, values: {} }] });
+    await api("POST", "/api/v3/content/entities", { id, name: `Skill ${id}`, traits: [{ id: `${id}-trait`, template_id: itemTrait.id, values: {} }] });
   }
   const large = structuredClone(after);
   const largeNodes = ["pointer-root", "pointer-child", "pointer-long", ...extraIds];
   large.traits[0].values.nodes = largeNodes;
   large.traits[0].values.edges = largeNodes.slice(1).map((id: string, index: number) => JSON.stringify([largeNodes[index], id]));
   large.traits[0].values.positions = "";
-  await api("PUT", "/api/v3/content/entity_templates/pointer-tree", large);
+  await api("PUT", "/api/v3/content/entities/pointer-tree", large);
   await page.reload();
   await picker.waitFor();
   const zoomIn = page.getByRole("button", { name: "Zoom in tree preview" });
@@ -241,7 +241,7 @@ try {
   assert(last && visibleRegion && last.x < visibleRegion.x + visibleRegion.width && last.x + last.width > visibleRegion.x,
     "keyboard navigation scrolls the selected tree position into view");
   large.traits[0].values.direction = "down";
-  await api("PUT", "/api/v3/content/entity_templates/pointer-tree", large);
+  await api("PUT", "/api/v3/content/entities/pointer-tree", large);
   await page.reload();
   await picker.waitFor();
   await page.getByRole("button", { name: "Fit tree preview" }).click();

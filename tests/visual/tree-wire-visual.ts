@@ -139,30 +139,30 @@ try {
   check("tree traits created on app load", !!graphTrait && !!itemTrait);
   if (!graphTrait || !itemTrait) throw new Error("TreeGraph or TreeItem trait template not found");
 
-  // 2. POST 4 TreeItem entity templates: Item A, B, C in graph, Item D available outside
-  await api("POST", "/api/v3/content/entity_templates", {
+  // 2. POST 4 TreeItem entities: Item A, B, C in graph, Item D available outside
+  await api("POST", "/api/v3/content/entities", {
     id: "item-a",
     name: "Item A",
     traits: [{ id: "ti-a", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-b",
     name: "Item B",
     traits: [{ id: "ti-b", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-c",
     name: "Item C",
     traits: [{ id: "ti-c", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-d",
     name: "Item D",
     traits: [{ id: "ti-d", template_id: itemTrait.id, values: {} }],
   });
 
   // Tree owner with initial 3 auto-layout nodes and 1 edge (A -> B)
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "tree-owner",
     name: "Tree Owner",
     traits: [
@@ -180,7 +180,7 @@ try {
   });
 
   // 3. Open Tree tab
-  await page.goto(`${base}/#/entity-templates/tree-owner`);
+  await page.goto(`${base}/#/entities/tree-owner`);
   await page.reload();
   const treeTab = page.getByRole("button", { name: "Tree", exact: true });
   await treeTab.waitFor();
@@ -394,7 +394,7 @@ try {
 
   const saveLayoutBtn = page.getByRole("button", { name: "Save layout" });
   const [saveResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes("/api/v3/content/entity_templates") && r.request().method() === "POST"),
+    page.waitForResponse((r) => r.url().includes("/api/v3/content/entities") && r.request().method() === "POST"),
     saveLayoutBtn.click(),
   ]);
   check("relationship save accepted by service", saveResponse.status() === 201, `status ${saveResponse.status()}`);
@@ -415,13 +415,13 @@ try {
   check("persisted wire accessible label preserved after reload", (await persistedEdge.count()) === 1);
 
   // Assert persisted data in the backend database
-  const savedEntity = await api("GET", "/api/v3/content/entity_templates/tree-owner");
+  const savedEntity = await api("GET", "/api/v3/content/entities/tree-owner");
   const ownerTrait = savedEntity.traits.find((t: { template_id: string }) => t.template_id === graphTrait!.id);
   const persistedEdges = (ownerTrait?.values?.edges ?? []).map((e: string) => JSON.parse(e));
   const hasNamedEdge = persistedEdges.some((e: unknown[]) => Array.isArray(e) && e[0] === "item-b" && e[1] === "item-c" && e[2] === "leads to");
   const hasUnnamedEdge = persistedEdges.some((e: unknown[]) => Array.isArray(e) && e[0] === "item-a" && e[1] === "item-b" && e.length === 2);
-  check("persisted entity template contains encoded 3-element named edge", hasNamedEdge);
-  check("persisted entity template contains encoded 2-element unnamed edge", hasUnnamedEdge);
+  check("persisted entity contains encoded 3-element named edge", hasNamedEdge);
+  check("persisted entity contains encoded 2-element unnamed edge", hasUnnamedEdge);
 
   await page.locator(".tree-options summary").click();
   const [download] = await Promise.all([

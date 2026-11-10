@@ -492,7 +492,7 @@ function addNode(type: NodeType, pluginType?: string) {
     baseNode.kind = "recollection";
     baseNode.visibility = "private";
   } else if (type === "go_to_location") {
-    baseNode.location_id = studioState.entityTemplates.find((entity) => hasTraitKey(entity, studioState.traitTemplates, "location"))?.id ?? "";
+    baseNode.location_id = studioState.entities.find((entity) => hasTraitKey(entity, studioState.traitTemplates, "location"))?.id ?? "";
     baseNode.height = 100;
   } else if (type === "qbn_storylet_hub") {
     baseNode.deck_storylet_ids = [];
@@ -811,7 +811,7 @@ const computedEdges = computed(() => {
 
           <div v-else-if="node.type === 'go_to_location'">
             <div class="field-label">Destination Location</div>
-            <div style="font-size:11px;">{{ studioState.entityTemplates.find((location) => location.id === node.location_id)?.name || 'Choose a location…' }}</div>
+            <div style="font-size:11px;">{{ studioState.entities.find((location) => location.id === node.location_id)?.name || 'Choose a location…' }}</div>
           </div>
 
           <div v-else-if="node.type === 'qbn_storylet_hub'">
@@ -873,7 +873,7 @@ const computedEdges = computed(() => {
               {{ node.tag || 'No tag specified' }}
             </div>
             <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
-              Target: {{ node.target_entity_id === 'world' || !node.target_entity_id ? 'World (Global)' : (studioState.entityTemplates.find(e => e.id === node.target_entity_id)?.name || node.target_entity_id) }}
+              Target: {{ node.target_entity_id === 'world' || !node.target_entity_id ? 'World (Global)' : (studioState.entities.find(e => e.id === node.target_entity_id)?.name || node.target_entity_id) }}
             </div>
           </div>
 

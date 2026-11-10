@@ -82,14 +82,14 @@ try {
   }
   check("plugin creates the Canvas trait", !!canvasTrait);
   const locationTraitId = "system.location";
-  await api("POST", "/api/v3/content/entity_templates", { id: "plain", name: "Plain", traits: [{ id: "location", template_id: locationTraitId, values: {} }], thumbnail: "https://example.invalid/plain.png" });
-  await api("POST", "/api/v3/content/entity_templates", { id: "crypt", name: "Crypt", traits: [{ id: "location", template_id: locationTraitId, values: {} }, { id: "ti_canvas", template_id: canvasTrait!.id, values: {} }], thumbnail: "https://example.invalid/crypt.png" });
-  await page.goto(`${base}/#/entity-templates/plain`);
+  await api("POST", "/api/v3/content/entities", { id: "plain", name: "Plain", traits: [{ id: "location", template_id: locationTraitId, values: {} }], thumbnail: "https://example.invalid/plain.png" });
+  await api("POST", "/api/v3/content/entities", { id: "crypt", name: "Crypt", traits: [{ id: "location", template_id: locationTraitId, values: {} }, { id: "ti_canvas", template_id: canvasTrait!.id, values: {} }], thumbnail: "https://example.invalid/crypt.png" });
+  await page.goto(`${base}/#/entities/plain`);
   await page.getByRole("button", { name: "Properties" }).waitFor();
   check("entity without the trait has no Canvas tab", (await page.getByRole("button", { name: "Canvas", exact: true }).count()) === 0);
 
   // 1. Entity panel contributed by the plugin.
-  await page.goto(`${base}/#/entity-templates/crypt`);
+  await page.goto(`${base}/#/entities/crypt`);
   await page.reload();
   await page.getByRole("button", { name: "Canvas", exact: true }).click();
   const stage = page.locator(".vc-stage");
@@ -161,7 +161,7 @@ try {
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await sleep(800);
   console.log("toast:", (await page.locator(".toast, [role=status], [role=alert]").allTextContents()).join(" | "));
-  const saved = await api("GET", "/api/v3/content/entity_templates/crypt");
+  const saved = await api("GET", "/api/v3/content/entities/crypt");
   const keys: string[] = saved.properties.map((x: { key: string }) => x.key);
   check("entity saves canvas_doc", keys.includes("canvas_doc"));
   check("gameplay shapes declare state properties", keys.filter((k) => k.startsWith("map_")).length === 12, keys.join(","));
@@ -169,17 +169,17 @@ try {
   const gate = doc.shapes.find((s: { label?: string }) => s.label === "Iron Gate");
   check("gate marker saved with icon and description", gate?.kind === "marker" && gate.icon === "door" && gate.description?.includes("rusted"));
 
-  const plainRefs = (await api("GET", "/api/v3/content/entity_templates/plain/references")).references;
+  const plainRefs = (await api("GET", "/api/v3/content/entities/plain/references")).references;
   check("entity placed on the canvas is referenced by the canvas holder", plainRefs.some((r: { source_id: string }) => r.source_id === "crypt"), JSON.stringify(plainRefs));
   const storyRefs = (await api("GET", "/api/v3/content/storylets/unlock/references")).references;
   check("storylet placed on the canvas is referenced by the canvas holder", storyRefs.some((r: { source_id: string }) => r.source_id === "crypt"), JSON.stringify(storyRefs));
 
-  await page.goto(`${base}/#/entity-templates/plain`);
+  await page.goto(`${base}/#/entities/plain`);
   await page.getByRole("button", { name: /^References/ }).click();
   await page.getByText("Canvas reference").first().waitFor({ timeout: 5000 }).catch(() => {});
   check("entity References tab lists the canvas holder", (await page.getByText("Canvas reference").count()) > 0);
   await shot(page, "canvas-06-entity-references");
-  await page.goto(`${base}/#/entity-templates/crypt`);
+  await page.goto(`${base}/#/entities/crypt`);
   await page.getByRole("button", { name: "Canvas", exact: true }).click();
 
   // 6. Property editor contributed by the plugin.
@@ -194,7 +194,7 @@ try {
   check("storylet References tab lists the canvas holder", (await refPane.getByText("Crypt", { exact: true }).count()) > 0);
   await shot(page, "canvas-05-storylet-references");
   await page.getByRole("button", { name: "Story graph" }).click();
-  const historyBefore = JSON.parse((await api("GET", "/api/v3/content/entity_templates/crypt")).properties.find((x: { key: string }) => x.key === "canvas_doc").value).revisions.length;
+  const historyBefore = JSON.parse((await api("GET", "/api/v3/content/entities/crypt")).properties.find((x: { key: string }) => x.key === "canvas_doc").value).revisions.length;
   async function connect(from: Locator, to: Locator) {
     const a = (await from.boundingBox())!; const b = (await to.boundingBox())!;
     await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2); await page.mouse.down();
@@ -235,7 +235,7 @@ try {
   await inspector.locator(".mc-ops li").first().waitFor();
   const opTexts = await inspector.locator(".mc-ops li").allTextContents();
   check("inspector lists four gameplay changes", opTexts.length === 4, opTexts.join(" | "));
-  const cryptDoc = async () => JSON.parse((await api("GET", "/api/v3/content/entity_templates/crypt")).properties.find((x: { key: string }) => x.key === "canvas_doc").value);
+  const cryptDoc = async () => JSON.parse((await api("GET", "/api/v3/content/entities/crypt")).properties.find((x: { key: string }) => x.key === "canvas_doc").value);
   let afterDoc = await cryptDoc();
   check("saving adds exactly one version to the entity history", afterDoc.revisions.length === historyBefore + 1 && afterDoc.revisions.filter((r: { source?: unknown }) => r.source).length === 1, `${historyBefore} -> ${afterDoc.revisions.length}`);
   check("the entity canvas itself is unchanged", afterDoc.shapes.length === 9);
@@ -275,7 +275,7 @@ try {
   check("reload raises one Modify Canvas node", (await page.locator(".graph-node.plugin").count()) === 1 && (await page.locator(".graph-node.apply_command").count()) === 0);
   await shot(page, "canvas-04-graph");
 
-  await page.goto(`${base}/#/entity-templates/crypt`);
+  await page.goto(`${base}/#/entities/crypt`);
   await page.getByRole("button", { name: "Canvas", exact: true }).click();
   await page.getByRole("button", { name: /^History/ }).click();
   check("entity history shows the storylet version", (await page.locator(".vc-history li.is-node-version").count()) === 1);
@@ -311,7 +311,7 @@ try {
   await deleteNode();
   for (let i = 0; i < 25 && !(await nodeVersionNow())?.pending_delete; i++) await sleep(200);
   check("deleting the node marks its version removal pending", (await nodeVersionNow())?.pending_delete === true);
-  await page.goto(`${base}/#/entity-templates/crypt`);
+  await page.goto(`${base}/#/entities/crypt`);
   await page.getByRole("button", { name: "Canvas", exact: true }).click();
   await page.getByRole("button", { name: /^History/ }).click();
   await shot(page, "canvas-08-history-pending");
@@ -329,9 +329,9 @@ try {
   for (let i = 0; i < 25 && (await versionCount()) > 0; i++) await sleep(200);
   const deletedDoc = await cryptDoc();
   check("saving after the delete removes the version", (await versionCount()) === 0 && deletedDoc.revisions.length === revisionsBeforeDelete - 1, `${revisionsBeforeDelete} -> ${deletedDoc.revisions.length}`);
-  const presentKeys = (await api("GET", "/api/v3/content/entity_templates/crypt")).properties.filter((x: { key: string }) => x.key.startsWith("map_") && x.key.endsWith("_present"));
+  const presentKeys = (await api("GET", "/api/v3/content/entities/crypt")).properties.filter((x: { key: string }) => x.key.startsWith("map_") && x.key.endsWith("_present"));
   check("properties only that version declared are removed", presentKeys.length === 6, String(presentKeys.length));
-  await page.goto(`${base}/#/entity-templates/crypt`);
+  await page.goto(`${base}/#/entities/crypt`);
   await page.getByRole("button", { name: "Canvas", exact: true }).click();
   await page.getByRole("button", { name: /^History/ }).click();
   check("entity history no longer lists the storylet version", (await page.locator(".vc-history li.is-node-version").count()) === 0);

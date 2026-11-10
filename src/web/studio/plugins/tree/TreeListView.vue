@@ -1,23 +1,19 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from "vue";
-import { useRoute } from "vue-router";
 import PropertyValueInput from "../../components/PropertyValueInput.vue";
 import type { PropertyValue } from "../../contracts.ts";
 import { studioState } from "../../state.ts";
 import { thumbnailUrl } from "../../thumbnails.ts";
-import type { AnyEntity } from "../runtime.ts";
+import type { EntityRecord } from "../../contracts.ts";
 import { TREE_ITEM_KEY, type TreeGraph } from "./model.ts";
 import { treeListRows } from "./listModel.ts";
 import { setTreeColumnValue, treeColumnValue, treeItemColumns, type TreeListColumn } from "./listProperties.ts";
 import { discardFailedTreeItem, editTreeItem, flushTreeItem, itemEditState, retryTreeItem, treeCellDrafts, treeCellErrors, treeItemEdits } from "./listEdits.ts";
 
-const props = defineProps<{ graph: TreeGraph; owner: AnyEntity; readonly?: boolean }>();
-const emit = defineEmits<{ (event: "patch", patch: Partial<AnyEntity>): void }>();
-const route = useRoute();
-const ownerKind = computed(() => route.name === "entity" ? "entities" : "entity_templates");
-type ItemKind = "entities" | "entity_templates";
-type Item = { record: AnyEntity; kind: ItemKind };
-const ownerDraft = shallowRef<AnyEntity>(props.owner);
+const props = defineProps<{ graph: TreeGraph; owner: EntityRecord; readonly?: boolean }>();
+const emit = defineEmits<{ (event: "patch", patch: Partial<EntityRecord>): void }>();
+type Item = { record: EntityRecord };
+const ownerDraft = shallowRef<EntityRecord>(props.owner);
 watch(() => props.owner, (owner) => { ownerDraft.value = owner; });
 const collapsed = ref(new Set<string>());
 const drafts = treeCellDrafts;
@@ -31,20 +27,18 @@ function discardInvalidInputs(): void {
   }
 }
 function retryFailedItems(): void {
-  for (const state of failedItems.value) retryTreeItem(state.kind, state.id);
+  for (const state of failedItems.value) retryTreeItem(state.id);
 }
 function discardFailedItems(): void {
-  for (const state of failedItems.value) discardFailedTreeItem(state.kind, state.id);
+  for (const state of failedItems.value) discardFailedTreeItem(state.id);
 }
 const itemTemplate = computed(() => studioState.traitTemplates.find((template) => template.key === TREE_ITEM_KEY));
 const columns = computed(() => treeItemColumns(itemTemplate.value));
 const items = computed(() => {
   const result = new Map<string, Item>();
-  for (const record of studioState.entities) result.set(record.id, { record, kind: "entities" });
-  for (const record of studioState.entityTemplates) result.set(record.id, { record, kind: "entity_templates" });
+  for (const record of studioState.entities) result.set(record.id, { record });
   const owner = ownerDraft.value;
-  const existing = result.get(owner.id);
-  if (!existing || existing.kind === ownerKind.value) result.set(owner.id, { record: owner, kind: ownerKind.value });
+  result.set(owner.id, { record: owner });
   return result;
 });
 const rows = computed(() => treeListRows(props.graph, collapsed.value));
@@ -60,13 +54,13 @@ const displayRows = computed(() => {
 });
 const nameOf = (id: string) => items.value.get(id)?.record.name || id;
 const draftKey = (id: string, column: TreeListColumn) => JSON.stringify([id, column.traitTemplateId, column.id]);
-function isOwner(item: Item): boolean { return item.record.id === props.owner.id && item.kind === ownerKind.value; }
+function isOwner(item: Item): boolean { return item.record.id === props.owner.id; }
 function hasItemTrait(item: Item): boolean {
   return !!itemTemplate.value && item.record.traits?.some((trait) => trait.template_id === itemTemplate.value!.id);
 }
 function cellValue(item: Item, column: TreeListColumn): PropertyValue {
   if (!isOwner(item)) {
-    const state = itemEditState(item.kind, item.record.id);
+    const state = itemEditState(item.record.id);
     if (state && Object.prototype.hasOwnProperty.call(state.values, column.id)) return state.values[column.id]!;
   }
   return treeColumnValue(item.record, column);
@@ -77,11 +71,11 @@ function updateValue(item: Item, column: TreeListColumn, value: PropertyValue): 
     ownerDraft.value = setTreeColumnValue(ownerDraft.value, column, value);
     emit("patch", { traits: ownerDraft.value.traits });
   } else {
-    editTreeItem(item.kind, item.record.id, column, value);
+    editTreeItem(item.record.id, column, value);
   }
 }
 function commitCell(item: Item): void {
-  if (!isOwner(item)) flushTreeItem(item.kind, item.record.id);
+  if (!isOwner(item)) flushTreeItem(item.record.id);
 }
 function focusOut(event: FocusEvent, item: Item): void {
   if (event.relatedTarget instanceof Node && (event.currentTarget as Element).contains(event.relatedTarget)) return;
@@ -104,7 +98,7 @@ function collapseAll(): void {
   collapsed.value = next;
 }
 function itemRoute(item: Item): string {
-  return `/${item.kind === "entities" ? "entities" : "entity-templates"}/${encodeURIComponent(item.record.id)}`;
+  return `/entities/${encodeURIComponent(item.record.id)}`;
 }
 function isUnsigned(column: TreeListColumn): boolean {
   return column.property.type === "int" && !column.property.is_array && (column.property.min != null || column.property.max != null);
@@ -211,8 +205,8 @@ function commitJson(item: Item, column: TreeListColumn): void {
                 <span v-else class="tree-missing">Unavailable</span>
               </td>
               <td class="tree-status-column">
-                <template v-if="items.get(row.nodeId) && !isOwner(items.get(row.nodeId)!) && itemEditState(items.get(row.nodeId)!.kind, row.nodeId)">
-                  <span v-if="itemEditState(items.get(row.nodeId)!.kind, row.nodeId)!.error" class="tree-cell-error" role="alert" :title="itemEditState(items.get(row.nodeId)!.kind, row.nodeId)!.error">Not saved <button type="button" @click="retryTreeItem(items.get(row.nodeId)!.kind, row.nodeId)">Retry</button></span>
+                <template v-if="items.get(row.nodeId) && !isOwner(items.get(row.nodeId)!) && itemEditState(row.nodeId)">
+                  <span v-if="itemEditState(row.nodeId)!.error" class="tree-cell-error" role="alert" :title="itemEditState(row.nodeId)!.error">Not saved <button type="button" @click="retryTreeItem(row.nodeId)">Retry</button></span>
                   <span v-else>Saving…</span>
                 </template>
                 <span v-else-if="items.get(row.nodeId) && isOwner(items.get(row.nodeId)!)">Owner draft</span>

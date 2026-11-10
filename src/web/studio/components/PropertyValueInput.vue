@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import type { AssetLinkValue, EntityRecord, EntityTemplateRecord, PropertyScalar, PropertyType, PropertyValue } from "../contracts.ts";
+import type { AssetLinkValue, EntityRecord, PropertyScalar, PropertyType, PropertyValue } from "../contracts.ts";
 import { defaultPropertyValue } from "../propertyModel.ts";
 import { traitLabels, hasTraitKey } from "../entityModel.ts";
 import { studioState } from "../state.ts";
@@ -34,7 +34,7 @@ watch(
 const isArray = computed(() => props.isArray ?? false);
 
 const entitiesByType = computed(() => {
-  const entities = [...studioState.entities, ...studioState.entityTemplates];
+  const entities = studioState.entities;
   return [{ type: "entities", label: "Entities", entities: entities.filter((entity) =>
     !props.traitKeyFilter || hasTraitKey(entity, studioState.traitTemplates, props.traitKeyFilter),
   ) }];

@@ -29,7 +29,6 @@ const source = computed(() =>
     projectName: studioState.project?.name ?? "Workspace",
     folders: studioState.folders,
     entities: studioState.entities,
-    entityTemplates: studioState.entityTemplates,
     traitTemplates: studioState.traitTemplates,
     assets: studioState.assets,
     storylets: studioState.storylets,
@@ -128,10 +127,9 @@ function folderDrag(event: DragEvent, id: string) {
       <div v-if="definition" class="folder-actions">
         <SegmentedControl v-model="viewMode" label="Layout" :options="[{ value: 'grid', label: 'Grid' }, { value: 'list', label: 'List' }]" />
         <router-link v-if="root === 'storylets'" to="/storylets" class="btn btn-secondary">Library view</router-link>
-        <router-link v-if="root === 'entities'" to="/browse/entity_templates" class="btn btn-secondary">Entity templates</router-link>
         <template v-if="definition.newLabel">
           <button type="button" class="btn btn-secondary" @click="createFolder(root, folderId)"><StudioIcon name="folder" /> New folder</button>
-          <button type="button" class="btn btn-primary" @click="createItem(definition, folderId)"><StudioIcon name="plus" /> {{ definition.newLabel }}</button>
+          <button type="button" class="btn btn-primary" @click="createItem(definition, folderId, $event.currentTarget as HTMLElement)"><StudioIcon name="plus" /> {{ definition.newLabel }}</button>
         </template>
       </div>
     </header>
@@ -153,11 +151,11 @@ function folderDrag(event: DragEvent, id: string) {
       <div v-if="!contents.folders.length && !contents.items.length" class="folder-empty" style="display:flex; flex-direction:column; align-items:center; gap:12px; padding:48px 20px; text-align:center;">
         <div v-if="root === 'entities'" style="display:flex; flex-direction:column; align-items:center; gap:12px;">
           <span>No entities in this folder.</span>
-          <button class="btn btn-primary" type="button" @click="createItem(definition, folderId)"><StudioIcon name="plus" /> New entity</button>
+          <button class="btn btn-primary" type="button" @click="createItem(definition, folderId, $event.currentTarget as HTMLElement)"><StudioIcon name="plus" /> New entity</button>
         </div>
         <template v-else>
           <span>This folder is empty.</span>
-          <button v-if="definition?.newLabel" class="btn btn-primary" type="button" @click="createItem(definition, folderId)">+ {{ definition.newLabel }}</button>
+          <button v-if="definition?.newLabel" class="btn btn-primary" type="button" @click="createItem(definition, folderId, $event.currentTarget as HTMLElement)">+ {{ definition.newLabel }}</button>
         </template>
       </div>
       <div v-else-if="viewMode === 'grid'" class="folder-grid">

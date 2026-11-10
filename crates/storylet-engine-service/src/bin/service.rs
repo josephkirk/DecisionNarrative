@@ -11,9 +11,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let fresh_database = args.iter().any(|arg| arg == "--fresh-database");
     let default_db_path = if fresh_database {
-        "data/storylet_studio_v6_clean.db"
+        "data/storylet_studio_v7_clean.db"
     } else {
-        "data/storylet_studio_v6.db"
+        "data/storylet_studio_v7.db"
     };
     let db_path = env::var("STORYLET_STUDIO_DB_PATH")
         .unwrap_or_else(|_| default_db_path.into());

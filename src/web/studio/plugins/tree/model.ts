@@ -1,5 +1,5 @@
 import type { TraitInstance, TraitTemplateRecord } from "../../contracts.ts";
-import type { AnyEntity } from "../runtime.ts";
+import type { EntityRecord } from "../../contracts.ts";
 
 export type TreeDirection = "right" | "left" | "down" | "up" | "radial";
 export type TreeShape = "card" | "rounded" | "ellipse" | "diamond";
@@ -140,7 +140,7 @@ export function treeItemTemplate(): TraitTemplateRecord {
   };
 }
 
-export function treeTrait(entity: AnyEntity, templates: TraitTemplateRecord[], key: string = TREE_GRAPH_KEY): TraitInstance | undefined {
+export function treeTrait(entity: EntityRecord, templates: TraitTemplateRecord[], key: string = TREE_GRAPH_KEY): TraitInstance | undefined {
   const template = templates.find((candidate) => candidate.key === key);
   return template ? entity.traits?.find((instance) => instance.template_id === template.id) : undefined;
 }
@@ -514,7 +514,7 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
   return { nodes, edges, direction, positions, ...(shapes ? { shapes } : {}), ...(appearance ? { appearance } : {}) };
 }
 
-export function setTreeGraph(entity: AnyEntity, instance: TraitInstance, graph: TreeGraph): Partial<AnyEntity> {
+export function setTreeGraph(entity: EntityRecord, instance: TraitInstance, graph: TreeGraph): Partial<EntityRecord> {
   const encodedEdges = graph.edges.map((edge) => {
     if (typeof edge.relationship === "string" && edge.relationship.trim() !== "") {
       return JSON.stringify([edge.from, edge.to, edge.relationship]);

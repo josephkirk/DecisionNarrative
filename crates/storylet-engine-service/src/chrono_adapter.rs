@@ -17,7 +17,7 @@ use storylet_engine::chrono_state::{
 };
 
 use crate::contracts::{
-    CharacterRecord, ChronoStoryletSettings, EntityRecord, EntityProperty, EntityTemplateRecord,
+    CharacterRecord, ChronoStoryletSettings, EntityRecord, EntityProperty,
     LocationRecord, PropertyType,
     ScenarioRecord, StoryletRecord, WorldObjectLayer, WorldObjectRecord,
 };
@@ -467,7 +467,7 @@ pub fn initialize_chrono_world(
     compiled: &CompiledChronoDispatch,
     storylets: &[StoryletRecord],
     world: &EntityRecord,
-    entities: &[EntityTemplateRecord],
+    entities: &[EntityRecord],
     locations: &[LocationRecord],
     characters: &[CharacterRecord],
     world_objects: &[WorldObjectRecord],
@@ -539,7 +539,7 @@ pub fn initialize_chrono_world(
         }
     }
 
-    let runtime_entities: BTreeMap<&str, &EntityTemplateRecord> = entities
+    let runtime_entities: BTreeMap<&str, &EntityRecord> = entities
         .iter()
         .map(|entity| (entity.id.as_str(), entity))
         .collect();
@@ -1032,7 +1032,7 @@ mod world_object_vertex_tests {
             "id": "world", "name": "World", "tags": [],
             "properties": [{ "id": "mood", "key": "mood", "name": "Mood", "type": "float", "value": 3 }]
         })).expect("valid World fixture");
-        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             {
                 "id": "square", "name": "Square", "tags": [], "traits": [{"template_id":"system.location"}],
                 "properties": [{ "id": "visited", "key": "visited", "name": "Visited", "type": "bool", "value": false }]
@@ -1190,7 +1190,7 @@ mod participant_seed_tests {
     #[test]
     fn overlapping_capabilities_share_one_runtime_entity_row() {
         let world: EntityRecord = serde_json::from_value(json!({"id":"world","name":"World"})).unwrap();
-        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([{
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([{
             "id":"dual","name":"Dual","traits":[
                 {"template_id":"system.character"},{"template_id":"system.location"}]
         }])).unwrap();
@@ -1212,7 +1212,7 @@ mod participant_seed_tests {
     #[test]
     fn participant_trait_compiles_rows_in_seat_order() {
         let world: EntityRecord = serde_json::from_value(json!({"id":"world","name":"World",})).unwrap();
-        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             {"id":"square","name":"Square","traits":[{"template_id":"system.location"}],},
             {"id":"player","name":"A","traits":[{"template_id":"system.character"},{"template_id":"system.participant","values":{"controller":"human","seat":1,"start_location":"square"}}]},
             {"id":"b","name":"B","traits":[{"template_id":"system.character"},{"template_id":"system.participant","values":{"controller":"human","seat":0}}]}
@@ -1299,7 +1299,7 @@ mod chronicle_compile_tests {
 /// `connected_zones` become always-open connections.
 pub fn compile_space(
     world: &crate::contracts::EntityRecord,
-    entities: &[EntityTemplateRecord],
+    entities: &[EntityRecord],
     locations: &[crate::contracts::LocationRecord],
     entity_indices: &BTreeMap<String, u16>,
     registry: &storylet_engine::chrono_state::GameplayTagRegistry,
@@ -1383,7 +1383,7 @@ mod space_compile_tests {
 
     fn compile(entities: Value, world_traits: Value) -> Result<(Vec<storylet_engine::chrono_space::Connection>, Option<storylet_engine::chrono_space::Clock>), String> {
         let world: EntityRecord = serde_json::from_value(json!({"id": "world", "name": "World", "traits": world_traits})).unwrap();
-        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(entities).unwrap();
+        let entities: Vec<EntityRecord> = serde_json::from_value(entities).unwrap();
         let templates = crate::store::Store::open_in_memory().unwrap().list_trait_templates().unwrap();
         let records = crate::entities::runtime_records_with_world(&world, &entities, &templates);
         let indices: BTreeMap<String, u16> = records.locations.iter().enumerate().map(|(i, l)| (l.id.clone(), i as u16)).collect();

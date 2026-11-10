@@ -33,7 +33,7 @@ use crate::chrono_graph_adapter::{
     validate_entity_property_graph,
 };
 use crate::contracts::{
-    CharacterRecord, EntityRecord, EntityTemplateRecord, LocationRecord, ScenarioRecord, StoryletRecord,
+    CharacterRecord, EntityRecord, LocationRecord, ScenarioRecord, StoryletRecord,
     WorldObjectRecord,
 };
 use crate::entities::runtime_records_with_world;
@@ -503,7 +503,7 @@ fn from_json<T: DeserializeOwned>(text: &str) -> Result<T, ChronoPlaytestError> 
 
 struct WorkspaceContent {
     world: EntityRecord,
-    entities: Vec<EntityTemplateRecord>,
+    entities: Vec<EntityRecord>,
     locations: Vec<LocationRecord>,
     characters: Vec<CharacterRecord>,
     world_objects: Vec<WorldObjectRecord>,
@@ -516,13 +516,13 @@ struct WorkspaceContent {
 }
 
 fn read_content(store: &Store) -> Result<WorkspaceContent, ChronoPlaytestError> {
-    let instances = store.list_entities().map_err(persistence_error)?;
-    let world = instances.iter().find(|entity| entity.id == "world").cloned()
+    let all_entities = store.list_entities().map_err(persistence_error)?;
+    let world = all_entities.iter().find(|entity| entity.id == "world").cloned()
         .ok_or_else(|| compile_error("missing intrinsic world entity".to_string()))?;
-    let mut entities = store.list_entity_templates().map_err(persistence_error)?;
+    let mut entities = crate::entities::runtime_entities(&all_entities);
     let templates = store.list_trait_templates().map_err(persistence_error)?;
-    crate::inventory::project_inventory_entities(&mut entities, &instances, &templates).map_err(compile_error)?;
-    crate::tree_pointer::project_tree_entities(&mut entities, &instances, &templates).map_err(compile_error)?;
+    crate::inventory::project_inventory_entities(&mut entities, &templates).map_err(compile_error)?;
+    crate::tree_pointer::project_tree_entities(&mut entities, &templates).map_err(compile_error)?;
     let runtime = runtime_records_with_world(&world, &entities, &templates);
     let storylets = store.list_storylets().map_err(persistence_error)?;
     for storylet in &storylets {

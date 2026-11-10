@@ -602,6 +602,17 @@ a { color: var(--accent-hover); }
 .project-tree__glyph.is-project { color: var(--accent-hover); }
 .project-tree__glyph.is-root { color: var(--text-muted); }
 
+.project-tree__template-badge {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  font-size: 13px;
+  color: var(--accent);
+}
+.project-tree__context-menu-check { margin-left: auto; color: var(--accent); }
+
 .project-tree__label {
   flex: 1;
   min-width: 0;
@@ -1639,6 +1650,16 @@ a { color: var(--accent-hover); }
   background: rgba(245, 158, 11, 0.15);
   color: var(--status-warning);
   border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.template-pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 .editor-validation-pill {

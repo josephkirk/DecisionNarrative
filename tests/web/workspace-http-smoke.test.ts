@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import path from "node:path";
 
-test("fresh designer workspace exposes intrinsic World and canonical Entity Template APIs", async () => {
+test("fresh designer workspace exposes intrinsic World and unified Entity APIs", async () => {
   const port = 39_000 + Math.floor(Math.random() * 1_000);
   const binaryCandidates = [
     Bun.env.STORYLET_SERVICE_BIN ? path.resolve(Bun.env.STORYLET_SERVICE_BIN) : null,
@@ -51,21 +51,18 @@ test("fresh designer workspace exposes intrinsic World and canonical Entity Temp
     const entities = await request("/api/v3/content/entities");
     expect(entities.status).toBe(200);
     expect(await entities.json()).toEqual(expect.arrayContaining([expect.objectContaining({ id: "world", properties: [], traits: [] })]));
-    const templates = await request("/api/v3/content/entity_templates");
-    expect(templates.status).toBe(200);
-    expect(await templates.json()).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: "world" })]));
     const tags = await request("/api/v3/content/gameplay_tags");
     expect(tags.status).toBe(200);
     expect(await tags.json()).toEqual(expect.any(Array));
     const project = await request("/api/v3/project");
     expect(await project.json()).toMatchObject({ id: "workspace-project", name: "Workspace", revision: 0 });
-    const created = await request("/api/v3/content/entity_templates", {
+    const created = await request("/api/v3/content/entities", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: "", object_id: "", game_id: "", game_id_auto: true, name: "Station", description: "", folder_id: null, tags: [], properties: [], traits: [] }),
+      body: JSON.stringify({ id: "", object_id: "", game_id: "", game_id_auto: true, template_id: null, is_template: true, name: "Station", description: "", folder_id: null, tags: [], properties: [], traits: [] }),
     });
     expect(created.status).toBe(201);
-    expect((await created.json()).id).toBeTruthy();
+    expect(await created.json()).toMatchObject({ id: expect.any(String), is_template: true, template_id: null });
   } finally {
     child.kill();
     await child.exited;

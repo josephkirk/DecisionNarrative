@@ -48,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Entities and entity templates are now one content kind. Any entity can be marked
+  as a template (`is_template`, toggled from the project tree's "Use as template"
+  context-menu item or the entity editor), and an entity may be based on a template
+  through `template_id`. Marked entities show a template glyph in the project tree
+  and a "Template" pill in the entity header; entities created from one show
+  "From <template>" instead of "Standalone Entity". Unmarking a template that other
+  entities still use is rejected. Start a fresh project to pick up the new model.
+- Creating an entity opens an in-app "Choose template" picker (a "None — empty
+  entity" row plus every template entity, anchored to the pane like the other
+  pickers) instead of a numbered browser prompt. The chosen template's description,
+  thumbnail, tags, properties and traits are copied with fresh trait instance ids;
+  with no template entities the empty entity is created directly.
 - Trait property editors are now driven by typed `editor` metadata
   (`option_source`, `selection_only`, `entity_trait_key`) and optional numeric
   `min`/`max` on property definitions, instead of trait or property names.
@@ -70,6 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Tree Graph and Inventory plugins no longer overwrite user-edited traits when
+  the workspace opens before trait templates have loaded; they check the stored traits.
 - Choice text fields in story graph nodes take focus again; their wire handle's hit
   area covered the whole row and started a connection instead.
 - Graph context menus stay inside the canvas, story nodes keep a readable minimum
@@ -126,6 +140,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The separate Entity Templates category: its tree root, `/entity-templates/:id`
+  route, `entity_templates` content kind and folder root, and the template-only
+  editor. Everything it listed is now an entity.
 - Automatic local pull-request reviews and their pre-push hook.
 
 ## [0.2.0-alpha.1] - 2026-11-08
