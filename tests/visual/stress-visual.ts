@@ -327,6 +327,7 @@ const steps: Step[] = [
     if (!await p.getByRole("textbox", { name: "Trait key" }).isDisabled()) throw new Error("System trait key must be read-only");
     if (!await p.getByRole("button", { name: "Delete", exact: true }).isDisabled()) throw new Error("System trait must not be deletable");
     if (!await p.getByText("Built-in system trait", { exact: true }).isVisible()) throw new Error("System trait indicator missing");
+    if (!await p.getByText("One per entity", { exact: true }).isVisible()) throw new Error("Single-instance constraint missing");
     if (!await p.getByText("This built-in trait's uniqueness cannot be changed.", { exact: true }).isVisible()) throw new Error("System trait restriction explanation missing");
   } },
   { name: "trait-focus", path: "/trait-templates/ledger", act: async (p) => {

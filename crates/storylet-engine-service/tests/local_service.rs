@@ -161,6 +161,27 @@ async fn trait_uniqueness_is_enforced_on_save_and_definition_changes() {
 }
 
 #[tokio::test]
+async fn core_capability_traits_are_single_instance_but_can_coexist() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id":"item", "key":"item", "name":"Item", "allow_multiple":false, "properties":[]
+    })).await.unwrap();
+    let ids = ["system.fact", "item", "system.character", "system.location"];
+    let traits: Vec<_> = ids.iter().enumerate().map(|(index, id)| json!({
+        "id": format!("trait-{index}"), "template_id": id, "values": {}
+    })).collect();
+    let entity = json!({"id":"capabilities", "name":"Capabilities", "traits":traits});
+    service.save_content_item("entity_templates", &entity).await.unwrap();
+    for (index, id) in ids.iter().enumerate() {
+        let mut duplicate = entity.clone();
+        duplicate["traits"].as_array_mut().unwrap().push(json!({
+            "id":format!("duplicate-{index}"), "template_id":id, "values":{}
+        }));
+        assert!(service.save_content_item("entity_templates", &duplicate).await.unwrap_err().contains("does not allow multiple instances"));
+    }
+}
+
+#[tokio::test]
 async fn disabling_multiple_rejects_existing_duplicate_traits() {
     let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
     let mut trait_definition = service.save_content_item("trait_templates", &json!({

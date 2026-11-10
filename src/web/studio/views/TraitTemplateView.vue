@@ -216,6 +216,7 @@ function scrollTabs(event: WheelEvent) {
           <div class="entity-subtitle-row">
             <span class="entity-type-label">trait.{{ draft.key || 'key' }}</span>
             <span v-if="draft.system" class="badge system-trait-badge">Built-in system trait</span>
+            <span v-if="!draft.allow_multiple" class="badge">One per entity</span>
             <span class="entity-bullet-sep" aria-hidden="true">•</span>
             <span v-if="draft.unique" class="entity-standalone-text" style="color: var(--accent);">Unique Trait</span>
             <span v-else class="entity-standalone-text">Standard Trait</span>
@@ -295,7 +296,7 @@ function scrollTabs(event: WheelEvent) {
           <span class="form-hint">Runtime attribute prefix: trait.&lt;Key&gt;.&lt;property_key&gt;.<template v-if="!draft.system"> A generated key follows the template name until you edit it.</template></span>
         </div>
         <div class="form-group" style="margin-bottom:0;">
-          <label class="form-label" :for="`${fieldId}-unique`">Unique trait</label>
+          <label class="form-label" :for="`${fieldId}-unique`">Unique trait (exclusive)</label>
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
             <input
               :id="`${fieldId}-unique`"
@@ -308,6 +309,7 @@ function scrollTabs(event: WheelEvent) {
             <span>Only one unique trait may be applied to an entity</span>
           </label>
           <span v-if="draft.system" :id="`${fieldId}-system-unique-help`" class="form-hint">This built-in trait's uniqueness cannot be changed.</span>
+          <span v-if="!draft.allow_multiple" class="form-hint">An entity can have only one instance of this trait. Different trait types may coexist, subject to the exclusive trait rule above.</span>
         </div>
       </div>
 
