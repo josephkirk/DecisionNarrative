@@ -59,7 +59,7 @@ function choose(id: string) {
 </script>
 
 <template>
-  <div v-if="open" class="picker-overlay" @click.self="$emit('close')">
+  <Teleport to="body"><div v-if="open" class="picker-overlay" @click.self="$emit('close')">
     <div
       class="picker-dialog"
       role="dialog"
@@ -157,7 +157,7 @@ function choose(id: string) {
         </button>
       </div>
     </div>
-  </div>
+  </div></Teleport>
 </template>
 
 <style scoped>

@@ -298,7 +298,7 @@ function scrollTabs(event: WheelEvent) {
         No traits applied to intrinsic entity.
       </div>
       <details v-for="entry in appliedTraits" :key="entry.instance.id" class="trait-card" open>
-        <summary>{{ entry.template?.name }}</summary>
+        <summary><span>{{ entry.template?.name }}</span><span class="trait-count">{{ countLabel((entry.template?.properties ?? []).length, 'property', 'properties') }}</span></summary>
         <component
           v-if="traitInspectorComponent(entry.template?.key ?? '')"
           :is="traitInspectorComponent(entry.template?.key ?? '')"
@@ -306,7 +306,7 @@ function scrollTabs(event: WheelEvent) {
           :readonly="intrinsic"
           @patch="patch"
         />
-        <template v-else>
+        <div v-else class="trait-fields">
           <div v-for="property in entry.template?.properties ?? []" :key="property.key" class="trait-row">
             <label>
               <span class="field-label">{{ property.name }}</span>
@@ -322,8 +322,8 @@ function scrollTabs(event: WheelEvent) {
               />
             </label>
           </div>
-        </template>
-        <button v-if="!intrinsic" class="btn btn-danger" @click="removeTrait(entry.instance.id)">Remove</button>
+        </div>
+        <div v-if="!intrinsic" class="trait-footer"><button class="btn btn-danger" @click="removeTrait(entry.instance.id)">Remove trait</button></div>
       </details>
     </section>
 
@@ -374,6 +374,22 @@ function scrollTabs(event: WheelEvent) {
 }
 
 /* Traits tab */
+.editor-column { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.trait-add { display: flex; gap: 8px; margin: 0; }
+.trait-add select { flex: 1; min-width: 0; }
+.trait-card { min-width: 0; overflow: hidden; margin: 0; padding: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); background: var(--bg-card); }
+.trait-card > summary { display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; font-size: 14px; font-weight: 600; list-style: none; }
+.trait-card > summary::-webkit-details-marker { display: none; }
+.trait-card > summary::before { content: '›'; color: var(--text-muted); font-size: 18px; line-height: 1; }
+.trait-card[open] > summary::before { transform: rotate(90deg); }
+.trait-card[open] > summary { border-bottom: 1px solid var(--border-subtle); }
+.trait-count { margin-left: auto; color: var(--text-muted); font-size: 11px; font-weight: 400; }
+.trait-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; padding: 16px; }
+.trait-row { display: block; min-width: 0; padding: 0; border: 0; }
+.trait-row label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.trait-row .field-label { color: var(--text-muted); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.trait-row :deep(.form-input), .trait-row :deep(.form-select), .trait-row :deep(.form-textarea) { width: 100%; min-width: 0; }
+.trait-footer { display: flex; justify-content: flex-end; padding: 0 16px 16px; }
 .traits-container {
   display: flex;
   flex-direction: column;
