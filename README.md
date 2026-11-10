@@ -39,3 +39,33 @@ An **entity template** is a reusable starting point for similar entities. Put sh
 You can also add traits directly to an entity without using an entity template. Use templates for shared starting points, traits for reusable details, and entities for the individual things in your world.
 
 **World** is the studio’s built-in entity, not a character template. Keep your people, places, and items separate from it.
+
+## Let stories respond to the world
+
+A **storylet** is a small playable scene: a conversation, an encounter, a discovery, or a turning point. Rather than putting every scene on one fixed path, you describe when each scene makes sense.
+
+Think of a locked lighthouse:
+
+1. **Set the situation.** The scene can require the player to be at the lighthouse and meet conditions you choose.
+2. **Write the moment.** Add dialogue and connect it to choices in the story graph.
+3. **Give choices consequences.** A choice might change a property, reveal information, or move the player somewhere else.
+4. **Connect what comes next.** Finish the scene, jump to another storylet, or mark an ending for the run.
+5. **Play and reconsider.** Save and approve the storylet so it can take part in a run. Use **Play** to try your story, rewind to a choice, and explore a different outcome.
+
+During play, the studio checks the current world and participants to determine which storylets can happen. A change made in one scene can make another scene available—or prevent it from happening. Your scenes become parts of a responsive world, not just branches on a single tree.
+
+## Extend your creative tools with plugins
+
+A **plugin** adds tools to the studio without making every project use them. It can add a new tab on an entity, a more useful way to edit a property, or new kinds of steps in a story graph.
+
+The built-in plugins show what this means in practice:
+
+- **Vector Canvas** gives an entity a visual canvas for maps, notes, and references to people, places, and stories.
+- **Inventory** lets you give entities inventories, arrange items, and use story choices to add, remove, or check those items.
+- **Tree Graph** lets you arrange connected entities visually—for example, as a skill tree or relationship map.
+
+Open **Plugins** to turn installed tools on or off. Then add the relevant trait to an entity: **Canvas** for a canvas, **InventoryOwner** for an inventory, or **TreeGraph** for a tree. Its extra editor appears as a tab on that entity.
+
+For example, give Mara the **InventoryOwner** trait and give a lighthouse-key entity the **Item** trait. A story choice can check whether she carries that key before opening the door. The plugin supplies the tool; you decide what it means for the story.
+
+Custom plugins can extend these same authoring tools, but creating one currently requires development work; there is no plugin marketplace or file-install button. Use only plugins you trust.
