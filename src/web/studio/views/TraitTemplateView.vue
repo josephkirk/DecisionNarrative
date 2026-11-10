@@ -335,6 +335,7 @@ function scrollTabs(event: WheelEvent) {
         <PropertyListEditor
           :model-value="draft.properties"
           mode="definition"
+          :categories="true"
           @update:model-value="draft.properties = $event as TraitPropertyDefinition[]"
         />
       </div>

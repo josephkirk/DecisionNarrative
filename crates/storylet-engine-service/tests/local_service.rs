@@ -610,3 +610,22 @@ async fn trait_template_thumbnail_persists_clears_rejects_invalids_and_roundtrip
     let imported_trait = imported_service.get_content_item("trait_templates", "legacy_trait").await.unwrap();
     assert_eq!(imported_trait["thumbnail"], "project-files/thumbnails/legacy.png");
 }
+
+#[tokio::test]
+async fn trait_property_categories_survive_save_and_bundle_round_trip() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    let payload = json!({"id":"category_test", "key":"category_test", "name":"Category test", "properties":[
+        {"id":"a", "key":"a", "name":"A", "type":"string", "default":"", "category":"Combat"},
+        {"id":"b", "key":"b", "name":"B", "type":"int", "default":0}
+    ]});
+    service.save_content_item("trait_templates", &payload).await.unwrap();
+    let saved = service.get_content_item("trait_templates", "category_test").await.unwrap();
+    assert_eq!(saved["properties"][0]["category"], "Combat");
+    assert!(saved["properties"][1].get("category").is_none());
+    let bundle = serde_json::to_value(service.export_project_bundle().await.unwrap()).unwrap();
+    let imported = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    imported.import_bundle(&bundle).await.unwrap();
+    let restored = imported.get_content_item("trait_templates", "category_test").await.unwrap();
+    assert_eq!(restored["properties"][0]["category"], "Combat");
+    assert_eq!(restored["properties"][1]["key"], "b");
+}

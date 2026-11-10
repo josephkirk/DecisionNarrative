@@ -14,6 +14,7 @@ import { entityPanelsFor, traitInspectorFor } from "../plugins/runtime.ts";
 import { countLabel } from "../countLabel.ts";
 import { thumbnailUrl } from "../thumbnails.ts";
 import ReferencePicker from "../components/ReferencePicker.vue";
+import { groupTraitProperties } from "../traitPropertyGroups.ts";
 const route = useRoute(); const router = useRouter(); const entityId = typeof route.params.id === "string" ? route.params.id : "";
 const editor = useEntityEditor(entityId); const { draft, dirty, loading, saving, activeTab, references, referencesLoading, isWorld, isEntityRoute, loadReferences, patch, addTrait, removeTrait, setTraitValue, traitPropertyDisplayValue, save, remove } = editor;
 const intrinsic = computed(() => isWorld.value);
@@ -314,8 +315,11 @@ function scrollTabs(event: WheelEvent) {
           :readonly="intrinsic"
           @patch="patch"
         />
-        <div v-else class="trait-fields">
-          <div v-for="property in entry.template?.properties ?? []" :key="property.key" class="trait-row">
+        <div v-else class="trait-groups">
+          <section v-for="group in groupTraitProperties(entry.template?.properties ?? [])" :key="group.category" class="trait-group" :class="{ 'is-categorized': group.category }">
+          <h3 v-if="group.category" class="trait-group-title">{{ group.category }}</h3>
+          <div class="trait-fields">
+          <div v-for="property in group.properties" :key="property.key" class="trait-row">
             <label>
               <span class="field-label">{{ property.name }}</span>
               <PropertyValueInput
@@ -330,6 +334,8 @@ function scrollTabs(event: WheelEvent) {
               />
             </label>
           </div>
+          </div>
+          </section>
         </div>
         <div v-if="!intrinsic" class="trait-footer"><button class="btn btn-danger" @click="removeTrait(entry.instance.id)">Remove trait</button></div>
       </details>
@@ -394,13 +400,19 @@ function scrollTabs(event: WheelEvent) {
 .trait-count { margin-left: auto; color: var(--text-muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
 .trait-thumbnail { flex: none; width: 32px; height: 32px; object-fit: cover; border-radius: var(--radius-sm, 4px); }
 .trait-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); column-gap: 16px; row-gap: 24px; padding: 16px; }
-.trait-fields:empty { display: none; }
+.trait-groups { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.trait-groups:empty { display: none; }
+.trait-group { min-width: 0; }
+.trait-group.is-categorized { border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); background: var(--bg-input); }
+.trait-group-title { margin: 0; padding: 12px 16px 0; color: var(--text-main); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.trait-group .trait-fields { padding: 16px; }
+.trait-group:not(.is-categorized) .trait-fields { padding: 0; }
 .trait-row { display: block; min-width: 0; padding: 0; border: 0; }
 .trait-row label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .trait-row .field-label { color: var(--text-muted); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
 .trait-row :deep(.form-input), .trait-row :deep(.form-select), .trait-row :deep(.form-textarea) { width: 100%; min-width: 0; }
 .trait-footer { display: flex; justify-content: flex-end; padding: 0 16px 16px; }
-.trait-fields:empty + .trait-footer { padding-top: 16px; }
+.trait-groups:empty + .trait-footer { padding-top: 16px; }
 .traits-container {
   display: flex;
   flex-direction: column;
