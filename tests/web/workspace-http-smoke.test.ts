@@ -46,7 +46,7 @@ test("fresh designer workspace exposes intrinsic World and canonical Entity Temp
 
     const studio = await request("/");
     const markup = await studio.text();
-    expect(markup).toContain("DecisionNarrative — Storylet Studio");
+    expect(markup).toContain("<title>Erzählstudio</title>");
 
     const entities = await request("/api/v3/content/entities");
     expect(entities.status).toBe(200);

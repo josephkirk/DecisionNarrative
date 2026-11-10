@@ -1,5 +1,5 @@
 import { computed, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { focusedRoute, focusedRouter } from "./panes.ts";
 import { StudioApi } from "../api.ts";
 import type { AssetRecord, ContentRoot, EntityRecord, EntityTemplateRecord, FolderRecord, TraitTemplateRecord } from "../contracts.ts";
 import { newEntityTemplateDraft, traitLabels } from "../entityModel.ts";
@@ -52,8 +52,8 @@ export interface DragPayload {
 }
 
 export function useProjectTree() {
-  const router = useRouter();
-  const route = useRoute();
+  // Tree actions navigate whichever split pane has focus.
+  const router = focusedRouter;
   const expanded = ref<Set<string>>(loadExpanded());
   const query = ref("");
 
@@ -117,6 +117,8 @@ export function useProjectTree() {
   }
 
   const activeKey = computed(() => {
+    const route = focusedRoute();
+    if (!route) return "";
     const name = typeof route.name === "string" ? route.name : "";
     const params = route.params as Record<string, unknown>;
     if (name === "browse") {

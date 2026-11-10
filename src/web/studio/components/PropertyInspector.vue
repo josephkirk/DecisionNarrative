@@ -11,6 +11,7 @@ import { normalizeTagName, uniqueTagNames, buildTagIndex } from "../tagData.ts";
 import { studioState, notify } from "../state.ts";
 import { hasTraitKey, traitLabels } from "../entityModel.ts";
 import { nodeTypeContribution } from "../plugins/runtime.ts";
+import StudioIcon from "./StudioIcon.vue";
 const props = defineProps<{
   storylet: StoryletRecord;
   graph: NarrativeGraph;
@@ -449,9 +450,9 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
     <!-- 1. NODE PROPERTIES (when a node is selected) -->
     <div v-if="selectedNode" class="inspector-content">
       <div class="panel-header">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span :class="['type-badge', selectedNode.type]">{{ selectedNode.type === 'condition' ? 'CONDITION NODE' : selectedNode.type.toUpperCase() }}</span>
-          <h3 class="panel-title">{{ selectedNode.title }}</h3>
+        <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+          <span :class="['type-badge', selectedNode.type]">{{ selectedNode.type === 'condition' ? 'condition node' : selectedNode.type.replaceAll('_', ' ') }}</span>
+          <h3 class="panel-title" :title="selectedNode.title">{{ selectedNode.title }}</h3>
         </div>
         <button class="btn btn-danger" style="font-size:11px; padding:3px 8px;" @click="$emit('delete-node', selectedNode.id)">
           Delete Node
@@ -475,10 +476,10 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         <div v-for="(sec, sIdx) in selectedNode.sections" :key="sec.id" class="dialogue-section-card">
           <div class="section-card-header">
             <input v-model="sec.title" class="section-title-input" aria-label="Dialogue section title" @input="emitGraphUpdate(selectedNode)" />
-            <div style="display:flex; gap:4px;">
+            <div style="display:flex; gap:4px; flex:none; white-space:nowrap;">
               <button class="btn-micro" aria-label="Add dialogue line" @click="addDialogueLine(sec)">+ Line</button>
               <button class="btn-micro" aria-label="Add idle action" @click="addIdleAction(sec)">+ Idle Action</button>
-              <button class="btn-micro danger" aria-label="Remove dialogue section" @click="removeSection(selectedNode, sIdx)">✕</button>
+              <button class="btn-micro danger" aria-label="Remove dialogue section" title="Remove dialogue section" @click="removeSection(selectedNode, sIdx)"><StudioIcon name="close" /></button>
             </div>
           </div>
 
@@ -487,11 +488,11 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
               <!-- LINE ITEM -->
               <div v-if="item.kind === 'line'">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                  <span style="font-size:10px; font-weight:700; color:var(--accent-purple);">💬 DIALOGUE</span>
-                  <button class="btn-micro danger" aria-label="Remove dialogue item" @click="removeItem(sec, iIdx)">✕</button>
+                  <span class="item-kind-label item-kind-label--line"><StudioIcon name="chat" /> Dialogue</span>
+                  <button class="btn-micro danger" aria-label="Remove dialogue item" title="Remove dialogue item" @click="removeItem(sec, iIdx)"><StudioIcon name="close" /></button>
                 </div>
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;">
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; margin-bottom:6px;">
                   <div>
                     <label class="field-sublabel">Speaker Role</label>
                     <TagEditor v-model="item.speaker_role" :options="roleTagOptions" :allow-create="false" :multiple="false" label="Speaker role" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
@@ -507,7 +508,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
                   <textarea :id="'dialogue-text-' + item.id" v-model="item.content" aria-label="Dialogue text" class="form-textarea" style="min-height:48px; font-size:11px; padding:4px;" @input="emitGraphUpdate(selectedNode)"></textarea>
                 </div>
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;">
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; margin-bottom:6px;">
                   <div>
                     <label class="field-sublabel">Emotion Tag</label>
                     <TagEditor v-model="item.emotion_tag" :options="emotionTagOptions" :allow-create="false" :multiple="false" label="Emotion tag" placeholder="Choose emotion" @update:model-value="emitGraphUpdate(selectedNode)" />
@@ -528,13 +529,13 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                     <label class="field-sublabel" style="margin-bottom:0;">Audio Path & Duration</label>
                     <label class="audio-browse-label">
-                      📁 Browse
+                      <StudioIcon name="folder" /> Browse
                       <input type="file" accept="audio/*" style="display:none;" @change="handleAudioBrowse($event, item)" />
                     </label>
                   </div>
                   <div style="display:flex; gap:4px;">
                     <input v-model="item.audio_path" aria-label="Audio file path" class="form-input micro" style="flex:1;" placeholder="audio/line_01.mp3" @input="emitGraphUpdate(selectedNode)" />
-                    <button class="btn-micro" title="Check server file duration" aria-label="Check server file duration" @click="checkAudioBackend(item)">🔍</button>
+                    <button class="btn-micro" title="Check server file duration" aria-label="Check server file duration" @click="checkAudioBackend(item)"><StudioIcon name="search" /></button>
                     <input v-model.number="item.duration" aria-label="Audio duration in seconds" type="number" step="0.1" class="form-input micro" style="width:60px;" placeholder="Sec" @input="emitGraphUpdate(selectedNode)" />
                   </div>
                 </div>
@@ -543,11 +544,11 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
               <!-- IDLE ACTION ITEM -->
               <div v-else-if="item.kind === 'idle_action'">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                  <span style="font-size:10px; font-weight:700; color:#ff9f0a;">⚙️ IDLE ACTION</span>
-                  <button class="btn-micro danger" @click="removeItem(sec, iIdx)">✕</button>
+                  <span class="item-kind-label item-kind-label--idle"><StudioIcon name="settings" /> Idle action</span>
+                  <button class="btn-micro danger" aria-label="Remove idle action" title="Remove idle action" @click="removeItem(sec, iIdx)"><StudioIcon name="close" /></button>
                 </div>
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:4px;">
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; margin-bottom:4px;">
                   <div>
                     <label class="field-sublabel">Action Type</label>
                     <select v-model="item.action_type" class="form-select micro" @change="emitGraphUpdate(selectedNode)">
@@ -561,7 +562,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
                   </div>
                 </div>
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px;">
                   <div>
                     <label class="field-sublabel">Target</label>
                     <TagEditor v-model="item.target" :options="targetRoles" :allow-create="false" :multiple="false" label="Target role" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
@@ -590,7 +591,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         <div v-for="(choice, index) in selectedNode.choices || []" :key="choice.id" class="choice-editor-row">
           <input v-model="choice.text" aria-label="Choice text" class="form-input micro" placeholder="Choice text" @input="emitGraphUpdate(selectedNode)" />
           <input v-model="choice.system_verb" aria-label="Choice system verb, optional" class="form-input micro" placeholder="System verb (optional)" @input="emitGraphUpdate(selectedNode)" />
-          <button class="btn-micro danger" title="Remove choice" aria-label="Remove choice" @click="removeChoice(selectedNode, index)">✕</button>
+          <button class="btn-micro danger" title="Remove choice" aria-label="Remove choice" @click="removeChoice(selectedNode, index)"><StudioIcon name="close" /></button>
         </div>
       </div>
 
@@ -664,7 +665,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
           </select>
           <input v-model="vertex.vertex_id" class="form-input micro" style="flex:1;" placeholder="vertex id (blank matches any)" @input="emitGraphUpdate(selectedNode)" />
           <button class="btn-micro" @click="addAttributePredicate(selectedNode, vertex)">+ Predicate</button>
-          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.lhs.vertices, index)">✕</button>
+          <button class="btn-micro danger" aria-label="Remove vertex pattern" title="Remove vertex pattern" @click="removeEntry(selectedNode, selectedNode.rule.lhs.vertices, index)"><StudioIcon name="close" /></button>
           <div v-for="(predicate, predicateIndex) in vertex.attributes" :key="predicateIndex" class="attribute-row">
             <input v-model="predicate.key" class="form-input micro" style="width:110px;" placeholder="attribute key" @input="emitGraphUpdate(selectedNode)" />
             <select v-model="predicate.op" class="form-select micro" style="width:55px;" @change="emitGraphUpdate(selectedNode)">
@@ -674,7 +675,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
               <option v-for="valueType in attributeValueTypes" :key="valueType" :value="valueType">{{ valueType }}</option>
             </select>
             <input class="form-input micro" style="width:80px;" :value="String(predicate.value.value)" @input="setAttributeValue(selectedNode, (value) => { predicate.value = value; }, predicate.value.type, eventValue($event))" />
-            <button class="btn-micro danger" @click="removeEntry(selectedNode, vertex.attributes, predicateIndex)">✕</button>
+            <button class="btn-micro danger" aria-label="Remove predicate" title="Remove predicate" @click="removeEntry(selectedNode, vertex.attributes, predicateIndex)"><StudioIcon name="close" /></button>
           </div>
         </div>
 
@@ -685,7 +686,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         <div v-for="(pattern, index) in selectedNode.rule.lhs.edges" :key="index" class="graph-pattern-row">
           <input v-model="pattern.edge_id" class="form-input micro" style="width:110px;" placeholder="edge id (blank matches any)" @input="emitGraphUpdate(selectedNode)" />
           <input v-model="pattern.relation_type" class="form-input micro" style="width:110px;" placeholder="relation type" @input="emitGraphUpdate(selectedNode)" />
-          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.lhs.edges, index)">✕</button>
+          <button class="btn-micro danger" aria-label="Remove edge pattern" title="Remove edge pattern" @click="removeEntry(selectedNode, selectedNode.rule.lhs.edges, index)"><StudioIcon name="close" /></button>
           <div class="binding-row">
             <label class="field-sublabel">source</label>
             <select class="form-select micro" style="width:105px;" :value="pattern.source?.type ?? 'literal'" @change="setBinding(selectedNode, (binding) => { pattern.source = binding; }, eventValue($event), bindingRaw(pattern.source))">
@@ -719,7 +720,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
               <option v-for="layer in graphLayers" :key="layer" :value="layer">{{ layer }}</option>
             </select>
             <button class="btn-micro" @click="addRecordAttribute(selectedNode, template.attributes)">+ Attribute</button>
-            <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.rhs.add_vertices, index)">✕</button>
+            <button class="btn-micro danger" aria-label="Remove vertex" title="Remove vertex" @click="removeEntry(selectedNode, selectedNode.rule.rhs.add_vertices, index)"><StudioIcon name="close" /></button>
           </div>
           <div v-for="(value, key) in template.attributes" :key="key" class="attribute-row">
             <input :value="key" class="form-input micro" style="width:110px;" placeholder="attribute key" @change="renameRecordAttribute(selectedNode, template.attributes, key, eventValue($event))" />
@@ -727,7 +728,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
               <option v-for="valueType in attributeValueTypes" :key="valueType" :value="valueType">{{ valueType }}</option>
             </select>
             <input class="form-input micro" style="width:80px;" :value="String(value.value)" @input="setAttributeValue(selectedNode, (next) => { template.attributes[key] = next; }, value.type, eventValue($event))" />
-            <button class="btn-micro danger" @click="removeRecordAttribute(selectedNode, template.attributes, key)">✕</button>
+            <button class="btn-micro danger" aria-label="Remove attribute" title="Remove attribute" @click="removeRecordAttribute(selectedNode, template.attributes, key)"><StudioIcon name="close" /></button>
           </div>
         </div>
 
@@ -740,7 +741,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
             <option v-for="bindingType in bindingTypes" :key="bindingType" :value="bindingType">{{ bindingType }}</option>
           </select>
           <input class="form-input micro" style="flex:1;" :value="bindingRaw(binding)" @input="setBinding(selectedNode!, (next) => { selectedNode!.rule!.rhs.remove_vertices[index] = next; }, binding.type, eventValue($event))" />
-          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.rhs.remove_vertices, index)">✕</button>
+          <button class="btn-micro danger" aria-label="Remove binding" title="Remove binding" @click="removeEntry(selectedNode, selectedNode.rule.rhs.remove_vertices, index)"><StudioIcon name="close" /></button>
         </div>
 
         <div class="field-row-heading">
@@ -771,7 +772,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
           </div>
           <input v-model="edge.relation_type" class="form-input micro" style="width:110px;" placeholder="relation type" @input="emitGraphUpdate(selectedNode)" />
           <input type="number" class="form-input micro" style="width:70px;" :value="edge.weight" @input="edge.weight = Number.isFinite(Number(eventValue($event))) ? Number(eventValue($event)) : 0; emitGraphUpdate(selectedNode)" />
-          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.rhs.add_edges, index)">✕</button>
+          <button class="btn-micro danger" aria-label="Remove edge" title="Remove edge" @click="removeEntry(selectedNode, selectedNode.rule.rhs.add_edges, index)"><StudioIcon name="close" /></button>
         </div>
 
         <div class="field-row-heading">
@@ -788,7 +789,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
             <option v-for="valueType in attributeValueTypes" :key="valueType" :value="valueType">{{ valueType }}</option>
           </select>
           <input class="form-input micro" style="width:80px;" :value="String(assignment.value.value)" @input="setAttributeValue(selectedNode, (value) => { assignment.value = value; }, assignment.value.type, eventValue($event))" />
-          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.rule.rhs.set_attributes, index)">✕</button>
+          <button class="btn-micro danger" aria-label="Remove assignment" title="Remove assignment" @click="removeEntry(selectedNode, selectedNode.rule.rhs.set_attributes, index)"><StudioIcon name="close" /></button>
         </div>
 
         <p class="field-help">The left-hand side matches graph vertices and edges; the right-hand side applies the rewrite. Pattern indexes refer to matched left-hand side vertices.</p>
@@ -803,7 +804,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         <div v-for="(delta, index) in selectedNode.op.micro_deltas" :key="index" class="mutation-row">
           <input type="number" class="form-input micro" style="width:70px;" :value="delta[0]" @input="setPassionRow(selectedNode, delta, 0, eventValue($event))" />
           <input type="number" class="form-input micro" style="flex:1;" :value="delta[1]" @input="setPassionRow(selectedNode, delta, 1, eventValue($event))" />
-          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.op.micro_deltas, index)">✕</button>
+          <button class="btn-micro danger" aria-label="Remove delta" title="Remove delta" @click="removeEntry(selectedNode, selectedNode.op.micro_deltas, index)"><StudioIcon name="close" /></button>
         </div>
 
         <div class="field-row-heading">
@@ -816,7 +817,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
             <option value="true">activate</option>
             <option value="false">deactivate</option>
           </select>
-          <button class="btn-micro danger" @click="removeEntry(selectedNode, selectedNode.op.active_ops, index)">✕</button>
+          <button class="btn-micro danger" aria-label="Remove operation" title="Remove operation" @click="removeEntry(selectedNode, selectedNode.op.active_ops, index)"><StudioIcon name="close" /></button>
         </div>
 
         <p class="field-help">Passion ids are u16 passion indices; deltas and active-pool flags apply through the runtime passion model.</p>
@@ -1092,7 +1093,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         <small class="field-sublabel">Leave empty for any human. A rule participant plays its storylets on its own at the start of each slot.</small>
       </fieldset>
 
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px;">
         <div class="form-group">
           <label class="field-label">Cluster Type</label>
           <select v-model="storylet.cluster_type" class="form-select" @change="$emit('update-storylet')">
@@ -1146,12 +1147,14 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 .precondition-help { margin: 0; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
 .property-inspector-panel {
   width: 340px;
-  background: var(--bg-card);
-  border-left: 1px solid var(--border-subtle);
+  flex: none;
+  background: rgba(255, 255, 255, 0.015);
+  border-left: 1px solid var(--border-faint);
   overflow-y: auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
+  gap: 2px;
   user-select: text;
 }
 
@@ -1159,56 +1162,76 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   margin-bottom: 14px;
-  padding-bottom: 10px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .panel-title {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   margin: 0;
   color: var(--text-main);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* Untyped (plugin and logic) nodes get a neutral chip; typed ones keep their pin colour with dark ink. */
 .type-badge {
-  font-size: 9px;
-  font-weight: 800;
-  padding: 2px 6px;
-  border-radius: var(--radius-xs, 3px);
-  color: #003640;
+  flex: none;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-badge);
+  color: var(--text-main);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
 }
 
-.type-badge.start { background: var(--status-success); color: #fff; }
-.type-badge.dialog { background: var(--secondary); color: #fff; }
-.type-badge.choice { background: var(--tertiary); color: #000; }
-.type-badge.condition { background: var(--status-warning); color: #000; }
-.type-badge.image { background: #ec4899; color: #fff; }
-.type-badge.teleport { background: var(--accent); color: #003640; }
-.type-badge.end { background: var(--status-danger); color: #fff; }
-.type-badge.graph_transform { background: #2563eb; color: #fff; }
-.type-badge.passion_mutation { background: #db2777; color: #fff; }
+.type-badge.start { background: var(--status-success); color: #04160f; }
+.type-badge.dialog { background: var(--secondary); color: #0b0e2a; }
+.type-badge.choice { background: var(--tertiary); color: #1f1300; }
+.type-badge.condition { background: var(--status-warning); color: #1f1300; }
+.type-badge.image { background: #f472b6; color: #2a0716; }
+.type-badge.teleport { background: var(--accent); color: var(--accent-ink); }
+.type-badge.end { background: var(--status-danger); color: #1a0308; }
+.type-badge.graph_transform { background: #60a5fa; color: #04122b; }
+.type-badge.passion_mutation { background: #f472b6; color: #2a0716; }
 
 .field-label {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--text-muted);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   display: block;
 }
 
 .field-sublabel {
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 500;
   color: var(--text-dim);
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   display: block;
 }
 
+.item-kind-label { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.item-kind-label--line { color: var(--secondary); }
+.item-kind-label--idle { color: var(--tertiary); }
+
 .dialogue-section-card {
-  background: var(--surface-container-high, #212735);
+  background: rgba(255, 255, 255, 0.025);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   margin-bottom: 10px;
   overflow: hidden;
 }
@@ -1230,6 +1253,8 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
   font-weight: 700;
   outline: none;
   flex: 1;
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 
 .section-items {
@@ -1242,47 +1267,65 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 
 .field-help { color: var(--text-muted); font-size: 12px; }
 .field-row-heading { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
-.choice-editor-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 5px; margin-bottom: 6px; }
+.choice-editor-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 5px; margin-bottom: 6px; }
 .dialogue-item-card {
   background: var(--bg-input, #141720);
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px;
 }
 
 .form-select.micro,
 .form-input.micro {
-  padding: 3px 6px;
+  min-height: 28px;
+  height: 28px;
+  padding: 3px 8px;
   font-size: 11px;
-  height: 26px;
+  border-radius: var(--radius-sm);
 }
+.form-select.micro { padding-right: 24px; background-position: right 7px center; }
 
 .btn-micro {
-  background: var(--surface-container-high, #212735);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 24px;
+  min-width: 24px;
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border-subtle);
   color: var(--text-main);
-  font-size: 9px;
-  font-weight: 700;
-  padding: 2px 5px;
-  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
 .btn-micro:hover {
-  background: var(--bg-card-hover);
+  background: rgba(255, 255, 255, 0.09);
+  border-color: var(--border-muted);
 }
 
 .btn-micro.danger {
-  color: var(--status-danger);
+  color: var(--text-dim);
+  background: transparent;
+  border-color: transparent;
+  padding: 2px;
 }
 
 .btn-micro.danger:hover {
-  background: rgba(255, 69, 58, 0.2);
+  color: var(--status-danger);
+  background: var(--status-danger-subtle);
 }
 
 .audio-browse-label {
-  font-size: 10px;
-  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--accent-hover);
   cursor: pointer;
   font-weight: 600;
 }
@@ -1315,6 +1358,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
   gap: 6px;
   margin-top: 4px;
 }
-.played-by { border: 1px solid var(--border-subtle); padding: 8px 12px; margin: 0 0 12px; }
+.played-by { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 8px 12px; margin: 0 0 12px; }
 .played-by__option { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 13px; }
 </style>

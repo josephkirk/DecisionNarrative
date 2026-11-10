@@ -6,7 +6,25 @@ import { studioState, notify } from "./studio/state.ts";
 import { StudioApi } from "./studio/api.ts";
 import { refreshWorkspace } from "./studio/view-models/workspace.ts";
 import ProjectTree from "./studio/components/ProjectTree.vue";
+import PaneWorkspace from "./studio/components/PaneWorkspace.vue";
+import StudioIcon from "./studio/components/StudioIcon.vue";
 import { buildInteractionContext, interactionContextKey, type InteractionFocus } from "./studio/interactionContext.ts";
+import { focusedRoute, focusedRouter } from "./studio/view-models/panes.ts";
+import AppearancePanel from "./studio/components/AppearancePanel.vue";
+import BrandMark from "./studio/components/BrandMark.vue";
+import { appearance, applyAppearance, onAppearanceStorageError } from "./studio/view-models/appearance.ts";
+
+applyAppearance();
+onAppearanceStorageError((message) => notify(message, "error"));
+
+/** Toolbar destinations open in the focused split pane; modified clicks keep browser behavior. */
+function navigate(path: string, event: MouseEvent) {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  void focusedRouter.push(path);
+}
+const focusedPath = computed(() => focusedRoute()?.path ?? "");
+const isCurrent = (path: string) => focusedPath.value === path || focusedPath.value.startsWith(`${path}/`);
 
 const route = useRoute();
 const interactionFocus = ref<InteractionFocus | null>(null);
@@ -40,7 +58,10 @@ watch(interactionContext, (context) => {
 const TREE_WIDTH_KEY = "dn.studio.treeWidth";
 const treeWidth = ref(readTreeWidth());
 const resizing = ref(false);
-const isTreeCollapsed = ref(false);
+// On phones the navigator is an overlay: start closed and close it after each navigation.
+const phoneQuery = window.matchMedia("(max-width: 768px)");
+const isTreeCollapsed = ref(phoneQuery.matches);
+watch(() => route.fullPath, () => { if (phoneQuery.matches) isTreeCollapsed.value = true; });
 
 function readTreeWidth(): number {
   try {
@@ -93,47 +114,56 @@ onMounted(async () => {
 
 <template>
   <div class="studio-root">
+    <div
+      class="studio-backdrop"
+      :class="{ 'has-image': appearance.backgroundImage, 'is-blurred': appearance.backgroundImage && appearance.blur }"
+      :style="appearance.backgroundImage ? { backgroundImage: `url(${appearance.backgroundImage})` } : undefined"
+      aria-hidden="true"
+    ></div>
     <header class="studio-toolbar">
       <button
         type="button"
         class="sidebar-toggle-btn"
         :aria-label="isTreeCollapsed ? 'Expand project tree' : 'Collapse project tree'"
+        :aria-pressed="!isTreeCollapsed"
         :title="isTreeCollapsed ? 'Expand project tree' : 'Collapse project tree'"
         @click="isTreeCollapsed = !isTreeCollapsed"
       >
-        <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-          <line x1="9" y1="3" x2="9" y2="21"/>
-        </svg>
+        <StudioIcon name="sidebar" class="toggle-icon" />
       </button>
 
       <div class="studio-toolbar__brand">
-        <span class="studio-toolbar__title">DecisionNarrative</span>
-        <span class="studio-toolbar__subtitle">Storylet Studio</span>
+        <BrandMark />
+        <span class="studio-toolbar__title">Erzählstudio</span>
       </div>
-      <nav class="studio-toolbar__nav">
-        <router-link
+      <nav class="studio-toolbar__nav" aria-label="Studio">
+        <a
           v-for="item in NAVIGATION_ITEMS"
           :key="item.id"
-          :to="item.path"
+          :href="`#${item.path}`"
           class="studio-toolbar__link"
+          :class="{ 'router-link-active': isCurrent(item.path) }"
+          :aria-current="isCurrent(item.path) ? 'page' : undefined"
+          @click="navigate(item.path, $event)"
         >
           {{ item.label }}
-        </router-link>
+        </a>
       </nav>
 
-      <router-link to="/play" class="btn btn-primary studio-toolbar__play" aria-label="Play the project">▶ Play</router-link>
-
-      <div class="studio-toolbar__status">
-        {{ studioState.project?.name ?? "Workspace" }} · rev {{ studioState.project?.revision ?? 0 }}
+      <AppearancePanel />
+      <div class="studio-toolbar__status" :title="`Project revision ${studioState.project?.revision ?? 0}`">
+        <span class="studio-toolbar__status-dot" aria-hidden="true"></span>
+        {{ studioState.project?.name ?? "Workspace" }} <span class="studio-toolbar__rev">rev {{ studioState.project?.revision ?? 0 }}</span>
       </div>
+      <a href="#/play" class="btn btn-primary studio-toolbar__play" aria-label="Play the project" @click="navigate('/play', $event)"><StudioIcon name="play" /> Play</a>
     </header>
 
-    <div class="studio-body">
+    <div class="studio-body" :class="{ 'is-resizing': resizing }">
       <aside
         :class="['project-tree-panel', isTreeCollapsed && 'is-collapsed']"
         :style="{ width: isTreeCollapsed ? '0px' : `${treeWidth}px` }"
         :aria-hidden="isTreeCollapsed"
+        :inert="isTreeCollapsed || undefined"
       >
         <ProjectTree />
       </aside>
@@ -147,7 +177,7 @@ onMounted(async () => {
       ></div>
 
       <main class="studio-main">
-        <router-view :key="$route.fullPath" />
+        <PaneWorkspace />
 
         <div
           v-if="studioState.notification"
@@ -155,6 +185,7 @@ onMounted(async () => {
           :role="studioState.notification.type === 'error' ? 'alert' : 'status'"
           aria-live="polite"
         >
+          <span class="notification-toast__dot" aria-hidden="true"></span>
           <span>{{ studioState.notification.message }}</span>
         </div>
       </main>

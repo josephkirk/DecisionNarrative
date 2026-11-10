@@ -11,6 +11,7 @@ import ReferenceList from "../components/ReferenceList.vue";
 import TagEditor from "../components/TagEditor.vue";
 import ThumbnailPicker from "../components/ThumbnailPicker.vue";
 import { entityPanelsFor, traitInspectorFor } from "../plugins/runtime.ts";
+import { countLabel } from "../countLabel.ts";
 const route = useRoute(); const router = useRouter(); const entityId = typeof route.params.id === "string" ? route.params.id : "";
 const editor = useEntityEditor(entityId); const { draft, dirty, loading, saving, activeTab, references, referencesLoading, isWorld, isEntityRoute, loadReferences, patch, addTrait, removeTrait, setTraitValue, traitPropertyDisplayValue, save, remove } = editor;
 const intrinsic = computed(() => isWorld.value);
@@ -109,6 +110,14 @@ onMounted(() => { void loadReferences(); });
 const confirmDiscard = () => !dirty.value || window.confirm("Discard unsaved changes?");
 onBeforeRouteLeave(confirmDiscard);
 onBeforeRouteUpdate(confirmDiscard);
+
+/** Mouse wheels scroll the tab strip sideways when plugin tabs overflow a narrow pane. */
+function scrollTabs(event: WheelEvent) {
+  const strip = event.currentTarget as HTMLElement;
+  if (strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+  event.preventDefault();
+  strip.scrollLeft += event.deltaY;
+}
 </script>
 <template>
   <div v-if="!loading && draft" class="entity-page-surface scroll-fade-mask">
@@ -140,7 +149,7 @@ onBeforeRouteUpdate(confirmDiscard);
           <div class="entity-subtitle-row">
             <span v-if="appliedTraitLabels.length" class="entity-type-label">{{ appliedTraitLabels.join(" · ") }}</span>
             <span v-else class="entity-standalone-text">No traits</span>
-            <span class="entity-bullet-sep">•</span>
+            <span v-if="parentTemplate || templateId || (!intrinsic && isEntityRoute)" class="entity-bullet-sep" aria-hidden="true">•</span>
             <span v-if="parentTemplate" class="entity-parent-link">
               Template: <router-link :to="`/entity-templates/${parentTemplate.id}`">{{ parentTemplate.name }}</router-link>
             </span>
@@ -156,7 +165,7 @@ onBeforeRouteUpdate(confirmDiscard);
       <div class="entity-hero-right">
         <div v-if="draft.game_id || draft.object_id" class="entity-runtime-badge">
           <span class="runtime-key">Runtime ID:</span>
-          <code class="runtime-val">{{ draft.game_id || draft.object_id }}</code>
+          <code class="runtime-val" :title="draft.game_id || draft.object_id">{{ draft.game_id || draft.object_id }}</code>
         </div>
         <div class="entity-hero-buttons">
           <span v-if="intrinsic" class="badge">Intrinsic · Read-Only</span>
@@ -167,7 +176,7 @@ onBeforeRouteUpdate(confirmDiscard);
     </header>
 
     <!-- Tab Navigation matching Image #2 -->
-    <nav class="entity-tabs" aria-label="Entity sections">
+    <nav class="entity-tabs" aria-label="Entity sections" @wheel="scrollTabs">
       <button :class="['entity-tab', activeTab === 'properties' && 'is-active']" @click="activeTab = 'properties'">
         <svg aria-hidden="true" class="tab-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="3" y1="6" x2="21" y2="6"/>
@@ -232,7 +241,7 @@ onBeforeRouteUpdate(confirmDiscard);
       <div class="content-block lore-block">
         <div class="content-block-head">
           <span class="block-title">Description</span>
-          <span class="char-count-tag">{{ (draft.description || '').length }} characters</span>
+          <span class="char-count-tag">{{ countLabel((draft.description || '').length, "character") }}</span>
         </div>
         <textarea
           class="lore-textarea"
@@ -258,7 +267,7 @@ onBeforeRouteUpdate(confirmDiscard);
           placeholder="Choose gameplay tags…"
           @update:model-value="updateTags"
         />
-        <span v-else class="intrinsic-tags-text">{{ draft.tags.length ? draft.tags.join(', ') : 'No gameplay tags' }}</span>
+        <span v-else class="intrinsic-tags-text" :class="{ 'is-empty': !draft.tags.length }">{{ draft.tags.length ? draft.tags.join(', ') : 'No gameplay tags' }}</span>
       </div>
 
       <!-- 3. Typed Properties -->
@@ -343,324 +352,8 @@ onBeforeRouteUpdate(confirmDiscard);
 </template>
 
 <style scoped>
-.entity-page-surface {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 20px 24px;
-  max-width: 960px;
-  margin: 0 auto;
-  width: 100%;
-  height: 100%;
-  overflow-y: auto;
-}
-
-/* Hero card matching Image #2 */
-.entity-hero-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 18px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg, 10px);
-}
-
-.entity-hero-left {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex: 1;
-  min-width: 0;
-}
-
-.entity-hero-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-}
-
-.entity-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.entity-hero-input {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text-main);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm, 4px);
-  padding: 2px 6px;
-  letter-spacing: -0.01em;
-  max-width: 380px;
-  width: 100%;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
-}
-
-.entity-hero-input:hover {
-  border-color: var(--border-subtle);
-  background: var(--bg-input);
-}
-
-.entity-hero-input:focus-visible {
-  border-color: var(--accent);
-  background: var(--bg-input);
-  box-shadow: 0 0 0 1px var(--accent-subtle);
-}
-
-.entity-hero-heading {
-  font-size: 20px;
-  font-weight: 700;
-  margin: 0;
-  color: var(--text-main);
-}
-
-.entity-id-tag {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  padding: 2px 6px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xs, 3px);
-  color: var(--text-dim);
-}
-
-.entity-subtitle-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-  flex-wrap: wrap;
-}
-
-.entity-type-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  font-size: 12px;
-}
-
-.entity-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  flex-shrink: 0;
-}
-
-.entity-bullet-sep {
-  color: var(--text-dim);
-}
-
-.entity-parent-link {
-  color: var(--text-muted);
-}
-
-.entity-parent-link a {
-  color: var(--accent);
-  text-decoration: none;
-  font-weight: 500;
-}
-.entity-parent-link a:hover {
-  text-decoration: underline;
-}
-
-.entity-standalone-text {
-  color: var(--text-dim);
-}
-
-.entity-unsaved-pill {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 9999px;
-  background: rgba(245, 158, 11, 0.15);
-  color: var(--status-warning);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-}
-
-.entity-hero-right {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-@media (max-width: 600px) {
-  .entity-hero-card { flex-direction: column; align-items: stretch; }
-  .entity-hero-right { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-  .entity-hero-input { min-width: 0; }
-}
-
-.entity-runtime-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-}
-
-.runtime-key {
-  color: var(--text-dim);
-}
-
-.runtime-val {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 1px 5px;
-  border-radius: var(--radius-xs, 3px);
-  border: 1px solid var(--border-subtle);
-}
-
-.entity-hero-buttons {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.btn-danger-hover:hover {
-  border-color: var(--status-danger) !important;
-  color: var(--status-danger) !important;
-  background: var(--status-danger-subtle) !important;
-}
-
-/* Tab bar matching Image #2 */
-.entity-tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--border-subtle);
-  padding: 0 4px;
-}
-
-.entity-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  padding: 8px 14px;
-  color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
-}
-
-.entity-tab:hover {
-  color: var(--text-main);
-}
-
-.entity-tab.is-active {
-  color: var(--text-main);
-  font-weight: 600;
-  border-bottom-color: var(--accent);
-}
-
-.tab-glyph {
-  width: 14px;
-  height: 14px;
-}
-
-.tab-badge {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  padding: 1px 6px;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-muted);
-}
-
-/* Content stack grouping with spacing */
-.entity-content-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.content-block {
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg, 10px);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.content-block-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.block-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-}
-
-.block-sub {
-  font-size: 10px;
-  color: var(--text-dim);
-  font-weight: 400;
-}
-
-.block-hint {
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-.char-count-tag, .defined-pill {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-dim);
-  background: rgba(255, 255, 255, 0.05);
-  padding: 2px 6px;
-  border-radius: var(--radius-xs, 3px);
-  border: 1px solid var(--border-subtle);
-}
-
-.lore-textarea {
-  font-family: var(--font-serif);
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--text-main);
-  background: var(--bg-input);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md, 8px);
-  padding: 12px;
-  width: 100%;
-  max-width: 75ch;
-  min-height: 84px;
-  resize: vertical;
-  transition: border-color 0.15s ease;
-}
-
-.lore-textarea:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-subtle);
-}
-
-.btn-compact {
-  font-size: 11px;
-  padding: 2px 8px;
-}
+.intrinsic-tags-text { font-size: 13px; color: var(--text-main); }
+.intrinsic-tags-text.is-empty { color: var(--text-muted); font-weight: 400; }
 
 .archetype-control-row {
   display: flex;

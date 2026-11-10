@@ -13,7 +13,10 @@ export function thumbnailUrl(reference: string | null | undefined): string | nul
   return `/api/v3/files/${path}`;
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** First user-perceived character, so emoji and combined marks never render as a broken half. */
 export function thumbnailInitial(label: string): string {
-  const trimmed = label.trim();
-  return trimmed ? trimmed.charAt(0).toUpperCase() : "?";
+  const first = graphemes.segment(label.trim())[Symbol.iterator]().next().value?.segment;
+  return first ? first.toLocaleUpperCase() : "?";
 }

@@ -733,6 +733,8 @@ pub struct TraitTemplateRecord {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<String>,
     #[serde(default)]
     pub folder_id: Option<String>,
     pub properties: Vec<TraitPropertyDefinition>,

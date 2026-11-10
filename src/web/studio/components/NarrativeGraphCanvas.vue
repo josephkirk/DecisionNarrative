@@ -1,9 +1,20 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { learnNodeDefaults, graphNodeTypes, graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, GRAPH_PIN_COLORS, type GraphValueType, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType } from "../narrativeGraphTypes.ts";
 import { studioState, notify } from "../state.ts";
 import { hasTraitKey } from "../entityModel.ts";
 import { registry, nodeTypeContribution, pluginNodeDeleted } from "../plugins/runtime.ts";
+import StudioIcon from "./StudioIcon.vue";
+import { countLabel } from "../countLabel.ts";
+
+/** Icon for a node type header; tag nodes carry a small +/−/? qualifier. */
+const NODE_ICONS: Partial<Record<string, string>> = {
+  start: "play", dialog: "chat", choice: "branch", image: "assets", go_to_location: "pin", teleport: "pin",
+  graph_transform: "link", add_entity_tag: "tag", remove_entity_tag: "tag", has_entity_tag: "tag", plugin: "plug",
+  learn: "eye", reveal: "eye", knows: "eye", end: "close",
+};
+const TAG_QUALIFIER: Partial<Record<string, string>> = { add_entity_tag: "+", remove_entity_tag: "−", has_entity_tag: "?" };
+const nodeIcon = (type: string) => NODE_ICONS[type] ?? "settings";
 
 const props = withDefaults(defineProps<{
   initialGraph: NarrativeGraph;
@@ -23,6 +34,44 @@ const panX = ref(40);
 const panY = ref(60);
 const isPanning = ref(false);
 const startPan = ref({ x: 0, y: 0 });
+
+/** Vertical room the floating toolbar takes (it wraps to two rows in narrow panes); the home view starts below it. */
+const toolbarRef = ref<HTMLElement | null>(null);
+const toolbarClearance = ref(60);
+let toolbarObserver: ResizeObserver | null = null;
+onMounted(() => {
+  const toolbar = toolbarRef.value;
+  if (!toolbar || typeof ResizeObserver === "undefined") return;
+  toolbarObserver = new ResizeObserver(() => { toolbarClearance.value = toolbar.offsetTop + toolbar.offsetHeight + 20; });
+  toolbarObserver.observe(toolbar);
+});
+onBeforeUnmount(() => toolbarObserver?.disconnect());
+// Follow the toolbar only while the view is still at its home position.
+watch(toolbarClearance, (next, previous) => { if (panY.value === previous && zoom.value === 1) panY.value = next; });
+function resetView() {
+  zoom.value = 1;
+  panX.value = 40;
+  panY.value = toolbarClearance.value;
+}
+/** Zooms out (never in past 100%) and pans so every node sits in view below the toolbar. */
+function fitView() {
+  const container = containerRef.value;
+  if (!container || !nodes.value.length) return resetView();
+  const cards = container.querySelectorAll<HTMLElement>(".graph-node");
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  nodes.value.forEach((node, index) => {
+    minX = Math.min(minX, node.x);
+    minY = Math.min(minY, node.y);
+    maxX = Math.max(maxX, node.x + nodeWidth(node));
+    maxY = Math.max(maxY, node.y + (cards[index]?.offsetHeight ?? NEW_NODE_SIZE.h));
+  });
+  const pad = 24;
+  const width = Math.max(1, container.clientWidth - pad * 2);
+  const height = Math.max(1, container.clientHeight - toolbarClearance.value - pad);
+  zoom.value = Math.max(0.3, Math.min(1, width / (maxX - minX), height / (maxY - minY)));
+  panX.value = pad - minX * zoom.value;
+  panY.value = toolbarClearance.value - minY * zoom.value;
+}
 
 // Graph state
 const nodes = ref<NarrativeNode[]>([]);
@@ -183,12 +232,22 @@ function onCanvasContextMenu(e: MouseEvent) {
   openMenu(e, "canvas");
 }
 
+const contextMenuRef = ref<HTMLElement | null>(null);
+
 function openMenu(e: MouseEvent, kind: "canvas" | "node" | "edge", targetId?: string) {
   const rect = containerRef.value?.getBoundingClientRect();
   if (!rect) return;
   contextMenu.value = { kind, targetId, x: e.clientX - rect.left, y: e.clientY - rect.top };
   contextWorld.value = eventToWorld(e);
   nodeSearch.value = "";
+  // The canvas clips its children, so a menu opened near an edge flips back inside it.
+  void nextTick(() => {
+    const menu = contextMenuRef.value, menuState = contextMenu.value;
+    if (!menu || !menuState) return;
+    const gap = 8;
+    if (menuState.x + menu.offsetWidth > rect.width - gap) menuState.x = Math.max(gap, menuState.x - menu.offsetWidth);
+    if (menuState.y + menu.offsetHeight > rect.height - gap) menuState.y = Math.max(gap, rect.height - gap - menu.offsetHeight);
+  });
 }
 
 function selectNode(node: NarrativeNode) {
@@ -215,10 +274,22 @@ function startNodeDrag(e: MouseEvent, node: NarrativeNode) {
   };
 }
 
+/** Stored widths can be tiny (imported or hand-written graphs); below this the header and choices clip. */
+const MIN_NODE_WIDTH = 140;
+const nodeWidth = (node: NarrativeNode) => Math.max(node.width ?? 0, MIN_NODE_WIDTH);
+
+/** Mouse wheels only scroll vertically; turn that into sideways scrolling so hidden node types are reachable. */
+function scrollPalette(e: WheelEvent) {
+  const palette = e.currentTarget as HTMLElement;
+  if (palette.scrollWidth <= palette.clientWidth) return;
+  e.preventDefault();
+  palette.scrollLeft += Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+}
+
 // Socket Connection Dragging
 function startConnection(e: MouseEvent, node: NarrativeNode, port: string, socketYOffset: number) {
   e.stopPropagation();
-  let startX = node.x + node.width;
+  let startX = node.x + nodeWidth(node);
   let startY = node.y + socketYOffset;
 
   const targetEl = e.currentTarget as HTMLElement | null;
@@ -328,30 +399,38 @@ function removeNode(nodeId: string) {
   emitUpdate();
 }
 
+/** Footprint used to keep toolbar-inserted nodes off existing cards. */
+const NEW_NODE_SIZE = { w: 260, h: 160 } as const;
+
 // Create new node of type
 function addNode(type: NodeType, pluginType?: string) {
   const nextId = `node_${pluginType ? pluginType.replace(/[^a-z0-9]/gi, "_") : type}_${Date.now().toString(36)}`;
   const fromCanvasMenu = contextMenu.value?.kind === "canvas" && contextWorld.value !== null;
+  // Toolbar inserts land in the middle of the visible canvas (below the toolbar), whatever the pane width.
+  const view = containerRef.value?.getBoundingClientRect();
+  const screenX = view ? Math.max(24, view.width / 2 - NEW_NODE_SIZE.w / 2) : 400;
+  const screenY = view ? Math.max(toolbarClearance.value, view.height / 2 - NEW_NODE_SIZE.h / 2) : 250;
   let x = fromCanvasMenu
     ? contextWorld.value!.x
-    : Math.round((-panX.value + 400) / zoom.value);
+    : Math.round((-panX.value + screenX) / zoom.value);
   let y = fromCanvasMenu
     ? contextWorld.value!.y
-    : Math.round((-panY.value + 250) / zoom.value);
+    : Math.round((-panY.value + screenY) / zoom.value);
 
-  // Toolbar inserts would otherwise stack exactly on top of each other; walk a
-  // diagonal cascade until the slot is free.
+  // Toolbar inserts would otherwise land on top of existing cards; step below
+  // whichever card the slot overlaps until it is free.
   if (!fromCanvasMenu) {
-    let attempts = 0;
-    const maxAttempts = nodes.value.length + 2;
-    while (
-      attempts < maxAttempts &&
-      nodes.value.some((node) => Math.abs(node.x - x) < 24 && Math.abs(node.y - y) < 24)
-    ) {
-      x += 48;
-      y += 48;
-      attempts += 1;
+    const gap = 24;
+    for (let attempts = 0; attempts <= nodes.value.length; attempts += 1) {
+      const blocker = nodes.value.find((node) =>
+        x < node.x + nodeWidth(node) + gap && node.x < x + NEW_NODE_SIZE.w + gap
+        && y < node.y + (node.height || NEW_NODE_SIZE.h) + gap && node.y < y + NEW_NODE_SIZE.h + gap);
+      if (!blocker) break;
+      y = blocker.y + (blocker.height || NEW_NODE_SIZE.h) + gap;
     }
+    // A slot pushed below the visible area scrolls into view so the new card is never placed unseen.
+    const bottom = (y + NEW_NODE_SIZE.h) * zoom.value + panY.value;
+    if (view && bottom > view.height - gap) panY.value -= bottom - (view.height - gap);
   }
 
   const baseNode: NarrativeNode = {
@@ -523,7 +602,7 @@ const computedEdges = computed(() => {
       if (idx >= 0) fromY = fromNode.y + 58 + idx * 30;
     }
 
-    const startX = fromNode.x + fromNode.width;
+    const startX = fromNode.x + nodeWidth(fromNode);
     const startY = fromY;
     const endX = toNode.x;
     const inputOffset = edge.kind === "data"
@@ -555,8 +634,8 @@ const computedEdges = computed(() => {
     @contextmenu.prevent="onCanvasContextMenu"
   >
     <!-- Top Floating Toolbar -->
-    <div class="graph-toolbar">
-      <div style="display:flex; align-items:center; gap:8px; min-width:0; max-width:calc(100% - 150px); overflow-x:auto;">
+    <div ref="toolbarRef" class="graph-toolbar">
+      <div class="graph-toolbar__palette" role="toolbar" aria-label="Add node" @wheel.stop="scrollPalette">
         <button class="node-tool-btn" @click="addNode('start')">Start</button>
         <button class="node-tool-btn" @click="addNode('get_entity')">Get entity</button>
         <button class="node-tool-btn" @click="addNode('get_entity_property')">Get property</button>
@@ -585,12 +664,11 @@ const computedEdges = computed(() => {
         </template>
       </div>
 
-      <div style="display:flex; align-items:center; gap:8px;">
-        <span style="font-size:11px; font-weight:600; width:45px; text-align:center;">
-          {{ Math.round(zoom * 100) }}%
-        </span>
-        <button class="btn btn-secondary" style="font-size:11px; padding:3px 8px;" @click="zoom = 1.0; panX = 40; panY = 60;">Reset</button>
-        <button v-if="props.graphMode === 'story'" class="btn btn-primary" style="font-size:11px; padding:4px 10px;" @click="emitUpdate">Sync to Storylet</button>
+      <div class="graph-toolbar__view">
+        <span class="graph-toolbar__zoom" aria-label="Zoom level">{{ Math.round(zoom * 100) }}%</span>
+        <button type="button" class="btn btn-secondary graph-toolbar__btn" title="Zoom out to show every node" @click="fitView">Fit</button>
+        <button type="button" class="btn btn-secondary graph-toolbar__btn" title="Back to 100% at the start" @click="resetView">Reset</button>
+        <button v-if="props.graphMode === 'story'" type="button" class="btn btn-primary graph-toolbar__btn" @click="emitUpdate">Sync to Storylet</button>
       </div>
     </div>
 
@@ -647,7 +725,7 @@ const computedEdges = computed(() => {
         :style="{
           left: `${node.x}px`,
           top: `${node.y}px`,
-          width: `${node.width}px`,
+          width: `${nodeWidth(node)}px`,
           minHeight: node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.itemInput ? '120px' : undefined,
         }"
         @click.stop="selectNode(node)"
@@ -657,11 +735,11 @@ const computedEdges = computed(() => {
         <div class="node-header" @mousedown="startNodeDrag($event, node)">
           <div class="node-header-title">
             <span class="node-icon">
-              {{ node.type === 'start' ? '▶' : node.type === 'dialog' ? '💬' : node.type === 'choice' ? '🔀' : node.type === 'image' ? '🎨' : node.type === 'go_to_location' ? '📍' : node.type === 'graph_transform' ? '🕸️' : node.type === 'passion_mutation' ? '💗' : node.type === 'add_entity_tag' ? '🏷️+' : node.type === 'remove_entity_tag' ? '🏷️-' : node.type === 'has_entity_tag' ? '🏷️?' : node.type === 'plugin' ? '🧩' : '⚙️' }}
+              <StudioIcon :name="nodeIcon(node.type)" /><span v-if="TAG_QUALIFIER[node.type]" class="node-icon__qualifier">{{ TAG_QUALIFIER[node.type] }}</span>
             </span>
             <input v-model="node.title" class="node-title-input" @input="emitUpdate" />
           </div>
-          <button class="node-close-btn" title="Delete node" aria-label="Delete node" @mousedown.stop @click.stop="removeNode(node.id)">✕</button>
+          <button type="button" class="node-close-btn" title="Delete node" aria-label="Delete node" @mousedown.stop @click.stop="removeNode(node.id)"><StudioIcon name="close" /></button>
         </div>
 
         <!-- Node Body Content based on Type -->
@@ -691,8 +769,8 @@ const computedEdges = computed(() => {
           <!-- DIALOG -->
           <div v-else-if="node.type === 'dialog'">
             <div class="field-label">Dialogue sequence</div>
-            <div style="font-size:11px;">{{ node.sections?.length ?? 0 }} sections · {{ node.sections?.reduce((total, section) => total + section.items.length, 0) ?? 0 }} steps</div>
-            <div v-if="node.sections?.[0]?.items?.[0]?.kind === 'line'" class="node-dialog-preview">
+            <div style="font-size:11px;">{{ countLabel(node.sections?.length ?? 0, "section") }} · {{ countLabel(node.sections?.reduce((total, section) => total + section.items.length, 0) ?? 0, "step") }}</div>
+            <div v-if="node.sections?.[0]?.items?.[0]?.kind === 'line'" class="node-dialog-preview" :title="node.sections[0].items[0].content || undefined">
               {{ node.sections[0].items[0].content || 'Select to edit dialogue…' }}
             </div>
           </div>
@@ -701,7 +779,7 @@ const computedEdges = computed(() => {
           <div v-else-if="node.type === 'choice'">
             <div class="field-label" style="margin-bottom:8px;">Choices & Branching:</div>
             <div v-for="(opt, idx) in node.choices" :key="opt.id" class="choice-option-row">
-              <input v-model="opt.text" class="form-input" style="font-size:11px; padding:4px 6px; flex:1;" @input="emitUpdate" />
+              <input v-model="opt.text" class="form-input" style="font-size:11px; padding:4px 6px; flex:1; min-width:0; text-overflow:ellipsis;" :title="opt.text" @input="emitUpdate" />
               <!-- Sockets on each choice item -->
               <div
                 class="socket output-socket choice-socket"
@@ -748,7 +826,7 @@ const computedEdges = computed(() => {
             <div class="field-label">Topic graph</div>
             <div style="font-size:11px;">{{ node.topic_nodes?.length ?? 0 }} topics · {{ node.topic_edges?.length ?? 0 }} transitions</div>
             <div v-for="(pin, index) in waypointExitPins(node)" :key="pin.id" class="choice-option-row">
-              <span style="font-size:11px; flex:1;">{{ pin.label }}</span>
+              <span style="font-size:11px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="pin.label">{{ pin.label }}</span>
               <div class="socket output-socket choice-socket" :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }" :title="`Connect ${pin.label} exit`" @mousedown="startConnection($event, node, pin.id, 72 + index * 30)"></div>
             </div>
           </div>
@@ -763,7 +841,7 @@ const computedEdges = computed(() => {
           <div v-else-if="node.type === 'condition'">
             <div class="field-label">Condition Node · Boolean switch input</div>
             <div v-for="(pin, index) in conditionalBranchPins" :key="pin.id" class="choice-option-row">
-              <span style="font-size:11px; flex:1;">{{ pin.label }}</span>
+              <span style="font-size:11px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="pin.label">{{ pin.label }}</span>
               <div class="socket output-socket choice-socket" :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }" :title="`Connect ${pin.label} branch`" @mousedown="startConnection($event, node, pin.id, 58 + index * 30)"></div>
             </div>
           </div>
@@ -840,7 +918,7 @@ const computedEdges = computed(() => {
         ></div>
       </div>
     </div>
-    <div v-if="contextMenu" class="graph-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @mousedown.stop @click.stop>
+    <div v-if="contextMenu" ref="contextMenuRef" class="graph-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @mousedown.stop @click.stop>
       <template v-if="contextMenu.kind === 'canvas'">
         <input v-model="nodeSearch" class="form-input" placeholder="Search node types" autofocus @keydown.esc="contextMenu = null" />
         <button v-for="type in matchingNodeTypes" :key="type" class="context-menu-item" @click="addNode(type)">+ {{ nodeTypeLabel(type) }}</button>
@@ -859,9 +937,10 @@ const computedEdges = computed(() => {
   position: relative;
   width: 100%;
   height: 100%;
-  overflow: hidden;
+  /* clip, not hidden: focusing a partly off-screen node input must not scroll the canvas (it would shift the toolbar). */
+  overflow: clip;
   background-color: var(--bg-canvas);
-  background-image: radial-gradient(#1d2332 1.2px, transparent 1.2px);
+  background-image: radial-gradient(var(--border-muted) 1.2px, transparent 1.2px);
   background-size: 24px 24px;
   cursor: grab;
   user-select: none;
@@ -874,38 +953,70 @@ const computedEdges = computed(() => {
 .graph-toolbar {
   position: absolute;
   top: 12px;
-  left: 16px;
-  right: 16px;
+  left: 12px;
+  right: 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  background: var(--bg-card);
+  gap: 8px;
+  padding: 6px;
+  background: var(--bg-elevated, var(--bg-card));
+  backdrop-filter: blur(16px);
   border: 1px solid var(--border-subtle);
-  border-radius: 0;
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-md);
   z-index: 100;
 }
 
+/* The palette scrolls on its own so the view controls never overlap it. */
+.graph-toolbar__palette {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+.graph-toolbar__palette::-webkit-scrollbar { display: none; }
+.graph-toolbar__view {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-subtle);
+}
+.graph-toolbar__zoom { min-width: 40px; text-align: center; font-size: 11px; font-weight: 600; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.graph-toolbar__btn { min-height: 30px; padding: 0 10px; font-size: 12px; }
+
 .node-tool-btn {
-  background: var(--surface-container-high, #212735);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-main);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
   font-size: 12px;
-  font-weight: 500;
-  min-height: 44px;
-  padding: 0 12px;
-  border-radius: 0;
+  font-weight: 550;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm, 6px);
   cursor: pointer;
-  transition: background-color 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out;
+  transition: background-color 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out, transform 0.1s var(--ease-out);
   flex: 0 0 auto;
   white-space: nowrap;
 }
 
 .node-tool-btn:hover {
-  background: var(--bg-card-hover);
-  border-color: var(--accent);
-  color: var(--accent);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-main);
+}
+.node-tool-btn:active { transform: scale(0.96); }
+.node-tool-plugin { color: var(--accent-hover); }
+/* Narrow panes: palette gets the full first row, view controls move to their own row. */
+@container pane (max-width: 560px) {
+  .graph-toolbar { flex-wrap: wrap; }
+  .graph-toolbar__palette { flex: 1 1 100%; }
+  .graph-toolbar__view { border-left: 0; padding-left: 0; margin-left: auto; }
 }
 
 
@@ -953,11 +1064,16 @@ const computedEdges = computed(() => {
   pointer-events: none;
 }
 
+/* Three clamped lines end in an ellipsis instead of a hard cut mid-glyph; long URLs wrap. */
 .node-dialog-preview {
   margin-top: 6px;
-  color: #c7c7cc;
-  max-height: 40px;
+  color: var(--text-muted);
   overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 .graph-context-menu {
@@ -970,12 +1086,13 @@ const computedEdges = computed(() => {
   max-height: min(360px, 70vh);
   padding: 8px;
   overflow: auto;
-  background: var(--surface-container-high, #212735);
+  background: var(--bg-elevated, #1c2336);
   border: 1px solid var(--border-muted);
-  border-radius: 0;
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-lg);
 }
 
-.context-menu-item { min-height: 44px; padding: 0 10px; text-align: left; color: var(--text-main); background: transparent; border: 0; border-radius: 0; cursor: pointer; transition: background-color 0.12s ease-out; }
+.context-menu-item { min-height: 32px; padding: 0 10px; text-align: left; color: var(--text-main); background: transparent; border: 0; border-radius: var(--radius-sm, 6px); cursor: pointer; transition: background-color 0.12s ease-out; }
 .context-menu-item:hover { background: var(--bg-card-hover); }
 .context-menu-item.danger { color: var(--status-danger); }
 .context-menu-empty { padding: 6px 8px; color: var(--text-muted); font-size: 12px; }
@@ -987,23 +1104,23 @@ const computedEdges = computed(() => {
   stroke-dasharray: 5 4;
 }
 
-/* Node cards (DESIGN.md): solid fill, 1px structural border, zero radius, 2px type strip */
+/* Node cards: solid fill, hairline border, rounded corners, 2px type strip on top. */
 .graph-node {
   position: absolute;
   background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-muted);
   border-top: 2px solid var(--text-dim);
-  border-radius: 0;
+  border-radius: var(--radius-md, 9px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
   pointer-events: auto;
   user-select: none;
-  transition: border-color 0.12s ease-out;
+  transition: border-color 0.12s ease-out, box-shadow 0.12s ease-out;
 }
 
 .graph-node.selected {
   border-color: var(--accent);
   border-top-color: var(--accent);
-  outline: 1px solid var(--accent);
-  outline-offset: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent), 0 6px 18px rgba(0, 0, 0, 0.28);
 }
 
 .graph-node.start { border-top-color: var(--status-success); }
@@ -1015,7 +1132,9 @@ const computedEdges = computed(() => {
 .node-header {
   padding: 0 10px;
   min-height: 28px;
-  background: var(--surface-container-high, #212735);
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 7px 7px 0 0;
   color: var(--text-main);
   display: flex;
   justify-content: space-between;
@@ -1028,34 +1147,43 @@ const computedEdges = computed(() => {
   align-items: center;
   gap: 6px;
   flex: 1;
+  min-width: 0;
 }
+.node-icon { display: inline-flex; align-items: center; flex: none; color: var(--text-muted); font-size: 13px; }
+.node-icon__qualifier { margin-left: 1px; font-size: 11px; font-weight: 700; }
 
 .node-title-input {
   background: transparent;
   border: none;
   color: var(--text-main);
-  font-weight: 700;
+  font-weight: 600;
   font-size: 12px;
   outline: none;
   width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 
 .node-close-btn {
   position: relative;
+  flex: none;
   background: transparent;
   border: none;
-  color: var(--text-muted);
-  font-size: 12px;
+  border-radius: var(--radius-xs, 4px);
+  color: var(--text-dim);
+  font-size: 13px;
   cursor: pointer;
-  padding: 6px 8px;
-  min-width: 44px;
-  min-height: 44px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-right: -4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: color 0.12s ease, background-color 0.12s ease;
 }
-.node-close-btn::after { content: ""; position: absolute; inset: 0; }
-.node-close-btn:hover { color: var(--status-danger); }
+.node-close-btn::after { content: ""; position: absolute; inset: -6px; }
+.node-close-btn:hover { color: var(--status-danger); background: var(--status-danger-subtle); }
 
 .node-body {
   padding: 10px 12px;
@@ -1083,7 +1211,7 @@ const computedEdges = computed(() => {
   position: absolute;
   width: 12px;
   height: 12px;
-  border-radius: 0;
+  border-radius: 50%;
   background: var(--text-dim);
   border: 1px solid var(--bg-card);
   cursor: crosshair;
@@ -1102,9 +1230,15 @@ const computedEdges = computed(() => {
   top: 35px;
 }
 
+/* In-row sockets stay positioned so their hit area wraps the dot, not the whole row
+   (a row-sized hit area made the choice text field start a wire instead of taking focus). */
 .choice-socket {
-  position: static;
+  position: relative;
+  top: auto;
+  right: auto;
+  flex: none;
   margin-left: 6px;
 }
+.choice-socket::after { inset: -8px; }
 
 </style>

@@ -12,6 +12,8 @@ import {
 } from "../projectTree.ts";
 import { thumbnailInitial, thumbnailUrl } from "../thumbnails.ts";
 import { useProjectTree } from "../view-models/projectTree.ts";
+import StudioIcon from "../components/StudioIcon.vue";
+import SegmentedControl from "../components/ui/SegmentedControl.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -74,10 +76,6 @@ function openItem(item: TreeItem) {
   router.push(itemRoute(item.root, item.id));
 }
 
-function tileColor(item: TreeItem): string {
-  return "var(--text-muted)";
-}
-
 function onDrop(event: DragEvent) {
   const payload = dragPayload(event);
   void moveTo(payload, root.value, folderId.value);
@@ -116,27 +114,24 @@ function folderDrag(event: DragEvent, id: string) {
   <div style="display:flex; flex-direction:column; height:100%;">
     <header class="view-header">
       <div class="folder-breadcrumb">
-        <router-link to="/project" class="folder-breadcrumb__link">{{ studioState.project?.name ?? "Workspace" }}</router-link>
+        <router-link to="/project" class="folder-breadcrumb__link" :title="studioState.project?.name ?? 'Workspace'">{{ studioState.project?.name ?? "Workspace" }}</router-link>
         <template v-if="definition">
           <span class="folder-breadcrumb__sep">›</span>
-          <router-link :to="`/browse/${root}`" class="folder-breadcrumb__link">{{ definition.label }}</router-link>
+          <router-link :to="`/browse/${root}`" class="folder-breadcrumb__link" :title="definition.label">{{ definition.label }}</router-link>
         </template>
         <template v-for="folder in breadcrumb" :key="folder.id">
           <span class="folder-breadcrumb__sep">›</span>
-          <router-link :to="`/browse/${root}/${folder.id}`" class="folder-breadcrumb__link">{{ folder.name }}</router-link>
+          <router-link :to="`/browse/${root}/${folder.id}`" class="folder-breadcrumb__link" :title="folder.name">{{ folder.name }}</router-link>
         </template>
       </div>
 
-      <div v-if="definition" style="display:flex; align-items:center; gap:8px;">
-        <div class="view-mode-toggle">
-          <button :class="['tab-btn', viewMode === 'grid' ? 'active' : '']" @click="viewMode = 'grid'">Grid</button>
-          <button :class="['tab-btn', viewMode === 'list' ? 'active' : '']" @click="viewMode = 'list'">List</button>
-        </div>
+      <div v-if="definition" class="folder-actions">
+        <SegmentedControl v-model="viewMode" label="Layout" :options="[{ value: 'grid', label: 'Grid' }, { value: 'list', label: 'List' }]" />
         <router-link v-if="root === 'storylets'" to="/storylets" class="btn btn-secondary">Library view</router-link>
         <router-link v-if="root === 'entities'" to="/browse/entity_templates" class="btn btn-secondary">Entity templates</router-link>
         <template v-if="definition.newLabel">
-          <button class="btn btn-secondary" @click="createFolder(root, folderId)">+ New folder</button>
-          <button class="btn btn-primary" @click="createItem(definition, folderId)">+ {{ definition.newLabel }}</button>
+          <button type="button" class="btn btn-secondary" @click="createFolder(root, folderId)"><StudioIcon name="folder" /> New folder</button>
+          <button type="button" class="btn btn-primary" @click="createItem(definition, folderId)"><StudioIcon name="plus" /> {{ definition.newLabel }}</button>
         </template>
       </div>
     </header>
@@ -158,7 +153,7 @@ function folderDrag(event: DragEvent, id: string) {
       <div v-if="!contents.folders.length && !contents.items.length" class="folder-empty" style="display:flex; flex-direction:column; align-items:center; gap:12px; padding:48px 20px; text-align:center;">
         <div v-if="root === 'entities'" style="display:flex; flex-direction:column; align-items:center; gap:12px;">
           <span>No entities in this folder.</span>
-          <button class="btn btn-primary" type="button" @click="createItem(definition, folderId)">+ New entity</button>
+          <button class="btn btn-primary" type="button" @click="createItem(definition, folderId)"><StudioIcon name="plus" /> New entity</button>
         </div>
         <template v-else>
           <span>This folder is empty.</span>
@@ -177,8 +172,8 @@ function folderDrag(event: DragEvent, id: string) {
           @dragover.prevent
           @drop.prevent="onTileDrop($event, folder.id)"
         >
-          <div class="folder-tile__thumb folder-tile__thumb--folder">▸</div>
-          <div class="folder-tile__banner">{{ folder.name }}</div>
+          <div class="folder-tile__thumb folder-tile__thumb--folder"><StudioIcon name="folder" /></div>
+          <div class="folder-tile__banner" :title="folder.name">{{ folder.name }}</div>
         </div>
 
         <div
@@ -197,7 +192,7 @@ function folderDrag(event: DragEvent, id: string) {
             :alt="item.label"
           />
           <div v-else class="folder-tile__thumb folder-tile__thumb--empty">{{ thumbnailInitial(item.label) }}</div>
-          <div class="folder-tile__banner" :style="{ background: tileColor(item) }">{{ item.label }}</div>
+          <div class="folder-tile__banner" :title="item.label">{{ item.label }}</div>
         </div>
       </div>
 
@@ -213,7 +208,7 @@ function folderDrag(event: DragEvent, id: string) {
           @dragover.prevent
           @drop.prevent="onTileDrop($event, folder.id)"
         >
-          <span class="folder-list__thumb folder-list__thumb--folder">▸</span>
+          <span class="folder-list__thumb folder-list__thumb--folder"><StudioIcon name="folder" /></span>
           <span class="folder-list__name">{{ folder.name }}</span>
           <span class="folder-list__detail">Folder</span>
         </div>

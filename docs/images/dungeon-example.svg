@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
+  <title id="title">A small dungeon, built from reusable story parts</title>
+  <desc id="desc">Three scenes: open a chest to receive a key, use the key to unlock a door, and enter the boss room. The Inventory plugin tracks the key. A Lockable trait supplies the door's Is locked property. Storylets check and change those values.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#a58539"/></marker>
+  </defs>
+  <rect x="2" y="2" width="956" height="536" rx="22" fill="#151715" stroke="#464b43" stroke-width="2"/>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <text x="32" y="44" fill="#ddbd70" font-size="14" font-weight="700" letter-spacing="2">ERZÄHLSTUDIO · DUNGEON EXAMPLE</text>
+    <text x="32" y="82" fill="#f4f2e9" font-size="28" font-weight="700">Find the key. Open the door. Keep exploring.</text>
+    <g fill="#20251f" stroke="#4f594a" stroke-width="2">
+      <rect x="32" y="112" width="272" height="246" rx="14"/>
+      <rect x="344" y="112" width="272" height="246" rx="14"/>
+      <rect x="656" y="112" width="272" height="246" rx="14"/>
+    </g>
+    <g stroke="#ddbd70" stroke-width="3" fill="none" stroke-linejoin="round">
+      <rect x="134" y="146" width="68" height="48" rx="5"/>
+      <path d="M134 164h68m-39-18v48"/>
+      <rect x="161" y="159" width="14" height="15" rx="2" fill="#ddbd70"/>
+      <path d="M453 198v-57h54v57m-54 0h54"/>
+      <circle cx="493" cy="173" r="3" fill="#ddbd70" stroke="none"/>
+      <path d="M748 198v-36a44 44 0 0 1 88 0v36m-74 0v-36a30 30 0 0 1 60 0v36m-30-38v36m-10-10 10 10 10-10"/>
+    </g>
+    <g stroke="#a58539" stroke-width="3" marker-end="url(#arrow)">
+      <path d="M308 235h30"/><path d="M620 235h30"/>
+    </g>
+    <g fill="#f4f2e9" font-size="21" font-weight="700" text-anchor="middle">
+      <text x="168" y="237">1. Chest room</text>
+      <text x="480" y="237">2. Locked door</text>
+      <text x="792" y="237">3. Boss room</text>
+    </g>
+    <g fill="#e2e5db" font-size="16" text-anchor="middle">
+      <text x="168" y="272">Choose “Open the chest”</text>
+      <text x="480" y="272">Have the key? “Use the key”</text>
+      <text x="792" y="272">Door unlocked? “Enter”</text>
+    </g>
+    <g fill="#a9d1a0" font-size="16" text-anchor="middle" font-weight="600">
+      <text x="168" y="320">Key added to inventory</text>
+      <text x="480" y="320">Is locked → false</text>
+      <text x="792" y="320">Player moves to next room</text>
+    </g>
+    <text x="32" y="397" fill="#ddbd70" font-size="14" font-weight="700" letter-spacing="1">THE PARTS BEHIND THE ADVENTURE</text>
+    <g fill="#e2e5db" font-size="16">
+      <text x="32" y="429"><tspan fill="#f4f2e9" font-weight="700">Entities</tspan><tspan> · Player, small key, door, rooms</tspan></text>
+      <text x="500" y="429"><tspan fill="#f4f2e9" font-weight="700">Trait</tspan><tspan> · Lockable → Is locked</tspan></text>
+      <text x="32" y="462"><tspan fill="#f4f2e9" font-weight="700">Plugin</tspan><tspan> · Inventory tracks who carries the key</tspan></text>
+      <text x="500" y="462"><tspan fill="#f4f2e9" font-weight="700">Storylets</tspan><tspan> · Check, offer choices, change values</tspan></text>
+    </g>
+    <text x="32" y="510" fill="#b6bdb0" font-size="14">Concept illustration—not an app screenshot. You author the checks and consequences in the story graph.</text>
+  </g>
+</svg>

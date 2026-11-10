@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Custom thumbnails for editable traits, using the entity image picker; saved
+  images appear in the trait editor, project tree, and folder views. Existing
+  traits without images remain compatible.
 - Tree Graph plugin with TreeGraph and TreeItem traits, an infinite pan-and-zoom
   canvas, editable entity connections, multiple roots, directional and radial
   layouts, configurable canvas backgrounds, nodes resizable from any edge or
@@ -24,13 +27,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   references, plus default gameplay fields and non-negative level and cost.
 - Tree position storylet nodes with a read-only graph picker and per-tree playtest pointer.
 - Shared color wheel picker for tree graph and vector canvas colors.
+- Split-pane studio workspace: drag any project-tree entry onto a pane edge (or use
+  the pane header, or the tree's "Open in split view") to open it beside or below
+  the current view; panes resize, maximize, close, and restore after reload, and
+  each pane keeps its own navigation and unsaved-change guard. Drag a pane's
+  title bar onto another pane's edge to move it there, or onto its middle to swap
+  the two; moved panes keep their unsaved edits.
+- Appearance settings in the toolbar: seven game-inspired themes (Kojima
+  Productions, the default; Mass Effect, Cyberpunk, RPG, Death Stranding, Anime,
+  Modern Warfare) that retune surfaces, borders, text, corner radii, heading type
+  and accent, plus an optional background image with a blur toggle. Stored
+  locally per browser.
+- Shared studio UI components: EmptyState, IconButton, SearchField,
+  SegmentedControl and ToggleSwitch, plus a consistent outline icon set.
+- A Fit button in the story graph toolbar zooms out so every node is in view.
+- `bun run test:visual:stress`: a worst-case data audit that seeds long, one-letter,
+  accented, CJK, emoji and very large values and scans every view at desktop,
+  1024px, phone and three-pane sizes for clipped, spilled, overlapping, covered
+  or low-contrast text.
+
+### Changed
+
+- The studio is now branded Erzählstudio, with a new logo (an "E" whose middle arm
+  forks into two outcomes) used as the toolbar mark and favicon.
+- Reworked studio visual system: floating rounded panes on an atmospheric
+  backdrop, a compact glass toolbar and project tree, self-hosted Sora UI font,
+  icon-based actions in place of emoji, quieter destructive buttons, and
+  container-query layouts so every view adapts to narrow split panes.
+- Trait and asset editors share the entity editor's centered layout, header,
+  section navigation, and content-card spacing.
+- Rebranded the README around Erzählstudio's vision, with a plain-language
+  dungeon example and screenshots of the studio and built-in plugins.
 
 ### Fixed
 
+- Choice text fields in story graph nodes take focus again; their wire handle's hit
+  area covered the whole row and started a connection instead.
+- Graph context menus stay inside the canvas, story nodes keep a readable minimum
+  width, and toolbar-added nodes land in view without covering existing cards.
+- Menus, pickers and the graph toolbar are opaque, so text underneath no longer
+  shows through.
+- Narrow panes: inspector field pairs, folder headers, entity titles and entity
+  tabs no longer overflow or clip; empty property lists hide their column heads.
+- Node type badges and tag placeholders meet text contrast in every theme;
+  project-tree menus near the bottom open upward.
+- Long unbroken values (file paths, URLs, emails) wrap inside asset version cards,
+  asset titles and dialogue previews instead of running past their card;
+  dialogue previews end in an ellipsis after three lines instead of a hard cut.
+- Long runtime ids yield space to the entity name; folder tiles show names on two
+  lines; breadcrumbs shrink ancestors before the current folder; truncated pane
+  titles, breadcrumbs, tiles and inspector titles show the full text on hover.
+- Thumbnail initials keep emoji and accented letters whole, the project tree
+  sorts numbered names naturally ("Clerk 2" before "Clerk 10"), and counts read
+  "1 section" rather than "1 sections", with digit grouping for large numbers.
+- The trait and asset editors are wide enough for property names, keys and
+  defaults such as "(none)" to stay readable.
 - Entity headers keep their names and actions visible on narrow screens.
 - Deleting tree trait templates checks both entities and entity templates in use.
 - Storylet precondition graphs now lower and raise plugin nodes, including Is Tree Position.
 - Added tactile active press feedback to tree view switches and hierarchy disclosure toggles.
+- Tree context menus open at the clicked row and stay inside the viewport.
+- Locked tree canvas images open their menu with Enter.
 - Clamped tree canvas context menus within visible viewport bounds to prevent clipping actions.
 - Improved tree list horizontal scroll indicators and select dropdown chevrons.
 - Added hover glow and press feedback to tree pointer preview nodes and zoom tools.

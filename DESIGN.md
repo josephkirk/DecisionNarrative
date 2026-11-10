@@ -1,5 +1,5 @@
 ---
-name: DecisionNarrative Studio
+name: Erzählstudio
 colors:
   surface: '#111317'
   surface-dim: '#111317'
@@ -123,95 +123,53 @@ spacing:
   space-xl: 1.5rem
   space-2xl: 2rem
 ---
-
 ## Brand & Style
-This design system pairs the classical typographic grace of historical typesetting with the surgical rigor of an IDE. Created for narrative directors, game writers, and interactive fiction architects, the aesthetic avoids playful consumer SaaS tropes in favor of an austere, monkish workstation.
+**Erzählstudio** ("narration studio"). The mark is an ink tile holding an "E": its spine and outer arms in paper white, its middle arm a gilt thread that forks into two outcomes, one filled and one open, a told story at its moment of choice. Source: `src/web/assets/erzaehlstudio-logo.svg` (favicon); the toolbar uses `BrandMark.vue`, the same geometry painted with theme tokens.
 
-The design philosophy reconciles two opposing modalities: the lyrical prose of long-form narrative craft and the discrete, deterministic logic of node-based state machines. Surfaces are obsidian-dark, structured through hairline grid boundaries, zero-radius geometry, and precise typographic cadence. The interface remains quiet and low-chroma during focused composition, allowing color to function exclusively as semantic logic indicators (branching choices, speaker roles, logic switches, variable telemetry).
+Inspired by the spatial, atmospheric aesthetic of modern creative worldbuilding studios (such as vvd.world). Designed for narrative designers and game writers, this aesthetic combines a serene, low-distraction dark backdrop with tactile floating glass panels, rounded geometry, and precise typographic hierarchy.
 
-## Colors
-The palette balances ultra-dark slate foundations with calibrated semantic accents that categorize narrative topology at a glance:
+Surfaces float above an atmospheric canvas with subtle gradient depth. Floating panels feature soft rounded corners (12-16px), fine hairline borders with subtle rim luminescence, and backdrop blur. High-frequency interactions remain snappy and grounded, with color serving primarily as semantic logic indicators.
 
-- **Base Canvas & Surfaces**:
-  - Root Canvas: `#0f1115` (Deep warm obsidian)
-  - Surface Container Low: `#141720` (Node canvas floor, docked panel wells)
-  - Surface Container: `#181c26` (Node bodies, inspector panels, dialog modals)
-  - Surface Container High: `#212735` (Header bars, active row states, tab strips)
-  - Surface Border: `#283042` (1px structural rule lines, muted dividing axes)
+## Colors & Surfaces
+The palette balances an ultra-dark cosmic base with translucent slate containers and purposeful semantic narrative accents:
+
+- **Atmospheric Canvas & Backdrops**:
+  - Root Canvas: `#0b0d13` with subtle radial glows of indigo (`rgba(79, 70, 229, 0.08)`) and teal (`rgba(6, 182, 212, 0.05)`)
+  - Floating Pane Surface: `rgba(18, 22, 34, 0.85)` with `backdrop-filter: blur(16px)`
+  - Panel Header / Card Well: `rgba(26, 32, 48, 0.7)`
+  - Elevated Popover / Menu: `rgba(28, 35, 54, 0.95)` with `box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5)`
+  - Glass Border Rule: `rgba(255, 255, 255, 0.08)` (hairline rim light)
+  - Focused Border: `#06b6d4` with `0 0 0 1px #06b6d4`
 
 - **Semantic Narrative Accents**:
-  - **Cyan (`#06b6d4`)**: Primary system anchor; teleport jumps, memory flags, variable pointers, focus rings.
-  - **Iris / Indigo (`#818cf8`)**: Secondary anchor; dialogue passages, speaker roles, voice manifests.
-  - **Amber / Gold (`#f59e0b`)**: Tertiary anchor; branch forks, player choice nodes, prompt selections.
-  - **Emerald (`#10b981`)**: Logic gates, boolean conditions, successful compilation pass states.
-  - **Rose / Coral (`#f43f5e`)**: Terminal narrative endpoints, orphaned node warnings, syntax errors.
-  - **Violet (`#a855f7`)**: Codex entities, lore taxonomies, world state definitions.
+  - **Cyan (`#06b6d4` / `#38bdf8`)**: Primary system anchor; action triggers, selections, teleport jumps.
+  - **Iris / Indigo (`#818cf8`)**: Secondary anchor; dialogue passages, speaker roles, entity types.
+  - **Amber / Gold (`#f59e0b`)**: Choices, player forks, interactive states.
+  - **Emerald (`#10b981`)**: Conditions passed, active states, locations.
+  - **Rose / Coral (`#f43f5e`)**: Danger, delete, terminal failure states.
 
-Text uses strict perceptual steps: `#f1f3f9` for high-contrast literary reading, `#9ba3b8` for property keys and secondary descriptors, and `#64748b` for inactive metadata, hotkeys, and connector port labels.
+Text maintains high legibility: `#f1f3f9` for primary reading, `#9ba3b8` for secondary descriptions, and `#64748b` for subtle metadata.
 
 ## Typography
-Typography is treated as an editorial artifact inside a mechanical housing. 
+- **Sora** (self-hosted variable font): System UI, sidebar navigators, headings, table cells, form labels and control buttons.
+- **EB Garamond**: Narrative prose fields, beat titles, scene headings, and story card excerpts.
+- **Geist Mono**: Monospace identifiers and numeric readouts.
+- **Long text**: names that identify something wrap (two lines on tiles); secondary metadata and ids truncate with an ellipsis and a `title` tooltip; unbroken paths, URLs and emails use `overflow-wrap: anywhere`; numbers are never truncated, and counts use `countLabel` for the right noun form and digit grouping. `bun run test:visual:stress` checks this with worst-case data.
 
-- **EB Garamond** powers narrative prose inputs, node beat titles, scene act declarations, and long-form story dialogues. Its classical Roman proportion offers comfort during extended writing sessions and visually isolates story content from machine instructions.
-- **Geist** serves as the system engine for the canvas shell, data tables, node headers, inspector fields, and tree navigators. Crisp, neutral, and monolinear, it delivers high legibility at 10px to 13px without geometric aberration.
-- Monospaced needs (variables, mathematical operators, raw branch expressions) utilize `Geist` with tabular numbers enabled (`tnum`, `zero`).
+## Themes
+The toolbar Appearance panel swaps whole-app themes; each is one token set in `src/web/studio/theme.ts`, applied as CSS variables on `<html>`:
+- **Tokens a theme owns**: app backdrop and glow, card/input/popover/pane surfaces, three border strengths, three text levels, accent (fill, hover, ink, subtle), a secondary brand color, a radius scale (sharp, crisp, soft, round), and the heading voice (display font, weight, tracking, case).
+- **Semantic colors stay fixed** across themes (status, node types, dialog iris) so logic signals keep their meaning.
+- **Presets**: Kojima Productions (default), Mass Effect, Cyberpunk, RPG, Death Stranding, Anime, Modern Warfare. Each must keep main text ≥ 7:1, muted text ≥ 4.5:1 and dim text ≥ 5:1 on cards, and accent ink ≥ 4.5:1 on the accent (`tests/web/theme.test.ts`).
+- **Background image**: optional, downscaled to 1920px and stored locally; dimmed by the theme backdrop, optionally blurred, and panes turn translucent over it.
+- **Popovers are opaque**: menus, pickers and the graph toolbar use the solid `--bg-elevated` surface so content underneath never shows through.
 
-## Layout & Spacing
-The layout adheres to a multi-pane IDE viewport model designed for high-density spatial multitasking:
-
-1. **Top Shell Bar**: Fixed 40px height housing breadcrumbs, global branch selectors, and compilation status.
-2. **Left Dock (Navigator & Codex)**: Collapsible sidebar fixed at 280px width, utilizing `space-xs` and `space-sm` for high vertical density.
-3. **Infinite Graph Canvas**: Fluid center plane patterned with a subtle 24px dot-matrix grid (`#1d2332` on `#0f1115`).
-4. **Right Dock (Inspector & Logic Evaluator)**: Fixed 360px panel with vertical sections spaced by hairline borders and internal `space-md` paddings.
-
-All internal gaps follow an absolute 4px baseline rhythm (`space-xs` = 4px, `space-sm` = 8px, `space-md` = 12px, `space-lg` = 16px).
-
-## Elevation & Depth
-Elevation eschews blurry drop shadows in favor of crisp, layered structural boundaries and localized luminescence:
-
-- **Level 0 (Canvas Base)**: `#0f1115` background with an etched dot grid.
-- **Level 1 (Docked Sidebars & Rails)**: `#141720` with a 1px solid border (`#283042`) separating canvas from docked utilities.
-- **Level 2 (Nodes & Graph Cards)**: `#181c26` solid fill, framed by a 1px border of `#283042`. When selected or focused, the border transitions to `#06b6d4` with an ultra-subtle, non-diffuse 0 0 0 1px outer ring.
-- **Level 3 (Search Palettes & Port Menus)**: `#212735` layered directly over the canvas with a 1px border (`#3a465f`) and zero ambient blur.
-- **Execution & Flow Glow**: Active running logic paths apply an intentional, sharp 1px hairline stroke in the semantic accent color without fuzzy illumination.
-
-## Shapes
-Every component in the design system has a strict `0px` border radius (`roundedness: 0`). 
-
-Rectilinear purity reinforces precision, maximizes dense screen estate, and emphasizes the structural nature of narrative architecture. Cards, input fields, ports, badges, context flyouts, and modal windows terminate in sharp 90-degree right angles.
-
-## Components
-
-### Node Graph Cards
-- **Structure**: Rectangular cards constructed on `#181c26` with a mandatory 1px border (`#283042`).
-- **Header**: Height 28px, background `#212735`, displaying an uppercase `label-sm` semantic indicator on the left, beat title in `headline-sm`, and run status dot on the right.
-- **Accent Strip**: Top border features a 2px horizontal rule colored by node type (e.g., Amber for Choice, Iris for Dialogue).
-- **Body**: Embedded prose area set in `body-md` (EB Garamond) with zero inner borders.
-- **Connector Ports**: 8x8px square tabs positioned on card left (inputs) and right (outputs) edges, colored `#64748b`, turning solid Cyan `#06b6d4` on connection hover.
-
-### Collapsible Inspector
-- **Accordion Sections**: Headers feature an uppercase `label-md` accompanied by an inline toggle icon.
-- **Property Rows**: 28px height, two-column split with label (`#9ba3b8`, 40% width) and input widget (60% width).
-- **Dividers**: Flat 1px border (`#283042`) separating semantic sections.
-
-### Buttons
-- **Primary**: Solid `#06b6d4` fill, `#0f1115` bold text, sharp edges, 28px height for compact toolbar usage.
-- **Secondary / Ghost**: Transparent fill, 1px `#283042` border, `#f1f3f9` text; hover transitions border to `#06b6d4`.
-- **Destructive**: 1px `#f43f5e` outline with transparent fill, text colored `#f43f5e`.
-
-### Input Fields & Monospace Editors
-- **Text Inputs**: Flat background `#141720`, 1px border `#283042`, zero radius. Focus yields 1px `#06b6d4` perimeter.
-- **Prose Area**: EB Garamond font, minimal background tint, auto-expanding height.
-- **Logic Condition Editor**: Geist mono font, line-numbered left gutter, colored tokens for boolean expressions and variable calls.
-
-### Tag & Badges
-- **Tag Pills**: Flat rectangles (0px radius), height 20px, uppercase `label-sm`.
-- **Badges by Category**:
-  - `CHOICE`: Background `rgba(245, 158, 11, 0.12)`, text `#f59e0b`, border `1px solid #f59e0b`.
-  - `SPEAKER`: Background `rgba(129, 140, 248, 0.12)`, text `#818cf8`, border `1px solid #818cf8`.
-  - `LOGIC`: Background `rgba(16, 185, 129, 0.12)`, text `#10b981`, border `1px solid #10b981`.
-  - `ERROR`: Background `rgba(244, 63, 94, 0.12)`, text `#f43f5e`, border `1px solid #f43f5e`.
-
-### Search & Command Palette
-- **Trigger Overlay**: Fullscreen backdrop with slight tint (`rgba(15, 17, 21, 0.8)`).
-- **Palette Window**: 560px width, sharp edges, top input rendered with `headline-sm`, scrollable autocomplete list with selected row highlighted in `#212735` and keyed with a Cyan left border indicator.
+## Layout & Workspace
+- **Top Shell Bar**: Sleek 44px glass strip with brand identity, breadcrumbs/tabs, play action, and workspace status.
+- **Floating Document Navigator**: Translucent collapsible floating panel on the left with rounded corners and search.
+- **Split-Pane Workspace**: Multi-pane subdivision system allowing any entity, storylet, or browse view to be opened side-by-side or split horizontally/vertically via drag-and-drop or pane controls. A pane's title bar is its drag handle (never selectable text): drop it on another pane's edge to move it there, or on its middle to swap the two.
+- **Record editors**: Entity, Trait, and Asset use the same centered 960px
+  surface, padded identity card, underline section navigation, and spaced
+  bordered content cards. In narrow panes the padding contracts and controls
+  wrap or scroll rather than clipping.
+- **Floating Controls**: Pill-style toolbars with grouped actions, 14px padding, and 44px touch targets.

@@ -207,10 +207,9 @@ try {
   await pluginNode.waitFor();
   const editor = page.getByTestId("modify-canvas-editor");
   check("disconnected node requires an entity input", await page.getByTestId("open-modify-canvas").isDisabled());
-  const sourceHeader = (await page.locator(".graph-node.get_entity .node-header").boundingBox())!;
-  await page.mouse.move(sourceHeader.x + 30, sourceHeader.y + 15); await page.mouse.down();
-  await page.mouse.move(sourceHeader.x - 180, sourceHeader.y + 120, { steps: 8 }); await page.mouse.up();
   await connect(page.locator(".graph-node.get_entity .output-socket"), pluginNode.locator('[title="Entity data input"]'));
+  // The new node is still selected; select Get Entity first so clicking the plugin node is a fresh selection.
+  await page.locator(".graph-node.get_entity .node-body").click();
   await pluginNode.locator(".node-body").click();
   await editor.waitFor();
   check("connected node opens the entity canvas without a selector", await editor.isVisible() && await editor.getByLabel("Canvas entity").count() === 0);
@@ -243,7 +242,8 @@ try {
   check("the new version is temp until the storylet is saved", afterDoc.revisions.at(-1)?.uncommitted === true);
   // Edit again: the node keeps its one version.
   // Deselect, then click the node: the editor opens again.
-  await page.locator(".graph-editor-canvas").click({ position: { x: 600, y: 700 } });
+  const emptyCanvasPoint = async () => { const b = (await page.locator(".graph-editor-canvas").boundingBox())!; return { x: b.width - 40, y: b.height - 40 }; };
+  await page.locator(".graph-editor-canvas").click({ position: await emptyCanvasPoint() });
   await pluginNode.click({ position: { x: 60, y: 50 } });
   await editor.waitFor();
   check("clicking the node opens the canvas editor", await editor.isVisible());
@@ -302,7 +302,7 @@ try {
   await sleep(300);
   const moved = (await page.locator(".graph-node.plugin .node-header").boundingBox())!;
   check("dragging the node moves it without opening the editor", (await page.getByTestId("modify-canvas-editor").count()) === 0 && moved.x > header.x + 40, `${header.x} -> ${moved.x}`);
-  await page.locator(".graph-editor-canvas").click({ position: { x: 600, y: 700 } });
+  await page.locator(".graph-editor-canvas").click({ position: await emptyCanvasPoint() });
   const deleteNode = async () => {
     await page.locator(".graph-node.plugin").getByRole("button", { name: "Delete node" }).click();
     await page.locator(".graph-node.plugin").waitFor({ state: "detached" });

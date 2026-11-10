@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { HierarchicalTagNode } from "../tagData.ts";
+import StudioIcon from "./StudioIcon.vue";
 
 const props = defineProps<{
   node: HierarchicalTagNode;
@@ -42,7 +43,7 @@ const emit = defineEmits<{
       @keydown="onKeydown"
     >
       <span class="tag-tree-twisty" :aria-hidden="!node.children.length">
-        {{ node.children.length ? (expandedPaths.has(node.fullPath) ? '▾' : '▸') : '' }}
+        <StudioIcon v-if="node.children.length" name="chevron" :class="['tag-tree-chevron', { 'is-open': expandedPaths.has(node.fullPath) }]" />
       </span>
       <span :class="['tag-tree-label', depth === 0 ? 'root-name' : 'leaf']">{{ node.segment }}</span>
       <span v-if="depth > 0" class="tag-tree-badge">{{ node.fullPath }}</span>
@@ -125,11 +126,14 @@ const emit = defineEmits<{
   outline-offset: 1px;
 }
 .tag-tree-twisty {
-  width: 14px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 11px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  color: var(--text-dim);
+  font-size: 12px;
 }
+.tag-tree-chevron { transition: transform 0.16s var(--ease-out); }
+.tag-tree-chevron.is-open { transform: rotate(90deg); }
 .tag-tree-label {
   font-size: 13px;
   font-weight: 600;

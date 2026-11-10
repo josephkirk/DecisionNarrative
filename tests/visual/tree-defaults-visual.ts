@@ -174,8 +174,9 @@ try {
   // Check upload status text indicates file was loaded
   const cssStatus = page.locator(".css-status-text");
   await cssStatus.waitFor();
-  const statusText = await cssStatus.textContent();
-  check("CSS file upload reflected in status", statusText?.includes("theme.css") || statusText?.includes("loaded") || false);
+  // FileReader is asynchronous: wait for the status to reflect the upload instead of sampling once.
+  const statusUpdated = await page.waitForFunction(() => /theme\.css|loaded/.test(document.querySelector(".css-status-text")?.textContent ?? ""), null, { timeout: 5000 }).then(() => true, () => false);
+  check("CSS file upload reflected in status", statusUpdated);
 
   // 6. Save entity
   const saveBtn = page.getByRole("button", { name: "Save", exact: true });

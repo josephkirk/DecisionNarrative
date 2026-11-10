@@ -2,6 +2,7 @@
 import { computed, ref, useId } from "vue";
 import { normalizeTagName, uniqueTagNames } from "../tagData.ts";
 import { addTagSelection, commitSingleTagEdit, nextTagSuggestionIndex, tagSuggestionQuery, tagSuggestions } from "../tagEditorModel.ts";
+import StudioIcon from "./StudioIcon.vue";
 
 const props = withDefaults(defineProps<{
   modelValue?: string | string[] | null;
@@ -108,7 +109,7 @@ function focusInput() {
   <div class="tag-editor" :aria-label="label" @click="focusInput">
     <span v-if="props.multiple" v-for="tag in selected" :key="normalizeTagName(tag)" class="tag-editor__chip" :title="tag">
       <span class="tag-hash">#</span><span class="tag-editor__chip-label">{{ tag }}</span>
-      <button type="button" class="tag-editor__remove" :aria-label="'Remove ' + tag" @click.stop="remove(tag)">✕</button>
+      <button type="button" class="tag-editor__remove" :aria-label="'Remove ' + tag" @click.stop="remove(tag)"><StudioIcon name="close" /></button>
     </span>
     <input
       ref="input"
@@ -202,7 +203,9 @@ function focusInput() {
 .tag-editor__remove:hover { color: var(--status-danger); }
 .tag-editor__input {
   flex: 1 1 140px;
-  min-width: 120px;
+  /* No hard minimum: inside two-column inspector grids a fixed min-width pushed fields past the card edge. */
+  min-width: 0;
+  text-overflow: ellipsis;
   height: 26px;
   border: 0;
   outline: 0;
@@ -212,6 +215,7 @@ function focusInput() {
   font-size: 12px;
 }
 .tag-editor__input:focus { outline: 0; }
+.tag-editor__input::placeholder { color: var(--text-dim); opacity: 1; }
 .tag-editor__popup {
   position: absolute;
   z-index: 50;

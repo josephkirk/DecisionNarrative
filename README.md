@@ -1,157 +1,85 @@
-# DecisionNarrative
+# Erzählstudio
 
-**Version 0.2.0-alpha.1** — alpha prerelease. APIs, bundle schemas, and databases may change without migration.
+<img src="src/web/assets/erzaehlstudio-logo.svg" alt="Erzählstudio logo" width="72" height="72" />
 
-DecisionNarrative is a local authoring and playtest studio for nonlinear, storylet-driven narrative games. It is designed to scale from a compact detective scenario to a large systemic RPG without imposing a built-in setting, cast, or linear plot structure.
+**A place to create worlds where choices matter.**
 
-The platform couples a host-independent Rust decision core with a unified local Rust service and a modern Vue 3 MVVM authoring studio styled after quiet macOS creative tools.
+Erzählstudio aspires to make interactive storytelling feel as natural as imagining a world: bring its people to life, connect their stories, and discover what happens when a player chooses differently.
 
-## Architecture
+![Erzählstudio web app — a visual workspace for branching stories](docs/images/ui-rework-after-storylet.webp)
 
-- **Narrative Core (`crates/storylet-engine`)**: Host-independent Rust library with zero I/O dependencies. ChronoFlow v5 uses data-oriented world state, fixed gameplay-tag bitsets, reversible mutation deltas, persistent call history, and deterministic QBN, salience, waypoint, token, timeline, invoke, and reconciliation runtime APIs. Adds participants with per-participant knowledge, a canon chronicle with per-participant telling and `Reveal` nodes, `Learn` / `Move` / `Knows` / `Colocated` nodes, and a world clock with scheduled connections and occupancy rules. A deterministic run kernel replays an action log against content, so runs can be rewound, reloaded after edits, and explained. Exports a C ABI for native embedding (Unreal / Unity / Godot / .NET), including `dn_run_*` entry points for deterministic runs.
-- **Unified Local Service (`crates/storylet-engine-service`)**: Axum, Tokio, and rusqlite service providing single-store SQLite persistence, REST endpoints, Server-Sent Events (SSE) live streams, and stdio/HTTP Model Context Protocol (MCP) server.
-- **Authoring Studio (`src/web`)**: Vue 3 (Composition API) + Vite + Vue Router application. Articy:draft-style project tree (Storylets, intrinsic Entities, Entity Templates, Traits, Assets) with custom folders/subfolders, live search, drag-and-drop hierarchy, and grid/list folder browsing. Generic entity-template authoring (characters, locations, items, facts, other) with Blueprint-style custom properties, composable traits, thumbnail storage, and bidirectional reference tracking with graph jump-to-node. Full-width graph storylet editor with a contextual property inspector, Tag Manager reference tracking, world/canon events, and starting-condition scenarios. A **Play** view (`/play`) reads and plays the story directly; see [docs/design/playtest-ui.md](docs/design/playtest-ui.md).
-- **Drama Director (`crates/storylet-engine`)**: Deterministic eligibility and selection in Rust; no embedding ranker or model dependency.
-- **Interaction Context (`src/web/studio/interactionContext.ts`)**: Shares the active studio view, project, focused entity/selection, and playtest revision with a local MCP agent. The agent works through MCP operations directly; the studio does not call a model or generate content.
+## Our ambition
 
-## Requirements
+Give writers and game makers room to think beyond a single path. From an intimate mystery to a sprawling role-playing world, the goal is stories shaped by characters, knowledge, place, and consequence—not just the next line of dialogue.
 
-- Windows, macOS, or Linux with Rust 1.90 or later (edition 2024 support).
-- Bun 1.3.14 or later.
-- No AI service, Python runtime, model download, or generation endpoint is required.
+Keep the creative process close: imagine, write, arrange, play, reconsider. A calm workspace should help creators see how their stories fit together without taking attention away from the stories themselves.
 
-## Quick start
+![Erzählstudio web app — a flexible workspace with stories and world details side by side](docs/images/ui-rework-split-view.webp)
 
-From the repository root:
+## Build your world with entities and traits
 
-```sh
-bun install
-bun run build
-bun run play
-```
+An **entity** is something in your story world: a person, a place, an item, or a fact. Give it an identity, then describe what matters to your story.
 
-On Windows you can run `run.bat` (or `run.bat fresh`) instead, which stops any previous server, installs dependencies if needed, then builds and starts the service.
+A **trait** is a reusable set of properties. Instead of defining the same details for every character or location, define them once in a trait and give each entity its own values.
 
-Open `http://127.0.0.1:3000` in your browser (e.g. Microsoft Edge, Chrome, Safari). `bun run play` uses `data/storylet_studio_v6.db`; set `STORYLET_STUDIO_DB_PATH` to select a different file or `:memory:` for isolated testing.
+For example, a **Lockable** trait adds an *Is locked* property to a door or chest. Each door and chest has its own value: opening one does not unlock the others.
 
-`bun run play:fresh` opens the separate `data/storylet_studio_v6_clean.db` workspace and binds on port 3001; it does not modify the default database. Earlier schema versions are rejected without migration. The MCP process inherits `STORYLET_STUDIO_DB_PATH` when the agent client passes it through.
+Combine traits rather than forcing everything into one category. A character can also be a merchant or an inventory owner; each trait adds another part of what that entity means in your world.
 
-## Environment configuration
+An **entity template** is a reusable starting point for similar entities. A *Dungeon Door* template can include the **Lockable** trait with *Is locked* set to true. Create an *Entrance Door* and a *Boss Door* from it, then give each door its own values.
 
-| Variable | Default | Purpose |
-| :--- | :--- | :--- |
-| `STORYLET_STUDIO_ADDR` | `127.0.0.1:3000` | HTTP service bind address (`play:fresh` defaults to port 3001) |
-| `STORYLET_STUDIO_DB_PATH` | `data/storylet_studio_v6.db` | Unified SQLite database file path |
+## Try it: create dungeon doors
 
-No AI service or model-provider environment variables are required.
+1. In the project tree, open the menu on **Traits** and choose **New Trait**. Name it *Lockable* with the key `lockable`. Under **Typed Properties**, add *Is locked* (`is_locked`, boolean), set it to true, and click **Save**.
+2. Open the menu on **Entity Templates** and choose **New Entity Template**. Name it *Dungeon Door*. In its **Traits** tab, select *Lockable* from **Choose trait…**, click **Add**, and **Save**.
+3. Open the menu on **Entities** and choose **New Entity**. Name it *Entrance Door* and choose *Dungeon Door* as its **Archetype template**.
+4. In its **Traits** tab, set *Is locked* to false and click **Save**. This door starts unlocked.
+5. Create a *Boss Door* from the same template and leave *Is locked* true. Both doors share a design, but only one starts locked.
 
-## Build and test
+You can also add traits directly to an entity without using an entity template. Use templates for shared starting points, traits for reusable details, and entities for the individual things in your world.
 
-```sh
-# Compile Vue 3 frontend
-bun run build
+To give an editable trait its own picture, open the trait, click its image in the header, choose an image, and save. Click an existing picture to replace or remove it. Built-in system traits remain read-only.
 
-# Run frontend typecheck
-bun run typecheck
+**World** is the studio’s built-in entity, not a character template. Keep your people, places, and items separate from it.
 
-# Run test suites
-bun test
-cargo test --manifest-path crates/storylet-engine/Cargo.toml
-cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
-```
+## Let stories respond to the world
 
-## Authoring and Starting Scenarios
+A **storylet** is a small playable scene: a conversation, an encounter, a discovery, or a turning point. Rather than putting every scene on one fixed path, you describe when each scene makes sense.
 
-- **Storylet Library**: Browsable card grid with responsive columns (60 cards per page), search by title/text/group tag, status filters (Approved/Draft), location-tag filters, and ending badges. Storylets may target location tags; with no location tags they are not location-gated. With tags, they are eligible anywhere the current location shares at least one tag. Clicking any card opens the full-width graph editor.
-- **Storylet Graph Editor**: Authors edit the graph canvas and inspect storylet metadata, dialogue sections, ordered lines or idle actions, role/tag/audio metadata, local variables, and node-specific rules. Go To Location nodes move the player to a selected project location and must be directly targeted by a Choice branch. Graph validation runs before draft save and approval; valid graphs require exactly one Start and one or more End nodes, with every node reachable from Start and able to reach an End. Each End is either terminal (ends the run) or a jump to another storylet. A jump takes precedence over a leftover terminal flag; a storylet is a dedicated ending only when every End is terminal and has no jump. Variable and condition nodes select global or storylet-local scope; right-click adds or deletes graph items, and Alt-drag cuts wires.
-- **Starting Scenarios**: Scenarios configure only starting conditions (player start location policy, initial property overrides, actor population and location policies, and random seed). Scenarios do not lock in plot arcs, storylet deck membership, or run length. All approved storylets in the project remain eligible during playtest based on dynamic world preconditions and role availability.
-- **Tag Manager**: Browse the hierarchical Gameplay Tag catalog, add root and child tags, inspect references, and open referenced entities or storylets.
-- **Story Codex & World Bible**: Author world and canon events. Character settings, location settings, and passion data are composed from reusable traits.
-- **Project Tree & Entities**: Keep the intrinsic World entity under Entities; author characters, locations, items, facts, and other game objects as Entity Templates under the separate Entity Templates root. Classify characters, locations, and facts with composable `system.character`, `system.location`, and `system.fact` trait instances; entities may carry multiple classification traits. Items use the inventory plugin Item trait. Gameplay Tag namespaces are independent of entity classification, and the intrinsic World is entity `world`. Compose reusable traits with default values and entity-specific overrides, and manage append-only Assets with versioning and external storage references.
-- **Trait uniqueness**: The **Unique trait** toggle defaults off. An entity can contain at most one trait instance marked unique, including duplicate instances of the same trait. Non-unique traits may coexist; `allow_multiple` controls whether the same trait may be applied more than once.
-- **Play**: A Play button in the top toolbar (and **Play from here** in the storylet editor) starts a run. The prose column is the centre of the screen; the run advances itself until it needs a choice, a move, or an ending. A *where & when* strip shows the clock, place, and participant tabs (hot-seat). Every step is on a timeline: click an earlier step to rewind, and choosing differently branches automatically. When content changes, **Reload run** replays the same actions on the new content and reports where it diverged. A closed-by-default *Inspect* panel shows knowledge provenance and the chronicle, and *Why?* explains the nearest misses when nothing is available.
-- **Coverage Explorer**: `workspace.coverage` / `/api/v4/coverage` deterministically explores the compiled project by replaying runs, so unreachable content can be found without hand-playing.
-- **Participants & Knowledge**: Characters act through storylets on the world clock. Knowledge is tracked per participant with provenance, co-presence witnesses what happens, and `Reveal` nodes tell canon chronicle events to chosen participants.
-- **Project Authoring Aids**: Storylets can carry time windows and participant badges; world connections and the clock are authored as system traits and validated.
-- **Project Interchange**: Export and import complete standalone project bundles (`.storylet.json`, schema v6) containing entities, entity templates, folders, traits, assets, storylets, and scenarios, with transactional validation. Earlier bundle schemas are rejected; use a fresh schema-v6 database rather than migrating a legacy database.
+Think of a simple Zelda-style dungeon: **find a key → unlock a door → reach the boss room**.
 
-## Plugins
+![Dungeon example: open a chest to get a key, use it to unlock a door, then enter the boss room. Entities, traits, the Inventory plugin, and storylets work together.](docs/images/dungeon-example.svg)
 
-The studio follows an *everything is a plugin* model (after DeepSeek Harness / Cordis). A plugin is
-`definePlugin({ name, apply(ctx) })`; everything it registers through `ctx` is removed when it is disposed.
-Code lives in `src/web/studio/plugins/`; see [docs/design/studio-plugin-system.md](docs/design/studio-plugin-system.md) for the extension contracts and lifecycle.
+1. **Find the key.** A storylet in the chest room offers “Open the chest.” That choice gives the player a small key.
+2. **Check the door.** Another storylet at the locked door offers “Use the key” only when the player carries it.
+3. **Change the world.** That choice sets the door’s *Is locked* property to false.
+4. **Continue the adventure.** An unlocked door allows a choice that moves the player into the boss room.
+5. **Play and reconsider.** Save and approve the storylet so it can take part in a run. Use **Play** to try your story, rewind to a choice, and explore a different outcome.
 
-| Extension point | Registers | Shown in |
-| --- | --- | --- |
-| `ctx.entityPanel()` | UI attached to an entity | an extra tab in the entity editor |
-| `ctx.propertyEditor()` | UI attached to a property | replaces the default value input |
-| `ctx.nodeType()` | a graph node: config in, core nodes out (`lower`) | story graph toolbar, context menu, inspector |
-| `ctx.on()` / `ctx.plugin()` | events, nested plugins | — |
+You author these checks and consequences in the story graph; adding a trait alone does not make a door behave this way. During play, the studio checks the current world and participants to determine which storylets can happen. Finding the key changes what the player can do next.
 
-Plugin nodes exist only while authoring. On save, each is lowered into core nodes (for example Apply Command);
-the authored node is kept as `plugin` metadata on the lowered nodes, so reopening the storylet shows it again.
-The engine runs only core nodes.
+## Extend your creative tools with plugins
 
-**Built-in: Vector Canvas.** The plugin adds a `Canvas` trait (created on first load). Entities with that trait get a **Canvas** tab: a layered vector editor (rooms, walls, text, sticky
-notes, icon markers, and entity and storylet references drawn with their thumbnails). New canvases start with one
-`Default` layer. Markers and references have a name shown on the canvas and a description shown on hover. Undo/redo
-and Restore do not add history entries. Markers and references declare entity properties (`map_<id>_present`, plus
-`map_<id>_icon` for markers). An entity or storylet placed on a canvas counts as a reference from the entity that
-holds the canvas (typed `map_<id>_ref` property), so it shows in that entity's or storylet's **References** list;
-storylets now have a **References** tab in the editor. Connect a configured **Get Entity** node to the **Modify Canvas**
-node's Entity input, then open the canvas editor on that entity's working copy (undo only, no history): draw, move,
-delete, add markers and references, or change icons. **Save version** stages the result in the entity's canvas history
-until the storylet is saved; saving the version again replaces it. When the node runs it sets the
-entity's `canvas_version` to that version and applies the gameplay differences (marker/reference presence, marker
-icons) as Apply Command nodes, so several nodes on one canvas compose. Node changes are temp history until the storylet
-is saved: a new or edited version is marked *storylet not saved* and a deleted node's version *removal pending*;
-**Save draft** commits them, and closing or reopening the storylet without saving discards them.
+A **plugin** adds tools to the studio without making every project use them. It can add a new tab on an entity, a more useful way to edit a property, or new kinds of steps in a story graph.
 
-**Built-in: Inventory.** The plugin creates the `InventoryOwner` and `Item` traits on workspace load. Add the `InventoryOwner` trait to an entity to get an **Inventory** tab. Set rows and columns (1–20 each, default 4×4, capacity = rows × columns), then add entities carrying the `Item` trait; each item occupies one slot, must be unique, and displays its entity thumbnail when present. Save the entity to persist the layout and initial contents. A grid cannot be shrunk below its current item count.
+The built-in plugins show what this means in practice.
 
-In a story graph, connect configured **Get Entity** nodes to the owner and item inputs of **Add Item**, **Remove Item**, or **Has Item**. Add/remove are flow nodes; Has Item outputs a boolean for a Condition Node. Inputs are checked for the required traits. Adding an item already present and removing an absent item are no-ops; adding to a full inventory fails. Runtime changes are part of the playtest state, not edits to the authored inventory.
+**Vector Canvas** gives an entity a visual canvas for maps, notes, and references to people, places, and stories. Here, the Forest Temple shows where the player starts, where the key is, and which door needs it.
 
-**Built-in: Tree Graph.** Add `TreeGraph` to an entity to open its **Tree** tab. Add entities carrying `TreeItem`, then drag from a node's outer edge to another node to connect them. Multiple roots, shared nodes, cycles, and disconnected components are supported without game-specific progression rules. Pan and zoom the canvas; switch between four directional views and radial view, drag nodes or use arrow keys, and save a separate layout for each view. **Save layout** saves the entity draft; **Export JSON** downloads the graph, item metadata, and current coordinates.
+![Vector Canvas plugin showing a dungeon map with a start point, key chest, locked door, boss room, and note](docs/images/plugin-canvas.webp)
 
-Switch between **Canvas** and **List** in the Tree tab. The list shows the hierarchy, incoming relationships, and editable columns defined by the `TreeItem` trait. Shared nodes and cycles appear as reference rows. Edits to other items save automatically; edits to the tree owner remain in its draft until saved. Failed item saves retain their edits and offer retry or discard.
+**Inventory** lets you give entities inventories, arrange items, and use story choices to add, remove, or check those items. Here, the Hero carries a small key, bomb, hookshot, map, and compass.
 
-`TreeItem` includes non-negative integer **Level** and **Cost**, a **Cost entity** reference, gameplay tags to add and remove, **Description**, **Asset**, and **Gameplay entity**. The gameplay entity can refer to an in-game skill or another entity; it is independent of TreeGraph connections. Add further columns by adding properties to the `TreeItem` trait.
+![Inventory plugin showing a hero inventory with dungeon items](docs/images/plugin-inventory.webp)
 
-In a story graph, connect **Get Entity** to **Set Tree Position** or **Is Tree Position**. Select a TreeItem in the read-only tree preview; use arrow keys to move between items. Set moves that tree's playtest pointer to the selected item; Is outputs a boolean for a Condition Node. Each tree starts with no position, and any item in the tree can be selected regardless of connections. The pointer belongs to playtest state, not the authored tree. Change or remove storylet references before removing their selected items or TreeGraph trait.
+**Tree Graph** lets you arrange connected entities visually—for example, as a skill tree, relationship map, or dungeon route.
 
-Right-click the canvas or open **Canvas actions** to change its background color, add TreeItems, or create skill-tree, roguelike-map, and relationship-tree examples. The background color is saved with the graph; **Reset background** restores the theme default. Right-click a node to change its shape, colors, outline width, and dimensions; drag its resize handle to resize it. Nodes use their entities' thumbnails as backgrounds. Open node options to connect without a mouse.
+![Tree Graph plugin showing connected dungeon rooms from two gates to a final sanctum](docs/images/plugin-tree.webp)
 
-Use **Canvas actions → Add image** to place a PNG or JPEG under nodes and wires. Drag its edges to resize it. Right-click an image or node to lock or unlock its position and size. Exported JSON references the uploaded image file; it does not include the file bytes.
+Open **Plugins** to turn installed tools on or off. Then add the relevant trait to an entity: **Canvas** for a canvas, **InventoryOwner** for an inventory, or **TreeGraph** for a tree. Its extra editor appears as a tab on that entity.
 
-In the entity's **Traits** tab, TreeGraph settings define default node and wire styles. Individual node and wire settings override those defaults; choose **Use tree defaults** to clear an override. Import a CSS file or edit CSS there to customize that tree's canvas. Styles are scoped to the canvas; CSS `@import` is not supported. Only import CSS from sources you trust.
+![Plugins page with Vector Canvas, Inventory, and Tree Graph enabled](docs/images/plugin-manager.webp)
 
-Double-click a wire to name its relationship; the name appears at the wire's midpoint. Right-click a wire to add, edit, or remove its relationship without removing the wire. Relationship names are saved and exported with the graph, and remain attached when the target is reconnected. These names describe graph connections; they do not change runtime relationship scores.
+For the dungeon example, give the player entity the **InventoryOwner** trait and the small-key entity the **Item** trait. Use the Inventory plugin’s story-graph steps to give the player the key and check whether they carry it. The plugin provides inventory tools; your story graph decides which door the key opens.
 
-The wire menu also offers normal, dashed, dotted, or brush styles, color, thickness, and removal. Drag a wire to reconnect its target; drop it on empty canvas to choose a target from a menu. Alt-drag across wires to cut them. Focus a wire and press Enter to open its options by keyboard.
-
-Expand **View options** to customize the grid and thumbnails; these preferences are stored in the local browser, separate from the saved graph.
-
-The **Plugins** tab lists installed plugins and turns them on or off.
-Visual check: `bun run test:visual:canvas`.
-
-## Model Context Protocol (MCP)
-
-DecisionNarrative exposes project data and deterministic playtest operations to local MCP agents. `workspace.context` identifies the active studio view and focused entity; the agent then works through MCP without UI automation. The MCP service shares the studio's local database. No generation or model-ranking tools are exposed:
-
-```sh
-# Run MCP over stdio against the shared project database; this does not reset it
-cargo run --manifest-path crates/storylet-engine-service/Cargo.toml --bin storylet-engine-service -- --mcp
-```
-
-Tools exposed:
-- `narrative_platform`: Read active workspace context, inspect/validate project content, manage entities, and exercise deterministic Rust playtests. Run operations are `run.start`, `run.view`, `run.act`, `run.rewind`, `run.reload`, `run.inspect`, `run.why_not`, `run.list`, and `run.delete`; `workspace.coverage` explores content coverage.
-
-The same runs are available over HTTP under `/api/v4/runs` (list/start, `/{id}` view/delete, `/{id}/act`, `/{id}/rewind`, `/{id}/reload`, `/{id}/inspect`, `/{id}/why-not`) with optimistic locking and idempotent actions, plus `/api/v4/coverage`.
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for release notes.
-
-## License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+Custom plugins can extend these same authoring tools, but creating one currently requires development work; there is no plugin marketplace or file-install button. Use only plugins you trust.

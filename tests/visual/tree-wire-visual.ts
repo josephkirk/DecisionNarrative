@@ -376,7 +376,7 @@ try {
   await removeRelBtn.waitFor({ state: "visible" });
   await removeRelBtn.click();
 
-  const unnamedEdge = page.locator('.tree-edge-hit[aria-label="Connection from Item B to Item C; press Enter for options"]');
+  const unnamedEdge = page.locator('.tree-edge-hit[aria-label^="Connection from Item B to Item C"]:not([aria-label*="Item C, "])');
   await unnamedEdge.waitFor({ state: "attached" });
   check("wire remains after relationship removal", (await unnamedEdge.count()) === 1);
   check("relationship label removed after contextual removal", (await page.locator(".tree-edge-label").count()) === 0);

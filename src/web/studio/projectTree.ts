@@ -119,7 +119,7 @@ export function buildTreeItems(input: BuildTreeInput): TreeSource {
       id: template.id,
       label: template.name,
       folderId: template.folder_id ?? null,
-      thumbnail: null,
+      thumbnail: template.thumbnail ?? null,
       detail: templateDetail(template),
     });
   }
@@ -172,8 +172,9 @@ export function defaultExpandedKeys(): string[] {
   return [projectKey(), ...CONTENT_ROOTS.map((entry) => rootKey(entry.root))];
 }
 
+/** Natural order: "Clerk 2" sorts before "Clerk 10". */
 function compareLabels(left: string, right: string): number {
-  return left.localeCompare(right, undefined, { sensitivity: "base" });
+  return left.localeCompare(right, undefined, { sensitivity: "base", numeric: true });
 }
 
 function compareNames(left: { name: string }, right: { name: string }): number {
