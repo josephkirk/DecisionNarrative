@@ -26,7 +26,7 @@ export function inventoryOwnerTemplate(): TraitTemplateRecord {
 }
 
 export function itemTemplate(): TraitTemplateRecord {
-  return { id: ITEM_KEY, key: ITEM_KEY, name: "Item", description: "Allows this entity to be placed in inventories.", allow_multiple: false, properties: [] };
+  return { id: ITEM_KEY, key: ITEM_KEY, name: "Item", description: "Allows this entity to be placed in inventories.", unique: true, allow_multiple: false, properties: [] };
 }
 
 export function traitInstance(entity: AnyEntity, templates: TraitTemplateRecord[], key: string): TraitInstance | undefined {

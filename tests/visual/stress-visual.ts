@@ -323,12 +323,25 @@ const steps: Step[] = [
   { name: "system-trait", path: "/trait-templates/system.fact", act: async (p) => {
     const unique = p.getByRole("checkbox", { name: /Only one unique trait/ });
     if (!await unique.isDisabled()) throw new Error("System trait uniqueness must be read-only");
+    if (!await unique.isChecked()) throw new Error("Fact must be marked as a unique trait");
     if (!await p.getByRole("textbox", { name: "Trait name" }).isDisabled()) throw new Error("System trait name must be read-only");
     if (!await p.getByRole("textbox", { name: "Trait key" }).isDisabled()) throw new Error("System trait key must be read-only");
     if (!await p.getByRole("button", { name: "Delete", exact: true }).isDisabled()) throw new Error("System trait must not be deletable");
     if (!await p.getByText("Built-in system trait", { exact: true }).isVisible()) throw new Error("System trait indicator missing");
     if (!await p.getByText("One per entity", { exact: true }).isVisible()) throw new Error("Single-instance constraint missing");
     if (!await p.getByText("This built-in trait's uniqueness cannot be changed.", { exact: true }).isVisible()) throw new Error("System trait restriction explanation missing");
+  } },
+  { name: "exclusive-traits", path: "/entity-templates/long-person", act: async (p) => {
+    await p.locator(".entity-tab").nth(1).click();
+    const select = p.getByRole("combobox", { name: "Trait to add" });
+    for (const id of ["system.location", "system.fact", "item"]) {
+      if (!await select.locator(`option[value="${id}"]`).count()) throw new Error(`${id} should be available before adding Character`);
+    }
+    await select.selectOption("system.character");
+    await p.getByRole("button", { name: "Add", exact: true }).click();
+    for (const id of ["system.location", "system.fact", "item"]) {
+      if (await select.locator(`option[value="${id}"]`).count()) throw new Error(`${id} must not be offered with Character`);
+    }
   } },
   { name: "trait-focus", path: "/trait-templates/ledger", act: async (p) => {
     const row = p.locator(".property-list__row").first();

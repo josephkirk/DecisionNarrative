@@ -1030,7 +1030,7 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
                 && template.name == spec.name
                 && template.system
                 && template.allow_multiple == spec.allow_multiple
-                && !template.unique
+                && template.unique == spec.unique
                 && spec.properties.iter().all(|expected| {
                     template.properties.iter().any(|property| {
                         property.key() == expected.key
@@ -1634,6 +1634,7 @@ mod tests {
                 "name": spec.name,
                 "system": true,
                 "allow_multiple": spec.allow_multiple,
+                "unique": spec.unique,
                 "properties": spec.properties.iter().map(|p| json!({
                     "key": p.key, "name": p.name, "type": p.property_type, "is_array": p.is_array, "default": null
                 })).collect::<Vec<_>>()

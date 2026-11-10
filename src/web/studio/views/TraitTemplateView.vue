@@ -234,7 +234,7 @@ function scrollTabs(event: WheelEvent) {
         <div class="entity-hero-buttons">
           <button
             class="btn btn-primary"
-            :disabled="saving || !dirty || !!propertiesProblem"
+            :disabled="saving || !dirty || !!propertiesProblem || draft.system"
             :title="propertiesProblem ?? 'Save'"
             @click="save"
           >
@@ -277,7 +277,7 @@ function scrollTabs(event: WheelEvent) {
     <section v-show="activeTab === 'properties'" class="entity-content-stack">
       <!-- 1. Identity & Rules -->
       <div class="content-block">
-        <p v-if="draft.system" class="system-trait-notice">This built-in trait is required by the project. Its name, key, thumbnail, properties, and uniqueness cannot be changed or deleted. You can create a separate trait for custom rules.</p>
+        <p v-if="draft.system" class="system-trait-notice">This built-in trait is required by the project and cannot be changed or deleted. You can create a separate trait for custom rules.</p>
         <div class="content-block-head">
           <span class="block-title">Trait identity & rules</span>
           <span class="block-hint">Attribute prefix & entity constraints</span>
@@ -322,6 +322,7 @@ function scrollTabs(event: WheelEvent) {
         <textarea
           class="lore-textarea"
           :value="draft.description ?? ''"
+          :disabled="draft.system"
           rows="3"
           aria-label="Trait description"
           placeholder="Describe this trait's purpose and game mechanics…"
@@ -389,13 +390,13 @@ function scrollTabs(event: WheelEvent) {
         </div>
 
         <div class="include-controls-row">
-          <select v-model="pendingIncludeId" class="form-select include-select" aria-label="Trait to include">
+          <select v-model="pendingIncludeId" class="form-select include-select" aria-label="Trait to include" :disabled="draft.system">
             <option value="">Choose a trait to include…</option>
             <option v-for="t in availableIncludes" :key="t.id" :value="t.id">
               {{ t.name }} ({{ countLabel(t.properties.length, "property", "properties") }})
             </option>
           </select>
-          <button class="btn btn-secondary include-btn" type="button" :disabled="!pendingIncludeId" @click="addInclude">
+          <button class="btn btn-secondary include-btn" type="button" :disabled="draft.system || !pendingIncludeId" @click="addInclude">
             + Include Trait
           </button>
         </div>
@@ -415,7 +416,7 @@ function scrollTabs(event: WheelEvent) {
               <span class="badge" style="font-size:10px;">{{ countLabel(inc.properties.length, "property", "properties") }}</span>
               <router-link :to="`/trait-templates/${inc.id}`" style="font-size:12px; color:var(--accent);">View</router-link>
             </div>
-            <button class="btn btn-secondary btn-danger-hover btn-compact" type="button" :aria-label="`Remove ${inc.name}`" @click="removeInclude(inc.id)">
+            <button class="btn btn-secondary btn-danger-hover btn-compact" type="button" :disabled="draft.system" :aria-label="`Remove ${inc.name}`" @click="removeInclude(inc.id)">
               Remove
             </button>
           </div>

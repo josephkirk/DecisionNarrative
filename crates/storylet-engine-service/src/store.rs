@@ -132,6 +132,8 @@ impl Store {
                 "INSERT INTO project_metadata (singleton, project_id, name, revision)
                  VALUES (1, 'workspace-project', 'Workspace', 0)", [])?;
             seed_system_records(&self.conn)?;
+        } else {
+            sync_system_trait_uniqueness(&self.conn)?;
         }
         ensure_world_entity(&self.conn)?;
         Ok(())
@@ -970,6 +972,21 @@ fn chrono_now_ms() -> i64 {
 }
 
 
+fn sync_system_trait_uniqueness(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
+    let tx = conn.unchecked_transaction()?;
+    let mut changed = 0;
+    for template in SYSTEM_TRAIT_TEMPLATES {
+        let id = format!("system.{}", template.key);
+        changed += tx.execute(
+            "UPDATE content_records SET data_json = json_set(data_json, '$.unique', json(?1)), revision = revision + 1 WHERE entity = 'trait_templates' AND id = ?2 AND COALESCE(json_extract(data_json, '$.unique'), 0) != ?3",
+            params![if template.unique { "true" } else { "false" }, id, template.unique],
+        )?;
+    }
+    if changed > 0 { tx.execute("UPDATE project_metadata SET revision = revision + 1 WHERE singleton = 1", [])?; }
+    tx.commit()?;
+    Ok(())
+}
+
 fn seed_system_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
     for template in SYSTEM_TRAIT_TEMPLATES {
         let properties: Vec<Value> = template.properties.iter().map(|spec| json!({
@@ -990,7 +1007,7 @@ fn seed_system_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Erro
             "folder_id": null,
             "properties": properties,
             "allow_multiple": template.allow_multiple,
-            "unique": false,
+            "unique": template.unique,
             "system": true,
             "created_at": 0
         });

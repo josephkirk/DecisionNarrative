@@ -14,7 +14,12 @@ export const inventoryPlugin = definePlugin({
     let creating = false;
     async function ensureTraits() {
       if (creating || !studioState.project) return;
-      const templates = [inventoryOwnerTemplate(), itemTemplate()].filter((template) => !studioState.traitTemplates.some((existing) => existing.key === template.key));
+      const templates = [inventoryOwnerTemplate(), itemTemplate()].flatMap((template) => {
+        const existing = studioState.traitTemplates.find((entry) => entry.key === template.key);
+        if (!existing) return [template];
+        if (template.unique && !existing.unique) return [{ ...existing, unique: true }];
+        return [];
+      });
       if (!templates.length) return;
       creating = true;
       try {

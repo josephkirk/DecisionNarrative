@@ -161,24 +161,37 @@ async fn trait_uniqueness_is_enforced_on_save_and_definition_changes() {
 }
 
 #[tokio::test]
-async fn core_capability_traits_are_single_instance_but_can_coexist() {
+async fn core_entity_type_traits_are_mutually_exclusive() {
     let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
     service.save_content_item("trait_templates", &json!({
-        "id":"item", "key":"item", "name":"Item", "allow_multiple":false, "properties":[]
+        "id":"item", "key":"item", "name":"Item", "unique":true, "allow_multiple":false, "properties":[]
     })).await.unwrap();
     let ids = ["system.fact", "item", "system.character", "system.location"];
-    let traits: Vec<_> = ids.iter().enumerate().map(|(index, id)| json!({
-        "id": format!("trait-{index}"), "template_id": id, "values": {}
-    })).collect();
-    let entity = json!({"id":"capabilities", "name":"Capabilities", "traits":traits});
-    service.save_content_item("entity_templates", &entity).await.unwrap();
     for (index, id) in ids.iter().enumerate() {
-        let mut duplicate = entity.clone();
-        duplicate["traits"].as_array_mut().unwrap().push(json!({
-            "id":format!("duplicate-{index}"), "template_id":id, "values":{}
-        }));
-        assert!(service.save_content_item("entity_templates", &duplicate).await.unwrap_err().contains("does not allow multiple instances"));
+        let entity = json!({"id":format!("capabilities-{index}"), "name":"Capabilities", "traits":[
+            {"id":"first", "template_id":id, "values":{}}
+        ]});
+        service.save_content_item("entity_templates", &entity).await.unwrap();
+        for other in ids {
+            let mut invalid = entity.clone();
+            invalid["traits"].as_array_mut().unwrap().push(json!({"id":"second", "template_id":other, "values":{}}));
+            assert!(service.save_content_item("entity_templates", &invalid).await.unwrap_err().contains("only one unique trait"));
+        }
     }
+}
+
+#[tokio::test]
+async fn existing_system_trait_uniqueness_is_updated_on_open() {
+    let path = std::env::temp_dir().join(format!("trait-unique-{}.db", uuid::Uuid::new_v4()));
+    drop(StudioService::open(&path, ".").unwrap());
+    let connection = Connection::open(&path).unwrap();
+    connection.execute("UPDATE content_records SET data_json = json_set(data_json, '$.unique', json('false')) WHERE entity = 'trait_templates' AND id = 'system.fact'", []).unwrap();
+    drop(connection);
+    let service = StudioService::open(&path, ".").unwrap();
+    let fact = service.get_content_item("trait_templates", "system.fact").await.unwrap();
+    assert_eq!(fact["unique"], true);
+    drop(service);
+    let _ = std::fs::remove_file(path);
 }
 
 #[tokio::test]
