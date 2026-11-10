@@ -339,6 +339,11 @@ const steps: Step[] = [
     }
     await select.selectOption("system.character");
     await p.getByRole("button", { name: "Add", exact: true }).click();
+    const character = p.locator(".trait-card").filter({ has: p.locator("summary", { hasText: "Character" }) });
+    if (!await character.getByText("Unique", { exact: true }).isVisible()) throw new Error("Unique trait indicator missing");
+    const ledger = p.locator(".trait-card").filter({ has: p.locator("summary", { hasText: "Correspondence Ledger" }) });
+    if (await ledger.getByText("Unique", { exact: true }).count()) throw new Error("Standard trait incorrectly marked unique");
+    await character.locator("summary").scrollIntoViewIfNeeded();
     for (const id of ["system.location", "system.fact", "item"]) {
       if (await select.locator(`option[value="${id}"]`).count()) throw new Error(`${id} must not be offered with Character`);
     }

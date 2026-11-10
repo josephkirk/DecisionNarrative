@@ -307,7 +307,7 @@ function scrollTabs(event: WheelEvent) {
         No traits applied to intrinsic entity.
       </div>
       <details v-for="entry in appliedTraits" :key="entry.instance.id" class="trait-card" open>
-        <summary><img v-if="thumbnailUrl(entry.template?.thumbnail)" class="trait-thumbnail" :src="thumbnailUrl(entry.template?.thumbnail) ?? undefined" alt="" width="32" height="32" /><span>{{ entry.template?.name }}</span><span class="trait-count">{{ countLabel((entry.template?.properties ?? []).length, 'property', 'properties') }}</span></summary>
+        <summary><img v-if="thumbnailUrl(entry.template?.thumbnail)" class="trait-thumbnail" :src="thumbnailUrl(entry.template?.thumbnail) ?? undefined" alt="" width="32" height="32" /><span class="trait-name">{{ entry.template?.name }}</span><span v-if="entry.template?.unique" class="trait-unique" title="Only one unique trait may be applied to an entity">Unique</span><span class="trait-count">{{ countLabel((entry.template?.properties ?? []).length, 'property', 'properties') }}</span></summary>
         <component
           v-if="traitInspectorComponent(entry.template?.key ?? '')"
           :is="traitInspectorComponent(entry.template?.key ?? '')"
@@ -397,6 +397,8 @@ function scrollTabs(event: WheelEvent) {
 .trait-card > summary::before { content: '›'; color: var(--text-muted); font-size: 18px; line-height: 1; }
 .trait-card[open] > summary::before { transform: rotate(90deg); }
 .trait-card[open] > summary { border-bottom: 1px solid var(--border-subtle); }
+.trait-name { min-width: 0; overflow-wrap: anywhere; }
+.trait-unique { flex: none; padding: 2px 7px; border: 1px solid var(--accent); border-radius: var(--radius-sm, 4px); background: var(--accent-subtle); color: var(--accent); font-size: 11px; font-weight: 600; line-height: 1.4; }
 .trait-count { margin-left: auto; color: var(--text-muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
 .trait-thumbnail { flex: none; width: 32px; height: 32px; object-fit: cover; border-radius: var(--radius-sm, 4px); }
 .trait-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); column-gap: 16px; row-gap: 24px; padding: 16px; }
