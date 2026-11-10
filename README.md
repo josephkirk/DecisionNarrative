@@ -60,13 +60,23 @@ You author these checks and consequences in the story graph; adding a trait alon
 
 A **plugin** adds tools to the studio without making every project use them. It can add a new tab on an entity, a more useful way to edit a property, or new kinds of steps in a story graph.
 
-The built-in plugins show what this means in practice:
+The built-in plugins show what this means in practice.
 
-- **Vector Canvas** gives an entity a visual canvas for maps, notes, and references to people, places, and stories.
-- **Inventory** lets you give entities inventories, arrange items, and use story choices to add, remove, or check those items.
-- **Tree Graph** lets you arrange connected entities visually—for example, as a skill tree or relationship map.
+**Vector Canvas** gives an entity a visual canvas for maps, notes, and references to people, places, and stories. Here, the Forest Temple shows where the player starts, where the key is, and which door needs it.
+
+![Vector Canvas plugin showing a dungeon map with a start point, key chest, locked door, boss room, and note](docs/images/plugin-canvas.webp)
+
+**Inventory** lets you give entities inventories, arrange items, and use story choices to add, remove, or check those items. Here, the Hero carries a small key, bomb, hookshot, map, and compass.
+
+![Inventory plugin showing a hero inventory with dungeon items](docs/images/plugin-inventory.webp)
+
+**Tree Graph** lets you arrange connected entities visually—for example, as a skill tree, relationship map, or dungeon route.
+
+![Tree Graph plugin showing connected dungeon rooms from two gates to a final sanctum](docs/images/plugin-tree.webp)
 
 Open **Plugins** to turn installed tools on or off. Then add the relevant trait to an entity: **Canvas** for a canvas, **InventoryOwner** for an inventory, or **TreeGraph** for a tree. Its extra editor appears as a tab on that entity.
+
+![Plugins page with Vector Canvas, Inventory, and Tree Graph enabled](docs/images/plugin-manager.webp)
 
 For the dungeon example, give the player entity the **InventoryOwner** trait and the small-key entity the **Item** trait. Use the Inventory plugin’s story-graph steps to give the player the key and check whether they carry it. The plugin provides inventory tools; your story graph decides which door the key opens.
 
