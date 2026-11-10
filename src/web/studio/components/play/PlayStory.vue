@@ -2,6 +2,7 @@
 import { ref, watch } from "vue";
 import type { NearMiss, RunAction, RunEnvelope } from "../../contracts.ts";
 import { alsoHereActions, editLink, nearMissText, stepCountText } from "../../runModel.ts";
+import StudioIcon from "../StudioIcon.vue";
 
 const props = defineProps<{
   envelope: RunEnvelope;
@@ -58,7 +59,7 @@ watch(() => props.envelope.view.scene?.storylet.title, (title) => {
           class="play-edit"
           :to="editLink(envelope.view.scene.storylet)!"
           aria-label="Edit this storylet"
-        >✎ edit</router-link>
+        ><StudioIcon name="pencil" /> edit</router-link>
       </header>
       <p v-for="(line, i) in envelope.view.scene.lines" :key="i" class="play-line">{{ line.text }}</p>
 

@@ -303,10 +303,9 @@ function openContext(event: MouseEvent, node?: string, edge?: number) {
   const anchor = event.currentTarget instanceof Element ? event.currentTarget.getBoundingClientRect() : rect;
   const rawX = (event.clientX || anchor.left + anchor.width / 2) - rect.left;
   const rawY = (event.clientY || anchor.bottom) - rect.top;
-  const menuWidth = 250;
-  const menuHeight = node ? 390 : edge !== undefined ? 360 : 340;
-  const x = Math.max(8, Math.min(rawX, rect.width - menuWidth - 8));
-  const y = Math.max(8, Math.min(rawY, rect.height - menuHeight - 8));
+  // Position at the anchor; the contextMenu watcher clamps with the menu's measured size.
+  const x = Math.max(0, rawX);
+  const y = Math.max(0, rawY);
   menuSearch.value = "";
   editingRelationship.value = false;
   menu.value = {
@@ -764,8 +763,8 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
               <button type="button" class="btn btn-secondary" :disabled="!graph.nodes.length && !graph.appearance?.images?.length" @click="exportJson">Export JSON</button>
             </div>
             <p class="field-sublabel">Grid and thumbnail preferences are saved on this device. Saving layout also saves other entity changes.</p>
-            <details class="tree-shortcuts">
-              <summary class="tree-shortcuts-summary">Keyboard shortcuts</summary>
+            <section class="tree-shortcuts" aria-label="Keyboard shortcuts">
+              <h3 class="tree-shortcuts-summary">Keyboard shortcuts</h3>
               <dl class="tree-shortcuts-list">
                 <div class="shortcut-row"><dt><kbd>+</kbd> / <kbd>−</kbd></dt><dd>Zoom in / out</dd></div>
                 <div class="shortcut-row"><dt><kbd>0</kbd> / <kbd>f</kbd></dt><dd>Fit to screen</dd></div>
@@ -776,7 +775,7 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
                 <div class="shortcut-row"><dt><kbd>Alt</kbd>+drag</dt><dd>Cut wires across slice</dd></div>
                 <div class="shortcut-row"><dt><kbd>Esc</kbd></dt><dd>Dismiss menu</dd></div>
               </dl>
-            </details>
+            </section>
             </div>
           </details>
         </div>
@@ -981,7 +980,7 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
 .tree-node:hover .tree-node-art { box-shadow: 0 0 0 2px var(--accent), 0 4px 16px rgba(0, 0, 0, 0.4); }
 .tree-node.is-selected .tree-node-art { box-shadow: 0 0 0 3px var(--accent), 0 0 16px rgba(6, 182, 212, 0.45); }
 .tree-shortcuts { margin-top: 8px; border-top: 1px solid var(--border-subtle); padding-top: 8px; }
-.tree-shortcuts-summary { font-size: 11px; font-weight: 600; color: var(--text-muted); cursor: pointer; }
+.tree-shortcuts-summary { margin: 0; font-size: 11px; font-weight: 600; color: var(--text-muted); }
 .tree-shortcuts-list { display: grid; gap: 6px; margin: 8px 0 0; padding: 0; }
 .shortcut-row { display: flex; align-items: center; justify-content: space-between; font-size: 11px; gap: 8px; }
 .shortcut-row dt { margin: 0; font-family: var(--font-mono, monospace); }

@@ -5,6 +5,10 @@ import { studioState } from "../state.ts";
 import { StudioApi } from "../api.ts";
 import { buildHierarchicalTagTree, buildTagIndex, isValidGameplayTagSegment, renamedGameplayTagName, TAG_KINDS, type HierarchicalTagNode, type TagKind, type TagReference } from "../tagData.ts";
 import TagTreeNode from "../components/TagTreeNode.vue";
+import StudioIcon from "../components/StudioIcon.vue";
+import EmptyState from "../components/ui/EmptyState.vue";
+import SearchField from "../components/ui/SearchField.vue";
+import SegmentedControl from "../components/ui/SegmentedControl.vue";
 import { refreshWorkspace } from "../view-models/workspace.ts";
 
 const router = useRouter();
@@ -105,38 +109,34 @@ function openReference(reference: { entityType: string; entityId: string; nodeId
 <template>
   <main class="tag-manager">
     <header class="tag-manager__header">
-      <div>
+      <div class="tag-manager__intro">
         <h1>Tag manager</h1>
         <p>Manage the canonical hierarchical gameplay tag catalog used by authored content.</p>
       </div>
-      <button v-if="activeKind === 'gameplay'" type="button" class="btn btn-primary" aria-label="Add root gameplay tag" @click="createTag()">Add root</button>
-      <button v-if="activeKind === 'gameplay'" type="button" class="btn btn-secondary" :disabled="!selectedTag || !selectedTagIsRegistered" :aria-label="selectedTag ? `Add child tag under ${selectedTag}` : 'Select a registered tag to add a child'" @click="selectedTagIsRegistered && createTag(selectedTag)">Add child</button>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <div v-if="activeKind === 'gameplay'" style="display:flex; gap:4px; margin-right:8px;">
-          <button :class="['btn', tagViewMode === 'tree' ? 'btn-primary' : 'btn-secondary']" style="padding:4px 10px; font-size:12px;" @click="tagViewMode = 'tree'">Tree</button>
-          <button :class="['btn', tagViewMode === 'list' ? 'btn-primary' : 'btn-secondary']" style="padding:4px 10px; font-size:12px;" @click="tagViewMode = 'list'">List</button>
+      <div class="tag-manager__toolbar">
+        <SearchField v-model="query" class="tag-manager__search" label="Search tags" placeholder="Search tags…" />
+        <SegmentedControl v-if="activeKind === 'gameplay'" v-model="tagViewMode" label="Tag view" :options="[{ value: 'tree', label: 'Tree' }, { value: 'list', label: 'List' }]" />
+        <div v-if="activeKind === 'gameplay'" class="tag-manager__actions">
+          <button type="button" class="btn btn-secondary" :disabled="!selectedTag || !selectedTagIsRegistered" :aria-label="selectedTag ? `Add child tag under ${selectedTag}` : 'Select a registered tag to add a child'" @click="selectedTagIsRegistered && createTag(selectedTag)">Add child</button>
+          <button type="button" class="btn btn-primary" aria-label="Add root gameplay tag" @click="createTag()"><StudioIcon name="plus" /> Add root</button>
         </div>
-        <input v-model="query" class="form-input" placeholder="Search tags…" aria-label="Search tags" />
       </div>
     </header>
     <p v-if="status" class="tag-manager__status" role="status">{{ status }}</p>
 
-    <nav v-if="TAG_KINDS.length > 1" class="tag-manager__tabs" aria-label="Tag categories">
-      <button
-        v-for="kind in TAG_KINDS"
-        :key="kind.id"
-        :class="['btn', activeKind === kind.id ? 'btn-primary' : 'btn-secondary']"
-        @click="activeKind = kind.id"
-      >
-        {{ kind.label }} <span class="tag-manager__count">{{ kindCount(kind.id) }}</span>
-      </button>
-    </nav>
+    <SegmentedControl
+      v-if="TAG_KINDS.length > 1"
+      v-model="activeKind"
+      class="tag-manager__tabs"
+      label="Tag categories"
+      :options="TAG_KINDS.map((kind) => ({ value: kind.id, label: kind.label, count: kindCount(kind.id) }))"
+    />
 
     <div v-if="loading" class="loading-state">Loading tag references…</div>
     <p v-else-if="error" class="tag-manager__error" role="alert">{{ error }}</p>
-    <div v-else-if="!visibleTags.length" class="tag-manager__empty">
-      No {{ TAG_KINDS.find((kind) => kind.id === activeKind)?.label.toLocaleLowerCase() }} found.
-    </div>
+    <EmptyState v-else-if="!visibleTags.length" icon="tag" :title="`No ${TAG_KINDS.find((kind) => kind.id === activeKind)?.label.toLocaleLowerCase()} found.`">
+      <button v-if="activeKind === 'gameplay' && !query" type="button" class="btn btn-primary" @click="createTag()"><StudioIcon name="plus" /> Add a root tag</button>
+    </EmptyState>
 
     <!-- HIERARCHICAL TREE VIEW FOR GAMEPLAY TAGS -->
     <div v-else-if="activeKind === 'gameplay' && tagViewMode === 'tree'" class="tag-tree-container" role="tree" aria-label="Gameplay tag hierarchy">
@@ -179,22 +179,23 @@ function openReference(reference: { entityType: string; entityId: string; nodeId
 </template>
 
 <style scoped>
-.tag-manager { height: 100%; overflow: auto; padding: 24px 32px; }
-.tag-manager__header { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 20px; }
-.tag-manager__header h1 { margin: 0; font-size: 22px; }
-.tag-manager__header p { margin: 6px 0 0; color: var(--text-muted); font-size: 13px; }
-.tag-manager__header .form-input { width: min(280px, 40%); }
-.tag-manager__tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
-.tag-manager__count { margin-left: 6px; font-size: 11px; opacity: 0.8; }
+.tag-manager { height: 100%; overflow: auto; padding: 20px 24px 32px; container-type: inline-size; }
+.tag-manager__header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px 24px; margin-bottom: 20px; }
+.tag-manager__intro { flex: 1 1 280px; min-width: 0; }
+.tag-manager__header h1 { margin: 0; }
+.tag-manager__header p { margin: 6px 0 0; color: var(--text-muted); font-size: 13px; max-width: 60ch; }
+.tag-manager__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tag-manager__search { flex: 1 1 180px; min-width: 160px; }
+.tag-manager__tabs { margin-bottom: 20px; }
 .tag-manager__error { color: var(--status-danger); }
-.tag-manager__empty, .loading-state { color: var(--text-muted); padding: 40px 0; text-align: center; }
-.tag-manager__list { display: flex; flex-direction: column; gap: 14px; }
-.tag-manager__tag { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 16px; }
-.tag-manager__tag-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.tag-manager__tag-header h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.loading-state { color: var(--text-muted); padding: 40px 0; text-align: center; }
+.tag-manager__list { display: flex; flex-direction: column; gap: 12px; }
+.tag-manager__tag { background: rgba(255, 255, 255, 0.025); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 16px; }
+.tag-manager__tag-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.tag-manager__tag-header h2 { margin: 0 auto 0 0; font-size: 15px; font-weight: 600; font-family: var(--font-mono); letter-spacing: 0; }
 .tag-manager__tag-header span { font-size: 12px; color: var(--text-muted); }
-.tag-manager__tag ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.tag-manager__tag li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; background: var(--bg-surface); border-radius: 6px; }
+.tag-manager__tag ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tag-manager__tag li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; background: rgba(0, 0, 0, 0.2); border-radius: var(--radius-md); }
 .tag-manager__tag li div { display: flex; flex-direction: column; }
 .tag-manager__tag li small { color: var(--text-muted); font-size: 11px; }
 

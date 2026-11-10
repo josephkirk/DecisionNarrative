@@ -2,6 +2,7 @@
 import { computed, ref, useId } from "vue";
 import { normalizeTagName, uniqueTagNames } from "../tagData.ts";
 import { addTagSelection, commitSingleTagEdit, nextTagSuggestionIndex, tagSuggestionQuery, tagSuggestions } from "../tagEditorModel.ts";
+import StudioIcon from "./StudioIcon.vue";
 
 const props = withDefaults(defineProps<{
   modelValue?: string | string[] | null;
@@ -108,7 +109,7 @@ function focusInput() {
   <div class="tag-editor" :aria-label="label" @click="focusInput">
     <span v-if="props.multiple" v-for="tag in selected" :key="normalizeTagName(tag)" class="tag-editor__chip" :title="tag">
       <span class="tag-hash">#</span><span class="tag-editor__chip-label">{{ tag }}</span>
-      <button type="button" class="tag-editor__remove" :aria-label="'Remove ' + tag" @click.stop="remove(tag)">✕</button>
+      <button type="button" class="tag-editor__remove" :aria-label="'Remove ' + tag" @click.stop="remove(tag)"><StudioIcon name="close" /></button>
     </span>
     <input
       ref="input"

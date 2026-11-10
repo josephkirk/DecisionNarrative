@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { thumbnailUrl, thumbnailInitial } from "../thumbnails.ts";
+import StudioIcon from "./StudioIcon.vue";
 
 export interface PickerItem {
   id: string;
@@ -95,7 +96,7 @@ function choose(id: string) {
             title="Close"
             aria-label="Close picker"
             @click="$emit('close')"
-          >✕</button>
+          ><StudioIcon name="close" /></button>
         </div>
       </div>
 

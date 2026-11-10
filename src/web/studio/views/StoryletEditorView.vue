@@ -5,6 +5,7 @@ import { useStoryletEditorViewModel } from "../view-models/storyletEditor.ts";
 import NarrativeGraphCanvas from "../components/NarrativeGraphCanvas.vue";
 import PropertyInspector from "../components/PropertyInspector.vue";
 import ReferenceList from "../components/ReferenceList.vue";
+import StudioIcon from "../components/StudioIcon.vue";
 import type { ContentReference } from "../contracts.ts";
 import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../plugins/graphLowering.ts";
 import { emit as emitPluginEvent, pluginNodeDeleted, type AnyEntity } from "../plugins/runtime.ts";
@@ -203,7 +204,7 @@ function deleteSelectedNode(nodeId: string) {
   <div class="full-editor">
     <header class="editor-toolbar">
       <div class="toolbar-left">
-        <button class="btn btn-secondary" @click="goBack">← Back to storylets</button>
+        <button type="button" class="btn btn-secondary editor-back" aria-label="Back to storylets" title="Back to storylets" @click="goBack"><StudioIcon name="back" /><span class="editor-back__label">Back to storylets</span></button>
         <input v-model="draft.title" class="form-input storylet-title-input" placeholder="Storylet title…" aria-label="Storylet title" />
         <span :class="['badge', isApproved ? 'approved' : '']">{{ isApproved ? "Approved" : "Draft" }} · v{{ draft.revision }}</span>
         <span v-if="originBadge(draft)" class="badge">{{ originBadge(draft) }}</span>
@@ -211,11 +212,12 @@ function deleteSelectedNode(nodeId: string) {
       </div>
       <div class="toolbar-right">
         <button
+          type="button"
           class="btn btn-secondary"
           :disabled="loading || isNew || isDirty"
           :title="isNew || isDirty ? 'Save the draft before playing it' : 'Play starting at this storylet'"
           @click="playFromHere"
-        >▶ Play from here</button>
+        ><StudioIcon name="play" /> Play from here</button>
         <button class="btn btn-secondary" :disabled="loading" @click="handleSave">Save draft</button>
         <button class="btn btn-primary" :disabled="!canApprove" :title="isDirty ? 'Save draft before approving' : 'Approve current revision'" @click="handleApprove">Approve revision</button>
       </div>
@@ -223,10 +225,10 @@ function deleteSelectedNode(nodeId: string) {
 
     <div v-if="loading || !graphReady" class="loading-state">Loading storylet…</div>
     <main v-else class="graph-editor-layout">
-      <nav class="graph-tabs" aria-label="Storylet graph">
-        <button :class="{ active: !showReferences && activeGraphTab === 'preconditions' }" @click="showReferences = false; activeGraphTab = 'preconditions'; selectedNodeId = null">Preconditions</button>
-        <button :class="{ active: !showReferences && activeGraphTab === 'story' }" @click="showReferences = false; activeGraphTab = 'story'; selectedNodeId = null">Story graph</button>
-        <button v-if="!isNew" :class="{ active: showReferences }" data-testid="storylet-references-tab" @click="showReferences = true; loadReferences()">References <span class="tab-count">{{ references.length }}</span></button>
+      <nav class="graph-tabs tab-nav" aria-label="Storylet graph">
+        <button type="button" class="tab-btn" :class="{ active: !showReferences && activeGraphTab === 'preconditions' }" @click="showReferences = false; activeGraphTab = 'preconditions'; selectedNodeId = null">Preconditions</button>
+        <button type="button" class="tab-btn" :class="{ active: !showReferences && activeGraphTab === 'story' }" @click="showReferences = false; activeGraphTab = 'story'; selectedNodeId = null">Story graph</button>
+        <button v-if="!isNew" type="button" class="tab-btn" :class="{ active: showReferences }" data-testid="storylet-references-tab" @click="showReferences = true; loadReferences()">References <span class="tab-count">{{ references.length }}</span></button>
       </nav>
       <div v-if="showReferences" class="storylet-references">
         <ReferenceList :references="references" :loading="referencesLoading" :target-name="draft.title" />
@@ -260,35 +262,28 @@ function deleteSelectedNode(nodeId: string) {
 </template>
 
 <style scoped>
-.full-editor { display: flex; flex-direction: column; container-type: inline-size; height: 100%; min-height: 0; overflow: hidden; background: var(--bg-app); }
-.editor-toolbar { height: auto; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 8px 16px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
-.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.toolbar-right { margin-left: auto; flex-shrink: 0; }
-.storylet-title-input { font-size: 13px; font-weight: 600; width: min(220px, 40vw); min-width: 0; }
-.unsaved { background: rgba(255, 149, 0, 0.18); color: var(--status-warning); }
+.full-editor { display: flex; flex-direction: column; container-type: inline-size; height: 100%; min-height: 0; overflow: hidden; background: transparent; }
+.editor-toolbar { height: auto; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; min-height: 56px; padding: 10px 16px; background: transparent; border-bottom: 1px solid var(--border-faint); flex-wrap: wrap; }
+.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.toolbar-left { flex: 1 1 320px; flex-wrap: wrap; }
+.toolbar-right { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.editor-back { padding: 0 10px; }
+.storylet-title-input { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; flex: 1 1 160px; max-width: 320px; min-width: 140px; }
+.unsaved { background: var(--tertiary-subtle); color: var(--status-warning); }
 .graph-editor-layout { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
-.graph-editor-workspace { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.graph-editor-workspace { display: flex; flex: 1; min-height: 0; overflow: hidden; border-top: 1px solid var(--border-faint); }
 
-.graph-tabs { display: flex; gap: 4px; padding: 7px 12px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); overflow-x: auto; }
-.graph-tabs button { border: 1px solid var(--border-subtle); border-radius: 6px; background: transparent; color: var(--text-muted); padding: 6px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
-.graph-tabs button.active { color: var(--text-main); background: var(--bg-app); border-color: var(--accent); }
+.graph-tabs { align-self: flex-start; margin: 10px 16px; overflow-x: auto; max-width: calc(100% - 32px); }
+.graph-tabs .tab-btn { white-space: nowrap; flex-shrink: 0; display: inline-flex; align-items: center; }
 .graph-editor-canvas { flex: 1; min-width: 0; }
 .storylet-references { flex: 1; min-height: 0; overflow: auto; padding: 16px; }
-.tab-count { margin-left: 4px; padding: 0 6px; border-radius: 8px; background: var(--bg-app); font-size: 11px; }
+.tab-count { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; }
 .loading-state { display: grid; flex: 1; place-items: center; color: var(--text-muted); }
-@media (max-width: 760px) {
-  .editor-toolbar { align-items: flex-start; row-gap: 8px; }
-  .toolbar-left { flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
-  .toolbar-right { flex-wrap: nowrap; }
-  .toolbar-right .btn { white-space: nowrap; }
-  :deep(.property-inspector-panel) { width: min(340px, 44vw); }
-}
-@media (max-width: 560px) {
-  .editor-toolbar { flex-wrap: nowrap; overflow-x: auto; }
-  .toolbar-left { flex-wrap: nowrap; flex: 0 0 auto; }
-  .toolbar-right { flex: 0 0 auto; }
+@container (max-width: 900px) {
+  :deep(.property-inspector-panel) { width: min(340px, 44cqw); }
 }
 @container (max-width: 600px) {
+  .editor-back__label { display: none; }
   .graph-editor-workspace { flex-direction: column; overflow-y: auto; }
   .graph-editor-canvas { flex: 0 0 auto; height: 46vh; min-height: 280px; }
   :deep(.property-inspector-panel) { width: 100%; border-left: 0; border-top: 1px solid var(--border-subtle); overflow-y: visible; }

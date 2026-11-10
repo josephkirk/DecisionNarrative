@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { StudioApi, ApiError } from "../api.ts";
 import { notify } from "../state.ts";
 import { thumbnailUrl } from "../thumbnails.ts";
+import StudioIcon from "./StudioIcon.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -110,14 +111,14 @@ async function onFile(event: Event) {
     <!-- Minimalist context menu if image is present -->
     <div v-if="showMenu" class="thumb-popover-menu" @click.stop>
       <button type="button" class="thumb-popover-item" @click="pickFile">
-        <span>📁</span> Upload new image…
+        <StudioIcon name="camera" /> Upload new image…
       </button>
       <button type="button" class="thumb-popover-item" @click="promptUrl">
-        <span>🔗</span> Enter image URL…
+        <StudioIcon name="link" /> Enter image URL…
       </button>
       <div class="thumb-popover-divider"></div>
       <button type="button" class="thumb-popover-item thumb-popover-item--danger" @click="clearImage">
-        <span>🗑️</span> Remove image
+        <StudioIcon name="trash" /> Remove image
       </button>
     </div>
 

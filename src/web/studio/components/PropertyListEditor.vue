@@ -11,6 +11,7 @@ import {
 } from "../propertyModel.ts";
 import PropertyValueInput from "./PropertyValueInput.vue";
 import { propertyEditorFor } from "../plugins/runtime.ts";
+import StudioIcon from "./StudioIcon.vue";
 
 type Row = EntityProperty | PropertyDefinition;
 
@@ -150,7 +151,7 @@ function add() {
 
     <div v-if="!rows.length" class="property-list__empty" style="display:flex; flex-direction:column; align-items:center; gap:12px; padding:28px;">
       <span>No typed properties defined yet.</span>
-      <button v-if="!props.disabled" class="btn btn-primary" type="button" @click="add">+ Add property</button>
+      <button v-if="!props.disabled" class="btn btn-primary" type="button" @click="add"><StudioIcon name="plus" /> Add property</button>
     </div>
 
     <div v-for="(row, index) in rows" :key="`${row.id || index}-${row.type}-${row.is_array}-${row.multiline}`" class="property-list__row">
@@ -219,13 +220,13 @@ function add() {
         <button v-if="row.type === 'string'" class="btn-micro" type="button" title="Multiline text" :aria-label="`Multiline text for ${row.name || row.key || 'property'}`" :aria-pressed="row.multiline === true" :class="{ 'is-active': row.multiline === true }" :disabled="props.disabled" @click="toggleMultiline(index)">Aa</button>
         <button class="btn-micro" type="button" title="Move property up" aria-label="Move property up" :disabled="props.disabled || index === 0" @click="move(index, -1)"><svg class="btn-micro__icon" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 7.5 6 4l3.5 3.5"/></svg></button>
         <button class="btn-micro" type="button" title="Move property down" aria-label="Move property down" :disabled="props.disabled || index === rows.length - 1" @click="move(index, 1)"><svg class="btn-micro__icon" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg></button>
-        <button class="btn-micro danger" type="button" title="Delete property" aria-label="Delete property" :disabled="props.disabled" @click="remove(index)">✕</button>
+        <button class="btn-micro danger" type="button" title="Delete property" aria-label="Delete property" :disabled="props.disabled" @click="remove(index)"><StudioIcon name="close" /></button>
       </div>
     </div>
 
-    <div class="property-list__footer">
+    <div v-if="rows.length" class="property-list__footer">
       <button v-if="!props.disabled" class="btn btn-secondary property-add-btn" type="button" @click="add">
-        <span style="font-size: 14px; line-height: 1;">+</span> Add Property
+        <StudioIcon name="plus" /> Add property
       </button>
     </div>
   </div>
@@ -233,18 +234,21 @@ function add() {
 
 <style scoped>
 .property-list {
-  background: var(--bg-card);
+  background: rgba(0, 0, 0, 0.18);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg, 10px);
-  overflow: hidden;
+  border-radius: var(--radius-md, 9px);
+  /* The table keeps its columns and scrolls sideways inside narrow panes. */
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .property-list__head {
   display: grid;
   grid-template-columns: 1.2fr 1fr 115px 84px 1.2fr 118px;
   gap: 8px;
+  min-width: 620px;
   padding: 8px 12px;
-  background: var(--surface-container-high, #212735);
+  background: rgba(255, 255, 255, 0.03);
   border-bottom: 1px solid var(--border-subtle);
   font-size: 11px;
   font-weight: 600;
@@ -263,6 +267,7 @@ function add() {
   display: grid;
   grid-template-columns: 1.2fr 1fr 115px 84px 1.2fr 118px;
   gap: 8px;
+  min-width: 620px;
   align-items: center;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border-subtle);

@@ -1,6 +1,7 @@
 import { createApp } from "vue";
 import App from "./App.vue";
 import { router } from "./studio/router.ts";
+import "@fontsource-variable/sora";
 import "./styles.css";
 import { installBuiltinPlugins } from "./studio/plugins/index.ts";
 

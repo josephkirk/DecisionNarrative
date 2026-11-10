@@ -243,7 +243,8 @@ try {
   check("the new version is temp until the storylet is saved", afterDoc.revisions.at(-1)?.uncommitted === true);
   // Edit again: the node keeps its one version.
   // Deselect, then click the node: the editor opens again.
-  await page.locator(".graph-editor-canvas").click({ position: { x: 600, y: 700 } });
+  const emptyCanvasPoint = async () => { const b = (await page.locator(".graph-editor-canvas").boundingBox())!; return { x: b.width - 40, y: b.height - 40 }; };
+  await page.locator(".graph-editor-canvas").click({ position: await emptyCanvasPoint() });
   await pluginNode.click({ position: { x: 60, y: 50 } });
   await editor.waitFor();
   check("clicking the node opens the canvas editor", await editor.isVisible());
@@ -302,7 +303,7 @@ try {
   await sleep(300);
   const moved = (await page.locator(".graph-node.plugin .node-header").boundingBox())!;
   check("dragging the node moves it without opening the editor", (await page.getByTestId("modify-canvas-editor").count()) === 0 && moved.x > header.x + 40, `${header.x} -> ${moved.x}`);
-  await page.locator(".graph-editor-canvas").click({ position: { x: 600, y: 700 } });
+  await page.locator(".graph-editor-canvas").click({ position: await emptyCanvasPoint() });
   const deleteNode = async () => {
     await page.locator(".graph-node.plugin").getByRole("button", { name: "Delete node" }).click();
     await page.locator(".graph-node.plugin").waitFor({ state: "detached" });

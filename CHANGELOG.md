@@ -24,6 +24,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   references, plus default gameplay fields and non-negative level and cost.
 - Tree position storylet nodes with a read-only graph picker and per-tree playtest pointer.
 - Shared color wheel picker for tree graph and vector canvas colors.
+- Split-pane studio workspace: drag any project-tree entry onto a pane edge (or use
+  the pane header, or the tree's "Open in split view") to open it beside or below
+  the current view; panes resize, maximize, close, and restore after reload, and
+  each pane keeps its own navigation and unsaved-change guard.
+- Appearance settings in the toolbar: seven game-inspired themes (Mass Effect,
+  Cyberpunk, RPG, Death Stranding, Kojima Productions, Anime, Modern Warfare) that
+  retune surfaces, borders, text, corner radii, heading type and accent, plus an
+  optional background image with a blur toggle. Stored locally per browser.
+- Shared studio UI components: EmptyState, IconButton, SearchField,
+  SegmentedControl and ToggleSwitch, plus a consistent outline icon set.
+
+### Changed
+
+- Reworked studio visual system: floating rounded panes on an atmospheric
+  backdrop, a compact glass toolbar and project tree, self-hosted Sora UI font,
+  icon-based actions in place of emoji, quieter destructive buttons, and
+  container-query layouts so every view adapts to narrow split panes.
 
 ### Fixed
 
@@ -31,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deleting tree trait templates checks both entities and entity templates in use.
 - Storylet precondition graphs now lower and raise plugin nodes, including Is Tree Position.
 - Added tactile active press feedback to tree view switches and hierarchy disclosure toggles.
+- Tree context menus open at the clicked row and stay inside the viewport.
+- Locked tree canvas images open their menu with Enter.
 - Clamped tree canvas context menus within visible viewport bounds to prevent clipping actions.
 - Improved tree list horizontal scroll indicators and select dropdown chevrons.
 - Added hover glow and press feedback to tree pointer preview nodes and zoom tools.

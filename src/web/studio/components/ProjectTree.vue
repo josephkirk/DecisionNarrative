@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
 import type { TreeRow } from "../projectTree.ts";
+import { itemRoute } from "../projectTree.ts";
 import { thumbnailUrl } from "../thumbnails.ts";
 import type { ContentRootDefinition } from "../projectTree.ts";
 import { useProjectTree } from "../view-models/projectTree.ts";
 import { refreshWorkspace } from "../view-models/workspace.ts";
+import { canSplit, focusedRouter as router, openSplit, paneState } from "../view-models/panes.ts";
 import { studioState } from "../state.ts";
-
-const router = useRouter();
+import StudioIcon from "./StudioIcon.vue";
+import SearchField from "./ui/SearchField.vue";
 
 const {
   roots,
@@ -44,16 +45,17 @@ function canAcceptDrop(row: TreeRow): boolean {
   return row.root === activeDragRoot.value;
 }
 
-function rowGlyph(row: TreeRow): string {
-  if (row.root === "entities" && row.id === "world") return "🌐";
-  if (row.kind === "project") return "▣";
-  if (row.kind === "root") return "▤";
-  if (row.kind === "folder") return "▸";
-  return "◆";
+function rowIcon(row: TreeRow): string {
+  if (row.root === "entities" && row.id === "world") return "globe";
+  if (row.kind === "project") return "project";
+  if (row.kind === "folder") return "folder";
+  return row.root ?? "file";
 }
 
-function rowColor(row: TreeRow): string {
-  return "var(--text-muted)";
+function rowPath(row: TreeRow): string | null {
+  if (!row.root || !row.id) return null;
+  if (row.kind === "folder") return `/browse/${row.root}/${encodeURIComponent(row.id)}`;
+  return row.kind === "item" ? itemRoute(row.root, row.id) : null;
 }
 
 function onRowClick(row: TreeRow) {
@@ -98,7 +100,8 @@ function rowDragPayload(event: DragEvent, row: TreeRow) {
       id: row.id,
     }),
   );
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  // Copy lets panes take the row as "open here" or a split; move keeps folder drops working.
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
 }
 
 function onDragEnd() {
@@ -170,6 +173,11 @@ function contextAction(action: string) {
     openRow(row);
     return;
   }
+  if (action === "split") {
+    const path = rowPath(row);
+    if (path) openSplit(paneState.activeId, "right", path);
+    return;
+  }
   if (action === "toggle-expand") {
     toggle(row.key);
     return;
@@ -227,14 +235,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="project-tree">
     <div class="project-tree__search">
-      <label for="tree-search-input" class="sr-only">Search project</label>
-      <input
-        id="tree-search-input"
-        v-model="query"
-        class="form-input"
-        placeholder="Search project…"
-        aria-label="Search project"
-      />
+      <SearchField v-model="query" input-id="tree-search-input" label="Search project" placeholder="Search project…" />
     </div>
 
     <div class="project-tree__rows" @contextmenu.prevent="openContextMenu($event, null)">
@@ -247,9 +248,13 @@ onBeforeUnmount(() => {
           activeKey === row.key ? 'is-active' : '',
           dropKey === row.key ? 'is-drop-target' : '',
         ]"
-        :style="{ paddingLeft: `${8 + row.depth * 14}px` }"
+        :style="{ paddingLeft: `${6 + row.depth * 14}px` }"
         :draggable="row.kind === 'folder' || row.kind === 'item'"
+        :title="row.kind === 'item' ? 'Drag onto a pane edge to open it in a split view' : undefined"
+        tabindex="0"
+        :aria-current="activeKey === row.key ? 'page' : undefined"
         @click="onRowClick(row)"
+        @keydown.enter.self.prevent="onRowClick(row)"
         @contextmenu.prevent.stop="openContextMenu($event, row)"
         @dragstart="rowDragPayload($event, row)"
         @dragend="onDragEnd"
@@ -259,11 +264,14 @@ onBeforeUnmount(() => {
       >
         <button
           v-if="row.hasChildren"
+          type="button"
           class="project-tree__twisty"
+          :class="{ 'is-open': row.expanded }"
           :aria-label="row.expanded ? `Collapse ${row.label}` : `Expand ${row.label}`"
+          :aria-expanded="row.expanded"
           @click.stop="toggle(row.key)"
         >
-          {{ row.expanded ? "▾" : "▸" }}
+          <StudioIcon name="chevron" />
         </button>
         <span v-else class="project-tree__twisty project-tree__twisty--empty"></span>
 
@@ -271,9 +279,9 @@ onBeforeUnmount(() => {
           v-if="row.thumbnail && thumbnailUrl(row.thumbnail)"
           class="project-tree__thumb"
           :src="thumbnailUrl(row.thumbnail) ?? ''"
-          :alt="row.label"
+          alt=""
         />
-        <span v-else class="project-tree__glyph" :style="{ color: rowColor(row) }">{{ rowGlyph(row) }}</span>
+        <span v-else class="project-tree__glyph" :class="`is-${row.kind}`"><StudioIcon :name="rowIcon(row)" /></span>
 
         <span class="project-tree__label" :title="row.detail ? `${row.label} — ${row.detail}` : row.label">{{ row.label }}</span>
 
@@ -287,18 +295,18 @@ onBeforeUnmount(() => {
           @click.stop="toggleMenu(row)"
           @keydown.enter.stop="toggleMenu(row)"
           @keydown.space.stop.prevent="toggleMenu(row)"
-        >+</button>
+        ><StudioIcon name="plus" /></button>
 
         <div v-if="menuKey === row.key" class="project-tree__menu" role="menu" @click.stop>
           <template v-if="menuDefinition(row)?.newLabel">
-            <button class="project-tree__menu-item" @click="runMenu(row, 'folder')">New folder</button>
-            <button class="project-tree__menu-item" @click="runMenu(row, 'item')">
-              {{ menuDefinition(row)?.newLabel ?? "New item" }}
+            <button type="button" class="project-tree__menu-item" role="menuitem" @click="runMenu(row, 'item')">
+              <StudioIcon :name="row.root ?? 'file'" /> {{ menuDefinition(row)?.newLabel ?? "New item" }}
             </button>
+            <button type="button" class="project-tree__menu-item" role="menuitem" @click="runMenu(row, 'folder')"><StudioIcon name="folder" /> New folder</button>
           </template>
           <template v-if="row.kind === 'folder'">
-            <button class="project-tree__menu-item" @click="runMenu(row, 'rename')">Rename</button>
-            <button class="project-tree__menu-item project-tree__menu-item--danger" @click="runMenu(row, 'delete')">Delete</button>
+            <button type="button" class="project-tree__menu-item" role="menuitem" @click="runMenu(row, 'rename')"><StudioIcon name="pencil" /> Rename</button>
+            <button type="button" class="project-tree__menu-item project-tree__menu-item--danger" role="menuitem" @click="runMenu(row, 'delete')"><StudioIcon name="trash" /> Delete</button>
           </template>
         </div>
       </div>
@@ -314,79 +322,47 @@ onBeforeUnmount(() => {
     >
       <!-- Row: Project or empty background -->
       <template v-if="!contextMenu.row || contextMenu.row.kind === 'project'">
-        <button class="project-tree__context-menu-item" @click="contextAction('new-project')">
-          <span>📄</span> New project…
-        </button>
-        <button class="project-tree__context-menu-item" @click="contextAction('refresh')">
-          <span>🔄</span> Refresh workspace
-        </button>
-        <div class="project-tree__context-menu-divider"></div>
-        <button class="project-tree__context-menu-item" @click="contextAction('project-settings')">
-          <span>⚙️</span> Project & export
-        </button>
-        <button class="project-tree__context-menu-item" @click="contextAction('tags')">
-          <span>🏷️</span> Tag manager
-        </button>
-        <button class="project-tree__context-menu-item" @click="contextAction('storylets')">
-          <span>📚</span> Storylet library
-        </button>
-        <button class="project-tree__context-menu-item" @click="contextAction('codex')">
-          <span>📜</span> Rules & events
-        </button>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('new-project')"><StudioIcon name="file" /> New project…</button>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('refresh')"><StudioIcon name="refresh" /> Refresh workspace</button>
+        <div class="project-tree__context-menu-divider" role="separator"></div>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('project-settings')"><StudioIcon name="settings" /> Project & export</button>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('tags')"><StudioIcon name="tag" /> Tag manager</button>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('storylets')"><StudioIcon name="storylets" /> Storylet library</button>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('codex')"><StudioIcon name="scroll" /> Rules & events</button>
       </template>
 
       <!-- Row: Root -->
       <template v-else-if="contextMenu.row.kind === 'root'">
         <template v-if="menuDefinition(contextMenu.row)?.newLabel">
-          <button class="project-tree__context-menu-item" @click="contextAction('item')">
-            <span>➕</span> {{ menuDefinition(contextMenu.row)?.newLabel ?? "New item" }}
-          </button>
-          <button class="project-tree__context-menu-item" @click="contextAction('folder')">
-            <span>📁</span> New folder…
-          </button>
-          <div class="project-tree__context-menu-divider"></div>
+          <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('item')"><StudioIcon name="plus" /> {{ menuDefinition(contextMenu.row)?.newLabel ?? "New item" }}</button>
+          <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('folder')"><StudioIcon name="folder" /> New folder…</button>
+          <div class="project-tree__context-menu-divider" role="separator"></div>
         </template>
-        <button class="project-tree__context-menu-item" @click="contextAction('open')">
-          <span>🔍</span> Browse {{ contextMenu.row.label }}
-        </button>
-        <button class="project-tree__context-menu-item" @click="contextAction('toggle-expand')">
-          <span>{{ contextMenu.row.expanded ? '▾' : '▸' }}</span> {{ contextMenu.row.expanded ? 'Collapse' : 'Expand' }}
-        </button>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('open')"><StudioIcon name="search" /> Browse {{ contextMenu.row.label }}</button>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('toggle-expand')"><StudioIcon name="chevron" /> {{ contextMenu.row.expanded ? 'Collapse' : 'Expand' }}</button>
       </template>
 
       <!-- Row: Folder -->
       <template v-else-if="contextMenu.row.kind === 'folder'">
         <template v-if="menuDefinition(contextMenu.row)?.newLabel">
-          <button class="project-tree__context-menu-item" @click="contextAction('item')">
-            <span>➕</span> {{ menuDefinition(contextMenu.row)?.newLabel ?? "New item" }}
-          </button>
-          <button class="project-tree__context-menu-item" @click="contextAction('folder')">
-            <span>📁</span> New subfolder…
-          </button>
+          <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('item')"><StudioIcon name="plus" /> {{ menuDefinition(contextMenu.row)?.newLabel ?? "New item" }}</button>
+          <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('folder')"><StudioIcon name="folder" /> New subfolder…</button>
         </template>
-        <div class="project-tree__context-menu-divider"></div>
-        <button class="project-tree__context-menu-item" @click="contextAction('open')">
-          <span>🔍</span> Open folder view
-        </button>
-        <button class="project-tree__context-menu-item" @click="contextAction('rename')">
-          <span>✏️</span> Rename…
-        </button>
-        <div class="project-tree__context-menu-divider"></div>
-        <button class="project-tree__context-menu-item project-tree__context-menu-item--danger" @click="contextAction('delete-folder')">
-          <span>🗑️</span> Delete folder
-        </button>
+        <div class="project-tree__context-menu-divider" role="separator"></div>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('open')"><StudioIcon name="search" /> Open folder view</button>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" :disabled="!canSplit()" @click="contextAction('split')"><StudioIcon name="split-right" /> Open in split view</button>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('rename')"><StudioIcon name="pencil" /> Rename…</button>
+        <div class="project-tree__context-menu-divider" role="separator"></div>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item project-tree__context-menu-item--danger" @click="contextAction('delete-folder')"><StudioIcon name="trash" /> Delete folder</button>
       </template>
 
       <!-- Row: Item -->
       <template v-else-if="contextMenu.row.kind === 'item'">
-        <button class="project-tree__context-menu-item" @click="contextAction('open')">
-          <span>👁️</span> Open
-        </button>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('open')"><StudioIcon name="open" /> Open</button>
+        <button type="button" role="menuitem" class="project-tree__context-menu-item" :disabled="!canSplit()" @click="contextAction('split')"><StudioIcon name="split-right" /> Open in split view</button>
         <template v-if="contextMenu.row.root !== 'entities' || contextMenu.row.id !== 'world'">
-          <div class="project-tree__context-menu-divider"></div>
-          <button class="project-tree__context-menu-item project-tree__context-menu-item--danger" @click="contextAction('delete-item')">
-            <span>🗑️</span> Delete
-          </button>
+          <div class="project-tree__context-menu-divider" role="separator"></div>
+          <button type="button" role="menuitem" class="project-tree__context-menu-item project-tree__context-menu-item--danger" @click="contextAction('delete-item')"><StudioIcon name="trash" /> Delete</button>
         </template>
       </template>
     </div>

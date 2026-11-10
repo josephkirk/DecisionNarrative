@@ -140,7 +140,7 @@ onBeforeRouteUpdate(confirmDiscard);
           <div class="entity-subtitle-row">
             <span v-if="appliedTraitLabels.length" class="entity-type-label">{{ appliedTraitLabels.join(" · ") }}</span>
             <span v-else class="entity-standalone-text">No traits</span>
-            <span class="entity-bullet-sep">•</span>
+            <span v-if="parentTemplate || templateId || (!intrinsic && isEntityRoute)" class="entity-bullet-sep" aria-hidden="true">•</span>
             <span v-if="parentTemplate" class="entity-parent-link">
               Template: <router-link :to="`/entity-templates/${parentTemplate.id}`">{{ parentTemplate.name }}</router-link>
             </span>
@@ -358,20 +358,21 @@ onBeforeRouteUpdate(confirmDiscard);
 /* Hero card matching Image #2 */
 .entity-hero-card {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 18px;
-  background: var(--bg-card);
+  padding: 16px 18px;
+  background: rgba(255, 255, 255, 0.025);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg, 10px);
+  border-radius: var(--radius-lg, 12px);
 }
 
 .entity-hero-left {
   display: flex;
   align-items: center;
   gap: 14px;
-  flex: 1;
+  flex: 1 1 280px;
   min-width: 0;
 }
 
@@ -391,15 +392,18 @@ onBeforeRouteUpdate(confirmDiscard);
 
 .entity-hero-input {
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-main);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm, 6px);
   padding: 2px 6px;
-  letter-spacing: -0.01em;
-  max-width: 380px;
-  width: 100%;
+  margin-left: -7px;
+  letter-spacing: -0.025em;
+  /* Size to the name so the id chip sits beside it instead of floating mid-card. */
+  field-sizing: content;
+  min-width: 6ch;
+  max-width: 100%;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
@@ -416,7 +420,8 @@ onBeforeRouteUpdate(confirmDiscard);
 
 .entity-hero-heading {
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: -0.025em;
   margin: 0;
   color: var(--text-main);
 }
@@ -493,11 +498,12 @@ onBeforeRouteUpdate(confirmDiscard);
   align-items: flex-end;
   gap: 8px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
-@media (max-width: 600px) {
-  .entity-hero-card { flex-direction: column; align-items: stretch; }
-  .entity-hero-right { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+@container pane (max-width: 560px) {
+  .entity-page-surface { padding: 16px; }
+  .entity-hero-right { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; width: 100%; }
   .entity-hero-input { min-width: 0; }
 }
 
@@ -538,22 +544,27 @@ onBeforeRouteUpdate(confirmDiscard);
 /* Tab bar matching Image #2 */
 .entity-tabs {
   display: flex;
+  flex: none;
   gap: 4px;
   border-bottom: 1px solid var(--border-subtle);
   padding: 0 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .entity-tab {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: none;
   background: transparent;
   border: 0;
   border-bottom: 2px solid transparent;
-  padding: 8px 14px;
+  padding: 10px 12px;
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease;
 }
@@ -591,13 +602,14 @@ onBeforeRouteUpdate(confirmDiscard);
 }
 
 .content-block {
-  background: var(--bg-card);
+  background: rgba(255, 255, 255, 0.025);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg, 10px);
-  padding: 14px 16px;
+  border-radius: var(--radius-lg, 12px);
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  min-width: 0;
 }
 
 .content-block-head {
@@ -608,9 +620,8 @@ onBeforeRouteUpdate(confirmDiscard);
 }
 
 .block-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--text-muted);
 }
 

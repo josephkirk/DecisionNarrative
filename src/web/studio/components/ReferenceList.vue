@@ -606,9 +606,9 @@ function resetGraphView() {
   top: 16px;
   right: 16px;
   width: 210px;
-  background: var(--surface-container-high, #212735);
+  background: var(--bg-elevated, #1c2336);
   border: 1px solid var(--border-subtle);
-  border-radius: 0;
+  border-radius: var(--radius-lg, 12px);
   padding: 12px;
   display: flex;
   flex-direction: column;
