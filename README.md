@@ -110,6 +110,27 @@ is saved: a new or edited version is marked *storylet not saved* and a deleted n
 **Built-in: Inventory.** The plugin creates the `InventoryOwner` and `Item` traits on workspace load. Add the `InventoryOwner` trait to an entity to get an **Inventory** tab. Set rows and columns (1–20 each, default 4×4, capacity = rows × columns), then add entities carrying the `Item` trait; each item occupies one slot, must be unique, and displays its entity thumbnail when present. Save the entity to persist the layout and initial contents. A grid cannot be shrunk below its current item count.
 
 In a story graph, connect configured **Get Entity** nodes to the owner and item inputs of **Add Item**, **Remove Item**, or **Has Item**. Add/remove are flow nodes; Has Item outputs a boolean for a Condition Node. Inputs are checked for the required traits. Adding an item already present and removing an absent item are no-ops; adding to a full inventory fails. Runtime changes are part of the playtest state, not edits to the authored inventory.
+
+**Built-in: Tree Graph.** Add `TreeGraph` to an entity to open its **Tree** tab. Add entities carrying `TreeItem`, then drag from a node's outer edge to another node to connect them. Multiple roots, shared nodes, cycles, and disconnected components are supported without game-specific progression rules. Pan and zoom the canvas; switch between four directional views and radial view, drag nodes or use arrow keys, and save a separate layout for each view. **Save layout** saves the entity draft; **Export JSON** downloads the graph, item metadata, and current coordinates.
+
+Switch between **Canvas** and **List** in the Tree tab. The list shows the hierarchy, incoming relationships, and editable columns defined by the `TreeItem` trait. Shared nodes and cycles appear as reference rows. Edits to other items save automatically; edits to the tree owner remain in its draft until saved. Failed item saves retain their edits and offer retry or discard.
+
+`TreeItem` includes non-negative integer **Level** and **Cost**, a **Cost entity** reference, gameplay tags to add and remove, **Description**, **Asset**, and **Gameplay entity**. The gameplay entity can refer to an in-game skill or another entity; it is independent of TreeGraph connections. Add further columns by adding properties to the `TreeItem` trait.
+
+In a story graph, connect **Get Entity** to **Set Tree Position** or **Is Tree Position**. Select a TreeItem in the read-only tree preview; use arrow keys to move between items. Set moves that tree's playtest pointer to the selected item; Is outputs a boolean for a Condition Node. Each tree starts with no position, and any item in the tree can be selected regardless of connections. The pointer belongs to playtest state, not the authored tree. Change or remove storylet references before removing their selected items or TreeGraph trait.
+
+Right-click the canvas or open **Canvas actions** to change its background color, add TreeItems, or create skill-tree, roguelike-map, and relationship-tree examples. The background color is saved with the graph; **Reset background** restores the theme default. Right-click a node to change its shape, colors, outline width, and dimensions; drag its resize handle to resize it. Nodes use their entities' thumbnails as backgrounds. Open node options to connect without a mouse.
+
+Use **Canvas actions → Add image** to place a PNG or JPEG under nodes and wires. Drag its edges to resize it. Right-click an image or node to lock or unlock its position and size. Exported JSON references the uploaded image file; it does not include the file bytes.
+
+In the entity's **Traits** tab, TreeGraph settings define default node and wire styles. Individual node and wire settings override those defaults; choose **Use tree defaults** to clear an override. Import a CSS file or edit CSS there to customize that tree's canvas. Styles are scoped to the canvas; CSS `@import` is not supported. Only import CSS from sources you trust.
+
+Double-click a wire to name its relationship; the name appears at the wire's midpoint. Right-click a wire to add, edit, or remove its relationship without removing the wire. Relationship names are saved and exported with the graph, and remain attached when the target is reconnected. These names describe graph connections; they do not change runtime relationship scores.
+
+The wire menu also offers normal, dashed, dotted, or brush styles, color, thickness, and removal. Drag a wire to reconnect its target; drop it on empty canvas to choose a target from a menu. Alt-drag across wires to cut them. Focus a wire and press Enter to open its options by keyboard.
+
+Expand **View options** to customize the grid and thumbnails; these preferences are stored in the local browser, separate from the saved graph.
+
 The **Plugins** tab lists installed plugins and turns them on or off.
 Visual check: `bun run test:visual:canvas`.
 

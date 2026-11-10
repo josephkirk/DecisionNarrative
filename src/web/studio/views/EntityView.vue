@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import type { EntityProperty, PropertyDefinition, TraitInstance } from "../contracts.ts";
 import { traitEditProblem, traitLabels } from "../entityModel.ts";
 import { notify, studioState } from "../state.ts";
@@ -10,7 +10,7 @@ import PropertyListEditor from "../components/PropertyListEditor.vue";
 import ReferenceList from "../components/ReferenceList.vue";
 import TagEditor from "../components/TagEditor.vue";
 import ThumbnailPicker from "../components/ThumbnailPicker.vue";
-import { entityPanelsFor } from "../plugins/runtime.ts";
+import { entityPanelsFor, traitInspectorFor } from "../plugins/runtime.ts";
 const route = useRoute(); const router = useRouter(); const entityId = typeof route.params.id === "string" ? route.params.id : "";
 const editor = useEntityEditor(entityId); const { draft, dirty, loading, saving, activeTab, references, referencesLoading, isWorld, isEntityRoute, loadReferences, patch, addTrait, removeTrait, setTraitValue, traitPropertyDisplayValue, save, remove } = editor;
 const intrinsic = computed(() => isWorld.value);
@@ -34,6 +34,7 @@ const characterRoleOptions = computed<string[]>(() => studioState.gameplayTags.m
 function roleTagOptions(templateKey: string | undefined, propertyKey: string): string[] | undefined {
   return templateKey === "character_settings" && propertyKey === "role" ? characterRoleOptions.value : undefined;
 }
+function traitInspectorComponent(traitKey: string) { return traitInspectorFor(traitKey)?.component; }
 function updateProperties(rows: Array<EntityProperty | PropertyDefinition>) { patch({ properties: rows as EntityProperty[] }); }
 function updateTags(value: string | string[]) { patch({ tags: Array.isArray(value) ? value : value ? [value] : [] }); }
 function addSelectedTrait() { const template = studioState.traitTemplates.find((t) => t.id === pendingTraitId.value); if (!template) return; if (addTrait(template)) pendingTraitId.value = ""; }
@@ -104,7 +105,10 @@ function reapplyTemplate() {
     onTemplateChange(templateId.value);
   }
 }
-onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.value || window.confirm("Discard unsaved changes?"));
+onMounted(() => { void loadReferences(); });
+const confirmDiscard = () => !dirty.value || window.confirm("Discard unsaved changes?");
+onBeforeRouteLeave(confirmDiscard);
+onBeforeRouteUpdate(confirmDiscard);
 </script>
 <template>
   <div v-if="!loading && draft" class="entity-page-surface scroll-fade-mask">
@@ -286,27 +290,36 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
       </div>
       <details v-for="entry in appliedTraits" :key="entry.instance.id" class="trait-card" open>
         <summary>{{ entry.template?.name }}</summary>
-        <div v-for="property in entry.template?.properties ?? []" :key="property.key" class="trait-row">
-          <label>
-            <span class="field-label">{{ property.name }}</span>
-            <PropertyValueInput
-              :model-value="traitPropertyDisplayValue(entry.instance, property)"
-              :type="property.type"
-              :is-array="property.is_array"
-              :tag-options="roleTagOptions(entry.template?.key ?? entry.template?.id, property.key)"
-              :selection-only="entry.template?.key === 'character_settings' && property.key === 'role'"
-              :trait-key-filter="entry.template?.key === 'character_settings' && (property.key === 'home_location' || property.key === 'current_location') ? 'location' : undefined"
-              :disabled="intrinsic"
-              @update:model-value="setTraitValue(entry.instance.id, property.key, $event)"
-            />
-          </label>
-        </div>
+        <component
+          v-if="traitInspectorComponent(entry.template?.key ?? '')"
+          :is="traitInspectorComponent(entry.template?.key ?? '')"
+          :entity="draft"
+          :readonly="intrinsic"
+          @patch="patch"
+        />
+        <template v-else>
+          <div v-for="property in entry.template?.properties ?? []" :key="property.key" class="trait-row">
+            <label>
+              <span class="field-label">{{ property.name }}</span>
+              <PropertyValueInput
+                :model-value="traitPropertyDisplayValue(entry.instance, property)"
+                :type="property.type"
+                :is-array="property.is_array"
+                :tag-options="roleTagOptions(entry.template?.key ?? entry.template?.id, property.key)"
+                :selection-only="entry.template?.key === 'character_settings' && property.key === 'role'"
+                :trait-key-filter="entry.template?.key === 'character_settings' && (property.key === 'home_location' || property.key === 'current_location') ? 'location' : undefined"
+                :disabled="intrinsic"
+                @update:model-value="setTraitValue(entry.instance.id, property.key, $event)"
+              />
+            </label>
+          </div>
+        </template>
         <button v-if="!intrinsic" class="btn btn-danger" @click="removeTrait(entry.instance.id)">Remove</button>
       </details>
     </section>
 
     <section v-else-if="activePanel" class="entity-content-stack" :data-plugin-panel="activePanel.id">
-      <component :is="activePanel.component" :entity="draft" :readonly="intrinsic" @patch="patch" />
+      <component :is="activePanel.component" :entity="draft" :readonly="intrinsic" @patch="patch" @save="save" />
     </section>
 
     <ReferenceList v-else :references="references" :loading="referencesLoading" />
@@ -480,6 +493,12 @@ onMounted(() => { void loadReferences(); }); onBeforeRouteLeave(() => !dirty.val
   align-items: flex-end;
   gap: 8px;
   flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+  .entity-hero-card { flex-direction: column; align-items: stretch; }
+  .entity-hero-right { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .entity-hero-input { min-width: 0; }
 }
 
 .entity-runtime-badge {

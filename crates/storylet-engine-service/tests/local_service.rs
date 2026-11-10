@@ -177,6 +177,282 @@ async fn disabling_multiple_rejects_existing_duplicate_traits() {
     assert_eq!(service.get_content_item("trait_templates", "repeatable").await.unwrap()["allow_multiple"], true);
 }
 
+#[tokio::test]
+async fn tree_graph_references_survive_saves_and_bundle_imports() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id": "tree_graph", "key": "tree_graph", "name": "TreeGraph",
+        "properties": [
+            {"id":"nodes","key":"nodes","name":"Nodes","type":"entity","is_array":true,"default":[]},
+            {"id":"edges","key":"edges","name":"Edges","type":"string","is_array":true,"default":[]},
+            {"id":"direction","key":"direction","name":"Direction","type":"string","default":"right"},
+            {"id":"positions","key":"positions","name":"Saved layouts","type":"string","default":""}
+        ]
+    })).await.unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id":"tree_item","key":"tree_item","name":"TreeItem","properties":[]
+    })).await.unwrap();
+    let item = service.save_content_item("entity_templates", &json!({
+        "id":"skill","name":"Skill","traits":[{"id":"marker","template_id":"tree_item","values":{}}]
+    })).await.unwrap();
+    service.save_content_item("entity_templates", &json!({"id":"plain","name":"Plain"})).await.unwrap();
+    let graph = json!({"id":"owner","name":"Owner","traits":[{
+        "id":"graph","template_id":"tree_graph",
+        "values":{"nodes":["skill"],"edges":["[\"skill\",\"skill\"]"],"direction":"radial","positions":"{\"radial\":{\"skill\":{\"x\":-320,\"y\":-120}}}"}
+    }]});
+    service.save_content_item("entity_templates", &graph).await.unwrap();
+    let mut definition = service.get_content_item("trait_templates", "tree_graph").await.unwrap();
+    definition["properties"].as_array_mut().unwrap().push(json!({"id":"shapes","key":"shapes","name":"Node shapes","type":"string","default":""}));
+    service.save_content_item("trait_templates", &definition).await.unwrap();
+    let mut graph = graph;
+    graph["traits"][0]["values"]["shapes"] = json!("{\"skill\":\"diamond\"}");
+    service.save_content_item("entity_templates", &graph).await.unwrap();
+    let mut invalid_shape = graph.clone();
+    invalid_shape["traits"][0]["values"]["shapes"] = json!("{\"skill\":\"triangle\"}");
+    assert!(service.save_content_item("entity_templates", &invalid_shape).await.is_err());
+    let mut invalid = graph.clone();
+    invalid["traits"][0]["values"]["nodes"] = json!(["plain"]);
+    assert!(service.save_content_item("entity_templates", &invalid).await.is_err());
+    let mut missing_marker = item.clone();
+    missing_marker["traits"] = json!([]);
+    assert!(service.save_content_item("entity_templates", &missing_marker).await.is_err());
+    let mut marker = service.get_content_item("trait_templates", "tree_item").await.unwrap();
+    marker["key"] = json!("renamed_item");
+    assert!(service.save_content_item("trait_templates", &marker).await.is_err());
+    let mut definition = service.get_content_item("trait_templates", "tree_graph").await.unwrap();
+    definition["properties"].as_array_mut().unwrap().clear();
+    assert!(service.save_content_item("trait_templates", &definition).await.is_err());
+    assert!(service.delete_content_item("entity_templates", "skill").await.is_err());
+
+    let bundle = serde_json::to_value(service.export_project_bundle().await.unwrap()).unwrap();
+    assert!(service.validate_bundle(&bundle).await.unwrap().is_empty());
+    service.import_bundle(&bundle).await.unwrap();
+    let loaded = service.get_content_item("entity_templates", "owner").await.unwrap();
+    assert_eq!(loaded["traits"][0]["values"], graph["traits"][0]["values"]);
+}
+
+#[tokio::test]
+async fn tree_graph_appearance_survives_saves_and_rejects_invalids() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id": "tree_graph", "key": "tree_graph", "name": "TreeGraph",
+        "properties": [
+            {"id":"nodes","key":"nodes","name":"Nodes","type":"entity","is_array":true,"default":[]},
+            {"id":"edges","key":"edges","name":"Edges","type":"string","is_array":true,"default":[]},
+            {"id":"direction","key":"direction","name":"Direction","type":"string","default":"right"},
+            {"id":"positions","key":"positions","name":"Saved layouts","type":"string","default":""},
+            {"id":"appearance","key":"appearance","name":"Appearance","type":"string","default":""}
+        ]
+    })).await.unwrap();
+    service.save_content_item("trait_templates", &json!({
+        "id": "tree_item", "key": "tree_item", "name": "TreeItem", "properties": []
+    })).await.unwrap();
+    let item = json!({"id":"node1","name":"Node 1","traits":[{"id":"item","template_id":"tree_item","values":{}}]});
+    service.save_content_item("entity_templates", &item).await.unwrap();
+    let valid_appearance = json!({
+        "canvasBackground": "#1a1c20",
+        "nodes": {
+            "node1": {
+                "background": "#112233",
+                "outline": "#445566",
+                "outlineWidth": 4,
+                "width": 250,
+                "height": 120
+            }
+        },
+        "edges": {
+            "[\"node1\",\"node1\"]": {
+                "color": "#aabbcc",
+                "width": 3.5,
+                "pattern": "dash"
+            }
+        }
+    }).to_string();
+    let graph = json!({"id":"owner","name":"Owner","traits":[{
+        "id":"graph","template_id":"tree_graph",
+        "values":{
+            "nodes":["node1"],
+            "edges":["[\"node1\",\"node1\"]"],
+            "direction":"right",
+            "appearance": valid_appearance
+        }
+    }]});
+    service.save_content_item("entity_templates", &graph).await.unwrap();
+    let loaded = service.get_content_item("entity_templates", "owner").await.unwrap();
+    assert_eq!(loaded["traits"][0]["values"]["appearance"], valid_appearance);
+
+    // Export & import roundtrip
+    let bundle = serde_json::to_value(service.export_project_bundle().await.unwrap()).unwrap();
+    assert!(service.validate_bundle(&bundle).await.unwrap().is_empty());
+    service.import_bundle(&bundle).await.unwrap();
+    let imported = service.get_content_item("entity_templates", "owner").await.unwrap();
+    assert_eq!(imported["traits"][0]["values"]["appearance"], valid_appearance);
+    // Omitted canvasBackground survives save/export/import
+    let omitted_bg_appearance = json!({
+        "nodes": {
+            "node1": {
+                "background": "#112233",
+                "outline": "#445566",
+                "outlineWidth": 4,
+                "width": 250,
+                "height": 120
+            }
+        },
+        "edges": {
+            "[\"node1\",\"node1\"]": {
+                "color": "#aabbcc",
+                "width": 3.5
+            }
+        }
+    }).to_string();
+    let mut omitted_graph = graph.clone();
+    omitted_graph["traits"][0]["values"]["appearance"] = json!(omitted_bg_appearance);
+    service.save_content_item("entity_templates", &omitted_graph).await.unwrap();
+    let loaded_omitted = service.get_content_item("entity_templates", "owner").await.unwrap();
+    assert_eq!(loaded_omitted["traits"][0]["values"]["appearance"], omitted_bg_appearance);
+    let omitted_bundle = serde_json::to_value(service.export_project_bundle().await.unwrap()).unwrap();
+    assert!(service.validate_bundle(&omitted_bundle).await.unwrap().is_empty());
+    service.import_bundle(&omitted_bundle).await.unwrap();
+    let imported_omitted = service.get_content_item("entity_templates", "owner").await.unwrap();
+    assert_eq!(imported_omitted["traits"][0]["values"]["appearance"], omitted_bg_appearance);
+
+    // Non-default edge patterns ("dash", "dot", "brush") persist through save & bundle roundtrip
+    for pat in ["solid", "dash", "dot", "brush"] {
+        let pat_appearance = json!({
+            "canvasBackground": "#1a1c20",
+            "nodes": {
+                "node1": {
+                    "background": "#112233",
+                    "outline": "#445566",
+                    "outlineWidth": 4,
+                    "width": 250,
+                    "height": 120
+                }
+            },
+            "edges": {
+                "[\"node1\",\"node1\"]": {
+                    "color": "#aabbcc",
+                    "width": 3.5,
+                    "pattern": pat
+                }
+            }
+        }).to_string();
+        let mut pat_graph = graph.clone();
+        pat_graph["traits"][0]["values"]["appearance"] = json!(pat_appearance);
+        service.save_content_item("entity_templates", &pat_graph).await.unwrap();
+        let loaded_pat = service.get_content_item("entity_templates", "owner").await.unwrap();
+        assert_eq!(loaded_pat["traits"][0]["values"]["appearance"], pat_appearance);
+        let pat_bundle = serde_json::to_value(service.export_project_bundle().await.unwrap()).unwrap();
+        assert!(service.validate_bundle(&pat_bundle).await.unwrap().is_empty());
+        service.import_bundle(&pat_bundle).await.unwrap();
+        let imported_pat = service.get_content_item("entity_templates", "owner").await.unwrap();
+        assert_eq!(imported_pat["traits"][0]["values"]["appearance"], pat_appearance);
+    }
+
+    // Restore graph with valid canvas background for subsequent negative checks
+    service.save_content_item("entity_templates", &graph).await.unwrap();
+
+    // Invalid canvasBackground hex format rejected
+    let mut bad_bg = graph.clone();
+    bad_bg["traits"][0]["values"]["appearance"] = json!("{\"canvasBackground\":\"#123\",\"nodes\":{\"node1\":{\"background\":\"#112233\"}}}");
+    assert!(service.save_content_item("entity_templates", &bad_bg).await.is_err());
+
+    // Invalid canvasBackground non-hex rejected
+    bad_bg["traits"][0]["values"]["appearance"] = json!("{\"canvasBackground\":\"invalid\",\"nodes\":{\"node1\":{\"background\":\"#112233\"}}}");
+    assert!(service.save_content_item("entity_templates", &bad_bg).await.is_err());
+
+    // Invalid canvasBackground non-string rejected
+    bad_bg["traits"][0]["values"]["appearance"] = json!("{\"canvasBackground\":12345,\"nodes\":{\"node1\":{\"background\":\"#112233\"}}}");
+    assert!(service.save_content_item("entity_templates", &bad_bg).await.is_err());
+
+    // Stored appearance preserved after rejected saves
+    let preserved = service.get_content_item("entity_templates", "owner").await.unwrap();
+    assert_eq!(preserved["traits"][0]["values"]["appearance"], valid_appearance);
+
+    // Invalid color
+    let mut bad = graph.clone();
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"background\":\"#123\"}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid outlineWidth (< 1)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"outlineWidth\":0.5}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid outlineWidth (> 12)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"outlineWidth\":15}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid width (< 100)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"width\":50}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid width (> 600)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"width\":700}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid height (< 60)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"height\":40}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid height (> 400)
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"height\":500}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Stale node reference
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"missing_node\":{\"width\":200}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Stale edge reference
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"missing\"]":{"width":2}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Malformed edge key
+    bad["traits"][0]["values"]["appearance"] = json!("{\"edges\":{\"node1->node1\":{\"width\":2}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Noncanonical edge keys are rejected so the editor can resolve the style.
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\", \"node1\"]":{"width":2}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid edge color
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"color":"blue"}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid edge width (< 1)
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"width":0}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid edge width (> 12)
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"width":13}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid edge pattern string rejected
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"pattern":"zigzag"}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Invalid edge pattern non-string rejected
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"pattern":123}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"pattern":true}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"pattern":null}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Unknown field on node
+    bad["traits"][0]["values"]["appearance"] = json!("{\"nodes\":{\"node1\":{\"unknown\":123}}}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Unknown field on edge
+    bad["traits"][0]["values"]["appearance"] = json!(json!({"edges":{"[\"node1\",\"node1\"]":{"unknown":123}}}).to_string());
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+
+    // Unknown field on root
+    bad["traits"][0]["values"]["appearance"] = json!("{\"extraRoot\":123}");
+    assert!(service.save_content_item("entity_templates", &bad).await.is_err());
+}
+
 
 fn reveal_storylet(event_id: &str) -> Value {
     json!({"id":"tell","title":"Tell","content":{"text_template":"x"},"created_at":1,

@@ -540,6 +540,7 @@ pub fn prepare_entity(
     if entity.name.is_empty() { return Err(format!("{PREFIX}: name cannot be empty")); }
     entity.tags = trim_tags(&entity.tags);
     validate_unique_traits(&entity.traits, &index.templates, "Entity validation failed")?;
+    crate::tree_graph::validate_tree_item_traits(&entity.traits, &index.templates, PREFIX)?;
     for tag in &entity.tags {
         if !index.gameplay_tags.iter().any(|registered| registered.name == *tag) {
             return Err(format!("{PREFIX}: gameplay tag '{tag}' is not registered"));
@@ -591,6 +592,7 @@ pub fn prepare_entity_record(
     entity.description = entity.description.trim().into();
     entity.tags = trim_tags(&entity.tags);
     validate_unique_traits(&entity.traits, &index.templates, "Entity validation failed")?;
+    crate::tree_graph::validate_tree_item_traits(&entity.traits, &index.templates, PREFIX)?;
     for tag in &entity.tags {
         if !index.gameplay_tags.iter().any(|registered| registered.name == *tag) {
             return Err(format!("{PREFIX}: gameplay tag '{tag}' is not registered"));
@@ -620,7 +622,7 @@ pub fn validate_unique_traits(traits: &[crate::contracts::TraitInstance], templa
 pub fn validate_trait_properties(
     properties: &mut [TraitPropertyDefinition],
     prefix: &str,
-    index: &WorkspaceIndex,
+    _index: &WorkspaceIndex,
 ) -> Result<(), String> {
     let mut seen = BTreeSet::new();
     for definition in properties {
@@ -707,6 +709,7 @@ pub fn prepare_trait_template(
     }
 
     validate_trait_properties(&mut template.properties, PREFIX, index)?;
+    crate::tree_graph::validate_tree_item_template(&template, PREFIX)?;
 
     template.description = template.description.trim().to_string();
     template.created_at = Some(
@@ -1048,8 +1051,10 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
         folders: content.folders.clone(),
         storylet_ids: content.storylets.iter().map(|storylet| storylet.id.clone()).collect(),
     };
+    issues.extend(crate::tree_graph::validate_tree_graphs(&index, None, None));
     for entity in &content.entities {
         if let Err(error) = validate_unique_traits(&entity.traits, &index.templates, &format!("entity '{}'", entity.name)) { issues.push(error); }
+        if let Err(error) = crate::tree_graph::validate_tree_item_traits(&entity.traits, &index.templates, &format!("entity '{}'", entity.name)) { issues.push(error); }
         let mut property_ids = BTreeSet::new();
         let mut property_keys = BTreeSet::new();
         for property in &entity.properties {
@@ -1201,6 +1206,7 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
 
     for entity in &content.entity_templates {
         if let Err(error) = validate_unique_traits(&entity.traits, &index.templates, &format!("entity template '{}'", entity.name)) { issues.push(error); }
+        if let Err(error) = crate::tree_graph::validate_tree_item_traits(&entity.traits, &index.templates, &format!("entity template '{}'", entity.name)) { issues.push(error); }
         let mut property_ids = BTreeSet::new();
         let mut property_keys = BTreeSet::new();
         for property in &entity.properties {
@@ -1280,6 +1286,9 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
         if let Err(error) = validate_trait_properties(&mut candidate.properties, "trait", &index) {
             issues.push(format!("trait '{}': {error}", template.name));
         }
+        if let Err(error) = crate::tree_graph::validate_tree_item_template(template, &format!("trait '{}'", template.name)) {
+            issues.push(error);
+        }
     }
 
     let mut template_ids = BTreeSet::new();
@@ -1337,6 +1346,68 @@ mod tests {
         ])).unwrap();
         assert!(validate_unique_traits(&repeated_existing, &templates, "entity").is_ok());
         assert!(validate_unique_traits(&repeated_existing, &toggled, "entity").unwrap_err().contains("only one unique trait"));
+    }
+
+    #[test]
+    fn tree_item_entity_and_template_save_validates_nonnegative_level_and_cost() {
+        let templates: Vec<TraitTemplateRecord> = vec![
+            serde_json::from_value(json!({
+                "id": "tid-tree-item",
+                "key": "tree_item",
+                "name": "TreeItem",
+                "properties": [
+                    { "key": "level", "name": "Level", "type": "int", "is_array": false, "default": 0 },
+                    { "key": "cost", "name": "Cost", "type": "int", "is_array": false, "default": 0 }
+                ]
+            })).unwrap(),
+        ];
+        let index = WorkspaceIndex { templates: templates.clone(), ..WorkspaceIndex::default() };
+
+        // 1. Valid nonnegative integers pass for both entity and entity_template
+        let valid_payload = json!({
+            "name": "Skill Node",
+            "traits": [{ "template_id": "tid-tree-item", "values": { "level": 0, "cost": 10 } }]
+        });
+        assert!(prepare_entity(&valid_payload, None, &index).is_ok());
+        assert!(prepare_entity_record(&valid_payload, None, &index).is_ok());
+
+        // 2. Absent values remain valid (pre-existing items)
+        let absent_payload = json!({
+            "name": "Skill Node",
+            "traits": [{ "template_id": "tid-tree-item", "values": {} }]
+        });
+        assert!(prepare_entity(&absent_payload, None, &index).is_ok());
+        assert!(prepare_entity_record(&absent_payload, None, &index).is_ok());
+
+        // 3. Negative level is rejected on save independently of membership in any graph
+        let neg_level_payload = json!({
+            "name": "Skill Node",
+            "traits": [{ "template_id": "tid-tree-item", "values": { "level": -1 } }]
+        });
+        let err_template = prepare_entity(&neg_level_payload, None, &index).unwrap_err();
+        assert!(err_template.contains("TreeItem 'level' must be a nonnegative integer"), "got {err_template}");
+        let err_record = prepare_entity_record(&neg_level_payload, None, &index).unwrap_err();
+        assert!(err_record.contains("TreeItem 'level' must be a nonnegative integer"), "got {err_record}");
+
+        // 4. Negative cost is rejected
+        let neg_cost_payload = json!({
+            "name": "Skill Node",
+            "traits": [{ "template_id": "tid-tree-item", "values": { "cost": -2 } }]
+        });
+        assert!(prepare_entity(&neg_cost_payload, None, &index).unwrap_err().contains("TreeItem 'cost' must be a nonnegative integer"));
+        assert!(prepare_entity_record(&neg_cost_payload, None, &index).unwrap_err().contains("TreeItem 'cost' must be a nonnegative integer"));
+
+        // 5. Guard trait template default prevents negative displayed default
+        let neg_default_trait_payload = json!({
+            "id": "tid-tree-item",
+            "key": "tree_item",
+            "name": "TreeItem",
+            "properties": [
+                { "key": "level", "name": "Level", "type": "int", "is_array": false, "default": -1 }
+            ]
+        });
+        let err_trait = prepare_trait_template(&neg_default_trait_payload, None, &index).unwrap_err();
+        assert!(err_trait.contains("TreeItem 'level' default must be a nonnegative integer"), "got {err_trait}");
     }
 
     #[test]

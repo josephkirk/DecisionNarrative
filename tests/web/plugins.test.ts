@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { Context, registry, nodeTypeContribution, entityPanelsFor, propertyEditorFor, definePlugin } from "../../src/web/studio/plugins/runtime.ts";
+import { Context, registry, nodeTypeContribution, entityPanelsFor, propertyEditorFor, traitInspectorFor, definePlugin } from "../../src/web/studio/plugins/runtime.ts";
 import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../../src/web/studio/plugins/graphLowering.ts";
 import { modifyCanvasNode } from "../../src/web/studio/plugins/canvas/modifyCanvasNode.ts";
 import {
@@ -31,6 +31,7 @@ test("plugin contributions are removed when the plugin is disposed", () => {
     apply(ctx) {
       ctx.entityPanel({ id: "demo-panel", label: "Demo", appliesTo: (e) => e.traits.some((trait) => trait.template_id === "location-trait"), component: Dummy });
       ctx.propertyEditor({ id: "demo-prop", matches: (p) => p.key === "demo", component: Dummy });
+      ctx.traitInspector({ id: "demo-trait", traitKey: "demo", component: Dummy });
       ctx.nodeType({ type: "demo.node", label: "Demo", defaults: () => ({}), lower: () => ({ nodes: [], edges: [], entry: "", exit: "" }) });
     },
   }));
@@ -38,10 +39,12 @@ test("plugin contributions are removed when the plugin is disposed", () => {
   expect(entityPanelsFor({ ...location(), traits: [{ id: "t", template_id: "location-trait", values: {} }] }).map((p) => p.id)).toContain("demo-panel");
   expect(entityPanelsFor(location()).map((p) => p.id)).not.toContain("demo-panel");
   expect(propertyEditorFor({ id: "x", key: "demo", name: "Demo", type: "string" })?.id).toBe("demo-prop");
+  expect(traitInspectorFor("demo")?.id).toBe("demo-trait");
   expect(nodeTypeContribution("demo.node")?.label).toBe("Demo");
   child.dispose();
   expect(registry.entityPanels.length).toBe(before);
   expect(nodeTypeContribution("demo.node")).toBeUndefined();
+  expect(traitInspectorFor("demo")).toBeUndefined();
   expect(registry.plugins).not.toContain("demo");
 });
 

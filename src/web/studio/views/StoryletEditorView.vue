@@ -81,7 +81,7 @@ onMounted(async () => {
   await Promise.all(loads);
   currentGraph.value = raisePluginGraph(buildGraphFromStorylet(draft));
   draft.graph = currentGraph.value;
-  preconditionGraph.value = draft.precondition_graph?.nodes.length ? draft.precondition_graph : defaultPreconditionGraph();
+  preconditionGraph.value = draft.precondition_graph?.nodes.length ? raisePluginGraph(draft.precondition_graph) : defaultPreconditionGraph();
   draft.precondition_graph = preconditionGraph.value;
   lastSavedSnapshot.value = JSON.stringify(draft);
   // The editor now shows the stored storylet: plugins drop temp changes left by an unsaved session.
@@ -139,24 +139,29 @@ async function playFromHere() {
 }
 
 /** Plugin nodes are lowered to core nodes for validation and storage. */
-function lowerForEngine(): NarrativeGraph | null {
+function lowerForEngine(): { graph: NarrativeGraph; preconditionGraph: NarrativeGraph } | null {
   const entities = [...studioState.entities, ...studioState.entityTemplates] as AnyEntity[];
-  const pluginIssues = validatePluginNodes(currentGraph.value, entities);
+  const pluginIssues = [
+    ...validatePluginNodes(currentGraph.value, entities),
+    ...validatePluginNodes(preconditionGraph.value, entities),
+  ];
   if (pluginIssues.length) { notify(pluginIssues.join(" "), "error"); return null; }
   const lowered = lowerPluginGraph(currentGraph.value, entities);
-  const graphIssues = [...validateNarrativeGraph(lowered), ...validatePreconditionGraph(preconditionGraph.value)];
+  const loweredPreconditions = lowerPluginGraph(preconditionGraph.value, entities);
+  const graphIssues = [...validateNarrativeGraph(lowered), ...validatePreconditionGraph(loweredPreconditions)];
   if (graphIssues.length) { notify(graphIssues.join(" "), "error"); return null; }
-  return lowered;
+  return { graph: lowered, preconditionGraph: loweredPreconditions };
 }
 
 async function handleSave() {
   const lowered = lowerForEngine();
   if (!lowered) return;
   const wasNew = isNew.value;
-  compileGraphToStorylet(lowered, draft);
-  draft.precondition_graph = preconditionGraph.value;
+  compileGraphToStorylet(lowered.graph, draft);
+  draft.precondition_graph = lowered.preconditionGraph;
   const saved = await saveDraft();
   draft.graph = currentGraph.value;
+  draft.precondition_graph = preconditionGraph.value;
   if (saved) {
     lastSavedSnapshot.value = JSON.stringify(draft);
     emitPluginEvent("storylet/saved", String(draft.id), currentGraph.value);
@@ -167,10 +172,11 @@ async function handleSave() {
 async function handleApprove() {
   const lowered = lowerForEngine();
   if (!lowered) return;
-  compileGraphToStorylet(lowered, draft);
-  draft.precondition_graph = preconditionGraph.value;
+  compileGraphToStorylet(lowered.graph, draft);
+  draft.precondition_graph = lowered.preconditionGraph;
   const approved = await approveStorylet();
   draft.graph = currentGraph.value;
+  draft.precondition_graph = preconditionGraph.value;
   if (approved) {
     lastSavedSnapshot.value = JSON.stringify(draft);
     emitPluginEvent("storylet/saved", String(draft.id), currentGraph.value);
@@ -254,7 +260,7 @@ function deleteSelectedNode(nodeId: string) {
 </template>
 
 <style scoped>
-.full-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; background: var(--bg-app); }
+.full-editor { display: flex; flex-direction: column; container-type: inline-size; height: 100%; min-height: 0; overflow: hidden; background: var(--bg-app); }
 .editor-toolbar { height: auto; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 8px 16px; background: var(--bg-card); border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
 .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .toolbar-right { margin-left: auto; flex-shrink: 0; }
@@ -281,6 +287,8 @@ function deleteSelectedNode(nodeId: string) {
   .editor-toolbar { flex-wrap: nowrap; overflow-x: auto; }
   .toolbar-left { flex-wrap: nowrap; flex: 0 0 auto; }
   .toolbar-right { flex: 0 0 auto; }
+}
+@container (max-width: 600px) {
   .graph-editor-workspace { flex-direction: column; overflow-y: auto; }
   .graph-editor-canvas { flex: 0 0 auto; height: 46vh; min-height: 280px; }
   :deep(.property-inspector-panel) { width: 100%; border-left: 0; border-top: 1px solid var(--border-subtle); overflow-y: visible; }
