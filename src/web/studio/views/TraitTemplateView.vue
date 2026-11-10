@@ -207,6 +207,7 @@ function scrollTabs(event: WheelEvent) {
               :value="draft.name"
               placeholder="Trait name…"
               aria-label="Trait name"
+              :disabled="draft.system"
               @input="patch({ name: ($event.target as HTMLInputElement).value })"
             />
             <span class="entity-id-tag">#{{ (draft.id || '').slice(-6) }}</span>
@@ -214,6 +215,7 @@ function scrollTabs(event: WheelEvent) {
 
           <div class="entity-subtitle-row">
             <span class="entity-type-label">trait.{{ draft.key || 'key' }}</span>
+            <span v-if="draft.system" class="badge system-trait-badge">Built-in system trait</span>
             <span class="entity-bullet-sep" aria-hidden="true">•</span>
             <span v-if="draft.unique" class="entity-standalone-text" style="color: var(--accent);">Unique Trait</span>
             <span v-else class="entity-standalone-text">Standard Trait</span>
@@ -239,7 +241,8 @@ function scrollTabs(event: WheelEvent) {
           </button>
           <button
             class="btn btn-secondary btn-danger-hover"
-            :disabled="saving"
+            :disabled="saving || draft.system"
+            :title="draft.system ? 'Built-in system traits cannot be deleted' : 'Delete trait'"
             @click="remove"
           >
             Delete
@@ -273,6 +276,7 @@ function scrollTabs(event: WheelEvent) {
     <section v-show="activeTab === 'properties'" class="entity-content-stack">
       <!-- 1. Identity & Rules -->
       <div class="content-block">
+        <p v-if="draft.system" class="system-trait-notice">This built-in trait is required by the project. Its name, key, thumbnail, properties, and uniqueness cannot be changed or deleted. You can create a separate trait for custom rules.</p>
         <div class="content-block-head">
           <span class="block-title">Trait identity & rules</span>
           <span class="block-hint">Attribute prefix & entity constraints</span>
@@ -284,10 +288,11 @@ function scrollTabs(event: WheelEvent) {
             class="form-input"
             aria-label="Trait key"
             :value="draft.key"
+            :disabled="draft.system"
             placeholder="Generated from the name"
             @input="patch({ key: ($event.target as HTMLInputElement).value })"
           />
-          <span class="form-hint">Runtime attribute prefix: trait.&lt;Key&gt;.&lt;property_key&gt;. A generated key follows the template name until you edit it.</span>
+          <span class="form-hint">Runtime attribute prefix: trait.&lt;Key&gt;.&lt;property_key&gt;.<template v-if="!draft.system"> A generated key follows the template name until you edit it.</template></span>
         </div>
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label" :for="`${fieldId}-unique`">Unique trait</label>
@@ -296,10 +301,13 @@ function scrollTabs(event: WheelEvent) {
               :id="`${fieldId}-unique`"
               type="checkbox"
               :checked="draft.unique ?? false"
+              :disabled="draft.system"
+              :aria-describedby="draft.system ? `${fieldId}-system-unique-help` : undefined"
               @change="patch({ unique: ($event.target as HTMLInputElement).checked })"
             />
             <span>Only one unique trait may be applied to an entity</span>
           </label>
+          <span v-if="draft.system" :id="`${fieldId}-system-unique-help`" class="form-hint">This built-in trait's uniqueness cannot be changed.</span>
         </div>
       </div>
 
@@ -336,6 +344,7 @@ function scrollTabs(event: WheelEvent) {
           :model-value="draft.properties"
           mode="definition"
           :categories="true"
+          :disabled="draft.system"
           @update:model-value="draft.properties = $event as TraitPropertyDefinition[]"
         />
       </div>
@@ -456,3 +465,8 @@ function scrollTabs(event: WheelEvent) {
     <div class="skeleton-block" style="height: 160px;"></div>
   </div>
 </template>
+
+<style scoped>
+.system-trait-badge { color: var(--text-main); }
+.system-trait-notice { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 6px); background: var(--bg-input); color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+</style>
