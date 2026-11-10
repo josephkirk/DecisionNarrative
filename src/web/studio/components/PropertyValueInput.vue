@@ -185,7 +185,9 @@ const pickerSelectedId = computed(() => {
   return typeof raw === "string" ? raw : null;
 });
 const gameplayTagOptions = computed(() => studioState.gameplayTags.map((tag) => tag.name));
-function openPicker(target: number | null) {
+const pickerAnchor = ref<HTMLElement | null>(null);
+function openPicker(target: number | null, event: MouseEvent) {
+  pickerAnchor.value = event.currentTarget as HTMLElement;
   pickerTarget.value = target;
   pickerOpen.value = true;
 }
@@ -272,7 +274,7 @@ function onAssetSelect(event: Event, write: (value: AssetLinkValue | null) => vo
         <option value="">(none)</option>
         <option v-for="asset in studioState.assets" :key="asset.id" :value="asset.id">{{ asset.name }}</option>
       </select>
-      <button class="link-browse-btn" type="button" title="Browse assets" aria-label="Browse assets" :disabled="props.disabled" @click="openPicker(null)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
+      <button class="link-browse-btn" type="button" title="Browse assets" aria-label="Browse assets" :disabled="props.disabled" @click="openPicker(null, $event)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
     </div>
     <div v-else-if="props.type === 'entity'" key="scalar-entity" class="link-row">
       <select class="form-select link-row__select" :value="textValue(props.modelValue as PropertyScalar)" aria-label="Entity" :disabled="props.disabled" @change="onEntity($event, emitScalar)">
@@ -287,14 +289,14 @@ function onAssetSelect(event: Event, write: (value: AssetLinkValue | null) => vo
           </option>
         </optgroup>
       </select>
-      <button class="link-browse-btn" type="button" title="Browse entities" aria-label="Browse entities" :disabled="props.disabled" @click="openPicker(null)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
+      <button class="link-browse-btn" type="button" title="Browse entities" aria-label="Browse entities" :disabled="props.disabled" @click="openPicker(null, $event)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
     </div>
     <div v-else-if="props.type === 'storylet'" key="scalar-storylet" class="link-row">
       <select class="form-select link-row__select" :value="textValue(props.modelValue as PropertyScalar)" aria-label="Storylet" :disabled="props.disabled" @change="onEntity($event, emitScalar)">
         <option value="">(none)</option>
         <option v-for="storylet in studioState.storylets" :key="storylet.id" :value="storylet.id">{{ storylet.title }}</option>
       </select>
-      <button class="link-browse-btn" type="button" title="Browse storylets" aria-label="Browse storylets" :disabled="props.disabled" @click="openPicker(null)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
+      <button class="link-browse-btn" type="button" title="Browse storylets" aria-label="Browse storylets" :disabled="props.disabled" @click="openPicker(null, $event)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
     </div>
     <TagEditor
       v-else-if="props.type === 'tag' && !props.disabled"
@@ -382,7 +384,7 @@ function onAssetSelect(event: Event, write: (value: AssetLinkValue | null) => vo
           <option value="">(none)</option>
           <option v-for="asset in studioState.assets" :key="asset.id" :value="asset.id">{{ asset.name }}</option>
         </select>
-        <button class="link-browse-btn" type="button" title="Browse assets" aria-label="Browse assets" :disabled="props.disabled" @click="openPicker(index)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
+        <button class="link-browse-btn" type="button" title="Browse assets" aria-label="Browse assets" :disabled="props.disabled" @click="openPicker(index, $event)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
       </div>
       <div v-else-if="props.type === 'entity'" :key="'array-entity-' + index" class="link-row">
         <select class="form-select link-row__select" :value="textValue(elementAt(index))" aria-label="Entity" :disabled="props.disabled" @change="onEntity($event, (value) => emitArray(index, value))">
@@ -391,14 +393,14 @@ function onAssetSelect(event: Event, write: (value: AssetLinkValue | null) => vo
             <option v-for="entity in group.entities" :key="entity.id" :value="entity.id">{{ entity.name }}</option>
           </optgroup>
         </select>
-        <button class="link-browse-btn" type="button" title="Browse entities" aria-label="Browse entities" :disabled="props.disabled" @click="openPicker(index)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
+        <button class="link-browse-btn" type="button" title="Browse entities" aria-label="Browse entities" :disabled="props.disabled" @click="openPicker(index, $event)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
       </div>
       <div v-else-if="props.type === 'storylet'" :key="'array-storylet-' + index" class="link-row">
         <select class="form-select link-row__select" :value="textValue(elementAt(index))" aria-label="Storylet" :disabled="props.disabled" @change="onEntity($event, (value) => emitArray(index, value))">
           <option value="">(none)</option>
           <option v-for="storylet in studioState.storylets" :key="storylet.id" :value="storylet.id">{{ storylet.title }}</option>
         </select>
-        <button class="link-browse-btn" type="button" title="Browse storylets" aria-label="Browse storylets" :disabled="props.disabled" @click="openPicker(index)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
+        <button class="link-browse-btn" type="button" title="Browse storylets" aria-label="Browse storylets" :disabled="props.disabled" @click="openPicker(index, $event)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.5"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.5"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.5"/></svg></button>
       </div>
       <button class="btn btn-secondary" type="button" :disabled="props.disabled" @click="removeElement(Number(index))">Remove</button>
     </div>
@@ -407,6 +409,7 @@ function onAssetSelect(event: Event, write: (value: AssetLinkValue | null) => vo
   </div>
   <ReferencePicker
     :open="pickerOpen"
+    :anchor="pickerAnchor"
     :title="pickerTitle"
     :items="linkItems"
     :selected-id="pickerSelectedId"

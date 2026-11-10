@@ -15,6 +15,7 @@ const props = defineProps<{
   title: string;
   items: PickerItem[];
   selectedId: string | null;
+  anchor?: HTMLElement | null;
 }>();
 const emit = defineEmits<{
   (e: "select", id: string): void;
@@ -24,6 +25,20 @@ const emit = defineEmits<{
 const query = ref("");
 const viewMode = ref<"list" | "grid">("list");
 const searchInput = ref<HTMLInputElement | null>(null);
+const paneBounds = ref<DOMRect | null>(null);
+let paneObserver: ResizeObserver | undefined;
+function updatePaneBounds() {
+  paneBounds.value = props.anchor?.closest('.studio-pane')?.getBoundingClientRect() ?? null;
+}
+const dialogStyle = computed(() => {
+  const bounds = paneBounds.value;
+  if (!bounds) return {};
+  const left = Math.max(0, bounds.left);
+  const top = Math.max(0, bounds.top);
+  const right = Math.min(window.innerWidth, bounds.right);
+  const bottom = Math.min(window.innerHeight, bounds.bottom);
+  return { left: `${(left + right) / 2}px`, top: `${(top + bottom) / 2}px`, width: `${Math.max(0, Math.min(560, right - left - 32))}px`, maxHeight: `${Math.max(0, Math.min(520, bottom - top - 32))}px` };
+});
 
 const filtered = computed(() => {
   const needle = query.value.trim().toLowerCase();
@@ -44,14 +59,20 @@ watch(
   (isOpen) => {
     if (isOpen) {
       query.value = "";
+      updatePaneBounds();
+      const pane = props.anchor?.closest('.studio-pane');
+      if (pane) { paneObserver = new ResizeObserver(updatePaneBounds); paneObserver.observe(pane); }
+      window.addEventListener('resize', updatePaneBounds);
       document.addEventListener("keydown", onKeyDown);
       nextTick(() => searchInput.value?.focus());
     } else {
+      paneObserver?.disconnect();
+      window.removeEventListener('resize', updatePaneBounds);
       document.removeEventListener("keydown", onKeyDown);
     }
   },
 );
-onBeforeUnmount(() => document.removeEventListener("keydown", onKeyDown));
+onBeforeUnmount(() => { document.removeEventListener("keydown", onKeyDown); window.removeEventListener('resize', updatePaneBounds); paneObserver?.disconnect(); });
 
 function choose(id: string) {
   emit("select", id);
@@ -62,6 +83,8 @@ function choose(id: string) {
   <Teleport to="body"><div v-if="open" class="picker-overlay" @click.self="$emit('close')">
     <div
       class="picker-dialog"
+      :class="{ 'picker-dialog--anchored': paneBounds }"
+      :style="dialogStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="title"
@@ -183,6 +206,7 @@ function choose(id: string) {
   box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
+.picker-dialog--anchored { position: fixed; transform: translate(-50%, -50%); }
 .picker-header {
   display: flex;
   align-items: center;
