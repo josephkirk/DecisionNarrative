@@ -123,6 +123,7 @@ function choose(id: string) {
           :class="{ 'is-selected': item.id === selectedId }"
           role="option"
           :aria-selected="item.id === selectedId"
+          :title="item.title"
           @click="choose(item.id)"
         >
           <span class="picker-thumb" aria-hidden="true">
@@ -297,9 +298,7 @@ function choose(id: string) {
 .picker-name {
   font-size: 13px;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .picker-sub {
   font-size: 11px;

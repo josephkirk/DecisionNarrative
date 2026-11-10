@@ -374,7 +374,7 @@ function scrollTabs(event: WheelEvent) {
 }
 
 /* Traits tab */
-.editor-column { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.editor-column { display: flex; flex-direction: column; gap: 12px; min-width: 0; container-type: inline-size; }
 .trait-add { display: flex; gap: 8px; margin: 0; }
 .trait-add select { flex: 1; min-width: 0; }
 .trait-card { min-width: 0; overflow: hidden; margin: 0; padding: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); background: var(--bg-card); }
@@ -383,11 +383,12 @@ function scrollTabs(event: WheelEvent) {
 .trait-card > summary::before { content: '›'; color: var(--text-muted); font-size: 18px; line-height: 1; }
 .trait-card[open] > summary::before { transform: rotate(90deg); }
 .trait-card[open] > summary { border-bottom: 1px solid var(--border-subtle); }
-.trait-count { margin-left: auto; color: var(--text-muted); font-size: 11px; font-weight: 400; }
+.trait-count { margin-left: auto; color: var(--text-muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
 .trait-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; padding: 16px; }
 .trait-row { display: block; min-width: 0; padding: 0; border: 0; }
 .trait-row label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .trait-row .field-label { color: var(--text-muted); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+@container (min-width: 500px) { .trait-row .field-label { min-height: 32px; } }
 .trait-row :deep(.form-input), .trait-row :deep(.form-select), .trait-row :deep(.form-textarea) { width: 100%; min-width: 0; }
 .trait-footer { display: flex; justify-content: flex-end; padding: 0 16px 16px; }
 .traits-container {
