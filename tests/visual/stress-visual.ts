@@ -75,7 +75,7 @@ async function seed() {
     name: "Correspondence Ledger Entry with Extremely Specific Provenance", description: prose, folder_id: null,
     allow_multiple: true, unique: false, system: false,
     properties: [
-      { id: "lp1", key: "archive_url", name: "Correspondence archive URL", type: "string", default: URL },
+      { key: "archive_url", name: "Correspondence archive URL", type: "string", default: URL },
       { id: "lp2", key: "letters_written_since_the_first_winter_of_the_flood", name: "Letters written since the first winter of the flood", type: "int", default: 1284000 },
       { id: "lp3", key: "recipient", name: "Recipient", type: "entity", default: "" },
       { id: "lp4", key: "topics", name: "Topics", type: "tag", is_array: true, default: [deepTag, "mood.melancholic"] },
@@ -318,6 +318,30 @@ const steps: Step[] = [
   { name: "entity-short", path: "/entity-templates/jo" },
   { name: "instance", path: "/entities/inst-long" },
   { name: "trait", path: "/trait-templates/ledger" },
+  { name: "trait-focus", path: "/trait-templates/ledger", act: async (p) => {
+    const row = p.locator(".property-list__row").first();
+    for (const selector of [".property-name-input", ".property-key-input", "[aria-label^='Category for']", ".property-list__cell--value input"]) {
+      const input = row.locator(selector);
+      await input.scrollIntoViewIfNeeded();
+      await input.click();
+      await p.keyboard.press("End");
+      const before = await input.inputValue();
+      await p.keyboard.type("xyz", { delay: 30 });
+      if (await input.inputValue() !== `${before}xyz` || !await input.evaluate((el) => el === document.activeElement)) {
+        throw new Error(`Focus or input lost in ${selector}`);
+      }
+    }
+    await row.locator(".property-drag").focus();
+    await p.keyboard.press("ArrowDown");
+    const moved = p.locator(".property-list__row").nth(1).locator(".property-name-input");
+    await moved.click();
+    await p.keyboard.press("End");
+    const name = await moved.inputValue();
+    await p.keyboard.type("ok", { delay: 30 });
+    if (await moved.inputValue() !== `${name}ok` || !await moved.evaluate((el) => el === document.activeElement)) {
+      throw new Error("Focus or input lost after reordering");
+    }
+  } },
   { name: "asset", path: "/assets/asset-long" },
   { name: "folder", path: "/browse/entity_templates/f-long-2" },
   { name: "folder-root", path: "/browse/entity_templates" },

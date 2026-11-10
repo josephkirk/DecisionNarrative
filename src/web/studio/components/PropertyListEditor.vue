@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, nextTick, onBeforeUnmount } from "vue";
+import { computed, ref, nextTick, onBeforeUnmount, toRaw } from "vue";
 import type { EntityProperty, PropertyDefinition, PropertyValue } from "../contracts.ts";
 import {
   isValidPropertyKey,
@@ -65,6 +65,7 @@ function patch(index: number, changes: Partial<Row>) {
   const next = rows.value.map((row, position) => {
     if (position !== index) return row;
     const updated = { ...row, ...changes } as Row & Record<string, unknown>;
+    if (!row.id) rowKeys.set(toRaw(updated), rowKey(row) as number);
     // Keep a single canonical value key per mode: the backend rejects
     // payloads that carry both `value` and its `default` alias.
     if (props.mode === "definition") delete updated.value;
@@ -122,8 +123,9 @@ const rowKeys = new WeakMap<object, number>();
 let nextRowKey = 0;
 function rowKey(row: Row): string | number {
   if (row.id) return row.id;
-  if (!rowKeys.has(row)) rowKeys.set(row, ++nextRowKey);
-  return rowKeys.get(row)!;
+  const raw = toRaw(row);
+  if (!rowKeys.has(raw)) rowKeys.set(raw, ++nextRowKey);
+  return rowKeys.get(raw)!;
 }
 onBeforeUnmount(() => clearTimeout(resetMotion));
 function move(from: number, to: number) {
