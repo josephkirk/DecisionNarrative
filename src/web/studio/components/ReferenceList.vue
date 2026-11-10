@@ -3,6 +3,13 @@ import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import type { ContentReference } from "../contracts.ts";
 import { countLabel } from "../countLabel.ts";
+import { studioState } from "../state.ts";
+import { thumbnailUrl } from "../thumbnails.ts";
+
+function referenceThumbnail(reference: ContentReference) {
+  const records = reference.source_kind === "storylet" ? studioState.storylets : reference.source_kind === "trait_template" ? studioState.traitTemplates : reference.source_kind === "entity_template" ? studioState.entityTemplates : studioState.entities;
+  return thumbnailUrl(records.find((record) => record.id === reference.source_id)?.thumbnail);
+}
 
 const props = withDefaults(
   defineProps<{
@@ -477,7 +484,7 @@ function resetGraphView() {
               @mouseleave="hoveredNodeId = null"
               @click="open(reference)"
             >
-              <span class="reference-list__label">{{ reference.node_label || reference.source_label }}</span>
+              <img v-if="referenceThumbnail(reference)" :src="referenceThumbnail(reference) ?? undefined" alt="" width="28" height="28" class="reference-thumbnail" /><span class="reference-list__label">{{ reference.node_label || reference.source_label }}</span>
               <span class="reference-list__field">{{ reference.field }}</span>
               <span class="reference-list__via">{{ viaLabel(reference) }}</span>
             </button>
@@ -492,7 +499,7 @@ function resetGraphView() {
               type="button"
               @click="open(reference)"
             >
-              <span class="reference-list__label">{{ reference.source_label }}</span>
+              <img v-if="referenceThumbnail(reference)" :src="referenceThumbnail(reference) ?? undefined" alt="" width="28" height="28" class="reference-thumbnail" /><span class="reference-list__label">{{ reference.source_label }}</span>
               <span class="reference-list__field">{{ reference.field }}</span>
               <span class="reference-list__via">{{ viaLabel(reference) }}</span>
             </button>
@@ -504,6 +511,7 @@ function resetGraphView() {
 </template>
 
 <style scoped>
+.reference-thumbnail { flex: none; object-fit: cover; border-radius: var(--radius-sm, 4px); }
 .reference-container {
   display: flex;
   flex-direction: column;

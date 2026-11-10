@@ -12,6 +12,8 @@ import TagEditor from "../components/TagEditor.vue";
 import ThumbnailPicker from "../components/ThumbnailPicker.vue";
 import { entityPanelsFor, traitInspectorFor } from "../plugins/runtime.ts";
 import { countLabel } from "../countLabel.ts";
+import { thumbnailUrl } from "../thumbnails.ts";
+import ReferencePicker from "../components/ReferencePicker.vue";
 const route = useRoute(); const router = useRouter(); const entityId = typeof route.params.id === "string" ? route.params.id : "";
 const editor = useEntityEditor(entityId); const { draft, dirty, loading, saving, activeTab, references, referencesLoading, isWorld, isEntityRoute, loadReferences, patch, addTrait, removeTrait, setTraitValue, traitPropertyDisplayValue, save, remove } = editor;
 const intrinsic = computed(() => isWorld.value);
@@ -23,6 +25,8 @@ const parentTemplate = computed(() => {
   return tid ? studioState.entityTemplates.find((t) => t.id === tid) : undefined;
 });
 const pendingTraitId = ref("");
+const traitPickerOpen = ref(false);
+const traitPickerAnchor = ref<HTMLElement | null>(null);
 const availableTemplates = computed(() => studioState.traitTemplates.filter((t) => {
   const traits = draft.value?.traits ?? [];
   if (!t.allow_multiple && traits.some((instance) => instance.template_id === t.id)) return false;
@@ -287,18 +291,21 @@ function scrollTabs(event: WheelEvent) {
 
     <section v-else-if="activeTab === 'traits'" class="editor-column">
       <div v-if="!intrinsic" class="trait-add">
+        <img v-if="thumbnailUrl(availableTemplates.find(t => t.id === pendingTraitId)?.thumbnail)" class="trait-thumbnail" :src="thumbnailUrl(availableTemplates.find(t => t.id === pendingTraitId)?.thumbnail) ?? undefined" alt="" width="32" height="32" />
         <select v-model="pendingTraitId" class="form-select" aria-label="Trait to add">
           <option value="">Choose trait…</option>
           <option v-for="template in availableTemplates" :key="template.id" :value="template.id">{{ template.name }}</option>
         </select>
+        <button type="button" class="btn btn-secondary" @click="traitPickerAnchor = $event.currentTarget as HTMLElement; traitPickerOpen = true">Browse</button>
         <button class="btn btn-secondary" :disabled="!pendingTraitId" @click="addSelectedTrait">Add</button>
       </div>
+      <ReferencePicker :open="traitPickerOpen" :anchor="traitPickerAnchor" title="Choose trait" :items="availableTemplates.map(t => ({ id: t.id, title: t.name, thumbnail: t.thumbnail }))" :selected-id="pendingTraitId || null" @select="pendingTraitId = $event; traitPickerOpen = false" @close="traitPickerOpen = false" />
       <p v-if="hasAppliedUniqueTrait" class="form-hint" style="margin:0 0 12px;">This entity already has a unique trait. Remove it before adding another unique trait.</p>
       <div v-if="intrinsic && !appliedTraits.length" class="form-hint" style="color:var(--text-muted); margin-bottom:12px;">
         No traits applied to intrinsic entity.
       </div>
       <details v-for="entry in appliedTraits" :key="entry.instance.id" class="trait-card" open>
-        <summary><span>{{ entry.template?.name }}</span><span class="trait-count">{{ countLabel((entry.template?.properties ?? []).length, 'property', 'properties') }}</span></summary>
+        <summary><img v-if="thumbnailUrl(entry.template?.thumbnail)" class="trait-thumbnail" :src="thumbnailUrl(entry.template?.thumbnail) ?? undefined" alt="" width="32" height="32" /><span>{{ entry.template?.name }}</span><span class="trait-count">{{ countLabel((entry.template?.properties ?? []).length, 'property', 'properties') }}</span></summary>
         <component
           v-if="traitInspectorComponent(entry.template?.key ?? '')"
           :is="traitInspectorComponent(entry.template?.key ?? '')"
@@ -384,6 +391,7 @@ function scrollTabs(event: WheelEvent) {
 .trait-card[open] > summary::before { transform: rotate(90deg); }
 .trait-card[open] > summary { border-bottom: 1px solid var(--border-subtle); }
 .trait-count { margin-left: auto; color: var(--text-muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
+.trait-thumbnail { flex: none; width: 32px; height: 32px; object-fit: cover; border-radius: var(--radius-sm, 4px); }
 .trait-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; padding: 16px; }
 .trait-row { display: block; min-width: 0; padding: 0; border: 0; }
 .trait-row label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }

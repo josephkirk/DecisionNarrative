@@ -8,6 +8,7 @@ import { currentFolderId, refreshWorkspace } from "../view-models/workspace.ts";
 import PropertyListEditor from "../components/PropertyListEditor.vue";
 import ThumbnailPicker from "../components/ThumbnailPicker.vue";
 import { countLabel } from "../countLabel.ts";
+import { thumbnailUrl } from "../thumbnails.ts";
 const route = useRoute();
 const router = useRouter();
 const templateId = typeof route.params.id === "string" ? route.params.id : "";
@@ -397,6 +398,7 @@ function scrollTabs(event: WheelEvent) {
             class="included-trait-row"
           >
             <div class="included-trait-meta">
+              <img v-if="thumbnailUrl(inc.thumbnail)" :src="thumbnailUrl(inc.thumbnail) ?? undefined" alt="" width="32" height="32" style="object-fit:cover; border-radius:4px;" />
               <span style="font-weight:600; font-size:13px; color:var(--text-main);">{{ inc.name }}</span>
               <span class="badge" style="font-size:10px;">{{ countLabel(inc.properties.length, "property", "properties") }}</span>
               <router-link :to="`/trait-templates/${inc.id}`" style="font-size:12px; color:var(--accent);">View</router-link>
@@ -427,7 +429,7 @@ function scrollTabs(event: WheelEvent) {
             class="usage-list__row"
             style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255, 255, 255, 0.02); border:1px solid var(--border-subtle); border-radius:6px; text-decoration:none;"
           >
-            <span style="color:var(--accent); font-weight:500;">{{ entity.name }}</span>
+            <span style="display:flex; align-items:center; gap:8px; color:var(--accent); font-weight:500;"><img v-if="thumbnailUrl(entity.thumbnail)" :src="thumbnailUrl(entity.thumbnail) ?? undefined" alt="" width="32" height="32" style="object-fit:cover; border-radius:4px;" />{{ entity.name }}</span>
             <span class="entity-id-tag">#{{ entity.id.slice(-6) }}</span>
           </router-link>
         </div>
