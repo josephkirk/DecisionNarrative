@@ -1,8 +1,10 @@
 # DecisionNarrative
 
+<img src="src/web/assets/erzaehlstudio-logo.svg" alt="Erzählstudio logo" width="72" height="72" />
+
 **Version 0.2.0-alpha.1** — alpha prerelease. APIs, bundle schemas, and databases may change without migration.
 
-DecisionNarrative is a local authoring and playtest studio for nonlinear, storylet-driven narrative games. It is designed to scale from a compact detective scenario to a large systemic RPG without imposing a built-in setting, cast, or linear plot structure.
+DecisionNarrative is a local authoring and playtest studio for nonlinear, storylet-driven narrative games; its web authoring app is **Erzählstudio**. It is designed to scale from a compact detective scenario to a large systemic RPG without imposing a built-in setting, cast, or linear plot structure.
 
 The platform couples a host-independent Rust decision core with a unified local Rust service and a modern Vue 3 MVVM authoring studio styled after quiet macOS creative tools.
 

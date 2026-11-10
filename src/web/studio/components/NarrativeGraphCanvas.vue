@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { learnNodeDefaults, graphNodeTypes, graphConnectionIsCompatible, graphNodeValueType, graphTargetPinType, isSafeImageUrl, GRAPH_PIN_COLORS, type GraphValueType, type NarrativeGraph, type NarrativeNode, type NarrativeEdge, type NodeType } from "../narrativeGraphTypes.ts";
 import { studioState, notify } from "../state.ts";
 import { hasTraitKey } from "../entityModel.ts";
@@ -33,6 +33,25 @@ const panX = ref(40);
 const panY = ref(60);
 const isPanning = ref(false);
 const startPan = ref({ x: 0, y: 0 });
+
+/** Vertical room the floating toolbar takes (it wraps to two rows in narrow panes); the home view starts below it. */
+const toolbarRef = ref<HTMLElement | null>(null);
+const toolbarClearance = ref(60);
+let toolbarObserver: ResizeObserver | null = null;
+onMounted(() => {
+  const toolbar = toolbarRef.value;
+  if (!toolbar || typeof ResizeObserver === "undefined") return;
+  toolbarObserver = new ResizeObserver(() => { toolbarClearance.value = toolbar.offsetTop + toolbar.offsetHeight + 20; });
+  toolbarObserver.observe(toolbar);
+});
+onBeforeUnmount(() => toolbarObserver?.disconnect());
+// Follow the toolbar only while the view is still at its home position.
+watch(toolbarClearance, (next, previous) => { if (panY.value === previous && zoom.value === 1) panY.value = next; });
+function resetView() {
+  zoom.value = 1;
+  panX.value = 40;
+  panY.value = toolbarClearance.value;
+}
 
 // Graph state
 const nodes = ref<NarrativeNode[]>([]);
@@ -565,7 +584,7 @@ const computedEdges = computed(() => {
     @contextmenu.prevent="onCanvasContextMenu"
   >
     <!-- Top Floating Toolbar -->
-    <div class="graph-toolbar">
+    <div ref="toolbarRef" class="graph-toolbar">
       <div class="graph-toolbar__palette" role="toolbar" aria-label="Add node">
         <button class="node-tool-btn" @click="addNode('start')">Start</button>
         <button class="node-tool-btn" @click="addNode('get_entity')">Get entity</button>
@@ -597,7 +616,7 @@ const computedEdges = computed(() => {
 
       <div class="graph-toolbar__view">
         <span class="graph-toolbar__zoom" aria-label="Zoom level">{{ Math.round(zoom * 100) }}%</span>
-        <button type="button" class="btn btn-secondary graph-toolbar__btn" @click="zoom = 1.0; panX = 40; panY = 60;">Reset</button>
+        <button type="button" class="btn btn-secondary graph-toolbar__btn" @click="resetView">Reset</button>
         <button v-if="props.graphMode === 'story'" type="button" class="btn btn-primary graph-toolbar__btn" @click="emitUpdate">Sync to Storylet</button>
       </div>
     </div>
@@ -867,9 +886,10 @@ const computedEdges = computed(() => {
   position: relative;
   width: 100%;
   height: 100%;
-  overflow: hidden;
+  /* clip, not hidden: focusing a partly off-screen node input must not scroll the canvas (it would shift the toolbar). */
+  overflow: clip;
   background-color: var(--bg-canvas);
-  background-image: radial-gradient(#1d2332 1.2px, transparent 1.2px);
+  background-image: radial-gradient(var(--border-muted) 1.2px, transparent 1.2px);
   background-size: 24px 24px;
   cursor: grab;
   user-select: none;

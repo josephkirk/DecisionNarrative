@@ -14,15 +14,18 @@ function contrast(a: string, b: string): number {
 }
 
 test("presets cover the requested game themes with unique ids", () => {
-  expect(THEME_PRESETS.map((preset) => preset.label)).toEqual(["Mass Effect", "Cyberpunk", "RPG", "Death Stranding", "Kojima Productions", "Anime", "Modern Warfare"]);
+  expect(THEME_PRESETS.map((preset) => preset.label)).toEqual(["Kojima Productions", "Mass Effect", "Cyberpunk", "RPG", "Death Stranding", "Anime", "Modern Warfare"]);
   expect(new Set(THEME_PRESETS.map((preset) => preset.id)).size).toBe(THEME_PRESETS.length);
+  expect(DEFAULT_PRESET).toBe("kojima");
 });
 
-test("every preset keeps body and secondary text readable on its cards", () => {
+test("every preset keeps body, secondary and hint text readable on its cards", () => {
   for (const preset of THEME_PRESETS) {
     const card = preset.vars["--bg-card"]!;
     expect(contrast(preset.vars["--text-main"]!, card), `${preset.id} main text`).toBeGreaterThanOrEqual(7);
     expect(contrast(preset.vars["--text-muted"]!, card), `${preset.id} muted text`).toBeGreaterThanOrEqual(4.5);
+    // Hints and metadata use the dim tone at 11–12px, so it must clear AA too (with margin for hover fills).
+    expect(contrast(preset.vars["--text-dim"]!, card), `${preset.id} dim text`).toBeGreaterThanOrEqual(5);
   }
 });
 

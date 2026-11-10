@@ -1,5 +1,5 @@
 ---
-name: DecisionNarrative Studio
+name: Erzählstudio
 colors:
   surface: '#111317'
   surface-dim: '#111317'
@@ -124,6 +124,8 @@ spacing:
   space-2xl: 2rem
 ---
 ## Brand & Style
+**Erzählstudio** ("narration studio"). The mark is an ink tile holding an "E": its spine and outer arms in paper white, its middle arm a gilt thread that forks into two outcomes, one filled and one open, a told story at its moment of choice. Source: `src/web/assets/erzaehlstudio-logo.svg` (favicon); the toolbar uses `BrandMark.vue`, the same geometry painted with theme tokens.
+
 Inspired by the spatial, atmospheric aesthetic of modern creative worldbuilding studios (such as vvd.world). Designed for narrative designers and game writers, this aesthetic combines a serene, low-distraction dark backdrop with tactile floating glass panels, rounded geometry, and precise typographic hierarchy.
 
 Surfaces float above an atmospheric canvas with subtle gradient depth. Floating panels feature soft rounded corners (12-16px), fine hairline borders with subtle rim luminescence, and backdrop blur. High-frequency interactions remain snappy and grounded, with color serving primarily as semantic logic indicators.
@@ -157,7 +159,7 @@ Text maintains high legibility: `#f1f3f9` for primary reading, `#9ba3b8` for sec
 The toolbar Appearance panel swaps whole-app themes; each is one token set in `src/web/studio/theme.ts`, applied as CSS variables on `<html>`:
 - **Tokens a theme owns**: app backdrop and glow, card/input/popover/pane surfaces, three border strengths, three text levels, accent (fill, hover, ink, subtle), a secondary brand color, a radius scale (sharp, crisp, soft, round), and the heading voice (display font, weight, tracking, case).
 - **Semantic colors stay fixed** across themes (status, node types, dialog iris) so logic signals keep their meaning.
-- **Presets**: Mass Effect (default), Cyberpunk, RPG, Death Stranding, Kojima Productions, Anime, Modern Warfare. Each must keep main text ≥ 7:1 and muted text ≥ 4.5:1 on cards, and accent ink ≥ 4.5:1 on the accent (`tests/web/theme.test.ts`).
+- **Presets**: Kojima Productions (default), Mass Effect, Cyberpunk, RPG, Death Stranding, Anime, Modern Warfare. Each must keep main text ≥ 7:1, muted text ≥ 4.5:1 and dim text ≥ 5:1 on cards, and accent ink ≥ 4.5:1 on the accent (`tests/web/theme.test.ts`).
 - **Background image**: optional, downscaled to 1920px and stored locally; dimmed by the theme backdrop, optionally blurred, and panes turn translucent over it.
 
 ## Layout & Workspace

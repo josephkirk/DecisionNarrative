@@ -258,7 +258,7 @@ onBeforeRouteUpdate(confirmDiscard);
           placeholder="Choose gameplay tags…"
           @update:model-value="updateTags"
         />
-        <span v-else class="intrinsic-tags-text">{{ draft.tags.length ? draft.tags.join(', ') : 'No gameplay tags' }}</span>
+        <span v-else class="intrinsic-tags-text" :class="{ 'is-empty': !draft.tags.length }">{{ draft.tags.length ? draft.tags.join(', ') : 'No gameplay tags' }}</span>
       </div>
 
       <!-- 3. Typed Properties -->
@@ -434,7 +434,7 @@ onBeforeRouteUpdate(confirmDiscard);
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xs, 3px);
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .entity-subtitle-row {
@@ -638,14 +638,17 @@ onBeforeRouteUpdate(confirmDiscard);
 
 .char-count-tag, .defined-pill {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--text-dim);
+  color: var(--text-muted);
   background: rgba(255, 255, 255, 0.05);
   padding: 2px 6px;
   border-radius: var(--radius-xs, 3px);
   border: 1px solid var(--border-subtle);
 }
+
+.intrinsic-tags-text { font-size: 13px; color: var(--text-main); }
+.intrinsic-tags-text.is-empty { color: var(--text-muted); font-weight: 400; }
 
 .lore-textarea {
   font-family: var(--font-serif);

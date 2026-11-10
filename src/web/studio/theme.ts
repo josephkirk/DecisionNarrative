@@ -97,41 +97,41 @@ function preset(spec: PresetSpec): ThemePreset {
   };
 }
 
-/** Game-inspired themes; the first is the default studio look. */
+/** Game-inspired themes; the first (Kojima Productions) is the default studio look. */
 export const THEME_PRESETS: ThemePreset[] = [
+  // Kojima Productions: ink black, warm paper white, restrained gilt; no coloured haze.
+  preset({ id: "kojima", label: "Kojima Productions", bg: "#0b0b0a", surface: "#161614", border: "232, 222, 200",
+    text: ["#f1ede4", "#a8a397", "#8c877d"], accent: "#c9a24a", hover: "#dfbf75", ink: "#140f03", secondary: "#f1ede4",
+    glows: ["rgba(241, 237, 228, 0.05)", "rgba(201, 162, 74, 0.06)", "rgba(201, 162, 74, 0.04)"],
+    radius: "crisp", display: { font: SANS, weight: 400, tracking: "0.02em" } }),
   // Mass Effect: deep-space navy, holographic cyan, Normandy indigo; soft glass.
   preset({ id: "mass-effect", label: "Mass Effect", bg: "#0a0c12", surface: "#161b28", border: "148, 163, 196",
-    text: ["#eef1f8", "#9ba5bd", "#7b8499"], accent: "#22c5e0", hover: "#67e3f5", ink: "#04161c", secondary: "#6366f1",
+    text: ["#eef1f8", "#9ba5bd", "#838da2"], accent: "#22c5e0", hover: "#67e3f5", ink: "#04161c", secondary: "#6366f1",
     glows: ["rgba(99, 102, 241, 0.16)", "rgba(34, 197, 224, 0.09)", "rgba(168, 85, 247, 0.10)"],
     radius: "soft", display: { font: SANS, weight: 600, tracking: "-0.025em" } }),
   // Cyberpunk: night-city black, signal yellow, neon magenta haze; hard edges, DIN caps.
   preset({ id: "cyberpunk", label: "Cyberpunk", bg: "#0b0a0f", surface: "#16141d", border: "5, 217, 232",
-    text: ["#f4f1e1", "#a9a5b8", "#7a768c"], accent: "#f3e600", hover: "#fff35c", ink: "#141100", secondary: "#ff2a6d",
+    text: ["#f4f1e1", "#a9a5b8", "#89859a"], accent: "#f3e600", hover: "#fff35c", ink: "#141100", secondary: "#ff2a6d",
     glows: ["rgba(255, 42, 109, 0.16)", "rgba(5, 217, 232, 0.10)", "rgba(243, 230, 0, 0.06)"],
     radius: "sharp", display: { font: TECHNICAL, weight: 700, tracking: "0.04em", transform: "uppercase" } }),
   // RPG: candle-lit tavern, gilded gold, parchment text, ember and forest; serif headings.
   preset({ id: "rpg", label: "RPG", bg: "#110d09", surface: "#1e1812", border: "217, 180, 120",
-    text: ["#f3ead8", "#b5a68b", "#877963"], accent: "#d9a441", hover: "#ecc06c", ink: "#1d1405", secondary: "#8b5a2b",
+    text: ["#f3ead8", "#b5a68b", "#988971"], accent: "#d9a441", hover: "#ecc06c", ink: "#1d1405", secondary: "#8b5a2b",
     glows: ["rgba(180, 83, 9, 0.16)", "rgba(217, 164, 65, 0.08)", "rgba(22, 101, 52, 0.12)"],
     radius: "soft", display: { font: SERIF, weight: 600, tracking: "0" } }),
   // Death Stranding: cold timefall slate, chiral amber, teal mist; thin, wide-tracked caps.
   preset({ id: "death-stranding", label: "Death Stranding", bg: "#0a0d10", surface: "#141a1f", border: "160, 190, 200",
-    text: ["#e9eef0", "#98a7ae", "#6f7d84"], accent: "#f2a54a", hover: "#f8c27f", ink: "#1e1103", secondary: "#4fb3bf",
+    text: ["#e9eef0", "#98a7ae", "#7f8d94"], accent: "#f2a54a", hover: "#f8c27f", ink: "#1e1103", secondary: "#4fb3bf",
     glows: ["rgba(79, 179, 191, 0.12)", "rgba(148, 163, 184, 0.08)", "rgba(242, 165, 74, 0.08)"],
     radius: "crisp", display: { font: SANS, weight: 400, tracking: "0.08em", transform: "uppercase" } }),
-  // Kojima Productions: ink black, warm paper white, restrained gilt; no coloured haze.
-  preset({ id: "kojima", label: "Kojima Productions", bg: "#0b0b0a", surface: "#161614", border: "232, 222, 200",
-    text: ["#f1ede4", "#a8a397", "#7d796f"], accent: "#c9a24a", hover: "#dfbf75", ink: "#140f03", secondary: "#f1ede4",
-    glows: ["rgba(241, 237, 228, 0.05)", "rgba(201, 162, 74, 0.06)", "rgba(201, 162, 74, 0.04)"],
-    radius: "crisp", display: { font: SANS, weight: 400, tracking: "0.02em" } }),
   // Anime: twilight violet, sakura pink, sky blue; round, bold and friendly.
   preset({ id: "anime", label: "Anime", bg: "#100c16", surface: "#1d1627", border: "220, 180, 255",
-    text: ["#fbf3ff", "#bba9cb", "#8b7c9b"], accent: "#ff7ab6", hover: "#ffa6cd", ink: "#2a0817", secondary: "#7cc7ff",
+    text: ["#fbf3ff", "#bba9cb", "#9484a4"], accent: "#ff7ab6", hover: "#ffa6cd", ink: "#2a0817", secondary: "#7cc7ff",
     glows: ["rgba(255, 122, 182, 0.14)", "rgba(124, 199, 255, 0.10)", "rgba(139, 92, 246, 0.14)"],
     radius: "round", display: { font: SANS, weight: 700, tracking: "-0.02em" } }),
   // Modern Warfare: tactical night, NVG green, sand; squared panels, stencil-like caps.
   preset({ id: "modern-warfare", label: "Modern Warfare", bg: "#0a0c09", surface: "#151913", border: "180, 190, 150",
-    text: ["#e8eadf", "#a3a791", "#777b67"], accent: "#9ccc3d", hover: "#bde36a", ink: "#0f1603", secondary: "#c2a36b",
+    text: ["#e8eadf", "#a3a791", "#888c77"], accent: "#9ccc3d", hover: "#bde36a", ink: "#0f1603", secondary: "#c2a36b",
     glows: ["rgba(101, 113, 59, 0.18)", "rgba(156, 204, 61, 0.06)", "rgba(194, 163, 107, 0.08)"],
     radius: "sharp", display: { font: TECHNICAL, weight: 600, tracking: "0.06em", transform: "uppercase" } }),
 ];

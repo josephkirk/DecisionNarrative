@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Erzählstudio</title>
+  <!-- Ink tile with a hairline gilt rim. -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#0b0b0a"/>
+  <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="13.25" fill="none" stroke="#c9a24a" stroke-opacity="0.55" stroke-width="1.5"/>
+  <!-- The E: a spine with two told threads… -->
+  <g fill="none" stroke="#f1ede4" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 17v30"/>
+    <path d="M21 17h21"/>
+    <path d="M21 47h21"/>
+  </g>
+  <!-- …and the middle arm as the moment of choice: a branch that forks into two gilt outcomes. -->
+  <g fill="none" stroke="#c9a24a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 32h8"/>
+    <path d="M29 32c4 0 5-5 9-5"/>
+    <path d="M29 32c4 0 5 5 9 5"/>
+  </g>
+  <circle cx="41" cy="27" r="3.25" fill="#c9a24a"/>
+  <circle cx="41" cy="37" r="3.25" fill="none" stroke="#c9a24a" stroke-width="2"/>
+</svg>

@@ -28,15 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the pane header, or the tree's "Open in split view") to open it beside or below
   the current view; panes resize, maximize, close, and restore after reload, and
   each pane keeps its own navigation and unsaved-change guard.
-- Appearance settings in the toolbar: seven game-inspired themes (Mass Effect,
-  Cyberpunk, RPG, Death Stranding, Kojima Productions, Anime, Modern Warfare) that
-  retune surfaces, borders, text, corner radii, heading type and accent, plus an
-  optional background image with a blur toggle. Stored locally per browser.
+- Appearance settings in the toolbar: seven game-inspired themes (Kojima
+  Productions, the default; Mass Effect, Cyberpunk, RPG, Death Stranding, Anime,
+  Modern Warfare) that retune surfaces, borders, text, corner radii, heading type
+  and accent, plus an optional background image with a blur toggle. Stored
+  locally per browser.
 - Shared studio UI components: EmptyState, IconButton, SearchField,
   SegmentedControl and ToggleSwitch, plus a consistent outline icon set.
 
 ### Changed
 
+- The studio is now branded Erzählstudio, with a new logo (an "E" whose middle arm
+  forks into two outcomes) used as the toolbar mark and favicon.
 - Reworked studio visual system: floating rounded panes on an atmospheric
   backdrop, a compact glass toolbar and project tree, self-hosted Sora UI font,
   icon-based actions in place of emoji, quieter destructive buttons, and

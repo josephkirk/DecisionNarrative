@@ -11,6 +11,7 @@ import StudioIcon from "./studio/components/StudioIcon.vue";
 import { buildInteractionContext, interactionContextKey, type InteractionFocus } from "./studio/interactionContext.ts";
 import { focusedRoute, focusedRouter } from "./studio/view-models/panes.ts";
 import AppearancePanel from "./studio/components/AppearancePanel.vue";
+import BrandMark from "./studio/components/BrandMark.vue";
 import { appearance, applyAppearance, onAppearanceStorageError } from "./studio/view-models/appearance.ts";
 
 applyAppearance();
@@ -132,9 +133,8 @@ onMounted(async () => {
       </button>
 
       <div class="studio-toolbar__brand">
-        <span class="studio-toolbar__mark" aria-hidden="true">DN</span>
-        <span class="studio-toolbar__title">DecisionNarrative</span>
-        <span class="studio-toolbar__subtitle">Storylet Studio</span>
+        <BrandMark />
+        <span class="studio-toolbar__title">Erzählstudio</span>
       </div>
       <nav class="studio-toolbar__nav" aria-label="Studio">
         <a
