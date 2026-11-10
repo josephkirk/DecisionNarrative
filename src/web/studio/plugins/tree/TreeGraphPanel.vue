@@ -11,6 +11,7 @@ import { refreshWorkspace } from "../../view-models/workspace.ts";
 import type { AnyEntity } from "../runtime.ts";
 import { TREE_EXAMPLES } from "./examples.ts";
 import { TREE_GRAPH_KEY, TREE_ITEM_KEY, TREE_SHAPES, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, treeTrait, type TreeCanvasImage, type TreeDirection, type TreeEdge, type TreeGraph, type TreePoint, type TreePositions, type TreeShape } from "./model.ts";
+import { countLabel } from "../../countLabel.ts";
 
 const props = defineProps<{ entity: AnyEntity; readonly?: boolean }>();
 const emit = defineEmits<{ (event: "patch", patch: Partial<AnyEntity>): void; (event: "save"): void }>();
@@ -731,7 +732,7 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
       <p v-if="notice || issues.length" class="tree-error" role="alert">{{ notice || issues.join(' ') }}</p>
       <p v-if="status" class="field-sublabel" role="status">{{ status }}</p>
       <p v-if="viewMode === 'canvas' && source && !readonly" class="tree-link-hint" role="status">Connecting from {{ label(source) }}. Open another node's options to connect. <button type="button" @click="source = ''">Cancel</button></p>
-      <div class="tree-meta"><span>{{ graph.nodes.length }} items</span><span>{{ graph.edges.length }} connections</span><span>{{ roots.size }} roots</span></div>
+      <div class="tree-meta"><span>{{ countLabel(graph.nodes.length, "item") }}</span><span>{{ countLabel(graph.edges.length, "connection") }}</span><span>{{ countLabel(roots.size, "root") }}</span></div>
       <TreeListView v-show="viewMode === 'list'" :graph="graph" :owner="entity" :readonly="readonly" @patch="emit('patch', $event)" />
       <div v-show="viewMode === 'canvas'" :id="canvasId" ref="treeScroll" class="tree-scroll" :class="{ 'hide-grid': !showGrid }" :style="{ backgroundColor: graph.appearance?.canvasBackground, backgroundPosition: `${panX}px ${panY}px`, backgroundSize: `${24 * zoomFactor}px ${24 * zoomFactor}px` }" tabindex="0" aria-label="Tree graph canvas; drag background to pan, use mouse wheel to zoom" @contextmenu="openContext($event)" @dblclick="wireDoubleClick" @pointerdown="startPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @wheel.prevent="wheelZoom" @keydown="keyboardPan">
         <component :is="'style'" v-if="customCanvasCss" v-text="customCanvasCss" />

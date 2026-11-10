@@ -11,6 +11,7 @@ import ReferenceList from "../components/ReferenceList.vue";
 import TagEditor from "../components/TagEditor.vue";
 import ThumbnailPicker from "../components/ThumbnailPicker.vue";
 import { entityPanelsFor, traitInspectorFor } from "../plugins/runtime.ts";
+import { countLabel } from "../countLabel.ts";
 const route = useRoute(); const router = useRouter(); const entityId = typeof route.params.id === "string" ? route.params.id : "";
 const editor = useEntityEditor(entityId); const { draft, dirty, loading, saving, activeTab, references, referencesLoading, isWorld, isEntityRoute, loadReferences, patch, addTrait, removeTrait, setTraitValue, traitPropertyDisplayValue, save, remove } = editor;
 const intrinsic = computed(() => isWorld.value);
@@ -164,7 +165,7 @@ function scrollTabs(event: WheelEvent) {
       <div class="entity-hero-right">
         <div v-if="draft.game_id || draft.object_id" class="entity-runtime-badge">
           <span class="runtime-key">Runtime ID:</span>
-          <code class="runtime-val">{{ draft.game_id || draft.object_id }}</code>
+          <code class="runtime-val" :title="draft.game_id || draft.object_id">{{ draft.game_id || draft.object_id }}</code>
         </div>
         <div class="entity-hero-buttons">
           <span v-if="intrinsic" class="badge">Intrinsic · Read-Only</span>
@@ -240,7 +241,7 @@ function scrollTabs(event: WheelEvent) {
       <div class="content-block lore-block">
         <div class="content-block-head">
           <span class="block-title">Description</span>
-          <span class="char-count-tag">{{ (draft.description || '').length }} characters</span>
+          <span class="char-count-tag">{{ countLabel((draft.description || '').length, "character") }}</span>
         </div>
         <textarea
           class="lore-textarea"
@@ -504,18 +505,21 @@ function scrollTabs(event: WheelEvent) {
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
+/* The name matters more than the runtime id: the id column shrinks (and truncates) first. */
 .entity-hero-right {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
   margin-left: auto;
 }
 
 @container pane (max-width: 560px) {
   .entity-page-surface { padding: 16px; }
-  .entity-hero-right { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; width: 100%; }
+  .entity-hero-right { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; width: 100%; max-width: none; }
   .entity-hero-input { min-width: 0; }
 }
 
@@ -523,14 +527,21 @@ function scrollTabs(event: WheelEvent) {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
   font-size: 11px;
 }
 
 .runtime-key {
+  flex: none;
   color: var(--text-dim);
 }
 
 .runtime-val {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;

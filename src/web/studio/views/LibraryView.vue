@@ -10,6 +10,7 @@ import StudioIcon from "../components/StudioIcon.vue";
 import EmptyState from "../components/ui/EmptyState.vue";
 import IconButton from "../components/ui/IconButton.vue";
 import SearchField from "../components/ui/SearchField.vue";
+import { countLabel } from "../countLabel.ts";
 const router = useRouter();
 const slots = computed(() => clockLabels(studioState.entities));
 const participantName = (id: string) => studioState.entityTemplates.find((entity) => entity.id === id)?.name ?? id;
@@ -179,7 +180,7 @@ function onFilterChange() {
                 <StudioIcon name="pin" />
                 <span>{{ item.location_tags.length ? item.location_tags.join(", ") : "Any location" }}</span>
               </span>
-              <span class="storylet-card__meta">{{ item.choice_count }} choices</span>
+              <span class="storylet-card__meta">{{ countLabel(item.choice_count, "choice") }}</span>
               <IconButton icon="trash" label="Delete storylet" tone="danger" reveal @click.stop="deleteStorylet(item.id)" @keydown.enter.stop />
             </div>
           </div>

@@ -139,7 +139,7 @@ function setFacts(value: string | string[]) {
           @keydown.enter.self="selectItem(item)"
         >
           <div class="codex__item-text">
-            <div class="codex__item-title">{{ itemLabel(item) }}</div>
+            <div class="codex__item-title" :title="itemLabel(item)">{{ itemLabel(item) }}</div>
             <div class="codex__item-detail">{{ itemDetail(item) }}</div>
           </div>
           <IconButton icon="trash" :label="'Delete ' + itemLabel(item)" tone="danger" reveal @click.stop="deleteItem(activeCategory, item.id)" @keydown.enter.stop />

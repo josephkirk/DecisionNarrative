@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   locally per browser.
 - Shared studio UI components: EmptyState, IconButton, SearchField,
   SegmentedControl and ToggleSwitch, plus a consistent outline icon set.
+- A Fit button in the story graph toolbar zooms out so every node is in view.
+- `bun run test:visual:stress`: a worst-case data audit that seeds long, one-letter,
+  accented, CJK, emoji and very large values and scans every view at desktop,
+  1024px, phone and three-pane sizes for clipped, spilled, overlapping, covered
+  or low-contrast text.
 
 ### Changed
 
@@ -59,6 +64,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tabs no longer overflow or clip; empty property lists hide their column heads.
 - Node type badges and tag placeholders meet text contrast in every theme;
   project-tree menus near the bottom open upward.
+- Long unbroken values (file paths, URLs, emails) wrap inside asset version cards,
+  asset titles and dialogue previews instead of running past their card;
+  dialogue previews end in an ellipsis after three lines instead of a hard cut.
+- Long runtime ids yield space to the entity name; folder tiles show names on two
+  lines; breadcrumbs shrink ancestors before the current folder; truncated pane
+  titles, breadcrumbs, tiles and inspector titles show the full text on hover.
+- Thumbnail initials keep emoji and accented letters whole, the project tree
+  sorts numbered names naturally ("Clerk 2" before "Clerk 10"), and counts read
+  "1 section" rather than "1 sections", with digit grouping for large numbers.
+- The trait and asset editors are wide enough for property names, keys and
+  defaults such as "(none)" to stay readable.
 - Entity headers keep their names and actions visible on narrow screens.
 - Deleting tree trait templates checks both entities and entity templates in use.
 - Storylet precondition graphs now lower and raise plugin nodes, including Is Tree Position.

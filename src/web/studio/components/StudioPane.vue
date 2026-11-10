@@ -149,7 +149,7 @@ function splitHere(side: DropSide) {
       @dragstart="onHeadDragStart"
       @dragend="onHeadDragEnd"
     >
-      <span class="studio-pane__title"><StudioIcon :name="heading.icon" /><span>{{ heading.title }}</span></span>
+      <span class="studio-pane__title"><StudioIcon :name="heading.icon" /><span :title="heading.title">{{ heading.title }}</span></span>
       <div class="studio-pane__actions">
         <IconButton icon="split-right" label="Split right" hint="or drag a project item onto a pane edge" size="sm" :disabled="!canSplit()" @click="splitHere('right')" />
         <IconButton icon="split-down" label="Split down" hint="or drag a project item onto a pane edge" size="sm" :disabled="!canSplit()" @click="splitHere('bottom')" />

@@ -6,6 +6,7 @@ import type { TraitPropertyDefinition, TraitTemplateRecord } from "../contracts.
 import { notify, studioState } from "../state.ts";
 import { currentFolderId, refreshWorkspace } from "../view-models/workspace.ts";
 import PropertyListEditor from "../components/PropertyListEditor.vue";
+import { countLabel } from "../countLabel.ts";
 
 const route = useRoute();
 const router = useRouter();
@@ -231,7 +232,7 @@ onBeforeRouteUpdate(confirmDiscard);
           <select v-model="pendingIncludeId" class="form-select" style="flex:1;" aria-label="Trait to include">
             <option value="">Choose a trait to include…</option>
             <option v-for="t in availableIncludes" :key="t.id" :value="t.id">
-              {{ t.name }} ({{ t.properties.length }} properties)
+              {{ t.name }} ({{ countLabel(t.properties.length, "property", "properties") }})
             </option>
           </select>
           <button class="btn btn-secondary" type="button" :disabled="!pendingIncludeId" @click="addInclude">
@@ -250,7 +251,7 @@ onBeforeRouteUpdate(confirmDiscard);
           >
             <div style="display:flex; align-items:center; gap:8px;">
               <span style="font-weight:600; font-size:13px;">{{ inc.name }}</span>
-              <span class="badge" style="font-size:10px;">{{ inc.properties.length }} properties</span>
+              <span class="badge" style="font-size:10px;">{{ countLabel(inc.properties.length, "property", "properties") }}</span>
               <router-link :to="`/trait-templates/${inc.id}`" style="font-size:12px; color:var(--accent);">View</router-link>
             </div>
             <button class="btn btn-danger" type="button" style="padding:2px 6px; font-size:11px;" :aria-label="`Remove ${inc.name}`" @click="removeInclude(inc.id)">

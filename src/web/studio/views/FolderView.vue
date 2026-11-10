@@ -114,14 +114,14 @@ function folderDrag(event: DragEvent, id: string) {
   <div style="display:flex; flex-direction:column; height:100%;">
     <header class="view-header">
       <div class="folder-breadcrumb">
-        <router-link to="/project" class="folder-breadcrumb__link">{{ studioState.project?.name ?? "Workspace" }}</router-link>
+        <router-link to="/project" class="folder-breadcrumb__link" :title="studioState.project?.name ?? 'Workspace'">{{ studioState.project?.name ?? "Workspace" }}</router-link>
         <template v-if="definition">
           <span class="folder-breadcrumb__sep">›</span>
-          <router-link :to="`/browse/${root}`" class="folder-breadcrumb__link">{{ definition.label }}</router-link>
+          <router-link :to="`/browse/${root}`" class="folder-breadcrumb__link" :title="definition.label">{{ definition.label }}</router-link>
         </template>
         <template v-for="folder in breadcrumb" :key="folder.id">
           <span class="folder-breadcrumb__sep">›</span>
-          <router-link :to="`/browse/${root}/${folder.id}`" class="folder-breadcrumb__link">{{ folder.name }}</router-link>
+          <router-link :to="`/browse/${root}/${folder.id}`" class="folder-breadcrumb__link" :title="folder.name">{{ folder.name }}</router-link>
         </template>
       </div>
 
@@ -173,7 +173,7 @@ function folderDrag(event: DragEvent, id: string) {
           @drop.prevent="onTileDrop($event, folder.id)"
         >
           <div class="folder-tile__thumb folder-tile__thumb--folder"><StudioIcon name="folder" /></div>
-          <div class="folder-tile__banner">{{ folder.name }}</div>
+          <div class="folder-tile__banner" :title="folder.name">{{ folder.name }}</div>
         </div>
 
         <div
@@ -192,7 +192,7 @@ function folderDrag(event: DragEvent, id: string) {
             :alt="item.label"
           />
           <div v-else class="folder-tile__thumb folder-tile__thumb--empty">{{ thumbnailInitial(item.label) }}</div>
-          <div class="folder-tile__banner">{{ item.label }}</div>
+          <div class="folder-tile__banner" :title="item.label">{{ item.label }}</div>
         </div>
       </div>
 

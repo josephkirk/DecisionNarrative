@@ -5,6 +5,7 @@ import { studioState, notify } from "../state.ts";
 import { hasTraitKey } from "../entityModel.ts";
 import { registry, nodeTypeContribution, pluginNodeDeleted } from "../plugins/runtime.ts";
 import StudioIcon from "./StudioIcon.vue";
+import { countLabel } from "../countLabel.ts";
 
 /** Icon for a node type header; tag nodes carry a small +/−/? qualifier. */
 const NODE_ICONS: Partial<Record<string, string>> = {
@@ -51,6 +52,25 @@ function resetView() {
   zoom.value = 1;
   panX.value = 40;
   panY.value = toolbarClearance.value;
+}
+/** Zooms out (never in past 100%) and pans so every node sits in view below the toolbar. */
+function fitView() {
+  const container = containerRef.value;
+  if (!container || !nodes.value.length) return resetView();
+  const cards = container.querySelectorAll<HTMLElement>(".graph-node");
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  nodes.value.forEach((node, index) => {
+    minX = Math.min(minX, node.x);
+    minY = Math.min(minY, node.y);
+    maxX = Math.max(maxX, node.x + nodeWidth(node));
+    maxY = Math.max(maxY, node.y + (cards[index]?.offsetHeight ?? NEW_NODE_SIZE.h));
+  });
+  const pad = 24;
+  const width = Math.max(1, container.clientWidth - pad * 2);
+  const height = Math.max(1, container.clientHeight - toolbarClearance.value - pad);
+  zoom.value = Math.max(0.3, Math.min(1, width / (maxX - minX), height / (maxY - minY)));
+  panX.value = pad - minX * zoom.value;
+  panY.value = toolbarClearance.value - minY * zoom.value;
 }
 
 // Graph state
@@ -646,7 +666,8 @@ const computedEdges = computed(() => {
 
       <div class="graph-toolbar__view">
         <span class="graph-toolbar__zoom" aria-label="Zoom level">{{ Math.round(zoom * 100) }}%</span>
-        <button type="button" class="btn btn-secondary graph-toolbar__btn" @click="resetView">Reset</button>
+        <button type="button" class="btn btn-secondary graph-toolbar__btn" title="Zoom out to show every node" @click="fitView">Fit</button>
+        <button type="button" class="btn btn-secondary graph-toolbar__btn" title="Back to 100% at the start" @click="resetView">Reset</button>
         <button v-if="props.graphMode === 'story'" type="button" class="btn btn-primary graph-toolbar__btn" @click="emitUpdate">Sync to Storylet</button>
       </div>
     </div>
@@ -748,8 +769,8 @@ const computedEdges = computed(() => {
           <!-- DIALOG -->
           <div v-else-if="node.type === 'dialog'">
             <div class="field-label">Dialogue sequence</div>
-            <div style="font-size:11px;">{{ node.sections?.length ?? 0 }} sections · {{ node.sections?.reduce((total, section) => total + section.items.length, 0) ?? 0 }} steps</div>
-            <div v-if="node.sections?.[0]?.items?.[0]?.kind === 'line'" class="node-dialog-preview">
+            <div style="font-size:11px;">{{ countLabel(node.sections?.length ?? 0, "section") }} · {{ countLabel(node.sections?.reduce((total, section) => total + section.items.length, 0) ?? 0, "step") }}</div>
+            <div v-if="node.sections?.[0]?.items?.[0]?.kind === 'line'" class="node-dialog-preview" :title="node.sections[0].items[0].content || undefined">
               {{ node.sections[0].items[0].content || 'Select to edit dialogue…' }}
             </div>
           </div>
@@ -1043,11 +1064,16 @@ const computedEdges = computed(() => {
   pointer-events: none;
 }
 
+/* Three clamped lines end in an ellipsis instead of a hard cut mid-glyph; long URLs wrap. */
 .node-dialog-preview {
   margin-top: 6px;
-  color: #c7c7cc;
-  max-height: 40px;
+  color: var(--text-muted);
   overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 .graph-context-menu {

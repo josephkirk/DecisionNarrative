@@ -452,7 +452,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
       <div class="panel-header">
         <div style="display:flex; align-items:center; gap:8px; min-width:0;">
           <span :class="['type-badge', selectedNode.type]">{{ selectedNode.type === 'condition' ? 'condition node' : selectedNode.type.replaceAll('_', ' ') }}</span>
-          <h3 class="panel-title">{{ selectedNode.title }}</h3>
+          <h3 class="panel-title" :title="selectedNode.title">{{ selectedNode.title }}</h3>
         </div>
         <button class="btn btn-danger" style="font-size:11px; padding:3px 8px;" @click="$emit('delete-node', selectedNode.id)">
           Delete Node

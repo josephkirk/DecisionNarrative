@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import type { ContentReference } from "../contracts.ts";
+import { countLabel } from "../countLabel.ts";
 
 const props = withDefaults(
   defineProps<{
@@ -266,7 +267,7 @@ function resetGraphView() {
     <header class="reference-toolbar">
       <div style="display:flex; align-items:center; gap:10px;">
         <span class="reference-toolbar__title">Reference Explorer</span>
-        <span class="badge" style="font-size:11px;">{{ props.references.length }} references</span>
+        <span class="badge" style="font-size:11px;">{{ countLabel(props.references.length, "reference") }}</span>
       </div>
 
       <div class="reference-view-toggle">

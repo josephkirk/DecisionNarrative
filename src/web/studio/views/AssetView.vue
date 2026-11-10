@@ -243,11 +243,11 @@ onBeforeRouteUpdate(confirmDiscard);
 <template>
   <div style="display:flex; flex-direction:column; height:100%;">
     <header class="view-header" style="display:flex; align-items:center; justify-content:space-between; gap:16px;">
-      <div style="display:flex; align-items:center; gap:12px; flex:1;">
+      <div style="display:flex; align-items:center; gap:12px; flex:1 1 16rem; min-width:0;">
         <ThumbnailPicker :model-value="draft?.thumbnail ?? null" :label="draft?.name" :size="48" @update:model-value="patch({ thumbnail: $event })" />
-        <h1 class="view-title" style="margin:0;">{{ draft?.name ?? "Asset" }}</h1>
+        <h1 class="view-title" style="margin:0; min-width:0; overflow-wrap:anywhere;">{{ draft?.name ?? "Asset" }}</h1>
       </div>
-      <div style="display:flex; gap:8px;">
+      <div style="display:flex; gap:8px; flex:none; margin-left:auto;">
         <button class="btn btn-primary" :disabled="saving || !dirty" @click="save">Save</button>
         <button class="btn btn-secondary" :disabled="saving || !draft" @click="remove">Delete</button>
       </div>

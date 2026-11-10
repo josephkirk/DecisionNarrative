@@ -154,6 +154,7 @@ Text maintains high legibility: `#f1f3f9` for primary reading, `#9ba3b8` for sec
 - **Sora** (self-hosted variable font): System UI, sidebar navigators, headings, table cells, form labels and control buttons.
 - **EB Garamond**: Narrative prose fields, beat titles, scene headings, and story card excerpts.
 - **Geist Mono**: Monospace identifiers and numeric readouts.
+- **Long text**: names that identify something wrap (two lines on tiles); secondary metadata and ids truncate with an ellipsis and a `title` tooltip; unbroken paths, URLs and emails use `overflow-wrap: anywhere`; numbers are never truncated, and counts use `countLabel` for the right noun form and digit grouping. `bun run test:visual:stress` checks this with worst-case data.
 
 ## Themes
 The toolbar Appearance panel swaps whole-app themes; each is one token set in `src/web/studio/theme.ts`, applied as CSS variables on `<html>`:
