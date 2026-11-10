@@ -40,6 +40,12 @@ const panX = ref(40);
 const panY = ref(40);
 let pan: { pointer: number; x: number; y: number } | null = null;
 const menu = ref<{ x: number; y: number; node?: string; edge?: number; image?: string; reconnect?: number; point: TreePoint } | null>(null);
+const selectedNode = ref<string | null>(null);
+const triggerElement = ref<HTMLElement | null>(null);
+function closeMenu() {
+  menu.value = null;
+  triggerElement.value?.focus();
+}
 watch(contextMenu, (element, _previous, onCleanup) => {
   if (!element) return;
   const fit = () => {
@@ -72,6 +78,14 @@ watch([showGrid, showThumbnails], ([grid, thumbnails]) => {
 function dismissMenu(event: Event) {
   if (event instanceof KeyboardEvent && event.key !== "Escape") return;
   if (event instanceof PointerEvent && (event.target as Element)?.closest(".tree-context")) return;
+  if (event instanceof KeyboardEvent && event.key === "Escape") {
+    if (menu.value) {
+      closeMenu();
+      return;
+    }
+    selectedNode.value = null;
+    return;
+  }
   menu.value = null;
 }
 window.addEventListener("pointerdown", dismissMenu);
@@ -203,6 +217,7 @@ watch(treeScroll, (element, _previous, onCleanup) => {
   onCleanup(() => observer.disconnect());
 }, { flush: "post" });
 function startPan(event: PointerEvent) {
+  selectedNode.value = null;
   if (event.button !== 0 && event.button !== 1) return;
   if (event.altKey && !props.readonly) {
     const point = worldPoint(event);
@@ -257,6 +272,21 @@ function wheelZoom(event: WheelEvent) {
 }
 function keyboardPan(event: KeyboardEvent) {
   if (event.target !== event.currentTarget) return;
+  if (event.key === "+" || event.key === "=") {
+    event.preventDefault();
+    zoom.value = Math.min(200, zoom.value + 10);
+    return;
+  }
+  if (event.key === "-" || event.key === "_") {
+    event.preventDefault();
+    zoom.value = Math.max(10, zoom.value - 10);
+    return;
+  }
+  if (event.key === "f" || event.key === "F" || event.key === "0") {
+    event.preventDefault();
+    fitGraph();
+    return;
+  }
   const delta: Record<string, TreePoint> = { ArrowLeft: { x: 40, y: 0 }, ArrowRight: { x: -40, y: 0 }, ArrowUp: { x: 0, y: 40 }, ArrowDown: { x: 0, y: -40 } };
   const move = delta[event.key];
   if (!move) return;
@@ -268,25 +298,40 @@ function openContext(event: MouseEvent, node?: string, edge?: number) {
   if (props.readonly || creatingExample.value || !treeScroll.value) return;
   event.preventDefault();
   event.stopPropagation();
+  triggerElement.value = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   const rect = treeScroll.value.getBoundingClientRect();
   const anchor = event.currentTarget instanceof Element ? event.currentTarget.getBoundingClientRect() : rect;
-  const x = (event.clientX || anchor.left + anchor.width / 2) - rect.left, y = (event.clientY || anchor.bottom) - rect.top;
+  const rawX = (event.clientX || anchor.left + anchor.width / 2) - rect.left;
+  const rawY = (event.clientY || anchor.bottom) - rect.top;
+  const menuWidth = 250;
+  const menuHeight = node ? 390 : edge !== undefined ? 360 : 340;
+  const x = Math.max(8, Math.min(rawX, rect.width - menuWidth - 8));
+  const y = Math.max(8, Math.min(rawY, rect.height - menuHeight - 8));
   menuSearch.value = "";
   editingRelationship.value = false;
   menu.value = {
-    x: Math.max(0, x),
-    y: Math.max(0, y),
+    x,
+    y,
     node,
     edge,
     point: event.currentTarget instanceof HTMLElement && event.currentTarget.closest(".tree-canvas-toolbar")
       ? { x: Math.round((rect.width / 2 - panX.value) / zoomFactor.value), y: Math.round((rect.height / 2 - panY.value) / zoomFactor.value) }
-      : { x: Math.round((x - panX.value) / zoomFactor.value), y: Math.round((y - panY.value) / zoomFactor.value) },
+      : { x: Math.round((rawX - panX.value) / zoomFactor.value), y: Math.round((rawY - panY.value) / zoomFactor.value) },
   };
   void nextTick(() => treeScroll.value?.querySelector<HTMLElement>(".tree-context input, .tree-context select, .tree-context button")?.focus());
 }
 function openEdgeKeyboard(event: KeyboardEvent, index: number) {
   const bounds = (event.currentTarget as Element).getBoundingClientRect();
   openContext(new MouseEvent("contextmenu", { clientX: bounds.left + bounds.width / 2, clientY: bounds.top + bounds.height / 2 }), undefined, index);
+}
+function onEdgeKeyDown(event: KeyboardEvent, index: number) {
+  if (event.key === "Enter" || event.key === " " || event.key === "ContextMenu") {
+    event.preventDefault();
+    openEdgeKeyboard(event, index);
+  } else if (event.key === "Delete" || event.key === "Backspace") {
+    event.preventDefault();
+    removeEdge(index);
+  }
 }
 function editRelationship(index: number) {
   relationshipDraft.value = graph.value?.edges[index]?.relationship ?? "";
@@ -562,8 +607,21 @@ function endDrag(event: PointerEvent) {
   if (drag?.pointer === event.pointerId) drag = null;
 }
 function keyboardMove(id: string, event: KeyboardEvent) {
-  if (props.readonly || nodeAppearance(id).locked || event.target !== event.currentTarget) return;
-  const delta: Record<string, TreePoint> = { ArrowLeft: { x: -10, y: 0 }, ArrowRight: { x: 10, y: 0 }, ArrowUp: { x: 0, y: -10 }, ArrowDown: { x: 0, y: 10 } };
+  if (props.readonly || event.target !== event.currentTarget) return;
+  if (event.key === "Enter" || event.key === " " || event.key === "ContextMenu") {
+    event.preventDefault();
+    const bounds = (event.currentTarget as Element).getBoundingClientRect();
+    openContext(new MouseEvent("contextmenu", { clientX: bounds.left + bounds.width / 2, clientY: bounds.bottom }), id);
+    return;
+  }
+  if (nodeAppearance(id).locked) return;
+  if (event.key === "Delete" || event.key === "Backspace") {
+    event.preventDefault();
+    removeItem(id);
+    return;
+  }
+  const step = event.shiftKey ? 40 : 10;
+  const delta: Record<string, TreePoint> = { ArrowLeft: { x: -step, y: 0 }, ArrowRight: { x: step, y: 0 }, ArrowUp: { x: 0, y: -step }, ArrowDown: { x: 0, y: step } };
   const change = delta[event.key];
   const point = layout.value?.positions[id];
   if (!change || !point) return;
@@ -688,6 +746,11 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
               <option value="down">Top to bottom</option><option value="up">Bottom to top</option><option value="radial">Radial</option>
             </select>
           </label>
+          <div class="tree-zoom-group" role="group" aria-label="Canvas zoom">
+            <button type="button" class="btn btn-secondary tree-zoom-btn" aria-label="Zoom out" title="Zoom out (−)" :disabled="zoom <= 10" @click="zoom = Math.max(10, zoom - 15)">−</button>
+            <span class="tree-zoom-display" title="Current zoom level">{{ zoom }}%</span>
+            <button type="button" class="btn btn-secondary tree-zoom-btn" aria-label="Zoom in" title="Zoom in (+)" :disabled="zoom >= 200" @click="zoom = Math.min(200, zoom + 15)">+</button>
+          </div>
           <button type="button" class="btn btn-secondary" :disabled="!graph.nodes.length && !graph.appearance?.images?.length" @click="fitGraph">Fit graph</button>
           <button v-if="!readonly" type="button" class="btn btn-primary" :disabled="creatingExample || !!issues.length" title="Saves all entity changes" @click="emit('save')">Save layout</button>
           <details class="tree-options">
@@ -701,24 +764,37 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
               <button type="button" class="btn btn-secondary" :disabled="!graph.nodes.length && !graph.appearance?.images?.length" @click="exportJson">Export JSON</button>
             </div>
             <p class="field-sublabel">Grid and thumbnail preferences are saved on this device. Saving layout also saves other entity changes.</p>
+            <details class="tree-shortcuts">
+              <summary class="tree-shortcuts-summary">Keyboard shortcuts</summary>
+              <dl class="tree-shortcuts-list">
+                <div class="shortcut-row"><dt><kbd>+</kbd> / <kbd>−</kbd></dt><dd>Zoom in / out</dd></div>
+                <div class="shortcut-row"><dt><kbd>0</kbd> / <kbd>f</kbd></dt><dd>Fit to screen</dd></div>
+                <div class="shortcut-row"><dt><kbd>Arrows</kbd></dt><dd>Nudge node (10px)</dd></div>
+                <div class="shortcut-row"><dt><kbd>Shift</kbd>+<kbd>Arrows</kbd></dt><dd>Nudge node (40px)</dd></div>
+                <div class="shortcut-row"><dt><kbd>Enter</kbd> / <kbd>Space</kbd></dt><dd>Node / wire options</dd></div>
+                <div class="shortcut-row"><dt><kbd>Delete</kbd></dt><dd>Remove node / wire / image</dd></div>
+                <div class="shortcut-row"><dt><kbd>Alt</kbd>+drag</dt><dd>Cut wires across slice</dd></div>
+                <div class="shortcut-row"><dt><kbd>Esc</kbd></dt><dd>Dismiss menu</dd></div>
+              </dl>
+            </details>
             </div>
           </details>
         </div>
         <div v-if="!graph.nodes.length && !graph.appearance?.images?.length" class="tree-empty"><strong>Start with an item or image</strong><span>Right-click the canvas or use Canvas actions to add content.</span></div>
         <div class="tree-world" :style="{ transform: `translate(${panX}px, ${panY}px) scale(${zoomFactor})` }">
-            <TreeImageLayer :images="graph.appearance?.images ?? []" :readonly="readonly" :zoom="zoomFactor" @change="changeImage" @context="openImageContext" />
+            <TreeImageLayer :images="graph.appearance?.images ?? []" :readonly="readonly" :zoom="zoomFactor" @change="changeImage" @context="openImageContext" @remove="removeImage" />
             <svg class="tree-edges" aria-label="Tree connections">
               <defs><marker :id="markerId" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" /></marker></defs>
               <template v-for="(edge, index) in graph.edges" :key="`${edge.from}-${edge.to}-${index}`">
                 <path v-if="edgePath(edge) && edgeAppearance(edge).pattern === 'brush'" :d="edgePath(edge) ?? ''" class="tree-edge" :style="{ stroke: edgeAppearance(edge).color, strokeWidth: Math.max(1, (edgeAppearance(edge).width ?? 2) * .45) }" />
                 <path v-if="edgePath(edge)" :d="edgePath(edge) ?? ''" class="tree-edge" :class="`wire-${edgeAppearance(edge).pattern ?? 'solid'}`" :style="{ stroke: edgeAppearance(edge).color, strokeWidth: edgeAppearance(edge).width }" :marker-end="`url(#${markerId})`" />
                 <text v-if="edge.relationship && edgeGeometry(edge)" class="tree-edge-label" :class="{ 'is-editable': !readonly }" :data-index="index" :x="edgeGeometry(edge)!.label.x" :y="edgeGeometry(edge)!.label.y" dy="-6" @pointerdown.stop="wireDown(index, $event)" @contextmenu.stop.prevent="openContext($event, undefined, index)">{{ edge.relationship }}</text>
-                <path v-if="edgePath(edge) && !readonly" :d="edgePath(edge) ?? ''" class="tree-edge-hit" :data-index="index" :aria-label="`Connection from ${label(edge.from)} to ${label(edge.to)}${edge.relationship ? `, ${edge.relationship}` : ''}; press Enter for options`" role="button" tabindex="0" @pointerdown.stop="wireDown(index, $event)" @contextmenu.stop.prevent="openContext($event, undefined, index)" @keydown.enter.prevent.stop="openEdgeKeyboard($event, index)" />
+                <path v-if="edgePath(edge) && !readonly" :d="edgePath(edge) ?? ''" class="tree-edge-hit" :data-index="index" :aria-label="`Connection from ${label(edge.from)} to ${label(edge.to)}${edge.relationship ? `, ${edge.relationship}` : ''}. Press Enter for options, Delete to remove.`" role="button" tabindex="0" @pointerdown.stop="wireDown(index, $event)" @contextmenu.stop.prevent="openContext($event, undefined, index)" @keydown="onEdgeKeyDown($event, index)" />
               </template>
               <path v-if="pendingLink" :d="pendingLink" class="tree-edge tree-edge-pending" />
               <path v-if="cutDrag" :d="`M ${cutDrag.start.x} ${cutDrag.start.y} L ${cutDrag.end.x} ${cutDrag.end.y}`" class="tree-cut-line" />
             </svg>
-            <article v-for="id in graph.nodes" :key="id" class="tree-node" :data-tree-id="id" :class="[`shape-${nodeShape(id)}`, { 'is-movable': !readonly && !nodeAppearance(id).locked, 'is-locked': nodeAppearance(id).locked }]" :style="{ left: `${layout.positions[id]?.x ?? 0}px`, top: `${layout.positions[id]?.y ?? 0}px`, width: `${nodeSize(id).width}px`, height: `${nodeSize(id).height}px`, '--node-bg': nodeAppearance(id).background, '--node-outline': nodeAppearance(id).outline, '--node-outline-width': `${nodeAppearance(id).outlineWidth ?? 1}px` }" :tabindex="readonly ? undefined : 0" :aria-label="`${label(id)}${roots.has(id) ? ', root' : ''}${nodeAppearance(id).locked ? ', locked' : '. Use arrow keys to move'}.`" @contextmenu.stop="openContext($event, id)" @pointerdown="startDrag(id, $event)" @pointermove="dragNode" @pointerup="endDrag" @pointercancel="endDrag" @keydown="keyboardMove(id, $event)">
+            <article v-for="id in graph.nodes" :key="id" class="tree-node" :data-tree-id="id" :class="[`shape-${nodeShape(id)}`, { 'is-movable': !readonly && !nodeAppearance(id).locked, 'is-locked': nodeAppearance(id).locked, 'is-selected': selectedNode === id }]" :style="{ left: `${layout.positions[id]?.x ?? 0}px`, top: `${layout.positions[id]?.y ?? 0}px`, width: `${nodeSize(id).width}px`, height: `${nodeSize(id).height}px`, '--node-bg': nodeAppearance(id).background, '--node-outline': nodeAppearance(id).outline, '--node-outline-width': `${nodeAppearance(id).outlineWidth ?? 1}px` }" :tabindex="readonly ? undefined : 0" :aria-label="`${label(id)}${roots.has(id) ? ', root' : ''}${nodeAppearance(id).locked ? ', locked. Press Enter to unlock' : '. Use arrow keys to move, Delete to remove'}.`" @contextmenu.stop="openContext($event, id)" @pointerdown="startDrag(id, $event)" @pointermove="dragNode" @pointerup="endDrag" @pointercancel="endDrag" @keydown="keyboardMove(id, $event)" @click.stop="selectedNode = id" @focus="selectedNode = id">
               <template v-if="!readonly"><span v-for="side in ['top', 'right', 'bottom', 'left']" :key="side" class="tree-connect-zone" :class="`zone-${side}`" title="Drag to connect" @pointerdown.stop="beginLink(id, $event)" @contextmenu.stop.prevent="openZoneContext(id, $event)" /></template>
               <span class="tree-node-art" aria-hidden="true"><img v-if="showThumbnails && thumbnailUrl(byId.get(id)?.thumbnail)" :src="thumbnailUrl(byId.get(id)?.thumbnail) ?? ''" width="164" height="68" alt="" /></span>
               <span class="tree-node-copy"><strong :title="label(id)">{{ label(id) }}</strong><small :title="description(id)">{{ roots.has(id) ? 'Root' : 'Tree item' }}{{ nodeAppearance(id).locked ? ' · Locked' : '' }}</small></span>
@@ -726,9 +802,12 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
               <template v-if="!readonly && !nodeAppearance(id).locked"><span v-for="direction in ['n','ne','e','se','s','sw','w','nw']" :key="direction" class="tree-resize" :class="`resize-${direction}`" :title="`Resize ${label(id)}`" aria-hidden="true" @pointerdown.stop="startResize(id, direction, $event)" /></template>
             </article>
           </div>
-        <div v-if="menu" ref="contextMenu" class="tree-context" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" @pointerdown.stop @wheel.stop @keydown.esc.stop="menu = null">
+        <div v-if="menu" ref="contextMenu" class="tree-context" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" @pointerdown.stop @wheel.stop @keydown.esc.stop="closeMenu">
           <template v-if="menu.node">
-            <strong>{{ label(menu.node) }}</strong>
+            <div class="tree-context-header">
+              <strong>{{ label(menu.node) }}</strong>
+              <span class="tree-context-badge">{{ roots.has(menu.node) ? 'Root' : 'Tree item' }}</span>
+            </div>
             <button type="button" @click="updateNodeAppearance(menu.node, { locked: !nodeAppearance(menu.node).locked })">{{ nodeAppearance(menu.node).locked ? 'Unlock node' : 'Lock node' }}</button>
             <label :for="`shape-${menu.node}`">Node shape</label>
             <select :id="`shape-${menu.node}`" class="form-select" aria-label="Node shape" :value="nodeShape(menu.node)" @change="setShape(menu.node, $event)">
@@ -753,7 +832,7 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
             <strong>{{ label(graph.edges[menu.edge]!.from) }} → {{ label(graph.edges[menu.edge]!.to) }}</strong>
             <template v-if="editingRelationship">
               <label for="tree-relationship-name">Relationship name</label>
-              <input id="tree-relationship-name" v-model="relationshipDraft" class="form-input tree-relationship-name" aria-label="Relationship name" placeholder="Relationship name" @keydown.enter.prevent.stop="setRelationship(menu.edge, relationshipDraft)" />
+              <input id="tree-relationship-name" v-model="relationshipDraft" class="form-input tree-relationship-name" aria-label="Relationship name" placeholder="Relationship name" @keydown.enter.prevent.stop="setRelationship(menu.edge, relationshipDraft)" @keydown.esc.prevent.stop="cancelRelationshipEdit" />
               <button type="button" :disabled="!relationshipDraft.trim() && !graph.edges[menu.edge]!.relationship" @click="setRelationship(menu.edge, relationshipDraft)">Save relationship</button>
               <button type="button" @click="cancelRelationshipEdit">Cancel</button>
             </template>
@@ -813,17 +892,19 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
 .tree-header h2 { margin: 0 0 4px; }
 .tree-header p { margin: 0; }
 .tree-view-switch { display: inline-flex; border: 1px solid var(--border-subtle); background: var(--bg-card); }
-.tree-view-switch button { min-height: 36px; padding: 6px 14px; color: var(--text-muted); background: transparent; border: 0; cursor: pointer; }
+.tree-view-switch button { min-height: 36px; padding: 6px 14px; color: var(--text-muted); background: transparent; border: 0; cursor: pointer; transition: color 150ms ease-out, background-color 150ms ease-out, transform 80ms ease-out; }
+.tree-view-switch button:active { transform: scale(0.97); }
 .tree-view-switch button + button { border-left: 1px solid var(--border-subtle); }
 .tree-view-switch button[aria-pressed="true"] { color: var(--text-main); background: var(--bg-card-hover); box-shadow: inset 0 -2px var(--accent); }
 .tree-view-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .zoom-label { grid-template-columns: auto auto; }
 .zoom-label input { grid-column: 1 / -1; width: 110px; }
 .tree-options { position: relative; margin-left: auto; color: var(--text-primary); font-size: 13px; }
-.tree-options summary { display: flex; align-items: center; box-sizing: border-box; min-height: 36px; cursor: pointer; border: 1px solid var(--border-subtle); background: var(--bg-card); border-radius: 5px; padding: 6px 12px; }
+.tree-options summary { display: flex; align-items: center; box-sizing: border-box; min-height: 36px; cursor: pointer; border: 1px solid var(--border-subtle); background: var(--bg-card); border-radius: var(--radius-sm, 4px); padding: 6px 12px; transition: border-color 150ms ease-out, background-color 150ms ease-out, transform 80ms ease-out; }
+.tree-options summary:active { transform: scale(0.97); }
 .tree-options summary::before { content: "▸"; margin-right: 5px; }
 .tree-options[open] summary::before { content: "▾"; }
-.tree-options-panel { position: absolute; top: calc(100% + 4px); right: 0; width: min(240px, calc(100vw - 48px)); max-height: 290px; overflow: auto; box-sizing: border-box; padding: 10px; background: var(--bg-card); border: 1px solid var(--border-subtle); box-shadow: 0 8px 24px rgb(0 0 0 / 35%); }
+.tree-options-panel { position: absolute; top: calc(100% + 4px); right: 0; width: min(240px, calc(100vw - 48px)); max-height: 290px; overflow: auto; box-sizing: border-box; padding: 10px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); box-shadow: 0 8px 24px rgb(0 0 0 / 35%); transform-origin: top right; }
 .tree-settings { display: grid; gap: 8px; padding: 8px 0; }
 .tree-settings label:not(.zoom-label) { display: flex; align-items: center; min-height: 32px; gap: 8px; }
 .tree-settings .zoom-label { display: grid; gap: 4px; }
@@ -839,14 +920,18 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
 .tree-scroll { position: relative; container-type: inline-size; overflow: hidden; height: min(65vh, 620px); min-height: 360px; border: 1px solid var(--border-subtle); background-color: var(--bg-card); background-image: radial-gradient(var(--border-subtle) 1px, transparent 1px); background-size: 24px 24px; cursor: grab; touch-action: none; }
 .tree-canvas-title { position: absolute; z-index: 2; left: 16px; bottom: 12px; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: clamp(20px, 4cqw, 48px); line-height: 1.15; text-shadow: 0 1px 6px var(--bg-card); pointer-events: none; }
 .tree-scroll.hide-grid { background-image: none; }
-.tree-context { position: absolute; z-index: 4; width: min(250px, 100%); max-height: min(420px, 100%); overflow: auto; display: grid; gap: 6px; box-sizing: border-box; padding: 10px; color: var(--text-primary); background: var(--bg-card); border: 1px solid var(--border-subtle); box-shadow: 0 8px 24px rgb(0 0 0 / 35%); cursor: default; touch-action: auto; }
+.tree-context { position: absolute; z-index: 4; width: min(250px, calc(100% - 16px)); max-height: min(420px, calc(100% - 16px)); overflow-y: auto; display: grid; gap: 6px; box-sizing: border-box; padding: 10px; color: var(--text-primary); background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); box-shadow: 0 8px 24px rgb(0 0 0 / 35%); cursor: default; touch-action: auto; transform-origin: top left; }
 .tree-context :deep(.color-trigger), .tree-context input, .tree-context select { box-sizing: border-box; min-height: 36px; }
 .tree-context label, .tree-context strong { font-size: 12px; }
 .tree-context-results { display: grid; gap: 2px; overflow-y: auto; }
-.tree-context button { min-height: 36px; border: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 8px 10px; cursor: pointer; }
+.tree-context button { min-height: 36px; border: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 8px 10px; cursor: pointer; border-radius: var(--radius-sm, 4px); transition: background-color 100ms ease-out, color 100ms ease-out, transform 80ms ease-out; }
 .tree-context button:hover, .tree-context button:focus-visible { background: var(--bg-hover, #30343b); outline: 1px solid var(--accent); }
+.tree-context button:active { transform: scale(0.97); }
 .tree-context button small { display: block; color: var(--text-muted); overflow-wrap: anywhere; }
-.tree-context .tree-context-danger { color: var(--status-danger); }
+.tree-context-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 2px; }
+.tree-context-badge { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 6px; border-radius: var(--radius-xs, 3px); background: var(--bg-hover, #30343b); color: var(--text-muted); }
+.tree-context-divider { height: 1px; background: var(--border-subtle); margin: 4px 0; }
+.tree-context .tree-context-danger { color: var(--status-danger); border-top: 1px solid var(--border-subtle); margin-top: 4px; padding-top: 8px; }
 .tree-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tree-empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 8px; padding: 16px; color: var(--text-muted); pointer-events: none; }
 .tree-empty strong { color: var(--text-primary); }
@@ -893,11 +978,25 @@ function edgePath(edge: TreeEdge): string | null { return edgeGeometry(edge)?.pa
 .tree-node.is-movable { cursor: grab; touch-action: none; }
 .tree-node.is-movable:active { cursor: grabbing; }
 .tree-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tree-node:hover .tree-node-art { box-shadow: 0 0 0 2px var(--accent), 0 4px 16px rgba(0, 0, 0, 0.4); }
+.tree-node.is-selected .tree-node-art { box-shadow: 0 0 0 3px var(--accent), 0 0 16px rgba(6, 182, 212, 0.45); }
+.tree-shortcuts { margin-top: 8px; border-top: 1px solid var(--border-subtle); padding-top: 8px; }
+.tree-shortcuts-summary { font-size: 11px; font-weight: 600; color: var(--text-muted); cursor: pointer; }
+.tree-shortcuts-list { display: grid; gap: 6px; margin: 8px 0 0; padding: 0; }
+.shortcut-row { display: flex; align-items: center; justify-content: space-between; font-size: 11px; gap: 8px; }
+.shortcut-row dt { margin: 0; font-family: var(--font-mono, monospace); }
+.shortcut-row dd { margin: 0; color: var(--text-muted); }
+.shortcut-row kbd { display: inline-block; padding: 1px 5px; font-size: 10px; font-family: var(--font-mono, monospace); background: var(--bg-hover, #30343b); border: 1px solid var(--border-subtle); border-radius: 3px; color: var(--text-primary); }
 .tree-node-copy { position: relative; min-width: 0; flex: 1; display: grid; gap: 3px; }
 .tree-node-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .tree-node-copy small { color: var(--text-muted); font-size: 10px; }
-.tree-remove { position: relative; border: 0; background: transparent; color: var(--text-primary); cursor: pointer; padding: 4px; }
-.tree-remove:hover, .tree-remove:focus-visible { color: var(--status-danger); }
+.tree-remove { position: relative; z-index: 2; border: 0; border-radius: var(--radius-xs, 3px); background: transparent; color: var(--text-muted); cursor: pointer; padding: 2px 6px; font-size: 14px; line-height: 1; transition: color 120ms ease-out, background-color 120ms ease-out, transform 80ms ease-out; }
+.tree-remove:hover, .tree-remove:focus-visible { color: var(--text-main); background: var(--bg-hover, #30343b); outline: 1px solid var(--accent); }
+.tree-remove:active { transform: scale(0.92); }
+.tree-zoom-group { display: inline-flex; align-items: center; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 4px); background: var(--bg-card); overflow: hidden; height: 36px; }
+.tree-zoom-btn { border: 0 !important; border-radius: 0 !important; min-height: 34px !important; min-width: 32px; padding: 0 8px !important; display: grid; place-content: center; font-size: 16px; }
+.tree-zoom-btn:hover:not(:disabled) { background: var(--bg-card-hover); }
+.tree-zoom-display { font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 0 6px; min-width: 40px; text-align: center; user-select: none; }
 .tree-context label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .tree-context input[type=number] { width: 70px; padding: 6px 8px; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: 4px; }
 </style>

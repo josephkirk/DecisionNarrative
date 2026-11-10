@@ -495,6 +495,12 @@ onBeforeRouteUpdate(confirmDiscard);
   flex-shrink: 0;
 }
 
+@media (max-width: 600px) {
+  .entity-hero-card { flex-direction: column; align-items: stretch; }
+  .entity-hero-right { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .entity-hero-input { min-width: 0; }
+}
+
 .entity-runtime-badge {
   display: flex;
   align-items: center;

@@ -27,6 +27,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Entity headers keep their names and actions visible on narrow screens.
+- Deleting tree trait templates checks both entities and entity templates in use.
+- Storylet precondition graphs now lower and raise plugin nodes, including Is Tree Position.
+- Added tactile active press feedback to tree view switches and hierarchy disclosure toggles.
+- Clamped tree canvas context menus within visible viewport bounds to prevent clipping actions.
+- Improved tree list horizontal scroll indicators and select dropdown chevrons.
+- Added hover glow and press feedback to tree pointer preview nodes and zoom tools.
+- Added keyboard zoom (+/-), fit (0/f), and Shift+arrow navigation to the tree canvas.
+- Synchronized table row hover states across sticky tree item columns in the list view.
+- Added keyboard viewport zoom and live region status announcements to the tree pointer inspector.
+- Added quick zoom buttons and live zoom level display to the tree canvas toolbar.
+- Added Expand All and Collapse All hierarchy controls to the tree list view.
+- Enhanced tree canvas node hover glow, tactile options button, and Esc cancel for relationship edits.
+- Ensured default tree dimensions immediately reflect clamped values in the defaults editor.
+- Resolved fieldset accessibility compliance across all tree settings panels.
+- Added search and filter capability to the tree list view for rapid item lookup.
+- Enabled keyboard Enter/Space unlocking for locked tree canvas nodes and Delete key removal for unlocked nodes, wires, and images.
+- Restored focus to triggering elements when dismissing tree canvas context menus.
+- Added Home and End keyboard selection navigation and live zoom percentage display to the tree pointer preview inspector.
+- Added inline keyboard shortcuts reference card in tree canvas view options.
+- Added instant clear button and matched result counter to tree list search.
+- Added visual selection outline and glowing focus state on canvas nodes.
+- Enabled Enter and Space keyboard context menu triggering on locked canvas images.
+- Added unselected status guidance to the storylet tree pointer inspector.
 - Tree pointer references now protect selected items and tree owners from invalidating saved storylets; scenario overrides cannot alter internal tree state.
 - Tree position previews preserve node shapes, images and wire styles, with readable labels, keyboard selection, and zoom focus.
 - Connecting, reconnecting, or removing tree wires preserves node positions.

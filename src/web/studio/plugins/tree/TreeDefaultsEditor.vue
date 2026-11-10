@@ -147,24 +147,28 @@ function updateCustomCss(text: string) {
 function onOutlineWidthChange(event: Event) {
   const input = event.target as HTMLInputElement;
   const val = Math.max(MIN_OUTLINE_WIDTH, Math.min(MAX_OUTLINE_WIDTH, Number(input.value) || 1));
+  input.value = String(val);
   updateNodeDefault({ outlineWidth: val });
 }
 
 function onNodeWidthChange(event: Event) {
   const input = event.target as HTMLInputElement;
   const val = Math.max(MIN_NODE_WIDTH, Math.min(MAX_NODE_WIDTH, Number(input.value) || CARD_WIDTH));
+  input.value = String(val);
   updateNodeDefault({ width: val });
 }
 
 function onNodeHeightChange(event: Event) {
   const input = event.target as HTMLInputElement;
   const val = Math.max(MIN_NODE_HEIGHT, Math.min(MAX_NODE_HEIGHT, Number(input.value) || CARD_HEIGHT));
+  input.value = String(val);
   updateNodeDefault({ height: val });
 }
 
 function onWireWidthChange(event: Event) {
   const input = event.target as HTMLInputElement;
   const val = Math.max(MIN_WIRE_WIDTH, Math.min(MAX_WIRE_WIDTH, Number(input.value) || 1));
+  input.value = String(val);
   updateEdgeDefault({ width: val });
 }
 
@@ -215,8 +219,7 @@ function onCustomCssInput(event: Event) {
 
     <div v-else class="tree-defaults-sections">
       <!-- Section: Node Defaults -->
-      <fieldset class="tree-defaults-group">
-        <legend class="tree-defaults-legend">Node Defaults</legend>
+      <fieldset class="tree-defaults-group"><legend class="tree-defaults-legend">Node Defaults</legend>
         <div class="tree-defaults-grid">
           <div class="tree-defaults-field">
             <label for="tree-default-shape" class="field-label">Default shape</label>
@@ -305,8 +308,7 @@ function onCustomCssInput(event: Event) {
       </fieldset>
 
       <!-- Section: Wire Defaults -->
-      <fieldset class="tree-defaults-group">
-        <legend class="tree-defaults-legend">Wire Defaults</legend>
+      <fieldset class="tree-defaults-group"><legend class="tree-defaults-legend">Wire Defaults</legend>
         <div class="tree-defaults-grid">
           <div class="tree-defaults-field">
             <span class="field-label">Default wire color</span>
@@ -354,8 +356,7 @@ function onCustomCssInput(event: Event) {
       </fieldset>
 
       <!-- Section: Canvas Background -->
-      <fieldset class="tree-defaults-group">
-        <legend class="tree-defaults-legend">Canvas Background</legend>
+      <fieldset class="tree-defaults-group"><legend class="tree-defaults-legend">Canvas Background</legend>
         <div class="tree-defaults-grid">
           <div class="tree-defaults-field">
             <span class="field-label">Background color</span>
@@ -372,6 +373,7 @@ function onCustomCssInput(event: Event) {
                 type="button"
                 class="btn btn-secondary btn-compact"
                 title="Reset canvas background to default"
+                aria-label="Reset canvas background to default"
                 @click="resetCanvasBackground"
               >
                 Reset
@@ -382,8 +384,7 @@ function onCustomCssInput(event: Event) {
       </fieldset>
 
       <!-- Section: Custom CSS -->
-      <fieldset class="tree-defaults-group">
-        <legend class="tree-defaults-legend">Custom Tree CSS</legend>
+      <fieldset class="tree-defaults-group"><legend class="tree-defaults-legend">Custom Tree CSS</legend>
         <p class="form-hint css-help">CSS applies only inside this tree canvas; @import is not supported.</p>
 
         <div class="css-toolbar">
@@ -406,7 +407,7 @@ function onCustomCssInput(event: Event) {
           <span class="css-status-text" aria-live="polite">
             {{ uploadedFileName ? uploadedFileName : (customCssText ? 'Custom CSS loaded' : 'No file chosen') }}
           </span>
-          <span v-if="cssError" role="alert">{{ cssError }}</span>
+          <span v-if="cssError" class="css-error" role="alert">{{ cssError }}</span>
           <button
             v-if="customCssText && !readonly"
             type="button"
@@ -530,6 +531,10 @@ function onCustomCssInput(event: Event) {
   font-style: italic;
   flex: 1;
   min-width: 140px;
+}
+.css-error {
+  font-size: 12px;
+  color: var(--status-danger, #ef4444);
 }
 
 .tree-css-textarea {

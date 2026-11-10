@@ -48,6 +48,16 @@ const items = computed(() => {
   return result;
 });
 const rows = computed(() => treeListRows(props.graph, collapsed.value));
+const searchQuery = ref("");
+const displayRows = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase();
+  if (!query) return rows.value;
+  return rows.value.filter((row) => {
+    const name = nameOf(row.nodeId).toLowerCase();
+    const rel = (row.edge?.relationship ?? "").toLowerCase();
+    return name.includes(query) || rel.includes(query);
+  });
+});
 const nameOf = (id: string) => items.value.get(id)?.record.name || id;
 const draftKey = (id: string, column: TreeListColumn) => JSON.stringify([id, column.traitTemplateId, column.id]);
 function isOwner(item: Item): boolean { return item.record.id === props.owner.id && item.kind === ownerKind.value; }
@@ -80,6 +90,17 @@ function focusOut(event: FocusEvent, item: Item): void {
 function toggle(id: string): void {
   const next = new Set(collapsed.value);
   if (next.has(id)) next.delete(id); else next.add(id);
+  collapsed.value = next;
+}
+const hasCollapsible = computed(() => rows.value.some((row) => row.hasChildren && !row.reference));
+function expandAll(): void {
+  collapsed.value = new Set();
+}
+function collapseAll(): void {
+  const next = new Set<string>();
+  for (const row of rows.value) {
+    if (row.hasChildren && !row.reference) next.add(row.nodeId);
+  }
   collapsed.value = next;
 }
 function itemRoute(item: Item): string {
@@ -132,7 +153,20 @@ function commitJson(item: Item, column: TreeListColumn): void {
 
 <template>
   <section class="tree-list-view" aria-label="Tree list">
-    <p class="tree-list-note">TreeItem fields on other entities save automatically. Owner changes save with the owner. Scroll horizontally for more fields.</p>
+    <div class="tree-list-toolbar">
+      <p class="tree-list-note">TreeItem fields on other entities save automatically. Owner changes save with the owner. Scroll horizontally for more fields.</p>
+      <div class="tree-list-toolbar-actions">
+        <div v-if="rows.length > 2" class="tree-list-search-wrapper">
+          <input v-model="searchQuery" type="search" class="form-input tree-list-search" placeholder="Search items..." aria-label="Search tree items by name or relationship" />
+          <button v-if="searchQuery" type="button" class="tree-list-search-clear" aria-label="Clear search" title="Clear search" @click="searchQuery = ''"><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M 2 2 L 10 10 M 10 2 L 2 10" /></svg></button>
+        </div>
+        <span v-if="searchQuery.trim()" class="tree-list-search-count">{{ displayRows.length }} of {{ rows.length }}</span>
+        <div v-if="hasCollapsible" class="tree-list-collapse-actions">
+          <button type="button" class="btn btn-secondary btn-compact" @click="expandAll">Expand all</button>
+          <button type="button" class="btn btn-secondary btn-compact" @click="collapseAll">Collapse all</button>
+        </div>
+      </div>
+    </div>
     <p v-if="invalidCount" class="tree-list-error" role="alert">Some fields contain invalid values. <button type="button" @click="discardInvalidInputs">Discard invalid input</button></p>
     <p v-if="failedItems.length" class="tree-list-error" role="alert">Some TreeItem changes could not be saved. <button type="button" @click="retryFailedItems">Retry failed saves</button> <button type="button" @click="discardFailedItems">Discard failed edits</button></p>
     <p v-if="!graph.nodes.length" class="tree-list-empty">No items in this tree. Add TreeItems from the canvas.</p>
@@ -150,7 +184,7 @@ function commitJson(item: Item, column: TreeListColumn): void {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in rows" :key="row.key" :data-node-id="row.nodeId" :data-depth="row.depth" :class="{ 'is-reference': row.reference }">
+            <tr v-for="row in displayRows" :key="row.key" :data-node-id="row.nodeId" :data-depth="row.depth" :class="{ 'is-reference': row.reference }">
               <th scope="row" class="tree-name-column">
                 <div class="tree-item-name" :style="{ paddingLeft: `${row.depth * 20 + 8}px` }">
                   <button v-if="row.hasChildren && !row.reference" type="button" class="tree-disclosure" :aria-expanded="!collapsed.has(row.nodeId)" :aria-label="`${collapsed.has(row.nodeId) ? 'Expand' : 'Collapse'} ${nameOf(row.nodeId)}`" @click="toggle(row.nodeId)">{{ collapsed.has(row.nodeId) ? '▸' : '▾' }}</button>
@@ -188,47 +222,63 @@ function commitJson(item: Item, column: TreeListColumn): void {
           </tbody>
         </table>
       </div>
+      <p v-if="searchQuery.trim() && !displayRows.length" class="tree-list-empty" role="status">No items match "{{ searchQuery }}".</p>
     </template>
   </section>
 </template>
 
 <style scoped>
 .tree-list-view { min-width: 0; display: grid; gap: 8px; }
+.tree-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tree-list-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tree-list-search-wrapper { position: relative; display: inline-flex; align-items: center; }
+.tree-list-search { width: 170px; min-height: 28px; padding: 2px 24px 2px 8px; font-size: 11px; }
+.tree-list-search-clear { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 2px 4px; border-radius: 2px; }
+.tree-list-search-clear:hover { color: var(--text-primary); }
+.tree-list-search-count { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono, monospace); }
+.tree-list-collapse-actions { display: flex; gap: 6px; }
+.tree-list-collapse-actions .btn { min-height: 28px; padding: 2px 10px; font-size: 11px; }
 .tree-list-note, .tree-list-empty { margin: 0; color: var(--text-muted); font-size: 12px; }
 .tree-list-error, .tree-cell-error { color: var(--status-danger); }
-.tree-list-error button { color: var(--accent); border: 0; background: transparent; cursor: pointer; text-decoration: underline; }
-.tree-table-scroll { max-width: 100%; max-height: min(65vh, 620px); overflow: auto; border: 1px solid var(--border-subtle); background: var(--bg-card); }
+.tree-list-error button { color: var(--accent); border: 0; background: transparent; cursor: pointer; text-decoration: underline; transition: transform 80ms ease-out; }
+.tree-list-error button:active { transform: scale(0.96); }
+.tree-table-scroll { max-width: 100%; max-height: min(65vh, 620px); overflow: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); background: var(--bg-card); box-shadow: inset -1px 0 0 var(--border-subtle); }
 table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: max-content; color: var(--text-main); font-size: 13px; }
 th, td { box-sizing: border-box; padding: 4px 8px; border-right: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); text-align: left; vertical-align: middle; }
 thead th { position: sticky; top: 0; z-index: 2; min-width: 150px; background: var(--bg-card-hover, #212735); font-size: 12px; font-weight: 600; }
+tbody tr { transition: background-color 100ms ease-out; }
 tbody tr:nth-child(even) { background: var(--bg-card-hover, #212735); }
 tbody tr:hover { background: var(--bg-hover, #282a2e); }
+tbody tr:hover .tree-name-column { background: var(--bg-hover, #282a2e); }
 tbody th { font-weight: 500; }
-.tree-name-column { position: sticky; left: 0; z-index: 1; min-width: 230px; max-width: 420px; background: var(--bg-card); }
+.tree-name-column { position: sticky; left: 0; z-index: 1; min-width: 230px; max-width: 420px; background: var(--bg-card); transition: background-color 100ms ease-out; }
 tbody tr:nth-child(even) .tree-name-column { background: var(--bg-card-hover, #212735); }
 thead .tree-name-column { z-index: 3; background: var(--bg-card-hover, #212735); }
 .tree-item-name { display: flex; align-items: center; gap: 6px; min-height: 32px; white-space: nowrap; }
 .tree-item-name a { color: var(--text-main); overflow: hidden; text-overflow: ellipsis; }
 .tree-item-name a:hover { color: var(--accent); }
+.tree-item-name a:focus-visible, .tree-relationship-source:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs, 2px); }
 .tree-item-thumbnail { width: 24px; height: 24px; object-fit: cover; }
 .tree-disclosure, .tree-disclosure-spacer { width: 24px; height: 28px; flex: 0 0 24px; }
-.tree-disclosure { border: 0; color: var(--text-main); background: transparent; cursor: pointer; }
+.tree-disclosure { border: 0; color: var(--text-main); background: transparent; cursor: pointer; transition: transform 120ms ease-out, color 120ms ease-out; }
+.tree-disclosure:active { transform: scale(0.92); }
 .tree-disclosure:focus-visible, .tree-table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .tree-reference, .tree-root-label, .tree-relationship-source, .tree-missing, .tree-status-column { color: var(--text-muted); font-size: 12px; }
 .tree-relationship-column { min-width: 160px; }
 .tree-relationship-name, .tree-relationship-source { display: block; }
 .tree-status-column { min-width: 100px; }
 .tree-cell-editor { min-width: 130px; }
-.tree-cell-editor > input, .tree-cell-editor > textarea { box-sizing: border-box; width: 100%; min-height: 32px; padding: 5px 8px; border: 1px solid transparent; background: transparent; color: var(--text-main); font: inherit; }
+.tree-cell-editor > input, .tree-cell-editor > textarea { box-sizing: border-box; width: 100%; min-height: 32px; padding: 5px 8px; border: 1px solid transparent; border-radius: var(--radius-xs, 3px); background: transparent; color: var(--text-main); font: inherit; transition: border-color 120ms ease-out, background-color 120ms ease-out; }
 .tree-cell-editor > input:hover, .tree-cell-editor > textarea:hover { border-color: var(--border-subtle); }
 .tree-cell-editor > input:focus, .tree-cell-editor > textarea:focus { border-color: var(--accent); outline: 1px solid var(--accent); }
 .tree-cell-editor :deep(.form-input), .tree-cell-editor :deep(.form-select), .tree-cell-editor :deep(.num-stepper__input), .tree-cell-editor :deep(.form-textarea) { min-height: 32px; min-width: 0; max-width: 100%; }
-.tree-cell-editor :deep(.form-textarea) { height: 36px; min-height: 36px !important; padding: 6px 8px; resize: vertical; }
+.tree-cell-editor :deep(.form-select) { min-width: 140px; }
 .tree-cell-editor :deep(.tag-editor) { min-height: 34px; padding: 4px 6px; }
 .tree-cell-editor :deep(.form-input) { border-color: transparent; background: transparent; }
 .tree-cell-editor :deep(.form-input:hover) { border-color: var(--border-subtle); }
 .tree-cell-editor :deep(.form-input:focus) { border-color: var(--accent); outline: 1px solid var(--accent); }
 .tree-cell-editor :deep(.property-array) { min-width: 140px; }
 .tree-cell-error { display: block; font-size: 11px; }
-.tree-status-column button { color: var(--accent); background: transparent; border: 0; cursor: pointer; }
+.tree-status-column button { color: var(--accent); background: transparent; border: 0; cursor: pointer; transition: transform 80ms ease-out; }
+.tree-status-column button:active { transform: scale(0.96); }
 </style>

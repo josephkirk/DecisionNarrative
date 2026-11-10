@@ -81,7 +81,7 @@ onMounted(async () => {
   await Promise.all(loads);
   currentGraph.value = raisePluginGraph(buildGraphFromStorylet(draft));
   draft.graph = currentGraph.value;
-  preconditionGraph.value = draft.precondition_graph?.nodes.length ? draft.precondition_graph : defaultPreconditionGraph();
+  preconditionGraph.value = draft.precondition_graph?.nodes.length ? raisePluginGraph(draft.precondition_graph) : defaultPreconditionGraph();
   draft.precondition_graph = preconditionGraph.value;
   lastSavedSnapshot.value = JSON.stringify(draft);
   // The editor now shows the stored storylet: plugins drop temp changes left by an unsaved session.
@@ -139,24 +139,29 @@ async function playFromHere() {
 }
 
 /** Plugin nodes are lowered to core nodes for validation and storage. */
-function lowerForEngine(): NarrativeGraph | null {
+function lowerForEngine(): { graph: NarrativeGraph; preconditionGraph: NarrativeGraph } | null {
   const entities = [...studioState.entities, ...studioState.entityTemplates] as AnyEntity[];
-  const pluginIssues = validatePluginNodes(currentGraph.value, entities);
+  const pluginIssues = [
+    ...validatePluginNodes(currentGraph.value, entities),
+    ...validatePluginNodes(preconditionGraph.value, entities),
+  ];
   if (pluginIssues.length) { notify(pluginIssues.join(" "), "error"); return null; }
   const lowered = lowerPluginGraph(currentGraph.value, entities);
-  const graphIssues = [...validateNarrativeGraph(lowered), ...validatePreconditionGraph(preconditionGraph.value)];
+  const loweredPreconditions = lowerPluginGraph(preconditionGraph.value, entities);
+  const graphIssues = [...validateNarrativeGraph(lowered), ...validatePreconditionGraph(loweredPreconditions)];
   if (graphIssues.length) { notify(graphIssues.join(" "), "error"); return null; }
-  return lowered;
+  return { graph: lowered, preconditionGraph: loweredPreconditions };
 }
 
 async function handleSave() {
   const lowered = lowerForEngine();
   if (!lowered) return;
   const wasNew = isNew.value;
-  compileGraphToStorylet(lowered, draft);
-  draft.precondition_graph = preconditionGraph.value;
+  compileGraphToStorylet(lowered.graph, draft);
+  draft.precondition_graph = lowered.preconditionGraph;
   const saved = await saveDraft();
   draft.graph = currentGraph.value;
+  draft.precondition_graph = preconditionGraph.value;
   if (saved) {
     lastSavedSnapshot.value = JSON.stringify(draft);
     emitPluginEvent("storylet/saved", String(draft.id), currentGraph.value);
@@ -167,10 +172,11 @@ async function handleSave() {
 async function handleApprove() {
   const lowered = lowerForEngine();
   if (!lowered) return;
-  compileGraphToStorylet(lowered, draft);
-  draft.precondition_graph = preconditionGraph.value;
+  compileGraphToStorylet(lowered.graph, draft);
+  draft.precondition_graph = lowered.preconditionGraph;
   const approved = await approveStorylet();
   draft.graph = currentGraph.value;
+  draft.precondition_graph = preconditionGraph.value;
   if (approved) {
     lastSavedSnapshot.value = JSON.stringify(draft);
     emitPluginEvent("storylet/saved", String(draft.id), currentGraph.value);

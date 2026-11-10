@@ -19,6 +19,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: "change", id: string, update: Partial<TreeCanvasImage>): void;
   (e: "context", id: string, event: MouseEvent): void;
+  (e: "remove", id: string): void;
 }>();
 
 const RESIZE_HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
@@ -187,9 +188,25 @@ function onKeyDown(image: TreeCanvasImage, event: KeyboardEvent) {
     return;
   }
 
-  // Locked or readonly images never move or resize via keyboard
-  if (props.readonly || image.locked) return;
+  if (props.readonly) return;
 
+  if (event.key === "Enter" || event.key === " " || event.key === "ContextMenu") {
+    event.preventDefault();
+    event.stopPropagation();
+    const bounds = (event.currentTarget as Element).getBoundingClientRect();
+    emit("context", image.id, new MouseEvent("contextmenu", { clientX: bounds.left + bounds.width / 2, clientY: bounds.bottom }));
+    return;
+  }
+
+  // Locked images never move or resize via keyboard
+  if (image.locked) return;
+
+  if (event.key === "Delete" || event.key === "Backspace") {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("remove", image.id);
+    return;
+  }
   const arrowKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
   if (!arrowKeys.includes(event.key)) return;
 
@@ -238,7 +255,7 @@ function onKeyDown(image: TreeCanvasImage, event: KeyboardEvent) {
       }"
       tabindex="0"
       role="img"
-      :aria-label="image.locked ? 'Tree canvas image (locked)' : 'Tree canvas image'"
+      :aria-label="image.locked ? 'Tree canvas image (locked). Press Enter for options.' : 'Tree canvas image. Use arrow keys to move, Shift+arrow to resize, Delete to remove, Enter for options.'"
       @pointerdown="startImageDrag(image, $event)"
       @pointermove="onImagePointerMove"
       @pointerup="onImagePointerUp"

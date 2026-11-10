@@ -763,10 +763,12 @@ impl StudioService {
                     ));
                 }
                 if template.as_ref().is_some_and(|template| matches!(template.key.as_str(), "tree_graph" | "tree_item"))
-                    && inner.store.list_entities().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
+                    && (inner.store.list_entities().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
                         .iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == id))
+                        || inner.store.list_entity_templates().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
+                        .iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == id)))
                 {
-                    return Err(ContentDeleteError::Conflict("Cannot delete a tree trait used by an entity".into()));
+                    return Err(ContentDeleteError::Conflict("Cannot delete a tree trait used by an entity or entity template".into()));
                 }
             }
             if entity == "gameplay_tags" {

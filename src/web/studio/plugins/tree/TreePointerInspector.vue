@@ -103,10 +103,20 @@ async function setZoom(value: number) {
 }
 function choose(id: string) { emit("update:config", { entity_id: entityId.value, target_id: id }); }
 async function moveSelection(id: string, event: KeyboardEvent) {
-  if (!["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"].includes(event.key)) return;
-  event.preventDefault();
   const nodes = parsed.value.tree?.nodes ?? [];
   if (!nodes.length) return;
+  if (event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    const next = event.key === "Home" ? nodes[0]! : nodes[nodes.length - 1]!;
+    choose(next);
+    await nextTick();
+    const target = [...(viewport.value?.querySelectorAll(".tree-pointer-node") ?? [])]
+      .find((element) => element.getAttribute("data-item-id") === next);
+    if (target instanceof SVGElement) target.focus();
+    return;
+  }
+  if (!["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"].includes(event.key)) return;
+  event.preventDefault();
   const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
   const next = nodes[(nodes.indexOf(id) + direction + nodes.length) % nodes.length]!;
   choose(next);
@@ -114,6 +124,18 @@ async function moveSelection(id: string, event: KeyboardEvent) {
   const target = [...(viewport.value?.querySelectorAll(".tree-pointer-node") ?? [])]
     .find((element) => element.getAttribute("data-item-id") === next);
   if (target instanceof SVGElement) target.focus();
+}
+function onViewportKeydown(event: KeyboardEvent) {
+  if (event.key === "+" || event.key === "=") {
+    event.preventDefault();
+    if (zoom.value < maxZoom.value) setZoom(zoom.value * 2);
+  } else if (event.key === "-" || event.key === "_") {
+    event.preventDefault();
+    if (zoom.value > 1) setZoom(zoom.value / 2);
+  } else if (event.key === "0" || event.key === "f" || event.key === "F") {
+    event.preventDefault();
+    setZoom(1);
+  }
 }
 </script>
 
@@ -128,11 +150,12 @@ async function moveSelection(id: string, event: KeyboardEvent) {
     <template v-else-if="layout && parsed.tree">
       <p>Choose a position in {{ owner?.name }}. The tree cannot be edited here.</p>
       <div class="tree-pointer-tools" aria-label="Tree preview zoom">
-        <button type="button" aria-label="Zoom out tree preview" :disabled="zoom <= 1" @click="setZoom(zoom / 2)">−</button>
-        <button type="button" aria-label="Fit tree preview" @click="setZoom(1)">Fit</button>
-        <button type="button" aria-label="Zoom in tree preview" :disabled="zoom >= maxZoom" @click="setZoom(zoom * 2)">+</button>
+        <button type="button" aria-label="Zoom out tree preview" title="Zoom out (−)" :disabled="zoom <= 1" @click="setZoom(zoom / 2)">−</button>
+        <span class="tree-pointer-zoom" title="Preview zoom factor">{{ Math.round(zoom * 100) }}%</span>
+        <button type="button" aria-label="Fit tree preview" title="Fit tree preview (0)" @click="setZoom(1)">Fit</button>
+        <button type="button" aria-label="Zoom in tree preview" title="Zoom in (+)" :disabled="zoom >= maxZoom" @click="setZoom(zoom * 2)">+</button>
       </div>
-      <div ref="viewport" class="tree-pointer-viewport" role="region" aria-label="Tree positions" tabindex="0" :style="{ background: parsed.tree.appearance?.canvasBackground }">
+      <div ref="viewport" class="tree-pointer-viewport" role="region" aria-label="Tree positions" tabindex="0" :style="{ background: parsed.tree.appearance?.canvasBackground }" @keydown="onViewportKeydown">
         <svg role="radiogroup" :style="{ width: `min(${zoom * 100}%, ${zoom * 320 * bounds.width / bounds.height}px)` }" :viewBox="`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`" aria-label="Choose a tree item">
           <defs>
             <marker :id="`${clipId}-arrow`" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" /></marker>
@@ -158,29 +181,34 @@ async function moveSelection(id: string, event: KeyboardEvent) {
       </div>
       <p v-if="config.target_id && config.entity_id !== entityId" role="alert">The connected tree changed. Choose a position in {{ owner?.name }}.</p>
       <p v-if="config.entity_id === entityId && config.target_id && !parsed.tree.nodes.includes(config.target_id)" role="alert">The selected item is no longer in this tree. Choose another position.</p>
-      <p v-else-if="config.entity_id === entityId && config.target_id">Selected: <strong>{{ names.get(config.target_id) || config.target_id }}</strong></p>
+      <p v-else-if="config.entity_id === entityId && config.target_id" role="status" aria-live="polite">Selected: <strong>{{ names.get(config.target_id) || config.target_id }}</strong></p>
+      <p v-else class="tree-pointer-unselected-hint" role="status">No position selected. Click or use arrow keys to choose a position.</p>
     </template>
   </div>
 </template>
 
 <style scoped>
 .tree-pointer-inspector p { margin: 0 0 8px; font-size: 13px; }
-.tree-pointer-viewport { box-sizing: content-box; max-height: 320px; max-width: 100%; overflow: auto; border: 1px solid var(--border, #364052); background: var(--surface, #141923); }
+.tree-pointer-viewport { box-sizing: content-box; max-height: 320px; max-width: 100%; overflow: auto; border: 1px solid var(--border, #364052); border-radius: var(--radius-sm, 4px); background: var(--surface, #141923); }
 .tree-pointer-viewport:focus-visible, .tree-pointer-node:focus-visible { outline: 2px solid var(--accent, #06b6d4); outline-offset: 2px; }
 .tree-pointer-wire { fill: none; stroke: #6d8192; stroke-width: 2; }
 .tree-pointer-wire.wire-dash { stroke-dasharray: 10 6; }
 .tree-pointer-wire.wire-dot { stroke-dasharray: 1 6; stroke-linecap: round; }
 .tree-pointer-wire.wire-brush { stroke-dasharray: 18 2 5 2 1 2; stroke-linecap: round; }
 .tree-pointer-node { cursor: pointer; }
-.tree-pointer-tools { display: flex; gap: 4px; margin-bottom: 8px; }
-.tree-pointer-tools button { min-width: 44px; height: 44px; padding: 0 8px; color: #e2e2e8; background: #1a202c; border: 1px solid #364052; font: inherit; cursor: pointer; }
+.tree-pointer-tools { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.tree-pointer-zoom { font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 600; color: #94a3b8; display: inline-flex; align-items: center; justify-content: center; min-width: 44px; height: 44px; user-select: none; }
+.tree-pointer-tools button { min-width: 44px; height: 44px; padding: 0 8px; color: #e2e2e8; background: #1a202c; border: 1px solid #364052; border-radius: var(--radius-sm, 4px); font: inherit; cursor: pointer; transition: transform 80ms ease-out, border-color 120ms ease-out; }
 .tree-pointer-tools button:hover:not(:disabled) { border-color: #06b6d4; }
+.tree-pointer-tools button:active:not(:disabled) { transform: scale(0.96); }
 .tree-pointer-tools button:disabled { opacity: 0.45; cursor: default; }
 .tree-pointer-tools button:focus-visible { outline: 2px solid #06b6d4; outline-offset: 2px; }
 .tree-pointer-viewport svg { display: block; height: auto; max-width: none; }
-.tree-pointer-shape { stroke: var(--tree-outline); stroke-width: var(--tree-outline-width); }
+.tree-pointer-shape { stroke: var(--tree-outline); stroke-width: var(--tree-outline-width); transition: stroke 120ms ease-out, filter 120ms ease-out; }
+.tree-pointer-node:hover .tree-pointer-shape { stroke: var(--accent, #06b6d4); filter: drop-shadow(0 0 4px rgba(6, 182, 212, 0.4)); }
 .tree-pointer-node.selected .tree-pointer-shape { stroke: #06b6d4; stroke-width: 4; }
 .tree-pointer-label { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: #eef2f7; font-size: 13px; pointer-events: none; }
 .tree-pointer-label span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-pointer-label.has-thumbnail span { padding: 2px 4px; background: rgba(0, 0, 0, 0.8); }
+.tree-pointer-unselected-hint { color: var(--text-muted, #94a3b8); font-style: italic; }
 </style>
