@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, useId } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import { StudioApi } from "../api.ts";
 import type { TraitPropertyDefinition, TraitTemplateRecord } from "../contracts.ts";
 import { notify, studioState } from "../state.ts";
 import { currentFolderId, refreshWorkspace } from "../view-models/workspace.ts";
 import PropertyListEditor from "../components/PropertyListEditor.vue";
+import StudioIcon from "../components/StudioIcon.vue";
 import { countLabel } from "../countLabel.ts";
-
 const route = useRoute();
 const router = useRouter();
 const templateId = typeof route.params.id === "string" ? route.params.id : "";
+const fieldId = useId();
 
 const draft = ref<TraitTemplateRecord | null>(null);
 type InheritedProperty = TraitPropertyDefinition & { origin_template_id: string; origin_template_name: string };
@@ -18,6 +19,7 @@ const savedJson = ref("");
 const saving = ref(false);
 const pendingIncludeId = ref("");
 
+const activeTab = ref<"properties" | "includes" | "references">("properties");
 const dirty = computed(() => draft.value !== null && JSON.stringify(draft.value) !== savedJson.value);
 
 const propertiesProblem = computed(() => {
@@ -176,119 +178,275 @@ function confirmDiscard(): boolean {
 
 onBeforeRouteLeave(confirmDiscard);
 onBeforeRouteUpdate(confirmDiscard);
+/** Mouse wheels scroll the tab strip sideways when tabs overflow a narrow pane. */
+function scrollTabs(event: WheelEvent) {
+  const strip = event.currentTarget as HTMLElement;
+  if (strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+  event.preventDefault();
+  strip.scrollLeft += event.deltaY;
+}
 </script>
 
 <template>
-  <div style="display:flex; flex-direction:column; height:100%;">
-    <header class="view-header">
-      <h1 class="view-title">{{ draft?.name ?? "Trait" }}</h1>
-      <div style="display:flex; gap:8px;">
-        <button class="btn btn-secondary" :disabled="saving || !dirty || !!propertiesProblem" :title="propertiesProblem ?? 'Save'" @click="save">Save</button>
-        <button class="btn btn-danger" :disabled="saving || !draft" @click="remove">Delete</button>
+  <div v-if="draft" class="entity-page-surface scroll-fade-mask">
+    <!-- Hero Card matching EntityView -->
+    <header class="entity-hero-card">
+      <div class="entity-hero-left">
+        <div class="editor-hero-avatar-placeholder" aria-hidden="true">
+          <StudioIcon name="trait_templates" style="font-size: 26px; color: var(--accent);" />
+        </div>
+
+        <div class="entity-hero-meta">
+          <div class="entity-title-row">
+            <input
+              class="entity-hero-input"
+              :value="draft.name"
+              placeholder="Trait name…"
+              aria-label="Trait name"
+              @input="patch({ name: ($event.target as HTMLInputElement).value })"
+            />
+            <span class="entity-id-tag">#{{ (draft.id || '').slice(-6) }}</span>
+          </div>
+
+          <div class="entity-subtitle-row">
+            <span class="entity-type-label">trait.{{ draft.key || 'key' }}</span>
+            <span class="entity-bullet-sep" aria-hidden="true">•</span>
+            <span v-if="draft.unique" class="entity-standalone-text" style="color: var(--accent);">Unique Trait</span>
+            <span v-else class="entity-standalone-text">Standard Trait</span>
+            <span v-if="dirty" class="entity-unsaved-pill">Unsaved</span>
+            <span v-if="propertiesProblem" class="editor-validation-pill" :title="propertiesProblem">{{ propertiesProblem }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="entity-hero-right">
+        <div class="entity-runtime-badge">
+          <span class="runtime-key">Prefix:</span>
+          <code class="runtime-val" :title="`trait.${draft.key || ''}.*`">trait.{{ draft.key || '&lt;key&gt;' }}.*</code>
+        </div>
+        <div class="entity-hero-buttons">
+          <button
+            class="btn btn-primary"
+            :disabled="saving || !dirty || !!propertiesProblem"
+            :title="propertiesProblem ?? 'Save'"
+            @click="save"
+          >
+            Save
+          </button>
+          <button
+            class="btn btn-secondary btn-danger-hover"
+            :disabled="saving"
+            @click="remove"
+          >
+            Delete
+          </button>
+        </div>
       </div>
     </header>
 
-    <div v-if="!draft" class="view-content" style="padding:40px; color:var(--text-muted);">
-      Loading trait…
-    </div>
+    <!-- Tabs matching EntityView -->
+    <nav class="entity-tabs" aria-label="Trait sections" @wheel="scrollTabs">
+      <button :class="['entity-tab', activeTab === 'properties' && 'is-active']" @click="activeTab = 'properties'">
+        <svg aria-hidden="true" class="tab-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <line x1="3" y1="12" x2="21" y2="12"/>
+          <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+        Properties
+        <span class="tab-badge">{{ draft.properties.length }}</span>
+      </button>
+      <button :class="['entity-tab', activeTab === 'includes' && 'is-active']" @click="activeTab = 'includes'">
+        Includes
+        <span class="tab-badge">{{ includedTemplates.length }}</span>
+      </button>
+      <button :class="['entity-tab', activeTab === 'references' && 'is-active']" @click="activeTab = 'references'">
+        References
+        <span class="tab-badge">{{ usedBy.length }}</span>
+      </button>
+    </nav>
 
-    <div v-else class="view-content editor-surface">
-      <section class="editor-column">
-        <div class="form-group">
-          <label class="form-label">Name</label>
-          <input class="form-input" :value="draft.name" @input="patch({ name: ($event.target as HTMLInputElement).value })" />
+    <!-- Properties Tab -->
+    <section v-show="activeTab === 'properties'" class="entity-content-stack">
+      <!-- 1. Identity & Rules -->
+      <div class="content-block">
+        <div class="content-block-head">
+          <span class="block-title">Trait identity & rules</span>
+          <span class="block-hint">Attribute prefix & entity constraints</span>
         </div>
-        <div class="form-group">
-          <label class="form-label" for="trait-key">Key</label>
-          <input id="trait-key" class="form-input" aria-label="Key" :value="draft.key" placeholder="Generated from the name" @input="patch({ key: ($event.target as HTMLInputElement).value })" />
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label" :for="`${fieldId}-key`">Key</label>
+          <input
+            :id="`${fieldId}-key`"
+            class="form-input"
+            aria-label="Trait key"
+            :value="draft.key"
+            placeholder="Generated from the name"
+            @input="patch({ key: ($event.target as HTMLInputElement).value })"
+          />
           <span class="form-hint">Runtime attribute prefix: trait.&lt;Key&gt;.&lt;property_key&gt;. A generated key follows the template name until you edit it.</span>
         </div>
-        <div class="form-group">
-          <label class="form-label">Description</label>
-          <textarea
-            class="form-textarea"
-            style="min-height:70px;"
-            :value="draft.description ?? ''"
-            @input="patch({ description: ($event.target as HTMLTextAreaElement).value })"
-          ></textarea>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="trait-unique">Unique trait</label>
-          <label style="display:flex; align-items:center; gap:8px;">
-            <input id="trait-unique" type="checkbox" :checked="draft.unique ?? false" @change="patch({ unique: ($event.target as HTMLInputElement).checked })" />
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label" :for="`${fieldId}-unique`">Unique trait</label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input
+              :id="`${fieldId}-unique`"
+              type="checkbox"
+              :checked="draft.unique ?? false"
+              @change="patch({ unique: ($event.target as HTMLInputElement).checked })"
+            />
             <span>Only one unique trait may be applied to an entity</span>
           </label>
         </div>
+      </div>
 
-        <!-- INCLUDED TRAITS -->
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:24px; margin-bottom:8px;">
-          <h3 class="editor-heading" style="margin:0;">Included Traits</h3>
+      <!-- 2. Description -->
+      <div class="content-block">
+        <div class="content-block-head">
+          <span class="block-title">Description</span>
+          <span class="char-count-tag">{{ countLabel((draft.description || '').length, "character") }}</span>
         </div>
-        <div class="form-hint" style="margin-bottom:8px;">
-          Compose other traits into this trait. Inherits their typed properties automatically without cyclic dependencies.
-        </div>
+        <textarea
+          class="lore-textarea"
+          :value="draft.description ?? ''"
+          rows="3"
+          aria-label="Trait description"
+          placeholder="Describe this trait's purpose and game mechanics…"
+          @input="patch({ description: ($event.target as HTMLTextAreaElement).value })"
+        ></textarea>
+      </div>
 
-        <div style="display:flex; gap:8px; margin-bottom:12px;">
-          <select v-model="pendingIncludeId" class="form-select" style="flex:1;" aria-label="Trait to include">
-            <option value="">Choose a trait to include…</option>
-            <option v-for="t in availableIncludes" :key="t.id" :value="t.id">
-              {{ t.name }} ({{ countLabel(t.properties.length, "property", "properties") }})
-            </option>
-          </select>
-          <button class="btn btn-secondary" type="button" :disabled="!pendingIncludeId" @click="addInclude">
-            + Include Trait
-          </button>
+      <!-- 3. Typed Properties -->
+      <div class="content-block">
+        <div class="content-block-head">
+          <span class="block-title">Typed properties</span>
+          <span class="defined-pill">{{ draft.properties.length }} defined</span>
         </div>
-
-        <div v-if="!includedTemplates.length" class="form-hint" style="margin-bottom:16px;">
-          No other traits included yet.
+        <div
+          v-if="propertiesProblem"
+          class="form-hint"
+          style="color:var(--status-danger, #ef4444); background:var(--status-danger-subtle, rgba(239, 68, 68, 0.1)); padding:8px 12px; border-radius:6px; border:1px solid rgba(239, 68, 68, 0.25);"
+        >
+          {{ propertiesProblem }}
         </div>
-        <div v-else style="display:flex; flex-direction:column; gap:6px; margin-bottom:16px;">
-          <div
-            v-for="inc in includedTemplates"
-            :key="inc.id"
-            style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:var(--bg-input, rgba(0,0,0,0.2)); border:1px solid var(--border-subtle, #333); border-radius:6px;"
-          >
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span style="font-weight:600; font-size:13px;">{{ inc.name }}</span>
-              <span class="badge" style="font-size:10px;">{{ countLabel(inc.properties.length, "property", "properties") }}</span>
-              <router-link :to="`/trait-templates/${inc.id}`" style="font-size:12px; color:var(--accent);">View</router-link>
-            </div>
-            <button class="btn btn-danger" type="button" style="padding:2px 6px; font-size:11px;" :aria-label="`Remove ${inc.name}`" @click="removeInclude(inc.id)">
-              Remove
-            </button>
-          </div>
-        </div>
-
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:24px; margin-bottom:8px;">
-          <h3 class="editor-heading" style="margin:0;">Typed Properties</h3>
-        </div>
-        <div v-if="propertiesProblem" class="form-hint" style="color:var(--danger, #ff5555); margin-bottom:8px;">{{ propertiesProblem }}</div>
         <PropertyListEditor
           :model-value="draft.properties"
           mode="definition"
           @update:model-value="draft.properties = $event as TraitPropertyDefinition[]"
         />
-        <template v-if="inheritedProperties.length">
-          <h3 class="editor-heading" style="margin-top:24px;">Inherited Properties</h3>
-          <div v-for="property in inheritedProperties" :key="property.key" class="form-hint">
-            {{ property.name }} ({{ property.type }}) from {{ property.origin_template_name }}
-          </div>
-        </template>
+      </div>
 
-        <h3 class="editor-heading" style="margin-top:24px;">Used by</h3>
-        <div v-if="!usedBy.length" class="form-hint">No entity template uses this template yet.</div>
-        <div v-else class="usage-list">
+      <!-- 4. Inherited Properties (if any) -->
+      <div v-if="inheritedProperties.length" class="content-block">
+        <div class="content-block-head">
+          <span class="block-title">Inherited properties</span>
+          <span class="defined-pill">{{ countLabel(inheritedProperties.length, "property", "properties") }}</span>
+        </div>
+        <div class="form-hint" style="margin-bottom:4px;">
+          Automatically inherited from included traits:
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <div
+            v-for="property in inheritedProperties"
+            :key="property.key"
+            style="display:flex; justify-content:space-between; align-items:center; padding:6px 12px; background:rgba(255, 255, 255, 0.03); border:1px solid var(--border-subtle); border-radius:6px; font-size:12px;"
+          >
+            <div>
+              <span style="font-weight:600; color:var(--text-main);">{{ property.name }}</span>
+              <code style="font-size:11px; color:var(--text-muted); margin-left:8px;">{{ property.key }}</code>
+              <span class="badge" style="font-size:10px; margin-left:8px;">{{ property.type }}</span>
+            </div>
+            <span style="color:var(--text-dim); font-size:11px;">from {{ property.origin_template_name }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Includes Tab -->
+    <section v-show="activeTab === 'includes'" class="entity-content-stack">
+      <div class="content-block">
+        <div class="content-block-head">
+          <span class="block-title">Compose other traits</span>
+          <span class="defined-pill">{{ countLabel(includedTemplates.length, "trait") }}</span>
+        </div>
+        <div class="form-hint">
+          Compose other traits into this trait. Inherits their typed properties automatically without cyclic dependencies.
+        </div>
+
+        <div class="include-controls-row">
+          <select v-model="pendingIncludeId" class="form-select include-select" aria-label="Trait to include">
+            <option value="">Choose a trait to include…</option>
+            <option v-for="t in availableIncludes" :key="t.id" :value="t.id">
+              {{ t.name }} ({{ countLabel(t.properties.length, "property", "properties") }})
+            </option>
+          </select>
+          <button class="btn btn-secondary include-btn" type="button" :disabled="!pendingIncludeId" @click="addInclude">
+            + Include Trait
+          </button>
+        </div>
+
+        <div v-if="!includedTemplates.length" class="form-hint" style="color:var(--text-muted);">
+          No other traits included yet.
+        </div>
+        <div v-else style="display:flex; flex-direction:column; gap:8px;">
+          <div
+            v-for="inc in includedTemplates"
+            :key="inc.id"
+            class="included-trait-row"
+          >
+            <div class="included-trait-meta">
+              <span style="font-weight:600; font-size:13px; color:var(--text-main);">{{ inc.name }}</span>
+              <span class="badge" style="font-size:10px;">{{ countLabel(inc.properties.length, "property", "properties") }}</span>
+              <router-link :to="`/trait-templates/${inc.id}`" style="font-size:12px; color:var(--accent);">View</router-link>
+            </div>
+            <button class="btn btn-secondary btn-danger-hover btn-compact" type="button" :aria-label="`Remove ${inc.name}`" @click="removeInclude(inc.id)">
+              Remove
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- References / Used By Tab -->
+    <section v-show="activeTab === 'references'" class="entity-content-stack">
+      <div class="content-block">
+        <div class="content-block-head">
+          <span class="block-title">Entity templates using this trait</span>
+          <span class="defined-pill">{{ countLabel(usedBy.length, "entity template") }}</span>
+        </div>
+        <div v-if="!usedBy.length" class="form-hint" style="color:var(--text-muted);">
+          No entity template uses this template yet.
+        </div>
+        <div v-else class="usage-list" style="display:flex; flex-direction:column; gap:6px;">
           <router-link
             v-for="entity in usedBy"
             :key="entity.id"
             :to="`/entity-templates/${entity.id}`"
             class="usage-list__row"
+            style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255, 255, 255, 0.02); border:1px solid var(--border-subtle); border-radius:6px; text-decoration:none;"
           >
-            {{ entity.name }}
+            <span style="color:var(--accent); font-weight:500;">{{ entity.name }}</span>
+            <span class="entity-id-tag">#{{ entity.id.slice(-6) }}</span>
           </router-link>
         </div>
-      </section>
+      </div>
+    </section>
+  </div>
+
+  <!-- Loading Skeleton -->
+  <div v-else class="entity-page-surface" aria-label="Loading trait">
+    <div class="skeleton-hero-card">
+      <div class="skeleton-avatar"></div>
+      <div style="flex:1; display:flex; flex-direction:column; gap:8px;">
+        <div class="skeleton-line skeleton-hero-title"></div>
+        <div class="skeleton-line skeleton-hero-meta"></div>
+      </div>
     </div>
+    <div class="skeleton-tabs">
+      <div class="skeleton-tab-item"></div>
+      <div class="skeleton-tab-item"></div>
+      <div class="skeleton-tab-item"></div>
+    </div>
+    <div class="skeleton-block" style="height: 120px;"></div>
+    <div class="skeleton-block" style="height: 160px;"></div>
   </div>
 </template>

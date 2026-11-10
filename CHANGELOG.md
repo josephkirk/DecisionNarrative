@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backdrop, a compact glass toolbar and project tree, self-hosted Sora UI font,
   icon-based actions in place of emoji, quieter destructive buttons, and
   container-query layouts so every view adapts to narrow split panes.
+- Trait and asset editors share the entity editor's centered layout, header,
+  section navigation, and content-card spacing.
 
 ### Fixed
 

@@ -168,4 +168,8 @@ The toolbar Appearance panel swaps whole-app themes; each is one token set in `s
 - **Top Shell Bar**: Sleek 44px glass strip with brand identity, breadcrumbs/tabs, play action, and workspace status.
 - **Floating Document Navigator**: Translucent collapsible floating panel on the left with rounded corners and search.
 - **Split-Pane Workspace**: Multi-pane subdivision system allowing any entity, storylet, or browse view to be opened side-by-side or split horizontally/vertically via drag-and-drop or pane controls. A pane's title bar is its drag handle (never selectable text): drop it on another pane's edge to move it there, or on its middle to swap the two.
+- **Record editors**: Entity, Trait, and Asset use the same centered 960px
+  surface, padded identity card, underline section navigation, and spaced
+  bordered content cards. In narrow panes the padding contracts and controls
+  wrap or scroll rather than clipping.
 - **Floating Controls**: Pill-style toolbars with grouped actions, 14px padding, and 44px touch targets.
