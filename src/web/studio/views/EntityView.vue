@@ -32,6 +32,7 @@ const availableTemplates = computed(() => studioState.traitTemplates.filter((t) 
   if (!t.allow_multiple && traits.some((instance) => instance.template_id === t.id)) return false;
   return !t.unique || !traits.some((instance) => studioState.traitTemplates.some((applied) => applied.id === instance.template_id && applied.unique));
 }));
+const pendingTraitThumbnail = computed(() => thumbnailUrl(availableTemplates.value.find((t) => t.id === pendingTraitId.value)?.thumbnail));
 const appliedTraits = computed(() => (draft.value?.traits ?? []).map((instance: TraitInstance) => ({ instance, template: studioState.traitTemplates.find((t) => t.id === instance.template_id) })).filter((e) => e.template));
 const hasAppliedUniqueTrait = computed(() => appliedTraits.value.some((entry) => entry.template?.unique));
 const appliedTraitLabels = computed(() => draft.value ? traitLabels(draft.value, studioState.traitTemplates) : []);
@@ -291,7 +292,7 @@ function scrollTabs(event: WheelEvent) {
 
     <section v-else-if="activeTab === 'traits'" class="editor-column">
       <div v-if="!intrinsic" class="trait-add">
-        <img v-if="thumbnailUrl(availableTemplates.find(t => t.id === pendingTraitId)?.thumbnail)" class="trait-thumbnail" :src="thumbnailUrl(availableTemplates.find(t => t.id === pendingTraitId)?.thumbnail) ?? undefined" alt="" width="32" height="32" />
+        <img v-if="pendingTraitThumbnail" class="trait-thumbnail" :src="pendingTraitThumbnail" alt="" width="32" height="32" />
         <select v-model="pendingTraitId" class="form-select" aria-label="Trait to add">
           <option value="">Choose trait…</option>
           <option v-for="template in availableTemplates" :key="template.id" :value="template.id">{{ template.name }}</option>
@@ -392,13 +393,14 @@ function scrollTabs(event: WheelEvent) {
 .trait-card[open] > summary { border-bottom: 1px solid var(--border-subtle); }
 .trait-count { margin-left: auto; color: var(--text-muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
 .trait-thumbnail { flex: none; width: 32px; height: 32px; object-fit: cover; border-radius: var(--radius-sm, 4px); }
-.trait-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; padding: 16px; }
+.trait-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); column-gap: 16px; row-gap: 24px; padding: 16px; }
+.trait-fields:empty { display: none; }
 .trait-row { display: block; min-width: 0; padding: 0; border: 0; }
 .trait-row label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .trait-row .field-label { color: var(--text-muted); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
-@container (min-width: 500px) { .trait-row .field-label { min-height: 32px; } }
 .trait-row :deep(.form-input), .trait-row :deep(.form-select), .trait-row :deep(.form-textarea) { width: 100%; min-width: 0; }
 .trait-footer { display: flex; justify-content: flex-end; padding: 0 16px 16px; }
+.trait-fields:empty + .trait-footer { padding-top: 16px; }
 .traits-container {
   display: flex;
   flex-direction: column;

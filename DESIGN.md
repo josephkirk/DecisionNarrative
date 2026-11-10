@@ -180,7 +180,7 @@ Property editing should make the available space useful and make related fields 
 
 - Group properties under a clear, collapsible record or trait header. Give the header a readable name and useful summary such as a property count; keep destructive actions clearly labeled and separate from field values.
 - Lay out fields in a responsive grid when the pane has room, and stack them in narrow panes. Let text, reference, and tag controls use the available field width instead of confining them to a small fixed column. Keep numeric controls practical to edit without forcing every control to the same small width.
-- Place each label close to its control, allow long labels to wrap, and align controls within a grid row when labels have different lengths. Use spacing and grouping to establish hierarchy; avoid a divider on every property and large unused areas beside tiny controls.
+- Place each label close to its own control and allow long labels to wrap. Keep more space between field rows than between a label and its control, so labels cannot be mistaken for the field above. Do not reserve empty label height solely to align controls; proximity takes priority when labels have different lengths. Use spacing and grouping to establish hierarchy; avoid a divider on every property and large unused areas beside tiny controls.
 - Preserve the full range of property types and states: scalar and array values, tags, references, empty values, disabled or read-only fields, and custom trait inspectors. Labels and controls must remain legible and usable with long names and in narrow split panes.
 - Check inherited and global styles as well as component styles. A new grid must not inherit an older row's fixed columns, padding, or separators.
 
