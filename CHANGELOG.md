@@ -82,6 +82,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Entity ids that differ from `world` only by letter case (`World`, `WORLD`) are
+  rejected instead of producing a duplicate world game id.
+- "Use as template" is disabled in the project tree for entities created from a
+  template, and toggling it in the tree no longer leaves the entity editor stuck
+  on "Unsaved".
 - The Reference Explorer graph now centers and sizes itself to its pane so node
   labels stay inside narrow panes, the Communities panel fits small panes, the
   toolbar wraps instead of clipping, and reference labels show full names on hover.
