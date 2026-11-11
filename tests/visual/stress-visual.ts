@@ -270,6 +270,11 @@ function scanPage(): Finding[] {
         if (ratio < (large ? 3 : 4.5)) found.push({ kind: "contrast", severity: "broken", sel: sel(el), text, detail: `${ratio.toFixed(2)}:1` });
       }
     }
+    // Lines hidden by the element's own vertical clip (e.g. line-clamp) paint nothing, so they cannot overlap.
+    if (cs.overflowY !== "visible") {
+      const own = el.getBoundingClientRect();
+      tr = { ...tr, t: Math.max(tr.t, own.top), b: Math.min(tr.b, own.bottom) };
+    }
     boxes.push({ el, r: tr });
   }
   // Overlapping text from different elements, where one actually paints over the other.

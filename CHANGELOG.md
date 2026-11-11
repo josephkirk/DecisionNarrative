@@ -82,6 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Reference Explorer graph now centers and sizes itself to its pane so node
+  labels stay inside narrow panes, the Communities panel fits small panes, the
+  toolbar wraps instead of clipping, and reference labels show full names on hover.
 - The Tree Graph and Inventory plugins no longer overwrite user-edited traits when
   the workspace opens before trait templates have loaded; they check the stored traits.
 - Choice text fields in story graph nodes take focus again; their wire handle's hit

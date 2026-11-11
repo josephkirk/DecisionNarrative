@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import type { ContentReference } from "../contracts.ts";
 import { countLabel } from "../countLabel.ts";
@@ -140,6 +140,19 @@ const canvasWrapRef = ref<HTMLDivElement | null>(null);
 const nodeDragOffset = ref({ x: 0, y: 0 });
 const nodePositions = ref<Map<string, { x: number; y: number }>>(new Map());
 
+// Default layout follows the pane: centered, with a ring small enough that labels stay inside narrow panes.
+const paneSize = ref({ width: 640, height: 520 });
+let paneObserver: ResizeObserver | undefined;
+watch(canvasWrapRef, (element) => {
+  paneObserver?.disconnect();
+  if (!element) return;
+  paneObserver = new ResizeObserver(([entry]) => {
+    paneSize.value = { width: entry.contentRect.width || 640, height: entry.contentRect.height || 520 };
+  });
+  paneObserver.observe(element);
+}, { flush: "post" });
+onBeforeUnmount(() => paneObserver?.disconnect());
+
 const graphData = computed(() => {
   const visibleRefs = props.references.filter((r) => activeCategories.value.has(r.source_kind));
 
@@ -149,8 +162,8 @@ const graphData = computed(() => {
     subLabel: "Target Record",
     kind: "center",
     color: "#f59e0b",
-    x: nodePositions.value.get("__center__")?.x ?? 320,
-    y: nodePositions.value.get("__center__")?.y ?? 260,
+    x: nodePositions.value.get("__center__")?.x ?? paneSize.value.width / 2,
+    y: nodePositions.value.get("__center__")?.y ?? paneSize.value.height / 2,
     isCenter: true,
   };
 
@@ -158,7 +171,9 @@ const graphData = computed(() => {
   const edges: GraphEdge[] = [];
 
   const count = visibleRefs.length;
-  const radius = Math.min(220, Math.max(140, count * 18));
+  // Labels are up to ~130px wide and the alternate ring sits 35px further out.
+  const fit = Math.min(paneSize.value.width / 2 - 75, paneSize.value.height / 2 - 70) - 35;
+  const radius = Math.max(50, Math.min(Math.min(220, Math.max(140, count * 18)), fit));
 
   visibleRefs.forEach((ref, index) => {
     const refIndex = props.references.indexOf(ref);
@@ -484,7 +499,7 @@ function resetGraphView() {
               @mouseleave="hoveredNodeId = null"
               @click="open(reference)"
             >
-              <img v-if="referenceThumbnail(reference)" :src="referenceThumbnail(reference) ?? undefined" alt="" width="28" height="28" class="reference-thumbnail" /><span class="reference-list__label">{{ reference.node_label || reference.source_label }}</span>
+              <img v-if="referenceThumbnail(reference)" :src="referenceThumbnail(reference) ?? undefined" alt="" width="28" height="28" class="reference-thumbnail" /><span class="reference-list__label" :title="reference.node_label || reference.source_label">{{ reference.node_label || reference.source_label }}</span>
               <span class="reference-list__field">{{ reference.field }}</span>
               <span class="reference-list__via">{{ viaLabel(reference) }}</span>
             </button>
@@ -499,7 +514,7 @@ function resetGraphView() {
               type="button"
               @click="open(reference)"
             >
-              <img v-if="referenceThumbnail(reference)" :src="referenceThumbnail(reference) ?? undefined" alt="" width="28" height="28" class="reference-thumbnail" /><span class="reference-list__label">{{ reference.source_label }}</span>
+              <img v-if="referenceThumbnail(reference)" :src="referenceThumbnail(reference) ?? undefined" alt="" width="28" height="28" class="reference-thumbnail" /><span class="reference-list__label" :title="reference.source_label">{{ reference.source_label }}</span>
               <span class="reference-list__field">{{ reference.field }}</span>
               <span class="reference-list__via">{{ viaLabel(reference) }}</span>
             </button>
@@ -521,6 +536,8 @@ function resetGraphView() {
 
 .reference-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
@@ -615,6 +632,8 @@ function resetGraphView() {
   top: 16px;
   right: 16px;
   width: 210px;
+  max-width: calc(100% - 32px);
+  box-sizing: border-box;
   background: var(--bg-elevated, #1c2336);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg, 12px);
