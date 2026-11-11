@@ -409,7 +409,8 @@ try {
       const page = await context.newPage();
       const errors: string[] = [];
       page.on("pageerror", (e) => errors.push(String(e)));
-      page.on("dialog", (d) => void d.dismiss());
+      // Steps move on from unsaved edits (e.g. exclusive-traits); choose "Discard" like a user would. Other dialogs stay dismissed.
+      page.on("dialog", (d) => void (d.message() === "Discard unsaved changes?" ? d.accept() : d.dismiss()));
       for (const step of steps.filter((s) => !process.env.STEPS || process.env.STEPS.split(",").includes(s.name))) {
         if (vp.split && step.name !== "storylet-dialog" && step.name !== "library") continue;
         await page.goto(`${base}/#/storylets`);
