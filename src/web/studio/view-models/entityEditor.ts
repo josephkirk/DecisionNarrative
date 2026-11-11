@@ -66,10 +66,10 @@ export function useEntityEditor(entityId: string) {
   }
   // The tree's "Use as template" saves outside this editor: follow the template flag without touching other edits.
   watch(() => studioState.entities.find((entity) => entity.id === entityId)?.is_template, (isTemplate) => {
-    if (isTemplate === undefined || !draft.value || saving.value || loading.value || draft.value.is_template === isTemplate) return;
+    if (isTemplate === undefined || !draft.value || saving.value || loading.value) return;
     const saved = JSON.parse(savedJson.value) as EntityRecord;
-    savedJson.value = JSON.stringify({ ...saved, is_template: isTemplate });
-    draft.value = { ...draft.value, is_template: isTemplate };
+    if (saved.is_template !== isTemplate) savedJson.value = JSON.stringify({ ...saved, is_template: isTemplate });
+    if (draft.value.is_template !== isTemplate) draft.value = { ...draft.value, is_template: isTemplate };
   });
   void load();
   return { draft, savedJson, loading, saving, activeTab, references, referencesLoading, dirty, isWorld, load, patch, addTrait, removeTrait, setTraitValue, traitPropertyDisplayValue, onTraitPropertyInput, save, loadReferences, remove };

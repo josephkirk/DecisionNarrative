@@ -779,3 +779,12 @@ async fn any_entity_can_be_a_template_with_validated_template_links() {
     service.save_content_item("entities", &unmarked).await.unwrap();
     assert!(service.delete_content_item("entities", "tpl").await.unwrap());
 }
+
+#[tokio::test]
+async fn reserved_world_id_is_rejected_in_any_case() {
+    let service = StudioService::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+    for id in ["World", "WORLD"] {
+        let error = service.save_content_item("entities", &json!({"id": id, "name": "Impostor", "traits": []})).await.unwrap_err();
+        assert!(error.contains("reserved"), "{id}: {error}");
+    }
+}

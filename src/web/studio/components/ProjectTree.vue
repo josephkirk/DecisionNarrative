@@ -121,6 +121,11 @@ function folderRecord(row: TreeRow) {
   return studioState.folders.find((folder) => folder.id === row.id);
 }
 
+/** An entity created from a template cannot itself become a template (the service rejects chains). */
+function hasTemplateParent(row: TreeRow): boolean {
+  return !!studioState.entities.find((entity) => entity.id === row.id)?.template_id;
+}
+
 function menuDefinition(row: TreeRow): ContentRootDefinition | undefined {
   return roots.find((definition) => definition.root === row.root);
 }
@@ -389,6 +394,8 @@ onBeforeUnmount(() => {
             class="project-tree__context-menu-item"
             aria-label="Use as template"
             :aria-checked="contextMenu.row.isTemplate === true"
+            :disabled="hasTemplateParent(contextMenu.row)"
+            :title="hasTemplateParent(contextMenu.row) ? 'Created from a template; templates cannot be based on another template' : undefined"
             @click="contextAction('toggle-template')"
           ><StudioIcon name="template" /> Use as template <StudioIcon v-if="contextMenu.row.isTemplate" class="project-tree__context-menu-check" name="check" /></button>
         </template>

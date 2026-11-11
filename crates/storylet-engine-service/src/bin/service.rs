@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let resource_root = env::var("STORYLET_RESOURCE_ROOT").unwrap_or_else(|_| ".".into());
 
-    // Schema v6 is a clean cutover; earlier databases are rejected without migration.
+    // Schema v7 is a clean cutover; earlier databases are rejected without migration.
     if db_path != ":memory:" {
         if let Some(parent) = PathBuf::from(&db_path).parent() {
             if !parent.as_os_str().is_empty() {

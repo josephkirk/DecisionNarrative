@@ -120,6 +120,21 @@ try {
   check("template choice copies traits and sets template_id", !!fromTpl && fromTpl.template_id === "knight" && fromTpl.traits.length === 1 && fromTpl.traits[0].id !== "k1", JSON.stringify(fromTpl));
   await page.screenshot({ path: path.join(outDir, "entity-template-instance.png") });
 
+  // An entity made from a template cannot become a template itself: the menu item is disabled.
+  await row("New Knight").click({ button: "right" });
+  check("instance cannot be marked as template in the menu", await page.locator('.project-tree__context-menu [aria-label="Use as template"]').isDisabled());
+  await page.keyboard.press("Escape");
+  await page.mouse.click(700, 500);
+
+  // Toggling from the tree while the editor has the same unsaved change leaves no stuck "Unsaved" state.
+  await row("Rock").click();
+  await page.getByRole("checkbox", { name: "Use as template" }).check();
+  await page.locator(".entity-unsaved-pill").waitFor();
+  await row("Rock").click({ button: "right" });
+  await page.locator('.project-tree__context-menu [aria-label="Use as template"]').click();
+  await page.locator(".entity-unsaved-pill").waitFor({ state: "detached", timeout: 5000 });
+  check("tree toggle clears matching unsaved template edit", (await api("GET", "/api/v3/content/entities/rock")).is_template === true);
+
   // Unmarking a referenced template is rejected with a visible error
   await row("Knight").click({ button: "right" });
   await page.locator('.project-tree__context-menu [aria-label="Use as template"]').click();

@@ -573,7 +573,10 @@ pub fn prepare_entity(
     if entity.id.trim().is_empty() {
         entity.id = new_object_id();
     }
-    let is_world = entity.id.eq_ignore_ascii_case(WORLD_ENTITY_ID);
+    if entity.id.eq_ignore_ascii_case(WORLD_ENTITY_ID) && entity.id != WORLD_ENTITY_ID {
+        return Err(format!("{PREFIX}: entity id world is reserved for the intrinsic world entity"));
+    }
+    let is_world = entity.id == WORLD_ENTITY_ID;
     if is_world {
         entity.name = "World".into();
     } else {
@@ -1128,20 +1131,20 @@ pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
         let mut property_keys = BTreeSet::new();
         for property in &entity.properties {
             if property.id.trim().is_empty() || !property_ids.insert(property.id.clone()) {
-                issues.push(format!("intrinsic entity '{}': missing or duplicate property id", entity.name));
+                issues.push(format!("entity '{}': missing or duplicate property id", entity.name));
             }
             if !is_identifier(&property.key) || !property_keys.insert(property.key.clone()) {
-                issues.push(format!("intrinsic entity '{}': property key '{}' must be a unique identifier", entity.name, property.key));
+                issues.push(format!("entity '{}': property key '{}' must be a unique identifier", entity.name, property.key));
             }
             if property.name.trim().is_empty() {
-                issues.push(format!("intrinsic entity '{}': property '{}' needs a name", entity.name, property.key));
+                issues.push(format!("entity '{}': property '{}' needs a name", entity.name, property.key));
             }
             if !value_shape_matches(property.property_type, property.is_array, &property.value) {
-                issues.push(format!("intrinsic entity '{}': property '{}' value does not match its type", entity.name, property.key));
+                issues.push(format!("entity '{}': property '{}' value does not match its type", entity.name, property.key));
                 continue;
             }
             if let Err(error) = validate_property_refs(property.property_type, property.is_array, &property.value, &index, "reference") {
-                issues.push(format!("intrinsic entity '{}': {error}", entity.name));
+                issues.push(format!("entity '{}': {error}", entity.name));
             }
         }
         if entity.id == WORLD_ENTITY_ID && !entity.traits.is_empty() {

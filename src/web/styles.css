@@ -611,7 +611,7 @@ a { color: var(--accent-hover); }
   font-size: 13px;
   color: var(--accent);
 }
-.project-tree__context-menu-check { margin-left: auto; color: var(--accent); }
+.project-tree__context-menu-item .project-tree__context-menu-check { margin-left: auto; color: var(--accent); }
 
 .project-tree__label {
   flex: 1;
