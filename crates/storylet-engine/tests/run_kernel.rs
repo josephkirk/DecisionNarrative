@@ -1622,7 +1622,7 @@ fn predicting_a_destination_uses_its_location_without_moving_the_player() {
 }
 
 #[test]
-fn exploration_view_preserves_current_choices_without_copying_the_timeline() {
+fn observation_preserves_actor_choices_without_copying_the_timeline() {
     let content = support::weirs_crossing::content();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 7).unwrap();
     test_act(
@@ -1636,11 +1636,18 @@ fn exploration_view_preserves_current_choices_without_copying_the_timeline() {
     )
     .unwrap();
     let full = run.architect_view(&content, 0);
-    let compact = run.exploration_view(&content, 0);
-    assert_eq!(compact.scene, full.scene);
-    assert_eq!(compact.also_here, full.also_here);
-    assert_eq!(compact.place, full.place);
-    assert_eq!(compact.hub, full.hub);
-    assert_eq!(compact.current_step, full.current_step);
-    assert!(compact.steps.is_empty() && compact.branches.is_empty());
+    let observation = run.observe(&content, 0);
+    let mut scene = full.scene.clone();
+    if let Some(scene) = &mut scene {
+        scene.lines.clear();
+    }
+    assert_eq!(observation.scene, scene);
+    assert_eq!(observation.place, full.place);
+    assert!(observation.available_actions.contains(&RunAction::Wait));
+    assert!(
+        observation
+            .available_actions
+            .iter()
+            .any(|action| matches!(action, RunAction::PlayStorylet { .. }))
+    );
 }
