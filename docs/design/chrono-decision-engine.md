@@ -1,353 +1,52 @@
 # Chrono Decision Engine
 
-**Status:** Current implementation design and delivery record  
-**Scope:** The deterministic narrative runtime behind DecisionNarrative's storylet studio  
-**Supersedes:** `docs/featuresbacklog/chrono-decision-engine/` (v3/v4/v5 specifications and the dense-runtime backlog)  
-**Related:** [Entity, trait, and quality model](entity-trait-quality.md) (target state model)
+**Status:** Current implementation
+**Scope:** Deterministic narrative execution and trusted run operations in `storylet-engine`
 
-## 1. Summary
+## Runtime
 
-Chrono is the deterministic decision core for storylet-driven narrative games. It evaluates authored eligibility, selects content, executes typed effects, records reversible history, and exposes diagnostics to the studio.
+`RunKernel` is the single runtime for a play session. `RunContent` supplies the authored graph, dispatcher, registries, mission assets, location connections, clock, and initial `WorldStateTable`. A kernel owns the mutable world and `FlowGraphInstance`; the world and instance are available through read-only accessors.
 
-The design is host-independent Rust with no HTTP, SQLite, browser, or model dependency. The local service adds persistence and MCP; the Vue studio adds authoring and playtest surfaces.
+Graph execution uses dense participant, entity, storylet, and tag indices. `FlowGraphInstance` executes graph nodes in deterministic token order and stores reversible call history. `BijectiveDelta` records reversible state changes. The runtime maintains stable iteration order for candidate selection and replay.
 
-The central rule is:
+`chrono_triggers`, `chrono_transactions`, `chrono_selection`, `chrono_tables`, and `chrono_features` are typed contracts and indexes that are not wired into the run lifecycle.
 
-> The authored graph is the narrative contract. The backend may optimize, index, and validate it, but it must not decide the game's genre, plot shape, required ending, or mandatory metadata.
+## Action catalog and trust boundary
 
-## 2. Architectural pillars
+Every external world change is submitted with `RunKernel::propose(content, authority, proposal)`. `ActionProposal` carries its schema version, actor, typed action, expected revision, idempotency key, and optional `DecisionProvenance`. Provenance identifies the policy and model, context hash, and decision sequence.
 
-1. **Authored graph, not a genre template.** Nodes, edges, endings, and optional metadata are project data.
-2. **Deterministic execution.** Same state, seed, cursor, content revision, and command produce the same result.
-3. **Data-oriented runtime.** Dense indices, flat arrays, fixed bitsets, CSR indexes, and explicit iteration order.
-4. **Stable identity at rest, dense identity in memory.** Persistence uses stable keys; runtime uses dense indices.
-5. **Call history is canonical.** Completion bitsets, trigger fire state, and indexes are rebuildable projections.
-6. **Transactional effects.** World mutation, history entry, completion bit, and post-commit events share a commit boundary.
-7. **Designer flexibility first.** Normal traversal, endings, QBN hubs, salience, waypoints, and future modes are profile configurations, not separate engines.
+`Authority` is `Human { seat }`, `Policy`, or `Architect`. Human authority controls only its matching human seat. Policy authority controls rule participants. Architect authority may submit actions for any participant and is required for rewind operations.
 
-## 3. Runtime layers
+A proposal is checked in this order: actor exists, authority controls that actor, revision matches, action is currently available, and action preconditions hold. A rejection restores the serialized kernel exactly. Each accepted proposal advances the revision. A repeated idempotency key with the same authority and proposal body returns its recorded receipt; reusing the key with a different body is rejected.
 
-```text
-authored project JSON
-  -> project/scenario validation
-  -> stable-key catalog + dense indices
-  -> compiled storylet graph and dispatcher rows
-  -> runtime scope/instance state
-  -> eligibility + selection profile + gates
-  -> reversible effect transaction
-  -> call history + completion/index projections
-  -> event queue + next storylet
-```
+`RunKernel::rewind(authority, to_step)` requires Architect authority. Rewind restores the selected branch snapshot, including world, graph instance, revision, proposal records, idempotency records, and event log. Event identifiers remain unique as execution continues after a rewind.
 
-### 3.1 Project and graph
+## Causal event log
 
-`StoryletRecord` keeps authored data: prose, choices, effects, Story Graph, optional Preconditions graph, and metadata.
-`NarrativeGraph` is canonical for storylet scene flow; a separate read-only graph gates candidate eligibility when present.
-The Preconditions graph is a dedicated graph tab beside Story Graph. Boolean predicate/value nodes feed `And`/`Or` expressions and then an empty `Condition Node`; the typed property path is `Get Entity -> Get Entity Property -> Compare -> Condition`. `Apply Command` writes through authored commands. Storylet-local variable definitions are not part of the model.
-- One or more End nodes are allowed.
-- Every node must be reachable from Start and able to reach an End.
-- A jump target takes precedence over a leftover terminal flag.
-- A dedicated ending requires every End to be terminal and to have no jump.
-- Unknown or non-executable node types fail validation; supported types execute deterministically.
+Each accepted step records an event id, step, revision, actor, action, causal parents, witnesses, and `BijectiveDelta` values. Witnesses are participants co-located with the actor when the event commits. Rule-participant plays triggered by a human action are separate events whose parent is that human action; their actor and storylet are recorded independently. Ordinary actions have no assumed causal parent.
 
-### 3.2 Storylet space and catalog
+`RunKernel::explain(event_id)` returns the requested event and its full ancestor chain in event-log order. Knowledge and telling rows refer to these event identifiers. `inspect().world_changes` is projected from event deltas.
 
-`StoryletSpace` is the single identity/capacity contract:
+## Participant observation
 
-```text
-stable key -> dense StoryletIndex (u16)
-MAX_STORYLETS = 65,536
-overflow -> typed load error
-```
+`RunKernel::observe(content, actor)` returns the actor's current place and legal moves, co-present participants, available actions, own knowledge rows, events caused or witnessed by that actor, and a pending scene when that actor owns the interaction. It does not expose another participant's private knowledge or unrelated event history.
 
-`StoryletCatalog` adds `is_ending`, payload reference, and duration metadata. It is frozen after load. The dispatcher's dense lookup is sized to the maximum loaded ID and rebuilt on deserialize.
+`RunKernel::architect_view(content, actor)` is the global diagnostic view. It includes the run timeline and global scene information for authoring and debugging. Participant clients use `observe`.
 
-Authoring and persistence use stable keys. Runtime eligibility uses dense indices only. Call history records stable keys for persistence and dense indices for the current content revision.
+## Knowledge, rules, and coordination
 
-### 3.3 Dense runtime tables
+Knowledge and telling rows use the same event-id space as the event log. Mission-scoped learn and reveal nodes and successful rule-participant storylets are attributed to the event that produced them. A told knowledge row records its teller in `told_by`.
 
-Two table families exist:
+Rule participants are evaluated in deterministic participant order. Eligibility evaluation failures and storylets that cannot complete without a player choice are recorded in the triggering step's notes. A failed rule storylet is rolled back independently, so the human action still commits.
 
-```text
-StoryletInstanceTable
-  storylet_index, scope_index, state, priority,
-  started_tick, finished_tick, transaction_index,
-  generation, free list, live count
+`Transfer { to, resource, amount }` and `Tell { to, fact }` require co-location. Transfers move item entity references between the existing inventory attributes and preserve the total quantity. A transfer fails if the actor lacks enough items or the recipient inventory has no capacity. Telling succeeds only for a fact the teller already knows and adds a `Told` knowledge row for the listener.
 
-ScopeTable
-  parent, scope_kind, flags, completed bitset,
-  history range, active-instance range,
-  generation, free list
-```
+## Replay and native ABI
 
-Rows are parallel vectors. Variable-length data belongs in flat arenas keyed by `(base, len)`. Released rows are generation-checked and reused through a free list.
+`RunKernel::replay(content, start, seed, proposals)` starts a kernel and applies the recorded `(Authority, ActionProposal)` sequence through `propose`; it does not call policy code. Replay preserves state, revisions, receipts, and event log when given the same content and seed.
 
-`StoryletBitset` is 65,536 bits = 1,024 words = 8 KiB per scope. It supersedes global `done.*` tags as the eligibility source. `done.*` tags, if retained, are projections.
+The native ABI exposes `dn_run_start`, `dn_run_propose`, `dn_run_observe`, `dn_run_explain`, `dn_run_architect_view`, `dn_run_free`, and `dn_string_free`. `dn_engine_abi_version` reports ABI version 2. JSON is the wire format for content, starts, proposals, receipts, observations, explanations, and diagnostic views.
 
-### 3.4 Scope completion
+## Runtime surface
 
-Each scope owns a completion bitset. Inheritance is opt-in and directional. A child may see a parent's bits without copying them. Completion changes are recorded in call history; rollback removes the corresponding bit at the commit boundary.
-
-`FlowGraphInstance.completed_storylets` is a bitset. Per-node completion sets remain sparse sets for node-local bookkeeping, but instance eligibility reads the bitset.
-
-### 3.5 Call history
-
-`CallHistoryEntry` is the canonical replay record. It carries:
-
-- node GUID and input/output pins;
-- chosen storylet ID and stable storylet key;
-- scope index;
-- completion flag;
-- trigger key/subscription;
-- effect transaction reference;
-- content revision, tick, and canonical choice key.
-
-`PersistentHistoryEngine` stores commits as a parent-linked DAG. `path_entries(head)` returns the active branch. Replay, checkout, reconciliation, and patch rebasing use that path.
-
-A completion bitset is rebuilt by folding the commit path. `StoryletBitset` serializes as a sorted index list, matching the old `BTreeSet<u16>` JSON shape and keeping saved sessions compact.
-
-### 3.6 Triggers
-
-`TriggerTable` is compiled content, not per-session state:
-
-```text
-rows: event_kind, event_key, storylet_index,
-      priority, once, enabled, scope_filter,
-      stable key, generation
-
-CSR:
-  bucket_offsets[kind * key_space + key]
-  bucket_entries[subscription_index]
-```
-
-Buckets are sorted by priority, storylet index, and subscription index. `EventQueue` holds runtime events; `TriggerFireTable` holds per-session fired bits derived from call history.
-
-`process_tick` uses a persistent `TriggerCursor`. It:
-
-- processes candidates in deterministic order;
-- skips disabled, scope-mismatched, already-fired, and already-started rows;
-- advances exactly once per consumed candidate;
-- resumes a capped event on the next tick;
-- keeps an event queued until its candidates are drained.
-
-Scopes are `u64` across events, rows, active keys, and fired state.
-
-### 3.7 Effects and transactions
-
-`MutationOp` and `BijectiveDelta` remain the effect/reversal primitive. `EffectTransaction` adds:
-
-```text
-state, scope, instance, write set,
-operation arenas, delta, sequence
-```
-
-`WriteSet` covers tags, metrics, entities, items, scopes, reservations, actor traits, and choices. Two transactions conflict when their write sets intersect. The intended policies are `RejectLater`, `PriorityWins`, `MergeAdditive`, and `Serialize`.
-
-Indirect writes must be included in the closure: zero-sum passions, macro rows, threshold tags, location/movement masks, graph transforms, item/cast changes, and feature rows.
-
-### 3.8 Selection profiles and gates
-
-Selection is one mechanism for many modes:
-
-```text
-SelectionProfile
-  key, pool, include_ending, candidate_limit, floor,
-  eligibility, gates, policy, terminal policy,
-  terminal target, fallback policy
-```
-
-```text
-SelectionPolicy = Priority | SalienceMax | Weighted | SeededOrder
-TerminalPolicy  = Continue | EndScope | Jump
-FallbackPolicy  = Storylet(key) | Continue | Error
-```
-
-Normal traversal, ending selection, QBN hubs, salience pools, waypoint choices, and future modes are profile configurations. Weighted selection is one-shot O(n); the sampler has an explicit seed/cursor and does not mutate world state.
-
-`SelectionGate` is reusable: count, time, flag, metric, tag, or custom. Pacing is an opt-in gate, not an ending rule. Gate failure returns a typed rejection; fallback applies only after gates pass and the eligible set is empty.
-
-### 3.9 Endings
-
-An ending is a storylet marker plus a selection profile. There is no runtime ending-component table and no separate ending index.
-
-- `is_ending` is a storylet bit.
-- A dedicated ending graph has all Ends terminal with no jump.
-- The ending profile is a `SelectionProfile`; it is not a second selector.
-- A project may have zero ending storylets.
-- Terminal behavior is profile-owned; `EndScope` is the default, with `Continue`/`Jump` available for epilogues, chapter endings, and NG+.
-- When a project has no ending profile, endings remain outside the normal deck in the target design. The current playtest path keeps them selectable until that profile is wired, to avoid stranding existing projects.
-
-### 3.10 Derived feature indexes
-
-Feature indexes are materialized views over authoritative state:
-
-- `ActorTraitIndex`: authored actor/trait rows.
-- `ItemIndex`: item ownership/quantity.
-- `ChoiceHistoryIndex`: canonical `(node_guid << 16) | choice_index` keys.
-- `WorldStageIndex`: global stage tags.
-- `ChoiceHistoryIndex` keys are `u64`; scope keys are `u64`.
-
-`rebuild_from_state`-style rebuild projects item edges and world stages. Actor traits and choices require explicit authored bindings; the engine must not infer them from macro passions or output-pin ordinals.
-
-Indexes are rebuildable from `WorldStateTable` and the resolved call-history path. Feature predicate compilation and transactional updates remain the next integration step.
-
-### 3.11 Execution semantics retained from the v5 design
-
-The dense contracts sit under the existing token runtime; they do not replace it.
-
-#### Token and budget execution
-
-- `FlowGraphAsset` is immutable topology. `FlowGraphInstance` is one execution with node state, a flat `SignalToken` vector, a fixed-point millisecond clock, and call history.
-- A `SignalToken` carries token ID, graph instance ID, target node GUID, target pin index, time budget, and active/deferred state.
-- Every node implements three interfaces:
-  - `ExecuteNormal`: normal execution;
-  - `ForceComplete`: one-frame execution for save/load and Story Invoke;
-  - `CancelAndRevert`: one-frame inverse execution from the node's cached rollback record.
-- Tokens are consumed in deterministic token-ID order. Zero-cost cycles are rejected at asset validation, except cycles through interactive Choice/QBN nodes. A per-tick execution cap prevents malformed assets from hanging the frame loop.
-- Inside `tick` with a positive frame budget, the first runnable token may overrun the frame when its node costs more than the remaining frame budget. Later tokens that cannot fit are parked until `deferred_until_ms`; they do not carry the unused frame remainder as a token budget. A parked token is revived when the clock reaches that deadline.
-- Direct `execute_input` calls are strict: a supplied token budget below the node cost returns `InsufficientBudget`.
-- Node categories are `MUTATOR`, `WAITER`, `LOGIC_GATE`, `DYNAMIC_DISPATCHER`, and `SCOPED_CONTAINER`.
-
-#### QBN, salience, and waypoint behavior
-
-- **QBN hub**: evaluates a deck of authored storylet IDs, filters exact eligibility and completion locks, orders by display priority, and presents the deck. The player may execute eligible storylets in any order until the hub's exit storylet is chosen.
-- **Salience selector**: exact eligibility first; candidates with an empty or mismatched dramatic-arc phase mask fail closed; score combines predicate specificity, present bonus tags, and negative weighted distance to the authored ideal state vector; ties use a deterministic saved seed. If nothing matches, the authored fallback storylet is used; without one, the node returns `NoSalienceMatch`.
-- **Waypoint conversation**: a directed topic graph with an NPC goal. NPC movement is Dijkstra from current topic to goal, excluding player-only trigger topics, with an added penalty for previously used edges. Player diversion moves to an adjacent topic and then the NPC re-routes. A scene-exit topic emits its declared output pin; visiting a topic may unlock a clue quality.
-- QBN, salience, and waypoint nodes record the chosen storylet, output pin, and edge/mission history so `CancelAndRevert` restores state and node-local records.
-
-#### Scene sections and timeline composer
-
-- A scene section owns `section_clock_ms` and a bounded event list.
-- Forward playback evaluates the left-inclusive/right-exclusive window `[t0, t1)`. Backward scrubbing evaluates the inverted window `(t1, t0]`.
-- Overlapping events decompose into `START`, `REGULAR`, and `END` action parts, sorted by action priority and target entity.
-- `SceneComposer` arbitrates concurrent commands per actor and caches the previous pose. Rollback restores that pose and the prior section clock exactly.
-- Scene-section completion can record a call-history entry and a completion commit.
-
-#### Invoke, reconcile, and patch rebase
-
-- **Story Invoke**: seek backward from a target POI. At an ALL gate, include every upstream branch; at ANY/Choice/Waypoint nodes, follow the declared route pin, falling back to the first incoming edge in deterministic order; at a QBN hub, greedily select deck storylets that become eligible and contribute tags the exit still needs, ordered by display priority then storylet ID, then append the exit. The path is simulated before mutation, `ForceComplete` runs it in forward order, and the target POI completes last.
-- **Reconcile**: find the lowest common ancestor of current and target history, `CancelAndRevert` the current branch back to it, then `ForceComplete` the target branch forward.
-- **Patch rebase**: drop entries whose node, storylet, input pin, or output pin no longer exists, then splice the shortest bridge path between consecutive surviving nodes when the updated asset inserted nodes. Rebase matches the persisted GUID/dense-ID records; service-level stable-key save/load migration remains incomplete. Catalog construction rejects duplicate stable keys.
-- The commit tree is a DAG; every rollback/reconcile operation moves one commit head and leaves abandoned branches intact for inspection.
-
-## 4. Implementation status
-
-| Contract | Status | Evidence |
-|---|---|---|
-| Authoring graph | Wired | Rust/TS validators, adapter compiler, service save/read |
-| Catalog / dense IDs | Wired | `chrono_catalog`, adapter, `UnifiedDispatcher` index |
-| Completion bitset | Wired | `FlowGraphInstance.completed_storylets` |
-| Call-history rebuild | Wired | `PersistentHistoryEngine::call_history`, bitset rebuild |
-| Trigger table | Contract + tests | CSR, stable keys, cursor `process_tick` |
-| Transactions | Contract + tests | write sets, conflict detection, single-op commit/revert |
-| Selection profile | Contract + tests | profile, policy, fallback, floor |
-| Selection gates | Contract + tests | typed gates and boundary tests |
-| Ending marker | Wired | derived `ending`, deck filters, jump precedence |
-| Catalog working set | Partial | dense lookup wired; lazy payload and masks deferred |
-| Feature indexes | Partial | rebuild + explicit bindings; predicates/transactions deferred |
-| Bundle validation | Wired | graph validation and ending derivation on import/validate |
-
-## 5. Known limitations and deferrals
-
-These are implementation limits, not hidden behavior.
-
-### 5.1 Runtime adoption
-
-- The v6 scheduler does not yet allocate from `StoryletInstanceTable`/`ScopeTable`.
-- Per-node completion sets remain `BTreeSet`s; instance eligibility uses the bitset.
-- Rollback still updates bits from node-set membership and does not always rebuild solely from the remaining commit path.
-- QBN prerequisite chains still consult node-local completion sets.
-- `UnifiedDispatcher::storylet` rebuilds its dense index on deserialize and on length changes. In-place mutation of an existing `storylet_id` without a length change requires an explicit `rebuild_index()`; otherwise a lookup can miss until rebuild.
-
-### 5.2 Persistence
-
-- SQLite still stores the v5 history shape; stable-key save/load migration, compaction, and rebase are not complete.
-- Trigger fired state uses dense subscription indices; stable trigger-key resolution is not wired into load.
-- `PersistedCallEntry` is a contract; service persistence migration remains.
-
-### 5.3 Triggers
-
-- Event crossing predicates and full typed event payload production are not wired.
-- Runtime subscriptions are not yet replaced by `TriggerTable`.
-- `process_tick` is tested as a contract, not used by the live scheduler.
-
-### 5.4 Transactions
-
-- No open-transaction table or conflict-policy execution in the service.
-- No transitive write-set closure from all indirect effects.
-- Multi-operation effect bodies are not yet one transaction.
-
-### 5.5 Selection and endings
-
-- Runtime selection still uses the v5 deck path.
-- Ending profile is not wired into playtest; endings remain selectable there.
-- Selection records/replay and distribution tests are incomplete.
-- Gate failure returns typed rejection; fallback is only for empty eligible sets.
-
-### 5.6 Catalog and features
-
-- Catalog metadata is partial; lazy payload loading and location/role/gate masks are not wired.
-- Runtime still compiles all storylet definitions.
-- Feature indexes are not yet used by predicate compilation or transactional updates.
-- Choice identity is canonical `u64`, but choice/trait rows require authored bindings.
-
-### 5.7 Authoring/import
-
-- No-choice ending storylets are accepted; the old project rule was removed.
-- Bundle import/validation now validates graphs and derives `ending`.
-- Content list/get preserve unknown fields and normalize only `ending`.
-
-## 5.8 Boolean precondition graphs
-
-The dedicated Preconditions graph tab is separate from Story Graph scene flow. Read-only predicate/value nodes produce booleans; `And` and `Or` combine boolean values, and an empty `Condition Node` consumes one boolean and controls the `true`/`false` flow branches. Typed property comparisons use `Get Entity -> Get Entity Property -> Compare -> Condition`. `Get Entity` resolves an entity, `Get Entity Property` reads a declared typed property, and `Apply Command` performs an authored mutation in the Story Graph. There is no Quality Check node, separate quality model, or storylet-local variable node.
-
-`Has Entity Tag` uses dot notation for membership/state tags (for example,
-`location.market.visited` or `character.guide.met`) and produces a boolean data
-value in either graph. Connect it to `Condition Node` for true/false flow;
-predicate nodes do not branch directly. Chrono operations are exposed as graph
-nodes only where the runtime supports them; this document does not imply
-additional Chrono nodes.
-
-## 6. Validation
-
-Current checks:
-
-```sh
-cargo test --manifest-path crates/storylet-engine/Cargo.toml --all-targets
-cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
-bun test
-bun run typecheck
-bun run build
-```
-
-Latest recorded result:
-
-- engine: 128 passed
-- service: 41 passed
-- Bun: 40 passed
-- typecheck/build: pass
-
-Known flake: full `bun test` can race parallel service startup; the isolated playtest HTTP test passes.
-
-## 7. Code map
-
-| Area | Files |
-|---|---|
-| World state / deltas | `crates/storylet-engine/src/chrono_state.rs` |
-| Dispatcher / eligibility | `crates/storylet-engine/src/chrono_dispatch.rs` |
-| Flow graph / history | `crates/storylet-engine/src/chrono_runtime.rs` |
-| Catalog / IDs | `crates/storylet-engine/src/chrono_catalog.rs` |
-| Completion bitset | `crates/storylet-engine/src/chrono_completion.rs` |
-| Dense tables | `crates/storylet-engine/src/chrono_tables.rs` |
-| Triggers | `crates/storylet-engine/src/chrono_triggers.rs` |
-| Transactions | `crates/storylet-engine/src/chrono_transactions.rs` |
-| Selection/endings/gates | `crates/storylet-engine/src/chrono_selection.rs` |
-| Feature indexes | `crates/storylet-engine/src/chrono_features.rs` |
-| Service adapter | `crates/storylet-engine-service/src/chrono_adapter.rs` |
-| Graph compiler | `crates/storylet-engine-service/src/chrono_graph_adapter.rs` |
-| Graph model | `crates/storylet-engine-service/src/narrative_graph.rs` |
-| Studio graph | `src/web/studio/narrativeGraphTypes.ts` |
-
-## 8. Migration note
-
-The former `docs/featuresbacklog/chrono-decision-engine/` tree contained v3/v4/v5 specifications, the dense-runtime REQ-DO backlog, validation log, and implementation limitations. This document is the condensed durable record. Historical detail is intentionally not duplicated; the code and tests are the executable source of truth.
+The crate exposes the Chrono `RunKernel`, typed content and graph structures, action catalog, actor observation, and the `dn_run_*` native interface. The separate `WorldState` command runtime, `StoryletRuntime`, project bundle runtime, legacy engine/playtest ABI, and their host and benchmark binaries are not part of the crate. Native-host example programs and the PowerShell runner are not included.
