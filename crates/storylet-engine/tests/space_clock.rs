@@ -224,7 +224,13 @@ fn edge_requires_fact() {
         told_by: None,
     });
     let run = started(&content);
-    assert!(moves_for(run.world(), &content, 0).into_iter().find(|m|m.to==HARBOR).unwrap().enabled);
+    assert!(
+        moves_for(run.world(), &content, 0)
+            .into_iter()
+            .find(|m| m.to == HARBOR)
+            .unwrap()
+            .enabled
+    );
 }
 
 #[test]
@@ -470,7 +476,7 @@ fn rule_storylet_plays_at_slot_start() {
     assert!(run.world().knowledge.knows(BENEDEK, fact_a).is_none());
     test_act(&mut run, &content, 0, RunAction::Wait).unwrap();
     let row = run
-        .world
+        .world()
         .knowledge
         .knows(BENEDEK, fact_a)
         .expect("Benedek overheard the gossip");
@@ -607,6 +613,12 @@ fn failed_rule_storylet_does_not_roll_back_the_triggering_action() {
             .iter()
             .any(|note| note.contains("needs an interaction"))
     );
+    assert!(
+        run.world()
+            .knowledge
+            .knows(ROSA, registry_fact(&content, "fact.a"))
+            .is_none()
+    );
 }
 
 #[test]
@@ -630,9 +642,22 @@ fn rule_knowledge_has_a_source_step_when_triggered_by_wait() {
     assert!(chain.iter().any(|event| event.actor == 1
         && event.action
             == RunAction::PlayStorylet {
-                node_guid: 0,
+                node_guid: 1,
                 storylet: 1
             }));
+    let rule_event = chain
+        .iter()
+        .find(|event| event.id == row.source_event)
+        .unwrap();
+    assert_eq!(rule_event.parents.len(), 1);
+    assert_eq!(
+        chain
+            .iter()
+            .find(|event| event.id == rule_event.parents[0])
+            .unwrap()
+            .actor,
+        0
+    );
 }
 
 #[test]
@@ -662,4 +687,3 @@ fn storylet_window_gates_eligibility() {
         &world
     ));
 }
-

@@ -258,6 +258,7 @@ struct Snapshot {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct RuleEventData {
     participant: PartIx,
+    node_guid: u32,
     storylet: u16,
     knowledge: Vec<(PartIx, u16)>,
     tellings: Vec<(PartIx, u16)>,
@@ -984,7 +985,6 @@ impl RunKernel {
         let backup = self.clone();
         let mut old_history_lengths = BTreeMap::new();
         Self::history_lengths(&self.instance, &mut old_history_lengths);
-        let prior = self.event_log.last().map(|e| e.id);
         let step = match self.act_internal(content, proposal.actor, proposal.action.clone()) {
             Ok((step, _)) => step,
             Err(error) => {
@@ -1037,7 +1037,7 @@ impl RunKernel {
             revision: self.revision,
             actor: proposal.actor,
             action: proposal.action.clone(),
-            parents: prior.into_iter().collect(),
+            parents: Vec::new(),
             witnesses,
             deltas,
         });
@@ -1074,7 +1074,7 @@ impl RunKernel {
                 revision: self.revision,
                 actor: rule.participant,
                 action: RunAction::PlayStorylet {
-                    node_guid: 0,
+                    node_guid: rule.node_guid,
                     storylet: rule.storylet,
                 },
                 parents: vec![id],
@@ -1132,7 +1132,7 @@ impl RunKernel {
         }
         Ok(run)
     }
-    pub fn exploration_view(&self, content: &RunContent, participant: PartIx) -> RunView {
+    pub(crate) fn exploration_view(&self, content: &RunContent, participant: PartIx) -> RunView {
         self.view_internal(content, participant, false)
     }
     fn view_internal(
@@ -1659,9 +1659,11 @@ impl RunKernel {
                     continue;
                 }
             };
+            let before_rule = self.world.clone();
             match self.play_rule_storylet(content, p, storylet) {
                 Ok(event) => self.pending_rule_events.push(event),
                 Err(error) => {
+                    self.world = before_rule;
                     failures.push(format!(
                         "rule participant {p} storylet {storylet} failed: {error:?}"
                     ));
@@ -1794,6 +1796,7 @@ impl RunKernel {
         }
         Ok(RuleEventData {
             participant: p,
+            node_guid: entry,
             storylet,
             knowledge: self
                 .world
