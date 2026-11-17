@@ -360,7 +360,7 @@ fn propose_action(
             });
         }
     };
-    let revision = run.revision;
+    let revision = run.revision();
     run.propose(
         content,
         authority,
@@ -676,6 +676,8 @@ fn explore_chunk(
                     if configured.clock.is_some() {
                         candidates.push(RunAction::Wait);
                     }
+                    let legal = run.observe(&configured, p).available_actions;
+                    candidates.retain(|candidate| legal.contains(candidate));
                     if candidates.is_empty() {
                         break;
                     }
@@ -845,4 +847,3 @@ fn explore_chunk(
     }
     report
 }
-

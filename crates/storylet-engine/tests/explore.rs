@@ -275,7 +275,7 @@ fn stranding_detected_without_on_close_replays_the_recorded_actions() {
         RunKernel::replay(&content, RunStart::Beginning, violation.seed, &proposals).unwrap();
     assert!(
         replayed
-            .world
+            .world()
             .participants
             .location
             .iter()
@@ -329,4 +329,3 @@ fn bluff_fills_probe_in_coop() {
         report.cells[0].probe_hits
     );
 }
-

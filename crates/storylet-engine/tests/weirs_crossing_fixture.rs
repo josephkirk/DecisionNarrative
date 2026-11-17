@@ -288,4 +288,3 @@ fn bluff_requires_a_suspect_real_evidence_and_benedek_present() {
     });
     assert!(!check(&mut world));
 }
-

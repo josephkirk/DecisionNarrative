@@ -1644,4 +1644,3 @@ fn exploration_view_preserves_current_choices_without_copying_the_timeline() {
     assert_eq!(compact.current_step, full.current_step);
     assert!(compact.steps.is_empty() && compact.branches.is_empty());
 }
-
