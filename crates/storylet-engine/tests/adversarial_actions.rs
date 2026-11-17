@@ -131,3 +131,18 @@ fn idempotency_key_cannot_be_reused_for_another_body() {
     );
     unchanged(&run, &before);
 }
+
+#[test]
+fn late_commit_failure_rolls_back_internal_mutation() {
+    let (content, run) = support::actions::start();
+    let mut serialized = serde_json::to_value(run).unwrap();
+    serialized["revision"] = serde_json::Value::from(u64::MAX);
+    let mut run: storylet_engine::RunKernel = serde_json::from_value(serialized).unwrap();
+    let before = serde_json::to_vec(&run).unwrap();
+    let proposal = support::actions::proposal(&run, 0, RunAction::Wait, "overflow");
+    assert!(
+        run.propose(&content, Authority::Human { seat: 0 }, proposal)
+            .is_err()
+    );
+    unchanged(&run, &before);
+}
