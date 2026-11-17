@@ -91,12 +91,11 @@ fn act_choose_appends_step_and_replay_matches() {
     let view = run.view(&content, 0);
     assert_eq!(view.steps.len(), 1);
     assert_eq!(view.current_step, 1);
-    let (replayed, divergence) =
-        RunKernel::replay(&content, RunStart::Beginning, 42, &[(0, action)]);
-    assert_eq!(divergence, None);
+    let proposal=storylet_engine::ActionProposal{schema_version:1,actor:0,action,idempotency_key:"replay-1".into(),expected_revision:0,provenance:None};
+    let replayed = RunKernel::replay(&content, RunStart::Beginning, 42, &[(storylet_engine::Authority::Human{seat:0},proposal)]).unwrap();
     assert_eq!(
         serde_json::to_value(view).unwrap(),
-        serde_json::to_value(replayed.unwrap().view(&content, 0)).unwrap()
+        serde_json::to_value(replayed.view(&content, 0)).unwrap()
     );
 }
 #[test]
@@ -216,11 +215,11 @@ fn replay_is_deterministic_over_twenty_choices() {
     for (p, action) in &actions {
         run.act(&content, *p, action.clone()).unwrap();
     }
-    let (replay, diverged) = RunKernel::replay(&content, RunStart::Beginning, 987, &actions);
-    assert_eq!(diverged, None);
+    let recorded=actions.iter().enumerate().map(|(i,(p,a))|(storylet_engine::Authority::Human{seat:0},storylet_engine::ActionProposal{schema_version:1,actor:*p,action:a.clone(),idempotency_key:format!("replay-{i}"),expected_revision:i as u64,provenance:None})).collect::<Vec<_>>();
+    let replay=RunKernel::replay(&content,RunStart::Beginning,987,&recorded).unwrap();
     assert_eq!(
         serde_json::to_value(run.view(&content, 0)).unwrap(),
-        serde_json::to_value(replay.unwrap().view(&content, 0)).unwrap()
+        serde_json::to_value(replay.view(&content, 0)).unwrap()
     );
 }
 #[test]
@@ -661,11 +660,11 @@ fn weirs_crossing_seeded_random_valid_actions_replay() {
         run.act(&content, 0, action.clone()).unwrap();
         actions.push((0, action));
     }
-    let (replayed, diverged) = RunKernel::replay(&content, RunStart::Beginning, 99, &actions);
-    assert_eq!(diverged, None);
+    let recorded=actions.iter().enumerate().map(|(i,(p,a))|(storylet_engine::Authority::Human{seat:0},storylet_engine::ActionProposal{schema_version:1,actor:*p,action:a.clone(),idempotency_key:format!("replay-{i}"),expected_revision:i as u64,provenance:None})).collect::<Vec<_>>();
+    let replayed=RunKernel::replay(&content,RunStart::Beginning,99,&recorded).unwrap();
     assert_eq!(
         serde_json::to_value(run.view(&content, 0)).unwrap(),
-        serde_json::to_value(replayed.unwrap().view(&content, 0)).unwrap()
+        serde_json::to_value(replayed.view(&content, 0)).unwrap()
     );
 }
 #[test]

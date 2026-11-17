@@ -255,7 +255,15 @@ pub struct RunKernel {
     run_seed: u64,
     stalled: Option<RunError>,
     rule_played: Vec<(PartIx, u16)>,
+    pub revision: u64,
+    proposals: Vec<(crate::actions::ActionProposal, crate::actions::Authority)>,
+    idempotency: BTreeMap<String, (String, crate::actions::ActionReceipt)>,
+    event_log: Vec<RunEvent>,
 }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct RunEvent { pub id:u64, pub step:u32, pub revision:u64, pub actor:PartIx, pub action:RunAction, pub parents:Vec<u64>, pub witnesses:Vec<PartIx>, pub before:serde_json::Value, pub after:serde_json::Value }
 impl RunKernel {
     fn reference(content: &RunContent, id: u16) -> StoryletRef {
         StoryletRef {
@@ -531,6 +539,8 @@ impl RunKernel {
             run_seed: seed,
             stalled: None,
             rule_played: Vec::new(),
+            revision: 0,
+            proposals: Vec::new(), idempotency:BTreeMap::new(), event_log:Vec::new(),
         };
         let stalled = match run.auto_advance() {
             Ok(()) => None,
@@ -560,6 +570,47 @@ impl RunKernel {
     pub fn view(&self, content: &RunContent, participant: PartIx) -> RunView {
         self.view_internal(content, participant, true)
     }
+    /// Architect-only global view including the full timeline.
+    pub fn architect_view(&self, content: &RunContent, participant: PartIx) -> RunView { self.view(content, participant) }
+    pub fn observe(&self, content: &RunContent, actor: PartIx) -> crate::observation::Observation {
+        let view = self.view_internal(content, actor, false);
+        let available_actions = self.available_actions(content, actor);
+        crate::observation::Observation { actor, place:view.place, co_present:self.world.participants.colocated(actor).collect(), scene:view.scene, available_actions, knowledge:self.world.knowledge.rows_for(actor).to_vec(), witnessed_events:self.event_log.iter().filter(|e| e.actor==actor || e.witnesses.contains(&actor)).map(|e|e.id).collect() }
+    }
+    fn available_actions(&self, content:&RunContent, actor:PartIx) -> Vec<RunAction> {
+        let mut out=vec![RunAction::Wait];
+        let view=self.view_internal(content,actor,false);
+        if let Some(scene)=view.scene { out.extend(scene.choices.into_iter().filter(|c|c.enabled).map(|c|c.action)); }
+        if let Some(hub)=view.hub { out.extend(view.also_here.iter().map(|s|RunAction::PlayStorylet{node_guid:hub,storylet:s.id})); }
+        if let Some(place)=view.place { out.extend(place.moves.into_iter().filter(|m|m.enabled).map(|m|RunAction::Move{to:m.to})); }
+        out
+    }
+    pub fn propose(&mut self, content:&RunContent, authority:crate::actions::Authority, proposal:crate::actions::ActionProposal) -> Result<crate::actions::ActionReceipt,crate::actions::ActionRejection> {
+        use crate::chrono_participants::Controller;
+        let reject=|reason:&str|crate::actions::ActionRejection{reason:reason.into()};
+        let actor=proposal.actor as usize;
+        if actor>=self.world.participants.len(){return Err(reject("unknown actor"));}
+        let controlled=match authority { crate::actions::Authority::Architect=>true, crate::actions::Authority::Policy=>self.world.participants.controller[actor]==Controller::Rule, crate::actions::Authority::Human{seat}=>self.world.participants.controller[actor]==Controller::Human{seat} };
+        if !controlled{return Err(reject("authority does not control actor"));}
+        let body=serde_json::to_string(&proposal).unwrap_or_default();
+        if let Some((old,receipt))=self.idempotency.get(&proposal.idempotency_key){return if *old==body {let mut r=receipt.clone();r.duplicate=true;Ok(r)} else {Err(reject("idempotency key reused with different body"))};}
+        if proposal.expected_revision!=self.revision{return Err(reject("stale revision"));}
+        if !self.available_actions(content,proposal.actor).contains(&proposal.action){return Err(reject("action is not currently available"));}
+        let before=serde_json::to_value(&self.world).unwrap_or_default();
+        let prior=self.event_log.last().map(|e|e.id);
+        let step=self.act_internal(content,proposal.actor,proposal.action.clone(),false).map_err(|e|reject(&format!("{e:?}")))?.0;
+        self.revision=self.revision.saturating_add(1);
+        let id=self.revision;
+        let after=serde_json::to_value(&self.world).unwrap_or_default();
+        let witnesses=self.world.participants.colocated(proposal.actor).collect();
+        self.event_log.push(RunEvent{id,step,revision:self.revision,actor:proposal.actor,action:proposal.action.clone(),parents:prior.into_iter().collect(),witnesses,before,after});
+        let receipt=crate::actions::ActionReceipt{event_id:id,revision:self.revision,step,duplicate:false};
+        self.idempotency.insert(proposal.idempotency_key.clone(),(body,receipt.clone()));
+        self.proposals.push((proposal,authority));
+        Ok(receipt)
+    }
+    pub fn explain(&self,event_id:u64)->Option<Vec<RunEvent>> { let target=self.event_log.iter().find(|e|e.id==event_id)?; let mut ids=target.parents.clone(); ids.push(event_id); Some(self.event_log.iter().filter(|e|ids.contains(&e.id)).cloned().collect()) }
+    pub fn replay(content:&RunContent,start:RunStart,seed:u64,proposals:&[(crate::actions::Authority,crate::actions::ActionProposal)]) -> Result<Self,crate::actions::ActionRejection> { let mut run=Self::start(content,start,seed).map_err(|e|crate::actions::ActionRejection{reason:format!("{e:?}")})?; for (authority,p) in proposals { run.propose(content,*authority,p.clone())?; } Ok(run) }
     /// Current interaction without the accumulated timeline, for headless traversal.
     pub fn exploration_view(&self, content: &RunContent, participant: PartIx) -> RunView {
         self.view_internal(content, participant, false)
@@ -1224,23 +1275,6 @@ impl RunKernel {
             })
             .take(limit)
             .collect()
-    }
-    pub fn replay(
-        content: &RunContent,
-        start: RunStart,
-        seed: u64,
-        actions: &[(PartIx, RunAction)],
-    ) -> (Result<Self, RunError>, Option<u32>) {
-        let mut run = match Self::start(content, start, seed) {
-            Ok(v) => v,
-            Err(e) => return (Err(e), Some(0)),
-        };
-        for (i, (p, a)) in actions.iter().enumerate() {
-            if let Err(e) = run.act(content, *p, a.clone()) {
-                return (Err(e), Some((i + 1) as u32));
-            }
-        }
-        (Ok(run), None)
     }
 }
 

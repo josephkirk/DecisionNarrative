@@ -253,16 +253,10 @@ fn stranding_detected_without_on_close_replays_the_recorded_actions() {
         .find(|v| matches!(v.invariant, Invariant::OccupantBeyondClosedEdge))
         .expect("expected a stranding trace");
     assert!(!violation.actions.is_empty());
-    let (replayed, divergence) = RunKernel::replay(
-        &content,
-        RunStart::Beginning,
-        violation.seed,
-        &violation.actions,
-    );
-    assert_eq!(divergence, None);
+    let proposals=violation.actions.iter().enumerate().map(|(i,(actor,action))|(storylet_engine::Authority::Human{seat:0},storylet_engine::ActionProposal{schema_version:1,actor:*actor,action:action.clone(),expected_revision:i as u64,idempotency_key:format!("trace-{i}"),provenance:None})).collect::<Vec<_>>();
+    let replayed=RunKernel::replay(&content,RunStart::Beginning,violation.seed,&proposals).unwrap();
     assert!(
         replayed
-            .unwrap()
             .world
             .participants
             .location
