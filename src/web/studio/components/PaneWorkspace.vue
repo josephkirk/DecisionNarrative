@@ -12,7 +12,6 @@ const pct = (value: number) => `${(value * 100).toFixed(4)}%`;
 function paneStyle(box: Box) {
   return { left: pct(box.x), top: pct(box.y), width: pct(box.w), height: pct(box.h) };
 }
-/** Outer splits come first; they sit above inner handles where dividers meet. */
 function handleStyle(handle: (typeof geometry.value.handles)[number], index: number) {
   const { box, ratio } = handle;
   const zIndex = 4 + geometry.value.handles.length - index;

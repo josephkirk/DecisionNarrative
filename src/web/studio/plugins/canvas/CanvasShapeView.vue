@@ -5,9 +5,7 @@ import { refInfo, refName } from "./refs.ts";
 
 const props = defineProps<{
   shape: CanvasShape;
-  /** Fade shapes that are absent at runtime. */
   runtime: boolean;
-  /** Unique per canvas instance, so clip-path ids do not collide. */
   uid: string;
 }>();
 

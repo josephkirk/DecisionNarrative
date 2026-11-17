@@ -52,16 +52,16 @@ describe("studio interaction context", () => {
     expect(context.selection).toBeUndefined();
   });
 
-  test("maps entity-template and folder routes to their own context entities", () => {
+  test("maps entity and folder routes to their own context entities", () => {
     const entityContext = buildInteractionContext({
-      route: route({ name: "entity-template", path: "/entity-templates/char-2", fullPath: "/entity-templates/char-2", params: { id: "char-2" } }),
+      route: route({ name: "entity", path: "/entities/char-2", fullPath: "/entities/char-2", params: { id: "char-2" } }),
       project,
     });
-    expect(entityContext.route.name).toBe("Entity Template Editor");
-    expect(entityContext.entity).toEqual({ type: "entity_template", id: "char-2" });
+    expect(entityContext.route.name).toBe("Entity Editor");
+    expect(entityContext.entity).toEqual({ type: "entity", id: "char-2" });
 
     const folderContext = buildInteractionContext({
-      route: route({ name: "browse", path: "/browse/entity_templates/f-1", fullPath: "/browse/entity_templates/f-1", params: { root: "entity_templates", folderId: "f-1" } }),
+      route: route({ name: "browse", path: "/browse/entities/f-1", fullPath: "/browse/entities/f-1", params: { root: "entities", folderId: "f-1" } }),
       project,
     });
     expect(folderContext.route.name).toBe("Project Browser");

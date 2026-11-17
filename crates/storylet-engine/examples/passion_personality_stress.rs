@@ -1,8 +1,3 @@
-//! Personality and passion-style stress benchmark using typed tag state.
-//!
-//! Personality predicates are represented by authored tags. The benchmark keeps
-//! the dense actor/trait workload without the removed metric/quality registry.
-
 use std::time::Instant;
 use storylet_engine::chrono_state::{GameplayTagRegistry, TagBitset};
 
@@ -12,7 +7,9 @@ const TRIALS: u64 = 5_000;
 
 fn main() {
     let names: Vec<String> = (0..ACTORS)
-        .flat_map(|actor| (0..TRAITS).map(move |trait_id| format!("character.{actor}.trait.{trait_id}")))
+        .flat_map(|actor| {
+            (0..TRAITS).map(move |trait_id| format!("character.{actor}.trait.{trait_id}"))
+        })
         .collect();
     let registry = GameplayTagRegistry::compile(names).unwrap();
     let mut checksum = 0u64;
@@ -27,12 +24,14 @@ fn main() {
                 }
             }
         }
-        // Simulate approval/hostility predicates as boolean tag intersections.
         let approved = state.bit(0) && state.bit((TRAITS + 1) as u16);
         let hostile = state.bit((2 * TRAITS + 2) as u16) && !approved;
         checksum = checksum.wrapping_add(state.words().iter().copied().sum::<u64>());
         checksum = checksum.wrapping_add(u64::from(approved) + 2 * u64::from(hostile));
     }
-    println!("passion_personality trials={TRIALS} actors={ACTORS} traits={TRAITS} checksum={checksum} elapsed={:?}", started.elapsed());
+    println!(
+        "passion_personality trials={TRIALS} actors={ACTORS} traits={TRAITS} checksum={checksum} elapsed={:?}",
+        started.elapsed()
+    );
     let _ = registry;
 }

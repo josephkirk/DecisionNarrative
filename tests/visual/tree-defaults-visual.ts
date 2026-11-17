@@ -1,5 +1,3 @@
-// Visual regression test: TreeGraph defaults editor, scoped CSS, and persistence.
-// Run: node tests/visual/tree-defaults-visual.ts
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import os from "node:os";
@@ -67,12 +65,10 @@ function check(name: string, ok: boolean, detail = "") {
 
 let browser;
 try {
-  // Wait for service to be ready
   for (let i = 0; i < 50; i++) {
     try {
       if ((await fetch(base + "/api/v3/project")).ok) break;
     } catch {
-      /* starting */
     }
     await sleep(200);
   }
@@ -86,7 +82,6 @@ try {
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("dialog", (d) => void d.accept());
 
-  // 1. Initialize trait templates by navigating to the studio
   await page.goto(`${base}/#/storylets`);
   let graphTrait: { id: string; key: string } | undefined;
   let itemTrait: { id: string; key: string } | undefined;
@@ -100,18 +95,17 @@ try {
   check("tree traits created on app load", !!graphTrait && !!itemTrait);
   if (!graphTrait || !itemTrait) throw new Error("TreeGraph or TreeItem trait template not found");
 
-  // 2. Browser fixture has two TreeItem nodes and a connected edge; Item B has an explicit override
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-a",
     name: "Item A",
     traits: [{ id: "ti-a", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-b",
     name: "Item B",
     traits: [{ id: "ti-b", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "tree-owner",
     name: "Tree Owner",
     traits: [
@@ -133,22 +127,18 @@ try {
     ],
   });
 
-  // 3. Open owner Traits tab
-  await page.goto(`${base}/#/entity-templates/tree-owner`);
+  await page.goto(`${base}/#/entities/tree-owner`);
   const traitsTab = page.locator(".entity-tab", { hasText: "Traits" });
   await traitsTab.waitFor();
   await traitsTab.click();
 
-  // Assert raw property list is replaced for TreeGraph (custom defaults editor rendered)
   const defaultsEditor = page.locator(".tree-defaults-editor");
   await defaultsEditor.waitFor();
   check("TreeGraph defaults editor rendered", (await defaultsEditor.count()) === 1);
 
-  // Assert raw property inputs (like textareas for shapes/appearance) are not shown
   const rawPropertyTextareas = page.locator('.trait-card textarea:not(#tree-custom-css-textarea)');
   check("raw trait fields not shown for TreeGraph", (await rawPropertyTextareas.count()) === 0);
 
-  // 4. Use TreeGraph defaults controls to set default node width, shape, and wire pattern
   const shapeSelect = page.locator("#tree-default-shape");
   await shapeSelect.waitFor();
   await shapeSelect.selectOption("rounded");
@@ -162,7 +152,6 @@ try {
   await wirePatternSelect.waitFor();
   await wirePatternSelect.selectOption("dash");
 
-  // 5. Import CSS file with rule for .tree-node-copy
   const cssFileRule = `.tree-node-copy { color: rgb(255, 0, 0); }`;
   const cssFileInput = page.locator("#tree-css-upload-input");
   await cssFileInput.setInputFiles({
@@ -171,20 +160,16 @@ try {
     buffer: Buffer.from(cssFileRule, "utf-8"),
   });
 
-  // Check upload status text indicates file was loaded
   const cssStatus = page.locator(".css-status-text");
   await cssStatus.waitFor();
-  // FileReader is asynchronous: wait for the status to reflect the upload instead of sampling once.
   const statusUpdated = await page.waitForFunction(() => /theme\.css|loaded/.test(document.querySelector(".css-status-text")?.textContent ?? ""), null, { timeout: 5000 }).then(() => true, () => false);
   check("CSS file upload reflected in status", statusUpdated);
 
-  // 6. Save entity
   const saveBtn = page.getByRole("button", { name: "Save", exact: true });
   await saveBtn.waitFor();
   await saveBtn.click();
   await page.locator(".entity-unsaved-pill").waitFor({ state: "detached" });
 
-  // 7. Open Tree tab and verify initial rendered defaults and scoped styling
   const treeTab = page.getByRole("button", { name: "Tree", exact: true });
   await treeTab.waitFor();
   await treeTab.click();
@@ -194,31 +179,26 @@ try {
   await nodeA.waitFor();
   await nodeB.waitFor();
 
-  // Verify node A inherited default shape (rounded) and default width (200px)
   const nodeAClasses = await nodeA.getAttribute("class");
   check("node A has default shape class shape-rounded", nodeAClasses?.includes("shape-rounded") ?? false);
 
   const nodeAWidth = await nodeA.evaluate((el) => parseFloat((el as HTMLElement).style.width));
   check("node A has default width 200px", Math.abs(nodeAWidth - 200) < 2, `got ${nodeAWidth}`);
 
-  // Verify node B per-node overrides survived default changes
   const nodeBClasses = await nodeB.getAttribute("class");
   check("node B retained per-node override shape-diamond", nodeBClasses?.includes("shape-diamond") ?? false);
 
   const nodeBWidth = await nodeB.evaluate((el) => parseFloat((el as HTMLElement).style.width));
   check("node B retained per-node override width 240px", Math.abs(nodeBWidth - 240) < 2, `got ${nodeBWidth}`);
 
-  // Verify edge has default wire pattern (dash)
   const edgePath = page.locator(".tree-edge.wire-dash");
   await edgePath.waitFor({ state: "attached" });
   check("edge wire pattern has wire-dash class", (await edgePath.count()) >= 1);
 
-  // Verify scoped custom CSS applies to .tree-node-copy inside canvas
   const nodeACopy = nodeA.locator(".tree-node-copy");
   const copyColor = await nodeACopy.evaluate((el) => window.getComputedStyle(el).color);
   check("scoped CSS applies red color to canvas .tree-node-copy", copyColor === "rgb(255, 0, 0)", `got ${copyColor}`);
 
-  // Verify external UI element is NOT styled by scoped canvas CSS
   const externalStyled = await page.evaluate(() => {
     const dummy = document.createElement("div");
     dummy.className = "tree-node-copy";
@@ -230,7 +210,6 @@ try {
   });
   check("external UI element with .tree-node-copy is NOT styled", !externalStyled);
 
-  // 8. Reload page and assert graph node dimensions/shape and wire pattern persist
   await page.reload();
   await page.getByRole("button", { name: "Tree", exact: true }).click();
   await nodeA.waitFor();

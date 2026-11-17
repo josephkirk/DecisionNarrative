@@ -147,6 +147,7 @@ fn piece_together_requires_all_three_clues_from_the_actor() {
             fact: content.registry.id(clue).unwrap(),
             kind: KnowKind::Evidence,
             source_event: 0,
+            told_by: None,
         });
     }
     let ctx = RuntimeContext::with_registries(
@@ -163,6 +164,7 @@ fn piece_together_requires_all_three_clues_from_the_actor() {
         fact: content.registry.id("fact.benedek_identified").unwrap(),
         kind: KnowKind::Evidence,
         source_event: 0,
+        told_by: None,
     });
     let ctx = RuntimeContext::with_registries(
         &mut world,
@@ -233,8 +235,8 @@ fn reveal_records_the_matching_past_marker_and_telling() {
         .registry
         .id("fact.past.P1")
         .expect("P1 marker is registered");
-    assert!(run.world.knowledge.knows(0, marker).is_some());
-    assert!(run.world.telling.is_told(0, 0));
+    assert!(run.world().knowledge.knows(0, marker).is_some());
+    assert!(run.world().telling.is_told(0, 0));
 }
 
 #[test]
@@ -270,6 +272,7 @@ fn bluff_requires_a_suspect_real_evidence_and_benedek_present() {
             fact: content.registry.id(fact).unwrap(),
             kind: KnowKind::Evidence,
             source_event: 0,
+            told_by: None,
         });
         assert_eq!(check(&mut world), expected);
     }
@@ -281,6 +284,8 @@ fn bluff_requires_a_suspect_real_evidence_and_benedek_present() {
         fact: content.registry.id("fact.benedek_identified").unwrap(),
         kind: KnowKind::Evidence,
         source_event: 0,
+        told_by: None,
     });
     assert!(!check(&mut world));
 }
+

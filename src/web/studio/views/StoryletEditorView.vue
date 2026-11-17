@@ -6,9 +6,9 @@ import NarrativeGraphCanvas from "../components/NarrativeGraphCanvas.vue";
 import PropertyInspector from "../components/PropertyInspector.vue";
 import ReferenceList from "../components/ReferenceList.vue";
 import StudioIcon from "../components/StudioIcon.vue";
-import type { ContentReference } from "../contracts.ts";
+import type { ContentReference, EntityRecord } from "../contracts.ts";
 import { lowerPluginGraph, raisePluginGraph, validatePluginNodes } from "../plugins/graphLowering.ts";
-import { emit as emitPluginEvent, pluginNodeDeleted, type AnyEntity } from "../plugins/runtime.ts";
+import { emit as emitPluginEvent, pluginNodeDeleted } from "../plugins/runtime.ts";
 import { buildGraphFromStorylet, compileGraphToStorylet, validateNarrativeGraph, validatePreconditionGraph, type NarrativeGraph } from "../narrativeGraphTypes.ts";
 import { notify, studioState } from "../state.ts";
 import { originBadge } from "../storyletModel.ts";
@@ -85,7 +85,6 @@ onMounted(async () => {
   preconditionGraph.value = draft.precondition_graph?.nodes.length ? raisePluginGraph(draft.precondition_graph) : defaultPreconditionGraph();
   draft.precondition_graph = preconditionGraph.value;
   lastSavedSnapshot.value = JSON.stringify(draft);
-  // The editor now shows the stored storylet: plugins drop temp changes left by an unsaved session.
   emitPluginEvent("storylet/opened", isNew.value ? "" : String(draft.id));
   const requestedNode = route.query.node;
   if (typeof requestedNode === "string" && currentGraph.value.nodes.some((node) => node.id === requestedNode)) selectedNodeId.value = requestedNode;
@@ -139,9 +138,8 @@ async function playFromHere() {
   }
 }
 
-/** Plugin nodes are lowered to core nodes for validation and storage. */
 function lowerForEngine(): { graph: NarrativeGraph; preconditionGraph: NarrativeGraph } | null {
-  const entities = [...studioState.entities, ...studioState.entityTemplates] as AnyEntity[];
+  const entities = studioState.entities;
   const pluginIssues = [
     ...validatePluginNodes(currentGraph.value, entities),
     ...validatePluginNodes(preconditionGraph.value, entities),

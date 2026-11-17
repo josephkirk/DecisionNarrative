@@ -1,9 +1,5 @@
-/**
- * The "Canvas" trait: entities with it get the Canvas tab. The plugin creates
- * the trait on first load when the project does not have it yet.
- */
 import type { TraitTemplateRecord } from "../../contracts.ts";
-import type { AnyEntity } from "../runtime.ts";
+import type { EntityRecord } from "../../contracts.ts";
 
 export const CANVAS_TRAIT_KEY = "canvas";
 
@@ -19,7 +15,7 @@ export function findCanvasTrait(templates: TraitTemplateRecord[]): TraitTemplate
   return templates.find((template) => template.key === CANVAS_TRAIT_KEY);
 }
 
-export function hasCanvasTrait(entity: AnyEntity, templates: TraitTemplateRecord[]): boolean {
+export function hasCanvasTrait(entity: EntityRecord, templates: TraitTemplateRecord[]): boolean {
   const trait = findCanvasTrait(templates);
   return !!trait && entity.traits.some((instance) => instance.template_id === trait.id);
 }

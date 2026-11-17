@@ -55,13 +55,10 @@ function zoomFactor(): number {
 }
 
 function startImageDrag(image: TreeCanvasImage, event: PointerEvent) {
-  // Ignore alt so canvas alt-cut / alt-pan works
   if (event.altKey) return;
 
-  // Locked or readonly images never move or resize; left pointer bubbles to pan
   if (image.locked || props.readonly) return;
 
-  // Only primary (left) button starts move drag
   if (event.button !== 0) return;
 
   event.stopPropagation();
@@ -98,7 +95,6 @@ function onImagePointerUp(event: PointerEvent) {
     try {
       (event.currentTarget as HTMLElement | null)?.releasePointerCapture(event.pointerId);
     } catch {
-      // pointer capture might have already been released
     }
     activeDrag.value = null;
   }
@@ -143,11 +139,9 @@ function onResizePointerMove(event: PointerEvent) {
   const rawWidth = activeResize.value.origWidth + (west ? -dx : east ? dx : 0);
   const rawHeight = activeResize.value.origHeight + (north ? -dy : south ? dy : 0);
 
-  // Clamping >= 24px
   const width = Math.max(24, Math.round(rawWidth));
   const height = Math.max(24, Math.round(rawHeight));
 
-  // Anchoring opposite edge
   const x = Math.round(activeResize.value.origX + (west ? activeResize.value.origWidth - width : 0));
   const y = Math.round(activeResize.value.origY + (north ? activeResize.value.origHeight - height : 0));
 
@@ -159,7 +153,6 @@ function onResizePointerUp(event: PointerEvent) {
     try {
       (event.currentTarget as HTMLElement | null)?.releasePointerCapture(event.pointerId);
     } catch {
-      // pointer capture might have already been released
     }
     activeResize.value = null;
   }
@@ -172,7 +165,6 @@ function onContextMenu(id: string, event: MouseEvent) {
 }
 
 function onKeyDown(image: TreeCanvasImage, event: KeyboardEvent) {
-  // Support context menu key
   if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
     event.preventDefault();
     event.stopPropagation();
@@ -198,7 +190,6 @@ function onKeyDown(image: TreeCanvasImage, event: KeyboardEvent) {
     return;
   }
 
-  // Locked images never move or resize via keyboard
   if (image.locked) return;
 
   if (event.key === "Delete" || event.key === "Backspace") {
@@ -215,7 +206,6 @@ function onKeyDown(image: TreeCanvasImage, event: KeyboardEvent) {
 
   const step = 10;
   if (event.shiftKey) {
-    // shift+arrows resize, clamping >= 24px
     let { width, height } = image;
     if (event.key === "ArrowRight") width = Math.max(24, width + step);
     else if (event.key === "ArrowLeft") width = Math.max(24, width - step);
@@ -224,7 +214,6 @@ function onKeyDown(image: TreeCanvasImage, event: KeyboardEvent) {
 
     emit("change", image.id, { width, height });
   } else {
-    // arrows move unlocked image
     let { x, y } = image;
     if (event.key === "ArrowLeft") x -= step;
     else if (event.key === "ArrowRight") x += step;
@@ -328,7 +317,6 @@ function onKeyDown(image: TreeCanvasImage, event: KeyboardEvent) {
   pointer-events: none;
 }
 
-/* Hover and focus indicators without obscuring canvas */
 .tree-canvas-image:hover,
 .tree-canvas-image:focus-visible,
 .tree-canvas-image:focus-within,
@@ -344,7 +332,6 @@ function onKeyDown(image: TreeCanvasImage, event: KeyboardEvent) {
   outline-offset: 1px;
 }
 
-/* Resize affordances hidden by default, shown on hover/focus */
 .tree-canvas-image .tree-image-resize {
   position: absolute;
   z-index: 2;
@@ -361,7 +348,6 @@ function onKeyDown(image: TreeCanvasImage, event: KeyboardEvent) {
   pointer-events: auto;
 }
 
-/* Edge handles */
 .resize-n,
 .resize-s {
   left: 8px;
@@ -394,7 +380,6 @@ function onKeyDown(image: TreeCanvasImage, event: KeyboardEvent) {
   left: -3px;
 }
 
-/* Corner handles */
 .resize-ne,
 .resize-se,
 .resize-sw,

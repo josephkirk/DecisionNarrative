@@ -2,7 +2,6 @@
 import { computed } from "vue";
 import { isGameplay, parseCanvas } from "./model.ts";
 
-/** Property-level UI: replaces the raw JSON textbox for a `canvas_doc` property. */
 const props = defineProps<{ modelValue: unknown; disabled?: boolean }>();
 const doc = computed(() => parseCanvas(props.modelValue));
 </script>

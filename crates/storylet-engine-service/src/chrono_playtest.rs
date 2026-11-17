@@ -1,15 +1,3 @@
-//! Persisted ChronoFlow v5 playtest lane (REQ-CH-02).
-//!
-//! A ChronoFlow session persists only its `CallHistoryEntry` arrays — the global
-//! call history plus the per-mission scoped call histories — the random seed, and
-//! the pinned authoring metadata. No `FlowGraphInstance` and no `WorldStateTable`
-//! snapshot is stored. Loading a session rebuilds the runtime instance and world
-//! from the current project compilation and reconstructs state by replaying the
-//! recorded history (REQ-CH-03).
-//!
-//! exists; it cannot detect that a surviving id was remapped onto a different
-//! storylet. Without the pinned ID space, a replay after a service restart would
-//! silently reinterpret the persisted history.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -33,7 +21,7 @@ use crate::chrono_graph_adapter::{
     validate_entity_property_graph,
 };
 use crate::contracts::{
-    CharacterRecord, EntityRecord, EntityTemplateRecord, LocationRecord, ScenarioRecord, StoryletRecord,
+    CharacterRecord, EntityRecord, LocationRecord, ScenarioRecord, StoryletRecord,
     WorldObjectRecord,
 };
 use crate::entities::runtime_records_with_world;
@@ -81,7 +69,6 @@ fn compile_error(error: String) -> ChronoPlaytestError {
     ChronoPlaytestError::Runtime(error)
 }
 
-// --- Requests --------------------------------------------------------------
 
 pub trait PlaytestRequest {
     fn validate(&self) -> Result<(), String>;
@@ -158,8 +145,6 @@ impl PlaytestRequest for ChronoPlaytestSignalRequest {
     }
 }
 
-/// Resolve a dynamic branch: exactly one of `outputPin` (a Choice node) or
-/// `storyletId` (a QBN hub or salience selector).
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChronoPlaytestChooseRequest {
@@ -226,7 +211,6 @@ impl PlaytestRequest for ChronoPlaytestDivertRequest {
     }
 }
 
-/// Scrub a scene-section timeline forward or backward (REQ-SC-04).
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChronoPlaytestScrubRequest {
@@ -252,7 +236,6 @@ impl PlaytestRequest for ChronoPlaytestScrubRequest {
     }
 }
 
-/// Rewind one mission subgraph to its start (REQ-CH-04).
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChronoPlaytestRollbackRequest {
@@ -274,9 +257,6 @@ impl PlaytestRequest for ChronoPlaytestRollbackRequest {
     }
 }
 
-/// Invoke a story to a POI node. `declaredRoutes` maps a node GUID to the input
-/// pin `seek_backward` should walk back through when that node has several
-/// incoming edges. (It selects an input pin, not the node's chosen output.)
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChronoPlaytestInvokeRequest {
@@ -318,8 +298,6 @@ impl PlaytestRequest for ChronoPlaytestInvokeRequest {
     }
 }
 
-/// Reconcile with an external history (REQ-CH-06). Entries use the engine's
-/// persisted record shape, which is also the shape this lane returns.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChronoPlaytestReconcileRequest {
@@ -334,8 +312,6 @@ pub struct ChronoPlaytestReconcileRequest {
 
 impl PlaytestRequest for ChronoPlaytestReconcileRequest {
     fn validate(&self) -> Result<(), String> {
-        // An empty history is the valid rollback target for a fresh-world
-        // reconcile; only validate entries that are present.
         for entry in &self.history {
             if entry.node_guid == 0 {
                 return Err("history entry nodeGuid must not be zero".into());
@@ -349,8 +325,6 @@ pub fn parse_request<T>(args: &Value) -> Result<T, ChronoPlaytestError>
 where
     T: PlaytestRequest + DeserializeOwned,
 {
-    // The MCP envelope carries the operation name and session id alongside the
-    // request fields; strip them before strict deserialization.
     let mut payload = args.clone();
     if let Some(object) = payload.as_object_mut() {
         object.remove("operation");
@@ -364,10 +338,7 @@ where
     Ok(request)
 }
 
-// --- Pinned ID space -------------------------------------------------------
 
-/// The deterministic name→id mapping a compilation produced. `passions` is keyed
-/// `"{character}.{passion}"` because the adapter's passion indices are tuples.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledIdSpace {
     pub storylets: BTreeMap<String, u16>,
@@ -410,7 +381,6 @@ impl CompiledIdSpace {
     }
 }
 
-/// Reverse lookups for stable payloads.
 #[derive(Clone, Debug, Default)]
 struct ReverseIndex {
     storylets: BTreeMap<u16, String>,
@@ -435,7 +405,6 @@ impl ReverseIndex {
     }
 }
 
-// --- Session model ---------------------------------------------------------
 
 #[derive(Clone, Debug)]
 pub struct ChronoPlaytestSession {
@@ -450,21 +419,14 @@ pub struct ChronoPlaytestSession {
     pub id_space: CompiledIdSpace,
     pub instance: FlowGraphInstance,
     pub world: WorldStateTable,
-    /// True when this session was rebuilt by replaying persisted history rather
-    /// than created in this process. The clock, turn, and cooldown table come
-    /// from the pending-state column, not from the call history.
     pub reconstructed: bool,
-    /// Last idempotency key and its exact response, so a retried mutation
-    /// returns the original payload instead of advancing twice.
     pub last_idempotency_key: String,
     pub last_result_json: String,
-    /// Monotonic per-session mutation counter for optimistic concurrency.
     pub mutation_revision: u64,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
-/// Mission-scoped histories, keyed by mission node GUID (REQ-CH-04).
 fn scoped_histories(session: &ChronoPlaytestSession) -> BTreeMap<u32, Vec<CallHistoryEntry>> {
     fn collect(instance: &FlowGraphInstance, histories: &mut BTreeMap<u32, Vec<CallHistoryEntry>>) {
         for node in &instance.nodes {
@@ -482,7 +444,6 @@ fn scoped_histories(session: &ChronoPlaytestSession) -> BTreeMap<u32, Vec<CallHi
     histories
 }
 
-/// Stable instance id derived from the session id, so a rebuild reproduces it.
 fn deterministic_instance_id(session_id: &str) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in session_id.as_bytes() {
@@ -503,7 +464,7 @@ fn from_json<T: DeserializeOwned>(text: &str) -> Result<T, ChronoPlaytestError> 
 
 struct WorkspaceContent {
     world: EntityRecord,
-    entities: Vec<EntityTemplateRecord>,
+    entities: Vec<EntityRecord>,
     locations: Vec<LocationRecord>,
     characters: Vec<CharacterRecord>,
     world_objects: Vec<WorldObjectRecord>,
@@ -516,13 +477,13 @@ struct WorkspaceContent {
 }
 
 fn read_content(store: &Store) -> Result<WorkspaceContent, ChronoPlaytestError> {
-    let instances = store.list_entities().map_err(persistence_error)?;
-    let world = instances.iter().find(|entity| entity.id == "world").cloned()
+    let all_entities = store.list_entities().map_err(persistence_error)?;
+    let world = all_entities.iter().find(|entity| entity.id == "world").cloned()
         .ok_or_else(|| compile_error("missing intrinsic world entity".to_string()))?;
-    let mut entities = store.list_entity_templates().map_err(persistence_error)?;
+    let mut entities = crate::entities::runtime_entities(&all_entities);
     let templates = store.list_trait_templates().map_err(persistence_error)?;
-    crate::inventory::project_inventory_entities(&mut entities, &instances, &templates).map_err(compile_error)?;
-    crate::tree_pointer::project_tree_entities(&mut entities, &instances, &templates).map_err(compile_error)?;
+    crate::inventory::project_inventory_entities(&mut entities, &templates).map_err(compile_error)?;
+    crate::tree_pointer::project_tree_entities(&mut entities, &templates).map_err(compile_error)?;
     let runtime = runtime_records_with_world(&world, &entities, &templates);
     let storylets = store.list_storylets().map_err(persistence_error)?;
     for storylet in &storylets {
@@ -552,11 +513,7 @@ fn read_content(store: &Store) -> Result<WorkspaceContent, ChronoPlaytestError> 
 }
 
 
-// --- Revision pin (REQ-CH-07) ---------------------------------------------
 
-/// Map each mission node GUID to the asset that owns its child scope. A scoped
-/// history's entries carry child-asset GUIDs, so rebasing it against the root
-/// asset drops or misreads them.
 fn mission_asset_map(
     root: &FlowGraphAsset,
     mission_assets: &BTreeMap<String, FlowGraphAsset>,
@@ -598,11 +555,6 @@ fn mission_asset_map(
     Ok(out)
 }
 
-/// A session is only operable against the compilation it was created from. If
-/// the authored revision moved, the freshly compiled ID space must still match —
-/// otherwise the persisted u16 ids would be reinterpreted — and every history is
-/// rebased onto the new asset. Dropped nodes become tombstones; removed
-/// connections are bridged. Returns the adopted history when a rebase happened.
 #[allow(clippy::too_many_arguments)]
 fn enforce_revision_pin(
     pinned_revision: u64,
@@ -616,8 +568,6 @@ fn enforce_revision_pin(
     scoped: &BTreeMap<u32, Vec<CallHistoryEntry>>,
 ) -> Result<Option<RebasedHistory>, ChronoPlaytestError> {
     if pinned_revision == current_revision {
-        // `import_bundle` can rewrite content at the same revision counter, so
-        // the compiled ID space is the real identity check.
         if pinned_space != current_space {
             return Err(ChronoPlaytestError::RevisionConflict(format!(
                 "project revision {current_revision} matches the session's pinned revision, but the compiled ID space changed"
@@ -634,8 +584,6 @@ fn enforce_revision_pin(
     let mission_assets_by_node = mission_asset_map(asset, mission_assets)?;
     let mut scoped_rebased = BTreeMap::new();
     for (node_guid, entries) in scoped {
-        // No asset owns this GUID anymore: the mission was deleted, so drop
-        // the scope instead of rebasing it against the wrong graph.
         let Some(scope_asset) = mission_assets_by_node.get(node_guid) else {
             continue;
         };
@@ -655,7 +603,6 @@ struct RebasedHistory {
     scoped: BTreeMap<u32, Vec<CallHistoryEntry>>,
 }
 
-/// One operation's freshly compiled registries, content, and ID space.
 struct Prepared {
     current_revision: u64,
     content: WorkspaceContent,
@@ -729,9 +676,6 @@ fn prepare(
     )?;
     let was_rebased = rebased.is_some();
     if let Some(history) = rebased {
-        // Adopt the recompiled asset and the rebased history. The world must
-        // start from the seed again: replaying into the live post-history
-        // world would apply every delta twice.
         let pending = pending_state(session);
         session.world = seed.state.clone();
         let mut rebuilt = FlowGraphInstance::new(
@@ -769,8 +713,6 @@ fn prepare(
     })
 }
 
-/// Load a session: the live instance when this process already has one, otherwise
-/// rebuild it from the persisted history (REQ-CH-03).
 fn load_session(
     inner: &StudioInner,
     session_id: &str,
@@ -915,7 +857,6 @@ fn load_session(
     Ok(session)
 }
 
-// --- Payloads ------------------------------------------------------------
 
 fn call_history_value(entries: &[CallHistoryEntry]) -> Value {
     serde_json::to_value(entries).unwrap_or(Value::Null)
@@ -976,7 +917,6 @@ fn tokens_value(instance: &FlowGraphInstance, tokens: &[SignalToken]) -> Value {
     )
 }
 
-/// REQ-BB-03 display metadata comes from authored Chrono storylet settings.
 fn storylet_display(storylet: &StoryletRecord) -> Value {
     let settings = storylet.chrono.as_ref();
     json!({
@@ -1010,7 +950,6 @@ fn session_descriptor(
     })
 }
 
-/// Storylets referenced by the current context, in deterministic order.
 fn storylets_in_context(session: &ChronoPlaytestSession, prepared: &Prepared) -> Vec<Value> {
     let reverse = ReverseIndex::build(&session.id_space);
     let mut referenced = BTreeSet::from([session.start_storylet_id.clone()]);
@@ -1276,8 +1215,6 @@ fn context_view(session: &ChronoPlaytestSession, prepared: &Prepared) -> Value {
         .filter_map(|index| reverse.passions.get(&index).cloned())
         .collect::<Vec<_>>();
 
-    // `macro_values` is indexed by Star-NPC id, which the adapter assigns as the
-    // character's entity index, so the entity reverse map resolves it to a name.
     let macro_values = (0..session.world.passions.macro_values.len() as u16)
         .map(|index| {
             (
@@ -1346,30 +1283,20 @@ fn context_view(session: &ChronoPlaytestSession, prepared: &Prepared) -> Value {
     })
 }
 
-/// Latent node data that the call history cannot express: a Choice, QBN, or
-/// Waiter pauses after its token is consumed and records no call, so the paused
-/// node and the live token queue are persisted separately (REQ-CH-02/03).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct PendingState {
     #[serde(default)]
     nodes: Vec<PendingNode>,
-    /// Persisted with the authored pin name so a stored session survives a
-    /// change to the in-memory pin representation.
     #[serde(default)]
     tokens: Vec<PersistedToken>,
-    /// Runtime clock. Replay stamps completions at zero, so the real clock and
-    /// cooldown table must be restored with the latent nodes.
     #[serde(default)]
     clock_ms: i64,
     #[serde(default)]
     turn: u64,
     #[serde(default)]
     last_completed_ms: BTreeMap<u16, i64>,
-    /// Paused mission children, keyed by the mission node that owns them.
     #[serde(default)]
     missions: Vec<PendingMission>,
-    /// Actor poses for in-progress scenes. The append-only applied/conflict
-    /// logs stay transient so the session row does not grow every frame.
     #[serde(default)]
     actor_pose: BTreeMap<String, String>,
 }
@@ -1402,7 +1329,6 @@ struct PendingNode {
     waiter_wake_ms: i64,
     current_topic_id: String,
     arrived_input_pins: BTreeSet<String>,
-    /// Inverse cache, so a restored latent node can still be rolled back.
     #[serde(default)]
     call_data: Vec<NodeCallData>,
 }
@@ -1465,7 +1391,6 @@ fn instance_pending_state(instance: &FlowGraphInstance) -> PendingState {
     }
 }
 
-/// How a rebuilt session treats a pending token whose pin no longer resolves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PinMismatch {
     Error,
@@ -1594,7 +1519,6 @@ fn payload(
     })
 }
 
-// --- Persistence -----------------------------------------------------------
 
 fn persist_session(
     store: &Store,
@@ -1624,8 +1548,6 @@ fn persist_session(
         .map_err(persistence_error)
 }
 
-/// Persist one operation transactionally, then publish the live session. On a
-/// persistence failure the in-memory session is restored to its prior state.
 fn finish(
     inner: &mut StudioInner,
     session: &mut ChronoPlaytestSession,
@@ -1684,15 +1606,12 @@ fn check_expected_revision(
     Ok(())
 }
 
-/// Reject stale clients and short-circuit retried mutations in one call.
 fn begin_mutation(
     session: &ChronoPlaytestSession,
     expected_revision: Option<u64>,
     expected_mutation_revision: Option<u64>,
     idempotency_key: Option<&str>,
 ) -> Result<Option<Value>, ChronoPlaytestError> {
-    // An exact retry key wins: the stored response is authoritative even
-    // though the mutation revision advanced when the first attempt committed.
     if let Some(response) = replay_idempotent(session, idempotency_key)? {
         return Ok(Some(response));
     }
@@ -1700,7 +1619,6 @@ fn begin_mutation(
     Ok(None)
 }
 
-/// Return the stored response when this exact mutation key already ran.
 fn replay_idempotent(
     session: &ChronoPlaytestSession,
     key: Option<&str>,
@@ -1714,7 +1632,6 @@ fn replay_idempotent(
     Ok(None)
 }
 
-// --- Service operations ----------------------------------------------------
 
 impl StudioService {
     pub async fn create_chrono_playtest(
@@ -1724,7 +1641,6 @@ impl StudioService {
         request
             .validate()
             .map_err(ChronoPlaytestError::InvalidInput)?;
-        // Read the interaction context before taking the service lock.
         let interaction = self
             .get_interaction_context()
             .await
@@ -1764,7 +1680,6 @@ impl StudioService {
         )
         .map_err(compile_error)?;
 
-        // Scenario: explicit request, otherwise the project's first scenario.
         let (scenario, scenario_source) = match &request.scenario_id {
             Some(id) => {
                 let scenario = content
@@ -1797,8 +1712,6 @@ impl StudioService {
             ));
         }
 
-        // Start location: explicit request, then the current interaction context,
-        // then the scenario's start policy.
         let known = |id: &str| content.locations.iter().any(|location| location.id == id);
         let (start_location, start_source) = if let Some(id) = &request.start_location_id {
             if !known(id) {
@@ -1850,9 +1763,6 @@ impl StudioService {
             .map_err(compile_error)?;
         bind_storylet_start_nodes(&mut compiled, &graphs).map_err(compile_error)?;
 
-        // Deterministic starting storylet: explicit request, otherwise the
-        // lexicographically smallest storylet whose location tags name the start
-        // location, otherwise the smallest storylet id.
         let (start_storylet, storylet_source) = match &request.storylet_id {
             Some(id) => {
                 let id = id.trim();
@@ -1941,8 +1851,6 @@ impl StudioService {
             rebased: false,
         };
 
-        // `start_at_node` only enqueues the entry token; execution happens on the
-        // first tick.
         let pending = session
             .instance
             .start_at_node(start_node_guid)
@@ -2251,9 +2159,6 @@ impl StudioService {
         )?;
         let node_guid = request.node_guid.unwrap();
         let delta_ms = request.delta_ms.unwrap();
-        // Scrubbing is a preview: composer poses and the scene clock are not
-        // part of the persisted history, so applying it live would be lost on
-        // reload. Run it on a clone and leave the session untouched.
         let mut preview = session.instance.clone();
         let conflicts_before = preview.composer.conflicts.len();
         let parts = preview
@@ -2778,8 +2683,6 @@ mod tests {
 
         let replay = begin_mutation(&session, Some(3), Some(0), Some("k")).unwrap();
         assert_eq!(replay.unwrap()["ok"], true);
-        // The revision advanced on the first attempt; an exact retry still
-        // returns the stored payload.
         assert!(begin_mutation(&session, Some(3), Some(1), Some("k"))
             .unwrap()
             .is_some());
@@ -2787,8 +2690,6 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(begin_mutation(&session, Some(2), None, None).is_err());
-        // A stale session mutation revision is rejected even when the project
-        // revision matches.
         assert!(begin_mutation(&session, Some(3), Some(1), None).is_err());
     }
 
@@ -2966,7 +2867,6 @@ mod tests {
     }
 }
 
-/// Compile a deterministic Run API content snapshot from the authored workspace.
 pub(crate) fn compile_run_content(store: &Store, scenario_id: Option<&str>, expected_revision: Option<u64>, start_storylet_id: Option<&str>) -> Result<(storylet_engine::run::RunContent, u64), String> {
     let tx = store.conn.unchecked_transaction().map_err(|e|e.to_string())?;
     let meta = store.get_project_metadata().map_err(|e| e.to_string())?;
@@ -3035,8 +2935,6 @@ mod run_compile_revision_tests {
         let path=std::env::temp_dir().join(format!("run-compile-race-{}.db",uuid::Uuid::new_v4()));
         let reader=Store::open(&path).unwrap();
         let expected=reader.get_project_metadata().unwrap().revision;
-        // Simulate the start request's successful precondition, then commit a
-        // content write on a separate connection before compilation begins.
         assert_eq!(reader.get_project_metadata().unwrap().revision,expected);
         let writer=Store::open(&path).unwrap();
         writer.save_content("storylets","new","{}",1,None).unwrap();

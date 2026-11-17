@@ -1,10 +1,9 @@
 import { StudioApi } from "../api.ts";
-import { notify, setEntities, setEntityTemplates, studioState } from "../state.ts";
+import { notify, setEntities, studioState } from "../state.ts";
 import { emit } from "../plugins/runtime.ts";
 import type {
   AssetRecord,
   EntityRecord,
-  EntityTemplateRecord,
   EventRecord,
   FolderRecord,
   StoryletRecord,
@@ -13,7 +12,6 @@ import type {
 } from "../contracts.ts";
 
 export type WorkspaceKind =
-  | "entity_templates"
   | "entities"
   | "gameplay_tags"
   | "trait_templates"
@@ -23,7 +21,6 @@ export type WorkspaceKind =
   | "folders";
 
 export const ALL_WORKSPACE_KINDS: readonly WorkspaceKind[] = [
-  "entity_templates",
   "entities",
   "gameplay_tags",
   "trait_templates",
@@ -35,7 +32,6 @@ export const ALL_WORKSPACE_KINDS: readonly WorkspaceKind[] = [
 
 function assign(kind: WorkspaceKind, rows: unknown[]) {
   switch (kind) {
-    case "entity_templates": setEntityTemplates(rows as EntityTemplateRecord[]); break;
     case "entities": setEntities(rows as EntityRecord[]); break;
     case "gameplay_tags":
       studioState.gameplayTags = rows as GameplayTagRecord[];
@@ -58,18 +54,10 @@ function assign(kind: WorkspaceKind, rows: unknown[]) {
   }
 }
 
-/**
- * The folder a record currently sits in, as last loaded from the server.
- * Returns `undefined` when the record is unknown (e.g. an unsaved draft).
- */
 export function currentFolderId(kind: WorkspaceKind, key: string): string | null | undefined {
   switch (kind) {
     case "entities": {
       const row = studioState.entities.find((entity) => entity.id === key);
-      return row ? row.folder_id ?? null : undefined;
-    }
-    case "entity_templates": {
-      const row = studioState.entityTemplates.find((entity) => entity.id === key);
       return row ? row.folder_id ?? null : undefined;
     }
     case "storylets": {
@@ -89,7 +77,6 @@ export function currentFolderId(kind: WorkspaceKind, key: string): string | null
   }
 }
 
-/** Reload the requested authored kinds (and the project revision) into the studio state. */
 export async function refreshWorkspace(
   kinds: readonly WorkspaceKind[] = ALL_WORKSPACE_KINDS,
 ): Promise<void> {

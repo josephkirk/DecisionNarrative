@@ -1,12 +1,7 @@
-/* ==========================================================================
-   STORYLET STUDIO — FLOATING GLASS WORKSPACE (see DESIGN.md)
-   Atmospheric dark backdrop, rounded translucent panes, cyan focus accent.
-   ========================================================================== */
 
 :root {
   color-scheme: dark;
 
-  /* Surfaces */
   --bg-app: #0b0b0a;
   --bg-sidebar: rgba(17, 20, 30, 0.82);
   --bg-pane: rgba(15, 18, 27, 0.86);
@@ -21,7 +16,6 @@
   --surface-container-high: #222a3d;
   --surface-container-highest: #2c3549;
 
-  /* Borders */
   --border-subtle: rgba(148, 163, 196, 0.13);
   --border-muted: rgba(148, 163, 196, 0.22);
   --border-strong: rgba(148, 163, 196, 0.32);
@@ -31,13 +25,11 @@
   --border: var(--border-subtle);
   --surface: var(--bg-input);
 
-  /* Text */
   --text-main: #eef1f8;
   --text-primary: #eef1f8;
   --text-muted: #9ba5bd;
   --text-dim: #838da2;
 
-  /* Accent: cyan */
   --accent: #22c5e0;
   --accent-hover: #67e3f5;
   --accent-subtle: rgba(34, 197, 224, 0.13);
@@ -47,21 +39,17 @@
   --primary-container: #22c5e0;
   --backdrop-glow: radial-gradient(1200px 700px at 12% -10%, rgba(241, 237, 228, 0.05), transparent 60%), radial-gradient(900px 600px at 95% 10%, rgba(201, 162, 74, 0.06), transparent 60%), radial-gradient(1000px 800px at 60% 120%, rgba(201, 162, 74, 0.04), transparent 60%);
 
-  /* Secondary: iris */
   --secondary: #8b95fb;
   --secondary-subtle: rgba(139, 149, 251, 0.14);
 
-  /* Tertiary: amber */
   --tertiary: #f5a524;
   --tertiary-subtle: rgba(245, 165, 36, 0.13);
 
-  /* Status */
   --status-success: #2dd4a0;
   --status-warning: #f5a524;
   --status-danger: #fb5a74;
   --status-danger-subtle: rgba(251, 90, 116, 0.13);
 
-  /* Elevation, radius, motion */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.38);
   --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.5);
@@ -74,10 +62,8 @@
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --gap-shell: 8px;
 
-  /* Typography */
   --font-sans: "Sora Variable", "Sora", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
   --font-display: var(--font-sans);
-  /* Heading voice: themes swap weight, tracking and case to change the app's personality. */
   --display-weight: 600;
   --display-tracking: -0.025em;
   --display-transform: none;
@@ -85,7 +71,6 @@
   --font-serif: "EB Garamond", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   --font-mono: "Geist Mono", "JetBrains Mono", "Cascadia Code", SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* Entity type colors */
   --type-character: #8b95fb;
   --type-location: #2dd4a0;
   --type-item: #f5a524;
@@ -112,7 +97,6 @@ body, html {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Atmospheric backdrop the floating panes sit on; the active theme supplies the glow. */
 body {
   background: var(--backdrop-glow, none), var(--bg-app);
 }
@@ -209,7 +193,6 @@ button.btn:active, .tab-btn:active, .thumb-avatar-btn:active {
 
 a { color: var(--accent-hover); }
 
-/* Native choice controls: brand accent and a comfortable target (low specificity so components can override). */
 :where(input[type="checkbox"], input[type="radio"]) {
   accent-color: var(--accent);
   width: 16px;
@@ -220,7 +203,6 @@ a { color: var(--accent-hover); }
 :where(input[type="checkbox"], input[type="radio"]):disabled { cursor: not-allowed; opacity: 0.5; }
 :where(label:has(> input[type="checkbox"]), label:has(> input[type="radio"])) { cursor: pointer; }
 
-/* Touch target expansion for compact icon buttons (tree rows have their own row-wide hit area). */
 .btn-micro, .tag-editor__remove {
   position: relative;
 }
@@ -240,13 +222,11 @@ a { color: var(--accent-hover); }
   display: none;
 }
 
-/* Rule 35 & 44: Fade edges of scrollable panes */
 .scroll-fade-mask {
   mask-image: linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 16px), transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 16px), transparent 100%);
 }
 
-/* Rule 14: Structural Skeletons */
 .skeleton-card, .skeleton-hero-card, .skeleton-block {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
@@ -277,9 +257,6 @@ a { color: var(--accent-hover); }
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
-/* ==========================================================================
-   APP SHELL: glass top bar, floating navigator, split-pane workspace
-   ========================================================================== */
 #app {
   display: flex;
   width: 100vw;
@@ -296,7 +273,6 @@ a { color: var(--accent-hover); }
   isolation: isolate;
 }
 
-/* Optional user image behind everything; dimmed (and optionally blurred) for legibility. */
 .studio-backdrop {
   position: fixed;
   inset: 0;
@@ -315,7 +291,6 @@ a { color: var(--accent-hover); }
   inset: 0;
   background: linear-gradient(180deg, color-mix(in srgb, var(--bg-app) 55%, transparent), color-mix(in srgb, var(--bg-app) 72%, transparent));
 }
-/* Kojima Productions: flat gilt on ink, hairline gold accents, lighter airier headings. */
 :root[data-theme="kojima"] .btn-primary,
 :root[data-theme="kojima"] .btn-primary:hover:not(:disabled) { background: var(--accent); box-shadow: none; }
 :root[data-theme="kojima"] .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
@@ -347,7 +322,6 @@ a { color: var(--accent-hover); }
   min-width: 0;
 }
 
-/* Wordmark beside the BrandMark tile. */
 .studio-toolbar__title {
   font-family: var(--font-display);
   font-size: 14px;
@@ -366,7 +340,6 @@ a { color: var(--accent-hover); }
   scrollbar-width: none;
 }
 .studio-toolbar__nav::-webkit-scrollbar { display: none; }
-/* When the links scroll on narrow screens, fade the cut edge so a clipped label reads as "more", not as broken text. */
 @media (max-width: 900px) {
   .studio-toolbar__nav { mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); padding-right: 20px; }
 }
@@ -463,7 +436,6 @@ a { color: var(--accent-hover); }
   min-width: 0;
   max-width: 520px;
   flex: 0 0 auto;
-  /* No backdrop-filter here: it would trap the fixed-position context menu inside the panel. */
   background: var(--bg-sidebar);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
@@ -602,6 +574,17 @@ a { color: var(--accent-hover); }
 .project-tree__glyph.is-project { color: var(--accent-hover); }
 .project-tree__glyph.is-root { color: var(--text-muted); }
 
+.project-tree__template-badge {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  font-size: 13px;
+  color: var(--accent);
+}
+.project-tree__context-menu-item .project-tree__context-menu-check { margin-left: auto; color: var(--accent); }
+
 .project-tree__label {
   flex: 1;
   min-width: 0;
@@ -697,10 +680,8 @@ a { color: var(--accent-hover); }
   background: var(--border-subtle);
 }
 
-/* Split-pane workspace ------------------------------------------------------ */
 .pane-workspace {
   position: relative;
-  /* Pane-internal layers (graph toolbars, menus) stay below shell popovers. */
   isolation: isolate;
   flex: 1;
   min-height: 0;
@@ -745,7 +726,6 @@ a { color: var(--accent-hover); }
   height: 100%;
   min-width: 0;
   overflow: hidden;
-  /* Content surface: near-opaque without blur (blur is reserved for floating chrome). */
   background: var(--bg-pane);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
@@ -764,7 +744,6 @@ a { color: var(--accent-hover); }
   padding: 0 6px 0 12px;
   border-bottom: 1px solid var(--border-faint);
   background: rgba(255, 255, 255, 0.015);
-  /* The header is a drag handle, never text to select. */
   user-select: none;
   -webkit-user-select: none;
 }
@@ -772,7 +751,6 @@ a { color: var(--accent-hover); }
 .studio-pane__head[draggable="true"]:active { cursor: grabbing; }
 .studio-pane__head[draggable="true"]:hover { background: rgba(255, 255, 255, 0.035); }
 .studio-pane__actions { cursor: default; }
-/* The pane being moved dims so the drop target reads as the destination. */
 .studio-pane.is-dragging { opacity: 0.55; }
 .studio-pane__title {
   display: inline-flex;
@@ -797,7 +775,6 @@ a { color: var(--accent-hover); }
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* Views adapt to their pane width, not the window, so splits stay usable. */
   container: pane / inline-size;
 }
 .studio-pane__body > :not(.studio-pane__drop) { flex: 1; min-height: 0; }
@@ -829,12 +806,10 @@ a { color: var(--accent-hover); }
 .studio-pane__drop.is-top { inset: 8px 8px 50% 8px; }
 .studio-pane__drop.is-bottom { inset: 50% 8px 8px 8px; }
 
-/* Glass fallback: browsers without backdrop-filter get solid surfaces instead of see-through ones. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root { --bg-elevated: #1a2030; }
   .studio-toolbar { background: #0b0d14; }
 }
-/* Material accessibility: solid surfaces and stronger edges when requested. */
 @media (prefers-reduced-transparency: reduce) {
   :root { --bg-sidebar: #12151f; --bg-pane: #0f121b; --bg-elevated: #1a2030; }
   .studio-toolbar, .project-tree-panel, .project-tree__menu, .project-tree__context-menu, .notification-toast { backdrop-filter: none; }
@@ -844,7 +819,6 @@ a { color: var(--accent-hover); }
   :root { --border-subtle: rgba(200, 210, 230, 0.35); --border-muted: rgba(220, 228, 240, 0.5); --text-muted: #c4cbdb; --text-dim: #a7afc2; }
 }
 
-/* Folder browser */
 .folder-breadcrumb {
   display: flex;
   align-items: center;
@@ -853,12 +827,10 @@ a { color: var(--accent-hover); }
   min-width: 0;
   flex: 1 1 12rem;
   overflow: hidden;
-  /* Room for the first link's hover pill, which sits 4px outside the text. */
   padding: 0 4px;
   margin: 0 -4px;
 }
 
-/* Ancestors shrink first and read as secondary; the current folder keeps most of its name. */
 .folder-breadcrumb__link {
   display: inline-block;
   flex: 0 1 auto;
@@ -893,7 +865,6 @@ a { color: var(--accent-hover); }
   color: var(--text-dim);
 }
 
-/* Narrow panes keep only the parent and current folder; the project tree still shows the full path. */
 @container pane (max-width: 640px) {
   .folder-breadcrumb > :nth-last-child(n+4) { display: none; }
 }
@@ -956,7 +927,6 @@ a { color: var(--accent-hover); }
 }
 .folder-tile__thumb--folder { color: var(--tertiary); }
 
-/* Names identify the item: wrap to two lines before truncating. */
 .folder-tile__banner {
   width: 100%;
   max-width: 112px;
@@ -1023,7 +993,6 @@ a { color: var(--accent-hover); }
   font-size: 11px;
 }
 
-/* Editors */
 .entity-banner {
   display: flex;
   align-items: center;
@@ -1080,7 +1049,6 @@ a { color: var(--accent-hover); }
   overflow-y: auto;
 }
 
-/* Wide enough for the six-column property table to show names, keys and defaults. */
 .editor-column {
   max-width: 880px;
   padding-bottom: 40px;
@@ -1240,8 +1208,6 @@ a { color: var(--accent-hover); }
 .property-list__cell {
   min-width: 0;
 }
-/* Single-tag slots show only the chosen chip; the picker input returns
-   once the chip is removed. */
 .tag-editor.tag-single:has(.tag-editor__chip) .tag-editor__input {
   display: none;
 }
@@ -1359,7 +1325,6 @@ a { color: var(--accent-hover); }
   margin-bottom: 6px;
 }
 
-/* File paths have no spaces; let them break anywhere rather than run out of the card. */
 .version-card__head strong {
   flex: 1;
   min-width: 0;
@@ -1425,7 +1390,6 @@ a { color: var(--accent-hover); }
   text-decoration: underline;
 }
 
-/* Main Workspace Area */
 .studio-main {
   flex: 1;
   min-width: 0;
@@ -1437,7 +1401,6 @@ a { color: var(--accent-hover); }
 }
 
 .view-header {
-  /* Grows and wraps in narrow panes: a fixed 56px pushed wrapped actions out of the top edge. */
   min-height: 56px;
   flex: none;
   padding: 10px 20px;
@@ -1465,9 +1428,6 @@ a { color: var(--accent-hover); }
   padding: 20px;
 }
 
-/* =============================================================================
-   Unified Editor Layout (Entity, Trait Template, Asset)
-   ============================================================================= */
 
 .editor-page-surface,
 .entity-page-surface {
@@ -1482,7 +1442,6 @@ a { color: var(--accent-hover); }
   overflow-y: auto;
 }
 
-/* Hero card */
 .editor-hero-card,
 .entity-hero-card {
   display: flex;
@@ -1641,6 +1600,16 @@ a { color: var(--accent-hover); }
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
+.template-pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
 .editor-validation-pill {
   font-size: 10px;
   font-weight: 600;
@@ -1726,7 +1695,6 @@ a { color: var(--accent-hover); }
   background: var(--status-danger-subtle) !important;
 }
 
-/* Tab bar */
 .editor-tabs,
 .entity-tabs {
   display: flex;
@@ -1806,7 +1774,6 @@ a { color: var(--accent-hover); }
   color: var(--text-muted);
 }
 
-/* Content cards */
 .editor-content-stack,
 .entity-content-stack {
   display: flex;
@@ -1902,7 +1869,6 @@ a { color: var(--accent-hover); }
   scrollbar-width: thin;
 }
 
-/* Narrow pane include controls */
 .include-controls-row {
   display: flex;
   gap: 8px;
@@ -1951,7 +1917,6 @@ a { color: var(--accent-hover); }
   flex-wrap: wrap;
 }
 
-/* Asset version form responsive storage row and grids */
 .form-grid-2col {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1995,7 +1960,6 @@ a { color: var(--accent-hover); }
   }
 }
 
-/* Card Grid */
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -2087,7 +2051,6 @@ a { color: var(--accent-hover); }
   margin-top: auto;
 }
 
-/* Full-width Storylet Editor */
 .full-editor {
   display: flex;
   flex-direction: column;
@@ -2151,7 +2114,6 @@ a { color: var(--accent-hover); }
   width: 100%;
 }
 
-/* Form Controls */
 .form-group {
   margin-bottom: 16px;
 }
@@ -2176,7 +2138,6 @@ a { color: var(--accent-hover); }
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
 .form-input::placeholder, .form-textarea::placeholder { color: var(--text-dim); }
-/* Long values end in an ellipsis instead of a hard cut while the field is not being edited. */
 .form-input, .form-select { text-overflow: ellipsis; }
 .form-input:hover:not(:disabled):not(:focus), .form-select:hover:not(:disabled):not(:focus), .form-textarea:hover:not(:disabled):not(:focus) { border-color: var(--border-muted); }
 
@@ -2243,7 +2204,6 @@ a { color: var(--accent-hover); }
   border-color: var(--border-muted);
 }
 
-/* Destructive actions stay quiet until intended: outlined, filled on hover. */
 .btn-danger {
   background: transparent;
   border-color: rgba(251, 90, 116, 0.45);
@@ -2251,7 +2211,6 @@ a { color: var(--accent-hover); }
 }
 .btn-danger:hover:not(:disabled) { background: var(--status-danger); border-color: var(--status-danger); color: #1a0308; }
 
-/* Toast Notifications */
 .notification-toast {
   position: absolute;
   bottom: 16px;
@@ -2281,10 +2240,6 @@ a { color: var(--accent-hover); }
   to { transform: none; opacity: 1; }
 }
 
-/* ==========================================================================
-   SHARED UI LIBRARY (src/web/studio/components/ui): EmptyState, IconButton,
-   SearchField, SegmentedControl. Views compose these instead of restyling.
-   ========================================================================== */
 .ui-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 64px 24px; text-align: center; color: var(--text-muted); }
 .ui-empty__icon { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 4px; border-radius: 14px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 22px; }
 .ui-empty__title { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-main); }
@@ -2310,7 +2265,6 @@ a { color: var(--accent-hover); }
 .ui-icon-btn:active:not(:disabled) { transform: scale(0.92); }
 .ui-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .ui-icon-btn[aria-pressed="true"] { color: var(--accent-hover); }
-/* Reveal buttons stay faint until their host row/card is hovered or focused (touch: always visible). */
 .ui-icon-btn--reveal { opacity: 0.5; }
 .ui-reveal-host:hover .ui-icon-btn--reveal, .ui-reveal-host:focus-within .ui-icon-btn--reveal, .ui-icon-btn--reveal:focus-visible { opacity: 1; }
 @media (hover: none) { .ui-icon-btn--reveal { opacity: 1; } }
@@ -2325,7 +2279,6 @@ a { color: var(--accent-hover); }
 
 .ui-switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; cursor: pointer; }
 .ui-switch.is-disabled { cursor: not-allowed; }
-/* Disabled: the control reads as off and inactive, while the hint that explains why stays readable. */
 .ui-switch.is-disabled .ui-switch__label { color: var(--text-muted); }
 .ui-switch.is-disabled .ui-switch__track { opacity: 0.45; }
 .ui-switch.is-disabled .ui-switch__input + .ui-switch__track { background: rgba(255, 255, 255, 0.14); }
@@ -2340,7 +2293,6 @@ a { color: var(--accent-hover); }
 .ui-switch__input:checked + .ui-switch__track .ui-switch__thumb { transform: translateX(16px); }
 .ui-switch__input:focus-visible + .ui-switch__track { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 
-/* Appearance popover (toolbar) ------------------------------------------------ */
 .appearance { position: relative; flex: none; }
 .appearance__panel {
   position: absolute;
@@ -2405,7 +2357,6 @@ a { color: var(--accent-hover); }
   .studio-toolbar__title, .studio-toolbar__status { display: none; }
   .studio-toolbar__brand { padding-right: 6px; }
   .studio-toolbar__link { flex-shrink: 0; padding: 0 10px; }
-  /* One pane at a time on phones: side panes stay mounted but hidden. */
   .pane-workspace__slot { inset: 0 !important; width: auto !important; height: auto !important; }
   .pane-workspace__slot:not(:has(.studio-pane.is-main)) { display: none; }
   .pane-workspace__handle { display: none; }
@@ -2414,11 +2365,6 @@ a { color: var(--accent-hover); }
   .appearance__panel { left: 8px; right: 8px; width: auto; }
 }
 
-/* ==========================================================================
-   PLAY (docs/design/playtest-ui.md). Shared studio tokens: rounded surfaces,
-   hairline borders. Cyan = focus/current, amber = choices, rose = endings and
-   failures, violet = knowledge. Story prose stays in the serif face.
-   ========================================================================== */
 
 .play-view { display: flex; flex-direction: column; gap: 16px; padding: 16px 24px; max-width: 920px; margin: 0 auto; width: 100%; }
 .play-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 4px; }
@@ -2484,7 +2430,6 @@ a { color: var(--accent-hover); }
 .play-field { display: flex; flex-direction: column; gap: 4px; }
 .play-field label, .play-options summary { font-size: 12px; font-weight: 600; color: var(--text-muted); }
 .play-options summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
-/* Flex summaries drop the native marker; draw a disclosure chevron so the fold reads as expandable. */
 .play-options summary::before, .play-advanced summary::before { content: ""; width: 6px; height: 6px; margin: 0 10px 0 2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 0.16s var(--ease-out); }
 .play-options[open] > summary::before, .play-advanced[open] > summary::before { transform: rotate(45deg); }
 .play-options summary::-webkit-details-marker, .play-advanced summary::-webkit-details-marker { display: none; }
@@ -2503,7 +2448,6 @@ a { color: var(--accent-hover); }
 
 @media (prefers-reduced-motion: reduce) { .play-choice { transition: none; } }
 
-/* Play: Inspect panel (closed by default; I toggles). Violet = knowledge kinds. */
 .play-layout { display: flex; gap: 16px; align-items: flex-start; }
 .play-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .play-inspect { flex: 0 0 340px; max-width: 100%; border: 1px solid var(--border-subtle); background: rgba(255, 255, 255, 0.025); padding: 14px; display: flex; flex-direction: column; gap: 12px; border-radius: var(--radius-lg); }
@@ -2530,7 +2474,6 @@ a { color: var(--accent-hover); }
 .play-inspect-toggle { align-self: flex-start; }
 @media (max-width: 900px) { .play-layout { flex-direction: column; } .play-inspect { flex-basis: auto; width: 100%; } }
 
-/* Play: where & when strip with moves and clock. */
 .play-place__actions { color: var(--text-muted); }
 .play-place__actions.is-out { color: var(--tertiary); }
 .play-moves { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -2545,7 +2488,6 @@ a { color: var(--accent-hover); }
 .play-world-notes { list-style: none; margin: 0; padding: 0 0 0 10px; border-left: 2px solid var(--tertiary); color: var(--text-muted); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
 @media (prefers-reduced-motion: reduce) { .play-chip { transition: none; } }
 
-/* Coverage inherits the Play visual contract. */
 .coverage { display: flex; flex-direction: column; gap: 18px; max-width: 760px; }
 .coverage__header, .coverage__violation, .coverage__bar-row > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .coverage__form { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }

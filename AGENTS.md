@@ -2,19 +2,21 @@
 conduct deep research and verify all source validity , build prototype code to check if a research topic ( algorithm, methods) is viable
 
 # When coding
-use graphify to query
-call agent with small model to build project knowledge
-use uv for python
-use bun for typescript
-use pnpm for javascript
-use rust for anything lowlevel and highperformance
-use C or C++ only if nessary like Unreal Code
+use graphicle or graphify to query, update graphify or graphicle after code change  
+call agent with small model to build project knowledge  
+use uv for python  
+use bun for typescript  
+use pnpm for javascript  
+use rust for anything lowlevel and highperformance  
+use C or C++ only if nessary like Unreal Code  
 use unsloth for lora trainning
 
 #architecture
 use mvvm
 use data oriented design architecture
 local first
+
+NO CODE COMMENTS
 
 # UX Skill
 For frontend work, use the installed ux-skill tooling where relevant. If a project `DESIGN.md` exists, treat it as the visual-system source of truth.

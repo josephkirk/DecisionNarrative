@@ -45,7 +45,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return (await resp.json()) as T;
 }
 
-/** The slice of the runs client the play view-model depends on (kept small so tests can fake it). */
 export interface RunsApi {
   start(input: RunStartInput): Promise<RunEnvelope>;
   view(id: string, participant: number): Promise<RunEnvelope>;
@@ -88,12 +87,10 @@ const runs: RunsApi & {
 export const StudioApi = {
   runs,
 
-  // Authoring options
   getAuthoringOptions(): Promise<AuthoringOptions> {
     return request<AuthoringOptions>("/api/v3/authoring-options");
   },
 
-  // Project
   getProject(): Promise<ProjectMetadata> {
     return request<ProjectMetadata>("/api/v3/project");
   },
@@ -122,7 +119,6 @@ export const StudioApi = {
       body: JSON.stringify(context),
     });
   },
-  // Library
   queryLibrary(params: Record<string, string | number>): Promise<LibraryPageResult> {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {
@@ -133,7 +129,6 @@ export const StudioApi = {
     return request<LibraryPageResult>(`/api/v3/library?${q.toString()}`);
   },
 
-  // Content CRUD
   listContent<T>(entity: string): Promise<T[]> {
     return request<T[]>(`/api/v3/content/${encodeURIComponent(entity)}`);
   },

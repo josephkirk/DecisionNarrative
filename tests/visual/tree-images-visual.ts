@@ -1,5 +1,3 @@
-// Visual regression test: TreeGraph image upload, drag, resize, lock/unlock, node lock, layering, and persistence.
-// Run: node tests/visual/tree-images-visual.ts
 import { chromium, type Locator } from "playwright-core";
 import fs from "node:fs";
 import os from "node:os";
@@ -82,12 +80,10 @@ async function getSize(loc: Locator) {
 
 let browser;
 try {
-  // Wait for service to be ready
   for (let i = 0; i < 50; i++) {
     try {
       if ((await fetch(base + "/api/v3/project")).ok) break;
     } catch {
-      /* starting */
     }
     await sleep(200);
   }
@@ -101,7 +97,6 @@ try {
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("dialog", (d) => void d.accept());
 
-  // 1. Initialize trait templates by navigating to the studio
   await page.goto(`${base}/#/storylets`);
   let graphTrait: { id: string; key: string } | undefined;
   let itemTrait: { id: string; key: string } | undefined;
@@ -115,19 +110,18 @@ try {
   check("tree traits initialized on app load", !!graphTrait && !!itemTrait);
   if (!graphTrait || !itemTrait) throw new Error("TreeGraph or TreeItem trait template not found");
 
-  // 2. Create at least two nodes and tree-owner with wire
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-a",
     name: "Node A",
     traits: [{ id: "ti-a", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-b",
     name: "Node B",
     traits: [{ id: "ti-b", template_id: itemTrait.id, values: {} }],
   });
 
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "tree-owner",
     name: "Tree Owner",
     traits: [
@@ -144,8 +138,7 @@ try {
     ],
   });
 
-  // 3. Open Tree tab
-  await page.goto(`${base}/#/entity-templates/tree-owner`);
+  await page.goto(`${base}/#/entities/tree-owner`);
   await page.reload();
   const treeTab = page.getByRole("button", { name: "Tree", exact: true });
   await treeTab.waitFor();
@@ -160,7 +153,6 @@ try {
   await wire.waitFor({ state: "attached" });
   check("nodes and wire rendered on tree canvas", (await nodeA.isVisible()) && (await nodeB.isVisible()) && (await wire.count()) === 1);
 
-  // 4. Use canvas menu and real PNG upload (buffer via setInputFiles) to add image
   const canvasActionsBtn = page.getByRole("button", { name: "Canvas actions" });
   await canvasActionsBtn.waitFor();
   await canvasActionsBtn.click();
@@ -193,14 +185,12 @@ try {
     });
   }
 
-  // Verify image renders
   const imageEl = page.locator(".tree-canvas-image");
   await imageEl.waitFor({ timeout: 10000 });
   check("image renders in .tree-image layer", await imageEl.isVisible());
   await imageEl.locator("img").evaluate(async (img: HTMLImageElement) => { await img.decode(); });
   check("uploaded image bytes render", await imageEl.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth > 0));
 
-  // A short image menu should stay near its anchor even in a short canvas.
   const canvas = page.locator(".tree-scroll");
   await canvas.evaluate((element: HTMLElement) => { element.style.height = "390px"; });
   await imageEl.scrollIntoViewIfNeeded();
@@ -216,11 +206,9 @@ try {
   await canvas.evaluate((element: HTMLElement) => { element.style.height = ""; });
   await sleep(100);
 
-  // 5. Verify image can drag and resize
   const initialPos = await getPos(imageEl);
   const initialBox = (await imageEl.boundingBox())!;
 
-  // Drag image by moving mouse
   await page.mouse.move(initialBox.x + initialBox.width / 2, initialBox.y + 12);
   await page.mouse.down();
   await page.mouse.move(initialBox.x + initialBox.width / 2 + 50, initialBox.y + 52, { steps: 5 });
@@ -234,7 +222,6 @@ try {
     `from (${initialPos.x}, ${initialPos.y}) to (${draggedPos.x}, ${draggedPos.y})`,
   );
 
-  // Resize image using south-east resize handle
   const initialSize = await getSize(imageEl);
   await imageEl.hover({ position: { x: 10, y: 10 } });
   const resizeHandle = imageEl.locator(".tree-image-resize.resize-se");
@@ -253,7 +240,6 @@ try {
     `from ${initialSize.width}x${initialSize.height} to ${resizedSize.width}x${resizedSize.height}`,
   );
 
-  // Move the image under the wire using the keyboard, then check actual hit order.
   const wirePoint = await wire.evaluate((el: SVGPathElement) => {
     const p = el.getPointAtLength(el.getTotalLength() / 2);
     return { x: p.x, y: p.y };
@@ -276,7 +262,6 @@ try {
   for (let i = 0; i < Math.abs(stepsX); i++) await page.keyboard.press(stepsX < 0 ? "ArrowRight" : "ArrowLeft");
   for (let i = 0; i < Math.abs(stepsY); i++) await page.keyboard.press(stepsY < 0 ? "ArrowDown" : "ArrowUp");
 
-  // 6. Lock image prevents movement
   const imgBoxBeforeLock = (await imageEl.boundingBox())!;
   await page.mouse.click(imgBoxBeforeLock.x + imgBoxBeforeLock.width / 2, imgBoxBeforeLock.y + imgBoxBeforeLock.height / 2, { button: "right" });
   await contextMenu.waitFor();
@@ -302,7 +287,6 @@ try {
     `position remained (${posLockedAfterDrag.x}, ${posLockedAfterDrag.y})`,
   );
 
-  // 7. Unlock permits movement
   const lockedBoxAfterPan = (await imageEl.boundingBox())!;
   await page.mouse.click(lockedBoxAfterPan.x + lockedBoxAfterPan.width / 2, lockedBoxAfterPan.y + lockedBoxAfterPan.height / 2, { button: "right" });
   await contextMenu.waitFor();
@@ -325,7 +309,6 @@ try {
     `moved to (${posAfterUnlockDrag.x}, ${posAfterUnlockDrag.y})`,
   );
 
-  // 8. Node lock prevents movement/resize while still allowing context menu
   const nodeAOptions = nodeA.locator('.tree-remove[aria-label="Options for Node A"]');
   await nodeAOptions.waitFor();
   await nodeAOptions.click();
@@ -340,7 +323,6 @@ try {
   const nodeAResizeHandles = await nodeA.locator(".tree-resize").count();
   check("locked node removes resize handles", nodeAResizeHandles === 0);
 
-  // Try dragging locked node A
   const nodeAPosBefore = await getPos(nodeA);
   const nodeABox = (await nodeA.boundingBox())!;
   await page.mouse.move(nodeABox.x + 30, nodeABox.y + 30);
@@ -356,7 +338,6 @@ try {
     `position remained (${nodeAPosAfter.x}, ${nodeAPosAfter.y})`,
   );
 
-  // Context menu still opens on locked node
   await nodeAOptions.click();
   await contextMenu.waitFor();
   const unlockNodeBtn = contextMenu.getByRole("button", { name: "Unlock node" });
@@ -366,8 +347,6 @@ try {
   await page.keyboard.press("Escape");
   await sleep(100);
 
-  // 9. Save/reload and assert image and node locks persisted
-  // Lock image again before save
   const imgBoxBeforeSave = (await imageEl.boundingBox())!;
   await page.mouse.click(imgBoxBeforeSave.x + imgBoxBeforeSave.width / 2, imgBoxBeforeSave.y + imgBoxBeforeSave.height / 2, { button: "right" });
   await contextMenu.waitFor();
@@ -388,14 +367,12 @@ try {
   check("image lock persisted after reload", await imageEl.evaluate((el) => el.classList.contains("is-locked")));
 
 
-  // Unlock image so we can reposition it under Node B
   const reloadedImgBox = (await imageEl.boundingBox())!;
   await page.mouse.click(reloadedImgBox.x + reloadedImgBox.width / 2, reloadedImgBox.y + reloadedImgBox.height / 2, { button: "right" });
   await contextMenu.waitFor();
   await contextMenu.getByRole("button", { name: "Unlock image" }).click();
   await sleep(100);
 
-  // Drag image to overlap Node B
   const nodeBBox = (await nodeB.boundingBox())!;
   const curImgBox = (await imageEl.boundingBox())!;
   await page.mouse.move(curImgBox.x + curImgBox.width / 2, curImgBox.y + curImgBox.height / 2);
@@ -404,7 +381,6 @@ try {
   await page.mouse.up();
   await sleep(150);
 
-  // Test elementsFromPoint at Node B center
   const layering = await page.evaluate(
     ({ x, y }) => {
       const els = document.elementsFromPoint(x, y);
@@ -420,7 +396,6 @@ try {
     `nodeIndex: ${layering.nodeIndex}, imageIndex: ${layering.imageIndex}`,
   );
 
-  // 11. Exported graph contains image
   const viewOptionsSummary = page.locator(".tree-options summary");
   await viewOptionsSummary.click();
   const exportBtn = page.getByRole("button", { name: "Export JSON" });

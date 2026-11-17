@@ -3,7 +3,6 @@ import type {
   AssetRecord,
   ContentRoot,
   EntityRecord,
-  EntityTemplateRecord,
   FolderRecord,
   StoryletRecord,
   TraitTemplateRecord,
@@ -20,7 +19,6 @@ export interface ContentRootDefinition {
 export const CONTENT_ROOTS: ContentRootDefinition[] = [
   { root: "storylets", label: "Storylets", kind: "storylets", newLabel: "New Storylet" },
   { root: "entities", label: "Entities", kind: "entities", newLabel: "New Entity" },
-  { root: "entity_templates", label: "Entity Templates", kind: "entity_templates", newLabel: "New Entity Template" },
   { root: "trait_templates", label: "Traits", kind: "trait_templates", newLabel: "New Trait" },
   { root: "assets", label: "Assets", kind: "assets", newLabel: "New Asset" },
 ];
@@ -33,7 +31,6 @@ export function itemRoute(root: ContentRoot | string, id: string): string {
   switch (root) {
     case "entities": return `/entities/${encodeURIComponent(id)}`;
     case "storylets": return `/storylets/${encodeURIComponent(id)}/edit`;
-    case "entity_templates": return `/entity-templates/${encodeURIComponent(id)}`;
     case "trait_templates": return `/trait-templates/${encodeURIComponent(id)}`;
     case "assets": return `/assets/${encodeURIComponent(id)}`;
     default: return "/";
@@ -47,6 +44,7 @@ export interface TreeItem {
   folderId: string | null;
   thumbnail: string | null;
   detail: string;
+  isTemplate?: boolean;
 }
 
 export interface TreeSource {
@@ -75,7 +73,6 @@ export interface BuildTreeInput {
   projectName: string;
   folders: FolderRecord[];
   entities: EntityRecord[];
-  entityTemplates: EntityTemplateRecord[];
   traitTemplates: TraitTemplateRecord[];
   assets: AssetRecord[];
   storylets: StoryletRecord[];
@@ -101,16 +98,7 @@ export function buildTreeItems(input: BuildTreeInput): TreeSource {
       folderId: entity.folder_id ?? null,
       thumbnail: entity.thumbnail ?? null,
       detail: traitLabels(entity, input.traitTemplates).join(" · ") || "No traits",
-    });
-  }
-  for (const entity of input.entityTemplates) {
-    items.push({
-      root: "entity_templates",
-      id: entity.id,
-      label: entity.name,
-      folderId: entity.folder_id ?? null,
-      thumbnail: entity.thumbnail ?? null,
-      detail: traitLabels(entity, input.traitTemplates).join(" · ") || "No traits",
+      isTemplate: entity.is_template === true,
     });
   }
   for (const template of input.traitTemplates) {
@@ -148,6 +136,7 @@ export interface TreeRow {
   folderId?: string | null;
   thumbnail?: string | null;
   detail?: string;
+  isTemplate?: boolean;
   hasChildren: boolean;
   expanded: boolean;
 }
@@ -172,7 +161,6 @@ export function defaultExpandedKeys(): string[] {
   return [projectKey(), ...CONTENT_ROOTS.map((entry) => rootKey(entry.root))];
 }
 
-/** Natural order: "Clerk 2" sorts before "Clerk 10". */
 function compareLabels(left: string, right: string): number {
   return left.localeCompare(right, undefined, { sensitivity: "base", numeric: true });
 }
@@ -215,8 +203,6 @@ export function flattenTree(input: {
       matchedItems.add(itemKey(item.root, item.id));
       keepAncestors(item.root, item.folderId);
     }
-    // A folder name is a reasonable thing to search for, so a matching folder and
-    // its ancestors stay visible even when no item inside matches.
     for (const folder of input.folders) {
       if (!folder.name.toLowerCase().includes(query)) continue;
       keepAncestors(folder.root, folder.id);
@@ -273,6 +259,7 @@ export function flattenTree(input: {
       folderId: item.folderId,
       thumbnail: item.thumbnail,
       detail: item.detail,
+      isTemplate: item.isTemplate === true,
       hasChildren: false,
       expanded: false,
     });

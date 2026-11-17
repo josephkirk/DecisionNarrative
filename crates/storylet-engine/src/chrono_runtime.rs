@@ -1,36 +1,20 @@
-//! Token-driven flow graph, scene timeline, and call-history runtime for the v5
-//! contract (CFN-SPEC-001 Modules 3, 4, 5, and 6).
-//!
-//! `FlowGraphAsset` is the immutable topology: nodes, pins, and edges with
-//! persistent globally unique node GUIDs. `FlowGraphInstance` is one active
-//! execution of that asset: node states, the flat `SignalToken` vector, the
-//! fixed-point integer-millisecond clock, and the call history. World state and
-//! storylet policy come from `chrono_state` and `chrono_dispatch`; this module
-//! owns execution order, node call data, and the reversible records that make
-//! rollback exact.
-//!
-//! Determinism: tokens are consumed in ascending token id order, node lookups are
-//! ordered by node GUID or name, action parts are ordered by priority key then
-//! combiner entity, and every tie is broken by a stable key. Nothing here reads a
-//! wall clock or a random source; the caller supplies the seed.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::chrono_completion::StoryletBitset;
 use crate::chrono_chronicle::ChronIx;
-use crate::chrono_participants::{FactIx, KnowKind, KnowledgeRow, PartIx};
+use crate::chrono_completion::StoryletBitset;
 use crate::chrono_dispatch::{DispatchError, UnifiedDispatcher, WaypointStep, WaypointTopicGraph};
+use crate::chrono_participants::{FactIx, KnowKind, KnowledgeRow, PartIx};
 use crate::chrono_state::{
-    apply_mutation, apply_mutation_with_registry, apply_passion_mutation, revert_delta,
-    AttributeValue, BijectiveDelta, ChronoStateError, EntityTagMutation, GameplayTagRegistry, GraphTransformRule, MutationOp,
-    PassionMutation, PassionRegistry, TagBitset, WorldStateTable, MAX_TAGS,
+    AttributeValue, BijectiveDelta, ChronoStateError, EntityTagMutation, GameplayTagRegistry,
+    GraphTransformRule, MAX_TAGS, MutationOp, PassionMutation, PassionRegistry, TagBitset,
+    WorldStateTable, apply_mutation, apply_mutation_with_registry, apply_passion_mutation,
+    revert_delta,
 };
 
-/// Operators used by typed condition and comparison nodes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PredicateOperator {
@@ -42,18 +26,12 @@ pub enum PredicateOperator {
     Lt,
     Lte,
 }
-/// Input pin name used when a call record is synthesized by replay or invoke.
 pub const DEFAULT_INPUT_PIN: &str = "In";
 
-/// Output pin name used when a node completes without an authored choice.
 pub const DEFAULT_OUTPUT_PIN: &str = "Out";
 
-/// Hard per-tick execution cap. Zero-cost cycles are rejected by
-/// `FlowGraphAsset::validate`; this cap also stops assets that bypassed
-/// validation from hanging the frame loop.
 pub const MAX_TICK_EXECUTIONS: usize = 4096;
 
-/// Node categories from REQ-FG-04.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeCategory {
@@ -65,7 +43,6 @@ pub enum NodeCategory {
     ScopedContainer,
 }
 
-/// Node execution states from REQ-FG-05.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeExecutionState {
@@ -76,7 +53,6 @@ pub enum NodeExecutionState {
     Aborted,
 }
 
-/// Composer activity for one action part inside a scene time window (REQ-SC-02).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventOverlapActivity {
@@ -86,8 +62,6 @@ pub enum EventOverlapActivity {
     EndActivity,
 }
 
-/// Timeline action classes, ordered by the composer priority key used for
-/// dispatch order and conflict arbitration (REQ-SC-03). Higher values win.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TimelineActionType {
@@ -100,8 +74,6 @@ pub enum TimelineActionType {
 }
 
 impl TimelineActionType {
-    /// Priority key for a timeline action. Authors may add a positive offset on
-    /// the event itself; the table value is the base.
     pub const fn action_key_priority(&self) -> i32 {
         match self {
             TimelineActionType::WorkspotPose => 0,
@@ -113,7 +85,6 @@ impl TimelineActionType {
     }
 }
 
-/// Typed values carried by graph data pins. Data edges never schedule execution.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum DataValue {
@@ -129,14 +100,21 @@ pub enum DataValue {
 impl DataValue {
     pub fn type_name(&self) -> &'static str {
         match self {
-            Self::Bool(_) => "bool", Self::Int(_) => "int", Self::Float(_) => "float",
-            Self::String(_) => "string", Self::Asset(_) => "asset",
-            Self::EntityRef(_) => "entity_ref", Self::Array(_) => "array",
+            Self::Bool(_) => "bool",
+            Self::Int(_) => "int",
+            Self::Float(_) => "float",
+            Self::String(_) => "string",
+            Self::Asset(_) => "asset",
+            Self::EntityRef(_) => "entity_ref",
+            Self::Array(_) => "array",
         }
     }
     pub fn same_type(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Array(a), Self::Array(b)) => a.first().zip(b.first()).map_or(true, |(x,y)| x.same_type(y)),
+            (Self::Array(a), Self::Array(b)) => a
+                .first()
+                .zip(b.first())
+                .map_or(true, |(x, y)| x.same_type(y)),
             _ => self.type_name() == other.type_name(),
         }
     }
@@ -158,17 +136,19 @@ pub struct DataEdgeConnection {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PropertyOperation { Set, Add, Subtract, Toggle }
+pub enum PropertyOperation {
+    Set,
+    Add,
+    Subtract,
+    Toggle,
+}
 
-
-/// One pin on a node.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PinDefinition {
     pub pin_name: String,
     pub is_input: bool,
 }
 
-/// One edge between two pins (REQ-FG-02).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EdgeConnection {
     pub source_node_guid: u32,
@@ -177,23 +157,18 @@ pub struct EdgeConnection {
     pub target_pin_name: String,
 }
 
-/// Flat signal token (REQ-FG-03): 32 bytes, no heap payload. The pin is an
-/// index into the target node's `input_pins`; status lives in `flags`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalToken {
     pub token_id: u64,
     pub graph_instance_id: u64,
     pub target_node_guid: u32,
-    /// Position in the target node's `input_pins`; the asset owns the name.
     pub target_pin_index: u16,
     pub flags: u16,
     pub time_budget_ms: i32,
     pub deferred_until_ms: i32,
 }
 
-/// Token is waiting to be consumed.
 pub const TOKEN_ACTIVE: u16 = 1 << 0;
-/// Token was budget-starved and parked until `deferred_until_ms`.
 pub const TOKEN_DEFERRED: u16 = 1 << 1;
 
 impl SignalToken {
@@ -222,18 +197,13 @@ impl SignalToken {
     }
 }
 
-/// Clamp a millisecond budget into the token's packed i32 range.
 fn clamp_token_ms(value: i64) -> i32 {
     value.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
-/// Absolute deferred deadlines must fit the packed token; overflowing would
-/// silently turn the deadline into "wake immediately".
 fn checked_token_ms(value: i64) -> Result<i32, GraphError> {
     i32::try_from(value).map_err(|_| GraphError::TokenClockOverflow { value })
 }
-/// Host-consumable edge emitted when a passion crosses a configured threshold.
-/// Rollback emits the inverse edge; callers can activate or cancel the linked asset.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PassionThresholdTriggerEvent {
     pub node_guid: u32,
@@ -243,7 +213,6 @@ pub struct PassionThresholdTriggerEvent {
     pub activated: bool,
 }
 
-/// One authored node: identity, category, behavior, and pins (REQ-FG-01).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlowNodeDef {
     pub node_guid: u32,
@@ -252,7 +221,6 @@ pub struct FlowNodeDef {
     pub kind: NodeKind,
     #[serde(default)]
     pub entity_path: String,
-    /// Execution pins carried by flow edges. These are distinct from typed data pins.
     #[serde(default)]
     pub input_pins: Vec<PinDefinition>,
     #[serde(default)]
@@ -261,59 +229,96 @@ pub struct FlowNodeDef {
     pub data_input_pins: Vec<DataPinDefinition>,
     #[serde(default)]
     pub data_output_pins: Vec<DataPinDefinition>,
-    /// Integer milliseconds charged against the frame budget when this node runs.
     #[serde(default)]
     pub cost_ms: i64,
-    /// Mission node that owns this node's invocations, when scoped (REQ-CH-04).
     #[serde(default)]
     pub mission_scope: Option<u32>,
-    /// Authored labels and content preserved for UI and MCP consumers.
     #[serde(default)]
     pub payload: serde_json::Value,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Visibility { Private, CoLocated }
+pub enum Visibility {
+    Private,
+    CoLocated,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum HolderRef { Acting, Participant(PartIx) }
+pub enum HolderRef {
+    Acting,
+    Participant(PartIx),
+}
 
-/// Node behavior. Every kind is executable through the same three endpoints
-/// (`ExecuteNormal`, `ForceComplete`, `CancelAndRevert`).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NodeKind {
-    Learn { fact: FactIx, #[serde(rename = "knowledge_kind")] kind: KnowKind, visibility: Visibility },
-    MoveParticipant { location_entity: u16 },
-    /// Tells the acting participant a canon chronicle entry (and, when
-    /// co-located, witnesses) and teaches them its facts. `facts` is copied
-    /// from the entry at compile time so execution needs no chronicle lookup.
-    Reveal { entry: ChronIx, #[serde(rename = "knowledge_kind")] kind: KnowKind, visibility: Visibility, #[serde(default)] facts: Vec<FactIx> },
-    Knows { holder: HolderRef, fact: FactIx, confirmed_only: bool },
-    /// True when the acting participant shares a location with another participant.
-    Colocated { participant: PartIx },
-    GetEntity { entity_id: String },
-    GetEntityProperty { property_key: String, value_type: String },
-    ApplyCommand { property_key: String, operation: PropertyOperation, value: DataValue },
+    Learn {
+        fact: FactIx,
+        #[serde(rename = "knowledge_kind")]
+        kind: KnowKind,
+        visibility: Visibility,
+    },
+    MoveParticipant {
+        location_entity: u16,
+    },
+    Reveal {
+        entry: ChronIx,
+        #[serde(rename = "knowledge_kind")]
+        kind: KnowKind,
+        visibility: Visibility,
+        #[serde(default)]
+        facts: Vec<FactIx>,
+    },
+    Knows {
+        holder: HolderRef,
+        fact: FactIx,
+        confirmed_only: bool,
+    },
+    Colocated {
+        participant: PartIx,
+    },
+    GetEntity {
+        entity_id: String,
+    },
+    GetEntityProperty {
+        property_key: String,
+        value_type: String,
+    },
+    ApplyCommand {
+        property_key: String,
+        operation: PropertyOperation,
+        value: DataValue,
+    },
     InventoryAdd,
     InventoryRemove,
     InventoryHas,
-    HasEntityTag { entity_id: String, tag: String, match_mode: String },
-    Compare { operator: PredicateOperator, literal: DataValue },
-    Condition { operator: PredicateOperator, literal: Option<DataValue> },
+    HasEntityTag {
+        entity_id: String,
+        tag: String,
+        match_mode: String,
+    },
+    Compare {
+        operator: PredicateOperator,
+        literal: DataValue,
+    },
+    Condition {
+        operator: PredicateOperator,
+        literal: Option<DataValue>,
+    },
     And,
     Or,
-    TagMutation { op: MutationOp, adding: bool },
+    TagMutation {
+        op: MutationOp,
+        adding: bool,
+    },
     Mutation {
         op: MutationOp,
     },
-    /// Apply an attributed world-graph transformation and cache its exact inverse.
     GraphTransform {
         rule: GraphTransformRule,
     },
-    /// Reversible Star-NPC passion mutation with threshold graph events.
     PassionMutation {
         op: PassionMutation,
     },
@@ -321,8 +326,6 @@ pub enum NodeKind {
         duration_ms: i64,
         #[serde(default)]
         required_tags: TagBitset,
-        /// Named wait event from the authored graph. A waiter also wakes when
-        /// `signal_event` delivers this name, independently of its timer.
         #[serde(default)]
         wait_event: String,
     },
@@ -366,21 +369,17 @@ pub enum NodeKind {
     End {
         #[serde(default)]
         jump_to_storylet: Option<u16>,
-        /// When present on a pure precondition graph, determines candidate validity.
         #[serde(default = "default_precondition_result")]
         precondition_result: bool,
     },
-    /// Boolean value or branch gate driven by a typed data input.
-    /// Explicit deferred invoke target, preserved from the legacy
     Teleport {
         #[serde(default)]
         destination_storylet: Option<u16>,
         #[serde(default)]
         destination_node_guid: Option<u32>,
-    }
+    },
 }
 
-/// One entry on a scene section timeline track (REQ-SC-01).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimelineTrackEvent {
     pub event_id: u64,
@@ -389,15 +388,12 @@ pub struct TimelineTrackEvent {
     pub start_time_ms: i64,
     pub duration_ms: i64,
     pub payload_asset_id: String,
-    /// Pose captured before this event overwrote it, used by reverse scrubbing.
     #[serde(default)]
     pub cached_previous_pose_id: String,
-    /// Author offset added to the action-type priority key.
     #[serde(default)]
     pub priority_offset: i32,
 }
 
-/// One resolved timeline action inside a time window (REQ-SC-02).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionPart {
     pub action_key_priority: i32,
@@ -407,7 +403,6 @@ pub struct ActionPart {
     pub event_ref: TimelineTrackEvent,
 }
 
-/// A command the composer dispatches after arbitration.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComposerCommand {
     pub node_guid: u32,
@@ -419,7 +414,6 @@ pub struct ComposerCommand {
     pub cached_previous_pose_id: String,
 }
 
-/// A recorded composer conflict: the winner and the parts it displaced.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComposerConflict {
     pub combiner_entity_path: String,
@@ -427,7 +421,6 @@ pub struct ComposerConflict {
     pub rejected: Vec<ComposerCommand>,
 }
 
-/// Per-entity pose arbitration for one scene section (REQ-SC-03).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SceneComposer {
     pub actor_pose: BTreeMap<String, String>,
@@ -435,7 +428,6 @@ pub struct SceneComposer {
     pub conflicts: Vec<ComposerConflict>,
 }
 
-/// One call-history record (REQ-CH-01).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallHistoryEntry {
     pub node_guid: u32,
@@ -461,12 +453,10 @@ pub struct CallHistoryEntry {
     pub tick: u32,
     #[serde(default)]
     pub completed: bool,
-    /// Canonical authored choice identity: `(node_guid << 16) | choice_index`.
     #[serde(default)]
     pub choice_key: Option<u64>,
 }
 
-/// One save-replay record: a call-history entry plus the frame it was played on.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SaveReplayEntry {
     pub node_guid: u32,
@@ -477,7 +467,6 @@ pub struct SaveReplayEntry {
     pub frame_ms: i64,
 }
 
-/// Per-node inverse cache. `CancelAndRevert` pops these in LIFO order.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeCallData {
@@ -487,15 +476,12 @@ pub enum NodeCallData {
     Storylet {
         storylet_id: u16,
         delta: BijectiveDelta,
-        /// Completion clock before this call, restored on rollback so a
-        /// rolled-back storylet is not left on cooldown.
         #[serde(default)]
         previous_completed_ms: Option<i64>,
     },
     WaypointStep {
         previous_topic_id: String,
         edge_id: String,
-        /// Authored line/asset the host should speak on this transition.
         #[serde(default)]
         dialogue_transition_asset_id: Option<String>,
         delta: BijectiveDelta,
@@ -503,8 +489,6 @@ pub enum NodeCallData {
     SceneSection {
         previous_clock_ms: i64,
         previous_poses: Vec<ScenePoseUndo>,
-        /// History commit created when the section completed; reopening is
-        /// only safe when this is the current head.
         #[serde(default)]
         completion_commit: Option<usize>,
     },
@@ -532,7 +516,6 @@ pub struct ScenePoseUndo {
 }
 
 impl NodeCallData {
-    /// The recorded delta, when the record carries one.
     pub fn delta(&self) -> Option<&BijectiveDelta> {
         match self {
             NodeCallData::Delta { delta }
@@ -543,7 +526,6 @@ impl NodeCallData {
     }
 }
 
-/// Runtime state for one node (REQ-FG-05).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlowNodeInstance {
     pub node_guid: u32,
@@ -552,25 +534,17 @@ pub struct FlowNodeInstance {
     pub executed_input_pin: Option<String>,
     pub chosen_output_pin: Option<String>,
     pub chosen_storylet_id: Option<u16>,
-    /// LIFO inverse cache for `CancelAndRevert`.
     pub call_data: Vec<NodeCallData>,
-    /// Input pins already arrived, for AND-gate fan-in.
     pub arrived_input_pins: BTreeSet<String>,
-    /// Completion lock keyed by storylet id, matching the dispatcher contract.
     pub completed_storylets: BTreeSet<u16>,
     pub current_topic_id: String,
     pub edge_use_counts: BTreeMap<String, u64>,
-    /// Mission-scoped invocations (REQ-CH-04).
     pub local_call_history: Vec<CallHistoryEntry>,
-    /// The nested instance a MissionSubGraph node owns (REQ-CH-04, spec §8.2).
     pub sub_graph: Option<Box<FlowGraphInstance>>,
     pub section_clock_ms: i64,
     pub waiter_wake_ms: i64,
 }
 
-/// One committed call-history record. The engine is a commit DAG: each commit
-/// points at its parent, so two clients that diverged can be reconciled by their
-/// lowest common ancestor (REQ-CH-05).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct HistoryCommit {
     pub index: usize,
@@ -579,10 +553,8 @@ pub struct HistoryCommit {
     pub delta: BijectiveDelta,
 }
 
-/// Persistent call-history engine (REQ-CH-05).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PersistentHistoryEngine {
-    /// Commit 0 is the root: an empty entry with no parent.
     pub commits: Vec<HistoryCommit>,
     pub head: usize,
 }
@@ -595,7 +567,6 @@ impl PersistentHistoryEngine {
         }
     }
 
-    /// Append a commit under `parent` and return its index.
     pub fn commit(
         &mut self,
         entry: &CallHistoryEntry,
@@ -612,7 +583,6 @@ impl PersistentHistoryEngine {
         index
     }
 
-    /// Append a commit under the current head.
     pub fn commit_for(&mut self, entry: &CallHistoryEntry, delta: &BijectiveDelta) -> usize {
         let index = self.commit(entry, delta, Some(self.head));
         self.head = index;
@@ -627,7 +597,6 @@ impl PersistentHistoryEngine {
         self.commits.get(index)
     }
 
-    /// Root-to-`commit` commit indices, in forward order.
     pub fn path_to(&self, commit: usize) -> Result<Vec<usize>, GraphError> {
         let mut path = Vec::new();
         let mut cursor = commit;
@@ -645,7 +614,6 @@ impl PersistentHistoryEngine {
         Ok(path)
     }
 
-    /// Entries on the path from the root to `commit`, root excluded.
     pub fn path_entries(&self, commit: usize) -> Result<Vec<CallHistoryEntry>, GraphError> {
         let mut entries = Vec::new();
         for &index in &self.path_to(commit)? {
@@ -657,7 +625,6 @@ impl PersistentHistoryEngine {
         Ok(entries)
     }
 
-    /// Entries on the path to the current head.
     pub fn call_history(&self) -> Result<Vec<CallHistoryEntry>, GraphError> {
         self.path_entries(self.head)
     }
@@ -666,7 +633,6 @@ impl PersistentHistoryEngine {
         Ok(self.path_to(commit)?.len() - 1)
     }
 
-    /// Lowest common ancestor of two commits (REQ-CH-05).
     pub fn lca(&self, left: usize, right: usize) -> Result<usize, GraphError> {
         let left_path = self.path_to(left)?;
         let right_path = self.path_to(right)?;
@@ -681,7 +647,6 @@ impl PersistentHistoryEngine {
     }
 }
 
-/// Immutable graph topology (REQ-FG-01).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlowGraphAsset {
     pub asset_id: String,
@@ -693,9 +658,6 @@ pub struct FlowGraphAsset {
 }
 
 impl FlowGraphAsset {
-    /// Structural validation: unique GUIDs, at least one pin per direction,
-    /// resolvable edge endpoints, non-negative costs, and resolvable mission
-    /// scopes.
     pub fn validate(&self) -> Result<(), GraphError> {
         if self.asset_id.is_empty() {
             return Err(GraphError::EmptyAssetId);
@@ -744,7 +706,10 @@ impl FlowGraphAsset {
                     }
                 }
             }
-            for (pins, is_input) in [(&node.data_input_pins, true), (&node.data_output_pins, false)] {
+            for (pins, is_input) in [
+                (&node.data_input_pins, true),
+                (&node.data_output_pins, false),
+            ] {
                 let mut names = BTreeSet::new();
                 for pin in pins {
                     if !names.insert(pin.pin_name.as_str()) || pin.is_input != is_input {
@@ -843,21 +808,37 @@ impl FlowGraphAsset {
             })?;
         }
         for edge in &self.data_edges {
-            let source = self.node(edge.source_node_guid).ok_or(GraphError::EdgeReferencesMissingNode {
-                node_guid: edge.source_node_guid,
-            })?;
-            let target = self.node(edge.target_node_guid).ok_or(GraphError::EdgeReferencesMissingNode {
-                node_guid: edge.target_node_guid,
-            })?;
-            let source_pin = source.data_output_pins.iter().find(|pin| pin.pin_name == edge.source_pin_name)
+            let source =
+                self.node(edge.source_node_guid)
+                    .ok_or(GraphError::EdgeReferencesMissingNode {
+                        node_guid: edge.source_node_guid,
+                    })?;
+            let target =
+                self.node(edge.target_node_guid)
+                    .ok_or(GraphError::EdgeReferencesMissingNode {
+                        node_guid: edge.target_node_guid,
+                    })?;
+            let source_pin = source
+                .data_output_pins
+                .iter()
+                .find(|pin| pin.pin_name == edge.source_pin_name)
                 .ok_or_else(|| GraphError::EdgeReferencesUnknownPin {
-                    node_guid: edge.source_node_guid, pin_name: edge.source_pin_name.clone(),
+                    node_guid: edge.source_node_guid,
+                    pin_name: edge.source_pin_name.clone(),
                 })?;
-            let target_pin = target.data_input_pins.iter().find(|pin| pin.pin_name == edge.target_pin_name)
+            let target_pin = target
+                .data_input_pins
+                .iter()
+                .find(|pin| pin.pin_name == edge.target_pin_name)
                 .ok_or_else(|| GraphError::EdgeReferencesUnknownPin {
-                    node_guid: edge.target_node_guid, pin_name: edge.target_pin_name.clone(),
+                    node_guid: edge.target_node_guid,
+                    pin_name: edge.target_pin_name.clone(),
                 })?;
-            if source_pin.is_input || !target_pin.is_input || (target_pin.value_type != "any" && source_pin.value_type != target_pin.value_type) {
+            if source_pin.is_input
+                || !target_pin.is_input
+                || (target_pin.value_type != "any"
+                    && source_pin.value_type != target_pin.value_type)
+            {
                 return Err(GraphError::DataPinTypeMismatch {
                     source_node_guid: edge.source_node_guid,
                     source_pin: edge.source_pin_name.clone(),
@@ -873,9 +854,16 @@ impl FlowGraphAsset {
     fn validate_acyclic_data(&self) -> Result<(), GraphError> {
         let mut adjacency: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
         for edge in &self.data_edges {
-            adjacency.entry(edge.source_node_guid).or_default().push(edge.target_node_guid);
+            adjacency
+                .entry(edge.source_node_guid)
+                .or_default()
+                .push(edge.target_node_guid);
         }
-        fn visit(node: u32, adjacency: &BTreeMap<u32, Vec<u32>>, state: &mut BTreeMap<u32, u8>) -> Result<(), GraphError> {
+        fn visit(
+            node: u32,
+            adjacency: &BTreeMap<u32, Vec<u32>>,
+            state: &mut BTreeMap<u32, u8>,
+        ) -> Result<(), GraphError> {
             match state.get(&node).copied().unwrap_or(0) {
                 1 => Err(GraphError::ZeroCostCycle { node_guid: node }),
                 2 => Ok(()),
@@ -896,28 +884,18 @@ impl FlowGraphAsset {
         Ok(())
     }
 
-    /// A cycle made only of zero-cost nodes never consumes frame budget, so a
-    /// token can loop forever inside one tick. Every node on the cycle must be
-    /// rejected at load time (REQ-FG-03).
     fn validate_acyclic_zero_cost(&self) -> Result<(), GraphError> {
-        // A Choice or QBN hub stops the token until the host supplies input, so
-        // a loop through one cannot spin inside a single tick even when every
-        // node costs zero.
         let zero_cost: BTreeSet<u32> = self
             .nodes
             .iter()
             .filter(|node| node.cost_ms == 0)
-            .filter(|node| {
-                !matches!(
-                    node.kind,
-                    NodeKind::Choice { .. } | NodeKind::QbnHub { .. }
-                )
-            })
+            .filter(|node| !matches!(node.kind, NodeKind::Choice { .. } | NodeKind::QbnHub { .. }))
             .map(|node| node.node_guid)
             .collect();
         let mut adjacency: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
         for edge in &self.edges {
-            if zero_cost.contains(&edge.source_node_guid) && zero_cost.contains(&edge.target_node_guid)
+            if zero_cost.contains(&edge.source_node_guid)
+                && zero_cost.contains(&edge.target_node_guid)
             {
                 adjacency
                     .entry(edge.source_node_guid)
@@ -929,7 +907,6 @@ impl FlowGraphAsset {
             targets.sort_unstable();
             targets.dedup();
         }
-        // 0 = unvisited, 1 = on the current stack, 2 = finished.
         let mut state: BTreeMap<u32, u8> = BTreeMap::new();
         for &start in zero_cost.iter() {
             if state.get(&start).copied().unwrap_or(0) != 0 {
@@ -981,7 +958,6 @@ impl FlowGraphAsset {
             .map(|pin| pin.pin_name.as_str())
     }
 
-    /// Incoming edges in deterministic order: source GUID, then source pin.
     pub fn incoming_edges(&self, node_guid: u32) -> Vec<&EdgeConnection> {
         let mut edges: Vec<&EdgeConnection> = self
             .edges
@@ -996,7 +972,6 @@ impl FlowGraphAsset {
         edges
     }
 
-    /// Outgoing edges in deterministic order: target GUID, then target pin.
     pub fn outgoing_edges(&self, node_guid: u32, pin_name: &str) -> Vec<&EdgeConnection> {
         let mut edges: Vec<&EdgeConnection> = self
             .edges
@@ -1017,9 +992,6 @@ impl FlowGraphAsset {
             .any(|edge| edge.source_node_guid == from && edge.target_node_guid == to)
     }
 
-    /// Shortest edge path from `from` to `to`, as `(node_guid, input_pin,
-    /// output_pin)` steps for the intermediate nodes only. Adjacency is ordered
-    /// by target GUID then target pin, so the result is reproducible.
     pub fn shortest_bridge_path(
         &self,
         from: u32,
@@ -1040,15 +1012,11 @@ impl FlowGraphAsset {
                 )
             })
             .collect();
-        // BFS over the whole edge set. Sorting by source node, target node and
-        // target pin makes the chosen path reproducible.
         adjacency.sort_by(|a, b| {
             a.0.cmp(&b.0)
                 .then_with(|| a.1.cmp(&b.1))
                 .then_with(|| a.3.cmp(&b.3))
         });
-        // parent[node] = (previous node, pin entered on `node`, pin left on
-        // `previous`).
         let mut parent: BTreeMap<u32, (u32, String, String)> = BTreeMap::new();
         let mut queue = vec![from];
         let mut visited = BTreeSet::from([from]);
@@ -1097,12 +1065,8 @@ impl FlowGraphAsset {
             if node == from || node == to {
                 continue;
             }
-            let (_, input_pin, _) = parent
-                .get(&node)
-                .expect("bridge step has an entering edge");
-            let (_, _, output_pin) = parent
-                .get(&next)
-                .expect("bridge step has a leaving edge");
+            let (_, input_pin, _) = parent.get(&node).expect("bridge step has an entering edge");
+            let (_, _, output_pin) = parent.get(&next).expect("bridge step has a leaving edge");
             steps.push((node, input_pin.clone(), output_pin.clone()));
         }
         steps
@@ -1122,7 +1086,6 @@ fn find_pin<'a>(
     pins.iter().find(|pin| pin.pin_name == pin_name)
 }
 
-/// Errors raised by the flow-graph runtime.
 #[derive(Clone, Debug, PartialEq)]
 pub enum GraphError {
     DataPinTypeMismatch {
@@ -1162,17 +1125,14 @@ pub enum GraphError {
         node_guid: u32,
         scope: u32,
     },
-    /// A mission node has no child instance attached (REQ-CH-04).
     MissionAssetNotAttached {
         node_guid: u32,
         sub_graph_asset_id: String,
     },
-    /// The supplied child asset does not match the node's `sub_graph_asset_id`.
     MissionAssetIdMismatch {
         node_guid: u32,
         asset_id: String,
     },
-    /// The child asset already appears in this instance's ancestor chain.
     MissionAssetCycle {
         node_guid: u32,
         asset_id: String,
@@ -1215,13 +1175,10 @@ pub enum GraphError {
     UnresolvedStorylet {
         storylet_id: u16,
     },
-    /// A direct storylet selection named an id outside the node's authored pool.
     StoryletNotInDeck {
         node_guid: u32,
         storylet_id: u16,
     },
-    /// A direct storylet selection named a storylet that is not currently
-    /// playable (completion lock, preconditions, arc phase, or cooldown).
     StoryletNotPlayable {
         node_guid: u32,
         storylet_id: u16,
@@ -1249,12 +1206,9 @@ pub enum GraphError {
         cursor_ms: i64,
     },
     NegativeFrameBudget(i64),
-    /// A cycle of zero-cost nodes would never consume frame budget.
     ZeroCostCycle {
         node_guid: u32,
     },
-    /// A frame exceeded the per-tick execution cap, which also stops
-    /// zero-cost tokens that were authored after validation.
     ExecutionLimitExceeded {
         limit: usize,
     },
@@ -1266,7 +1220,6 @@ pub enum GraphError {
         node_guid: u32,
         event_id: u64,
     },
-    /// A signal token minted by another instance must not drive this graph.
     TokenInstanceMismatch {
         token_instance_id: u64,
         instance_id: u64,
@@ -1280,13 +1233,10 @@ pub enum GraphError {
     CommitNotFound {
         commit_index: usize,
     },
-    /// A turn-based cooldown cannot be honored because the runtime clock is
-    /// integer milliseconds and no turn-to-millisecond conversion was supplied.
     TurnCooldownNotConvertible {
         storylet_id: u16,
         cooldown_turns: u64,
     },
-    /// A named tag effect cannot be resolved without a compiled registry.
     RegistryRequired {
         node_guid: u32,
         tag_name: String,
@@ -1294,7 +1244,10 @@ pub enum GraphError {
     PassionRegistryRequired {
         node_guid: u32,
     },
-    ParticipantNotFound { node_guid: u32, participant: PartIx },
+    ParticipantNotFound {
+        node_guid: u32,
+        participant: PartIx,
+    },
     EntityIndexOutOfRange {
         node_guid: u32,
         entity_index: u16,
@@ -1328,7 +1281,10 @@ pub enum GraphError {
         node_guid: u32,
         category: NodeCategory,
     },
-    Inventory { node_guid: u32, message: String },
+    Inventory {
+        node_guid: u32,
+        message: String,
+    },
     State(ChronoStateError),
     Dispatch(DispatchError),
 }
@@ -1336,8 +1292,15 @@ pub enum GraphError {
 impl fmt::Display for GraphError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GraphError::Inventory { node_guid, message } => write!(f, "inventory node {node_guid}: {message}"),
-            GraphError::DataPinTypeMismatch { source_node_guid, source_pin, target_node_guid, target_pin } => write!(
+            GraphError::Inventory { node_guid, message } => {
+                write!(f, "inventory node {node_guid}: {message}")
+            }
+            GraphError::DataPinTypeMismatch {
+                source_node_guid,
+                source_pin,
+                target_node_guid,
+                target_pin,
+            } => write!(
                 f,
                 "data pin {source_node_guid}:{source_pin} is incompatible with {target_node_guid}:{target_pin}"
             ),
@@ -1501,7 +1464,10 @@ impl fmt::Display for GraphError {
                 f,
                 "scene section {node_guid} has a negative duration of {duration_ms} ms"
             ),
-            GraphError::NegativeEventTime { node_guid, event_id } => write!(
+            GraphError::NegativeEventTime {
+                node_guid,
+                event_id,
+            } => write!(
                 f,
                 "scene section {node_guid} event {event_id} has a negative time"
             ),
@@ -1587,7 +1553,13 @@ impl fmt::Display for GraphError {
                 f,
                 "teleport at node {node_guid} targets unknown node {destination}"
             ),
-            GraphError::ParticipantNotFound { node_guid, participant } => write!(f, "node {node_guid} references unknown participant {participant}"),
+            GraphError::ParticipantNotFound {
+                node_guid,
+                participant,
+            } => write!(
+                f,
+                "node {node_guid} references unknown participant {participant}"
+            ),
             GraphError::EntityIndexOutOfRange {
                 node_guid,
                 entity_index,
@@ -1623,9 +1595,6 @@ impl From<DispatchError> for GraphError {
     }
 }
 
-/// Everything a node execution needs from outside the graph: world state,
-/// storylet policy, and the optional hierarchical registry that makes tag
-/// predicates and effects resolve through ancestor masks.
 pub struct RuntimeContext<'a> {
     pub state: &'a mut WorldStateTable,
     pub dispatcher: &'a UnifiedDispatcher,
@@ -1679,8 +1648,6 @@ impl<'a> RuntimeContext<'a> {
     }
 }
 
-/// Salience coverage for one dynamic dispatcher node, so a caller can prove the
-/// pool is not starved before the node runs (REQ-SD-03).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SalienceCoverage {
     pub node_guid: u32,
@@ -1689,9 +1656,6 @@ pub struct SalienceCoverage {
 }
 
 impl SceneComposer {
-    /// Sort the parts by priority key then combiner entity, arbitrate one winner
-    /// per entity, and dispatch the winners in that order (REQ-SC-02, REQ-SC-03).
-    /// Ties are broken by node GUID then event id, so the winner is reproducible.
     pub fn execute_sorted_action_parts(
         &mut self,
         node_guid: u32,
@@ -1701,8 +1665,6 @@ impl SceneComposer {
         self.execute_sorted_action_parts_multi(&[(node_guid, parts)], is_reverse)
     }
 
-    /// Arbitrate commands from several concurrent scene sections in one pass so
-    /// conflicts span nodes (REQ-SC-06).
     pub fn execute_sorted_action_parts_multi(
         &mut self,
         owners: &[(u32, &[ActionPart])],
@@ -1796,8 +1758,6 @@ impl SceneComposer {
     }
 }
 
-/// Composer arbitration order: higher priority key wins, then the smaller node
-/// GUID, then the smaller event id.
 fn beats(winner: &ComposerCommand, challenger: &ComposerCommand) -> bool {
     challenger.action_key_priority > winner.action_key_priority
         || (challenger.action_key_priority == winner.action_key_priority
@@ -1806,56 +1766,36 @@ fn beats(winner: &ComposerCommand, challenger: &ComposerCommand) -> bool {
                     && challenger.event_id < winner.event_id)))
 }
 
-/// One active execution of an asset (REQ-FG-05).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlowGraphInstance {
     pub instance_id: u64,
     #[serde(default)]
     pub acting_participant: PartIx,
     pub asset: FlowGraphAsset,
-    /// Node instances, ordered by node GUID.
     pub nodes: Vec<FlowNodeInstance>,
-    /// Flat token vector, the runtime ring buffer from REQ-FG-03.
     pub tokens: Vec<SignalToken>,
-    /// Execution lineage for live tokens and latent nodes. Zero denotes legacy
-    /// unscoped execution. Maps are additive for older serialized sessions.
     #[serde(default)]
     pub token_invocations: BTreeMap<u64, u64>,
     #[serde(default)]
     pub node_invocations: BTreeMap<u32, u64>,
     #[serde(skip)]
     pub current_invocation: u64,
-    /// Linear call history for the branch that reaches the current head.
     pub global_call_history: Vec<CallHistoryEntry>,
     pub history: PersistentHistoryEngine,
     pub composer: SceneComposer,
-    /// Fixed-point integer-millisecond clock.
     pub clock_ms: i64,
     pub seed: u64,
     pub next_token_id: u64,
-    /// Turn counter. The runtime clock is milliseconds, so a turn-based cooldown
-    /// is only honored when `ms_per_turn` is supplied; otherwise the caller keeps
-    /// the legacy turn path.
     pub turn: u64,
     pub ms_per_turn: Option<i64>,
-    /// Frame at which each storylet last completed, for cooldown checks.
     pub last_completed_ms: BTreeMap<u16, i64>,
-    /// Once-only lock across every dispatcher node in this instance, not just
-    /// the node that completed the storylet (REQ-BB-02).
     #[serde(default)]
     pub completed_storylets: StoryletBitset,
-    /// Dense storylet index -> stable authoring key, supplied by the loader.
     #[serde(default)]
     pub storylet_keys: BTreeMap<u16, String>,
-    /// Dense scope row for call-history/feature projection. Root is 0; mission
-    /// children get a deterministic derived scope.
     #[serde(default)]
     pub scope_index: u64,
-    /// Asset ids from the root instance down to this instance, used to reject
-    /// mission cycles deterministically (REQ-CH-04).
     pub mission_asset_path: Vec<String>,
-    /// Transient host events from newly committed passion threshold crossings.
-    /// Timeline reconstruction suppresses replayed historical events.
     #[serde(skip)]
     pub pending_passion_events: Vec<PassionThresholdTriggerEvent>,
 }
@@ -1866,8 +1806,6 @@ impl FlowGraphInstance {
         Self::new_at_path(instance_id, asset, seed, vec![asset_id])
     }
 
-    /// Build an instance with a known mission ancestor chain, so attaching a
-    /// child asset can reject a cycle at attach time (REQ-CH-04).
     fn new_at_path(
         instance_id: u64,
         asset: FlowGraphAsset,
@@ -1911,7 +1849,6 @@ impl FlowGraphInstance {
         })
     }
 
-    /// Clear every runtime record without touching the asset.
     pub fn reset(&mut self) {
         for node in &mut self.nodes {
             let node_guid = node.node_guid;
@@ -1920,8 +1857,6 @@ impl FlowGraphInstance {
                 .node(node_guid)
                 .map(|def| def.entity_path.clone())
                 .unwrap_or_default();
-            // Attachments survive a reset: the child instance is reset in place,
-            // so a load rebuilds mission state from its scoped array.
             let mut sub_graph = node.sub_graph.take();
             if let Some(child) = sub_graph.as_mut() {
                 child.reset();
@@ -1947,8 +1882,6 @@ impl FlowGraphInstance {
         self.completed_storylets.clear_all();
         self.pending_passion_events.clear();
     }
-    /// Non-empty scoped mission arrays anywhere in this instance tree, keyed by
-    /// mission node GUID. This is the replay source for nested missions.
     pub fn nested_mission_histories(&self) -> BTreeMap<u32, Vec<CallHistoryEntry>> {
         fn collect(instance: &FlowGraphInstance, out: &mut BTreeMap<u32, Vec<CallHistoryEntry>>) {
             for node in &instance.nodes {
@@ -1965,12 +1898,7 @@ impl FlowGraphInstance {
         out
     }
 
-    /// Write scoped mission arrays back into this instance tree. Used after a
-    /// reset that must clear runtime state but keep the replay source alive.
-    fn restore_mission_mirrors(
-        &mut self,
-        mirrors: &BTreeMap<u32, Vec<CallHistoryEntry>>,
-    ) {
+    fn restore_mission_mirrors(&mut self, mirrors: &BTreeMap<u32, Vec<CallHistoryEntry>>) {
         for node in &mut self.nodes {
             if let Some(entries) = mirrors.get(&node.node_guid) {
                 node.local_call_history.clone_from(entries);
@@ -1981,7 +1909,6 @@ impl FlowGraphInstance {
         }
     }
 
-    /// Take committed passion threshold events, including events from mission children.
     pub fn drain_passion_threshold_events(&mut self) -> Vec<PassionThresholdTriggerEvent> {
         let mut events = std::mem::take(&mut self.pending_passion_events);
         for node in &mut self.nodes {
@@ -2025,15 +1952,10 @@ impl FlowGraphInstance {
         &self.global_call_history
     }
 
-    /// Bind dense storylet indices to stable keys. Call once after content load.
-    pub fn bind_storylet_keys(
-        &mut self,
-        keys: impl IntoIterator<Item = (u16, String)>,
-    ) {
+    pub fn bind_storylet_keys(&mut self, keys: impl IntoIterator<Item = (u16, String)>) {
         self.storylet_keys = keys.into_iter().collect();
     }
 
-    /// Rebuild the materialized completion bitset from the canonical commit path.
     pub fn rebuild_completed_bitset(&self) -> Result<StoryletBitset, GraphError> {
         let mut bits = StoryletBitset::new();
         for entry in self.history.call_history()? {
@@ -2046,12 +1968,9 @@ impl FlowGraphInstance {
         Ok(bits)
     }
 
-    /// Debug/checkpoint verification: the live bitset equals the rebuilt path.
     pub fn verify_completed_bitset(&self) -> Result<bool, GraphError> {
         Ok(self.completed_storylets == self.rebuild_completed_bitset()?)
     }
-    /// Deliver an external gameplay verb and immediately release every matching
-    /// latent waiter, regardless of its timeout or required-tag condition.
     pub fn signal_event(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -2087,8 +2006,6 @@ impl FlowGraphInstance {
         Ok(emitted)
     }
 
-    /// Deterministic per-node seed, derived from the instance seed and the node
-    /// GUID. Same mixing as the dispatcher's deterministic index.
     pub fn next_deterministic_seed(&mut self, node_guid: u32) -> u64 {
         self.seed = mix64(self.seed ^ (node_guid as u64).wrapping_add(0x9e37_79b9_7f4a_7755));
         self.seed
@@ -2102,10 +2019,6 @@ fn mix64(value: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-/// A node execution decided against current state. `plan` performs the world
-/// change; `commit_plan` applies the record side effects (history, call data,
-/// node state). Splitting them keeps the borrow discipline simple: no borrow into
-/// the instance is held across a record call.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 struct NodePlan {
     node_guid: u32,
@@ -2128,7 +2041,6 @@ struct NodePlan {
     commit: bool,
 }
 
-/// One scene section's planned slice of a frame, before arbitration.
 #[derive(Clone, Debug)]
 struct SectionFrame {
     node_guid: u32,
@@ -2142,7 +2054,6 @@ struct SectionFrame {
 }
 
 impl FlowGraphInstance {
-    /// Decide one node execution for any kind through the same path.
     fn plan(
         &self,
         ctx: &mut RuntimeContext,
@@ -2198,44 +2109,101 @@ impl FlowGraphInstance {
                     category: def.category,
                 });
             }
-            NodeKind::Learn { fact, kind, visibility } => {
+            NodeKind::Learn {
+                fact,
+                kind,
+                visibility,
+            } => {
                 let actor = self.acting_participant;
                 if usize::from(actor) >= ctx.state.participants.len() {
-                    return Err(GraphError::ParticipantNotFound { node_guid, participant: actor });
+                    return Err(GraphError::ParticipantNotFound {
+                        node_guid,
+                        participant: actor,
+                    });
                 }
                 let source_event = match def.mission_scope {
-                    Some(scope) => self.nodes[self.node_index(scope).ok_or(GraphError::MissionScopeNotFound { node_guid, scope })?].local_call_history.len(),
+                    Some(scope) => self.nodes[self
+                        .node_index(scope)
+                        .ok_or(GraphError::MissionScopeNotFound { node_guid, scope })?]
+                    .local_call_history
+                    .len(),
                     None => self.global_call_history.len(),
                 } as u32;
                 let witnesses: Vec<_> = if *visibility == Visibility::CoLocated {
                     ctx.state.participants.colocated(actor).collect()
-                } else { Vec::new() };
-                ctx.state.apply_learn(KnowledgeRow { holder: actor, fact: *fact, kind: *kind, source_event }, &mut plan.delta);
+                } else {
+                    Vec::new()
+                };
+                ctx.state.apply_learn(
+                    KnowledgeRow {
+                        holder: actor,
+                        fact: *fact,
+                        kind: *kind,
+                        source_event,
+                        told_by: None,
+                    },
+                    &mut plan.delta,
+                );
                 for holder in witnesses {
-                    ctx.state.apply_learn(KnowledgeRow { holder, fact: *fact, kind: KnowKind::Witnessed, source_event }, &mut plan.delta);
+                    ctx.state.apply_learn(
+                        KnowledgeRow {
+                            holder,
+                            fact: *fact,
+                            kind: KnowKind::Witnessed,
+                            source_event,
+                            told_by: None,
+                        },
+                        &mut plan.delta,
+                    );
                 }
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
             }
-            NodeKind::Reveal { entry, kind, visibility, facts } => {
+            NodeKind::Reveal {
+                entry,
+                kind,
+                visibility,
+                facts,
+            } => {
                 let actor = self.acting_participant;
                 if usize::from(actor) >= ctx.state.participants.len() {
-                    return Err(GraphError::ParticipantNotFound { node_guid, participant: actor });
+                    return Err(GraphError::ParticipantNotFound {
+                        node_guid,
+                        participant: actor,
+                    });
                 }
                 let source_event = match def.mission_scope {
-                    Some(scope) => self.nodes[self.node_index(scope).ok_or(GraphError::MissionScopeNotFound { node_guid, scope })?].local_call_history.len(),
+                    Some(scope) => self.nodes[self
+                        .node_index(scope)
+                        .ok_or(GraphError::MissionScopeNotFound { node_guid, scope })?]
+                    .local_call_history
+                    .len(),
                     None => self.global_call_history.len(),
                 } as u32;
                 let witnesses: Vec<_> = if *visibility == Visibility::CoLocated {
                     ctx.state.participants.colocated(actor).collect()
-                } else { Vec::new() };
-                ctx.state.apply_reveal(actor, *entry, facts, *kind, source_event, &mut plan.delta);
+                } else {
+                    Vec::new()
+                };
+                ctx.state
+                    .apply_reveal(actor, *entry, facts, *kind, source_event, &mut plan.delta);
                 for holder in witnesses {
-                    ctx.state.apply_reveal(holder, *entry, facts, KnowKind::Witnessed, source_event, &mut plan.delta);
+                    ctx.state.apply_reveal(
+                        holder,
+                        *entry,
+                        facts,
+                        KnowKind::Witnessed,
+                        source_event,
+                        &mut plan.delta,
+                    );
                 }
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
@@ -2243,76 +2211,141 @@ impl FlowGraphInstance {
             NodeKind::MoveParticipant { location_entity } => {
                 let actor = self.acting_participant;
                 if usize::from(actor) >= ctx.state.participants.len() {
-                    return Err(GraphError::ParticipantNotFound { node_guid, participant: actor });
+                    return Err(GraphError::ParticipantNotFound {
+                        node_guid,
+                        participant: actor,
+                    });
                 }
                 if usize::from(*location_entity) >= ctx.state.entity_tags.len() {
-                    return Err(GraphError::EntityIndexOutOfRange { node_guid, entity_index: *location_entity });
+                    return Err(GraphError::EntityIndexOutOfRange {
+                        node_guid,
+                        entity_index: *location_entity,
+                    });
                 }
-                ctx.state.apply_move(actor, Some(*location_entity), &mut plan.delta);
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                ctx.state
+                    .apply_move(actor, Some(*location_entity), &mut plan.delta);
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
             }
-            NodeKind::ApplyCommand { property_key, operation, value } => {
-                let entity = match resolve_data_input(self, ctx, node_guid, "entity", &mut BTreeSet::new())? {
-                    DataValue::EntityRef(id) => id,
-                    other => return Err(GraphError::DataPinTypeMismatch {
-                        source_node_guid: node_guid, source_pin: other.type_name().into(),
-                        target_node_guid: node_guid, target_pin: "entity".into(),
-                    }),
-                };
+            NodeKind::ApplyCommand {
+                property_key,
+                operation,
+                value,
+            } => {
+                let entity =
+                    match resolve_data_input(self, ctx, node_guid, "entity", &mut BTreeSet::new())?
+                    {
+                        DataValue::EntityRef(id) => id,
+                        other => {
+                            return Err(GraphError::DataPinTypeMismatch {
+                                source_node_guid: node_guid,
+                                source_pin: other.type_name().into(),
+                                target_node_guid: node_guid,
+                                target_pin: "entity".into(),
+                            });
+                        }
+                    };
                 let attribute_key = format!("prop.{property_key}");
-                if !ctx.state.vertex(&entity).is_some_and(|vertex| vertex.attributes.contains_key(&attribute_key)) {
-                    return Err(GraphError::State(ChronoStateError::AttributeTypeMismatch { key: attribute_key }));
+                if !ctx
+                    .state
+                    .vertex(&entity)
+                    .is_some_and(|vertex| vertex.attributes.contains_key(&attribute_key))
+                {
+                    return Err(GraphError::State(ChronoStateError::AttributeTypeMismatch {
+                        key: attribute_key,
+                    }));
                 }
-                let attribute = data_value_to_attribute(value)
-                    .ok_or(GraphError::UnsupportedNode { node_guid, category: def.category })?;
+                let attribute =
+                    data_value_to_attribute(value).ok_or(GraphError::UnsupportedNode {
+                        node_guid,
+                        category: def.category,
+                    })?;
                 let op = match operation {
                     PropertyOperation::Set => "set",
                     PropertyOperation::Add => "add",
                     PropertyOperation::Subtract => "subtract",
                     PropertyOperation::Toggle => "toggle",
                 };
-                let diff = ctx.state.apply_property_command(
-                    &entity, &format!("prop.{property_key}"), op, attribute
-                ).map_err(GraphError::State)?;
+                let diff = ctx
+                    .state
+                    .apply_property_command(&entity, &format!("prop.{property_key}"), op, attribute)
+                    .map_err(GraphError::State)?;
                 plan.delta.graph_diffs.push(diff);
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
             }
             NodeKind::InventoryAdd | NodeKind::InventoryRemove => {
-                let DataValue::EntityRef(owner) = resolve_data_input(self, ctx, node_guid, "entity", &mut BTreeSet::new())? else {
-                    return Err(GraphError::Inventory { node_guid, message: "owner must be an entity".into() });
+                let DataValue::EntityRef(owner) =
+                    resolve_data_input(self, ctx, node_guid, "entity", &mut BTreeSet::new())?
+                else {
+                    return Err(GraphError::Inventory {
+                        node_guid,
+                        message: "owner must be an entity".into(),
+                    });
                 };
-                let DataValue::EntityRef(item) = resolve_data_input(self, ctx, node_guid, "item", &mut BTreeSet::new())? else {
-                    return Err(GraphError::Inventory { node_guid, message: "item must be an entity".into() });
+                let DataValue::EntityRef(item) =
+                    resolve_data_input(self, ctx, node_guid, "item", &mut BTreeSet::new())?
+                else {
+                    return Err(GraphError::Inventory {
+                        node_guid,
+                        message: "item must be an entity".into(),
+                    });
                 };
                 let (current, capacity) = inventory_state(ctx.state, &owner, &item, node_guid)?;
                 let mut next = current.to_vec();
                 let item_value = AttributeValue::EntityRef(item);
                 if matches!(&def.kind, NodeKind::InventoryAdd) {
                     if !next.contains(&item_value) {
-                        if next.len() >= capacity { return Err(GraphError::Inventory { node_guid, message: "inventory is full".into() }); }
+                        if next.len() >= capacity {
+                            return Err(GraphError::Inventory {
+                                node_guid,
+                                message: "inventory is full".into(),
+                            });
+                        }
                         next.push(item_value);
                     }
                 } else {
                     next.retain(|value| value != &item_value);
                 }
-                let diff = ctx.state.apply_property_command(&owner, "prop.__inventory_items", "set", AttributeValue::Array(next)).map_err(GraphError::State)?;
+                let diff = ctx
+                    .state
+                    .apply_property_command(
+                        &owner,
+                        "prop.__inventory_items",
+                        "set",
+                        AttributeValue::Array(next),
+                    )
+                    .map_err(GraphError::State)?;
                 plan.delta.graph_diffs.push(diff);
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
             }
             NodeKind::TagMutation { op, adding } => {
                 let mut resolved = op.clone();
-                if let Some(edge) = self.asset.data_edges.iter().find(|edge| edge.target_node_guid == node_guid && edge.target_pin_name == "target") {
-                    let DataValue::EntityRef(target) = resolve_data_node(self, ctx, edge.source_node_guid, &mut BTreeSet::new())? else {
-                        return Err(GraphError::DataPinTypeMismatch { source_node_guid: edge.source_node_guid, source_pin: "target".into(), target_node_guid: node_guid, target_pin: "target".into() });
+                if let Some(edge) = self.asset.data_edges.iter().find(|edge| {
+                    edge.target_node_guid == node_guid && edge.target_pin_name == "target"
+                }) {
+                    let DataValue::EntityRef(target) =
+                        resolve_data_node(self, ctx, edge.source_node_guid, &mut BTreeSet::new())?
+                    else {
+                        return Err(GraphError::DataPinTypeMismatch {
+                            source_node_guid: edge.source_node_guid,
+                            source_pin: "target".into(),
+                            target_node_guid: node_guid,
+                            target_pin: "target".into(),
+                        });
                     };
                     let target = target.trim();
                     let mut tags = TagBitset::new();
@@ -2327,15 +2360,30 @@ impl FlowGraphInstance {
                     resolved.remove_global_tags = TagBitset::new();
                     resolved.entity_tag_ops.clear();
                     if target.eq_ignore_ascii_case("world") || target.is_empty() {
-                        if adding { resolved.add_global_tags = tags; } else { resolved.remove_global_tags = tags; }
+                        if adding {
+                            resolved.add_global_tags = tags;
+                        } else {
+                            resolved.remove_global_tags = tags;
+                        }
                     } else {
-                        let vertex = ctx.state.vertex(target).ok_or(GraphError::NodeNotFound { node_guid })?;
-                        let entity_id = vertex.entity_index.ok_or(GraphError::NodeNotFound { node_guid })?;
-                        resolved.entity_tag_ops.push(EntityTagMutation { entity_id, add_tags: if adding { tags } else { TagBitset::new() }, remove_tags: if adding { TagBitset::new() } else { tags } });
+                        let vertex = ctx
+                            .state
+                            .vertex(target)
+                            .ok_or(GraphError::NodeNotFound { node_guid })?;
+                        let entity_id = vertex
+                            .entity_index
+                            .ok_or(GraphError::NodeNotFound { node_guid })?;
+                        resolved.entity_tag_ops.push(EntityTagMutation {
+                            entity_id,
+                            add_tags: if adding { tags } else { TagBitset::new() },
+                            remove_tags: if adding { TagBitset::new() } else { tags },
+                        });
                     }
                 }
                 plan.delta = ctx.apply_op(&resolved)?;
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
@@ -2388,8 +2436,6 @@ impl FlowGraphInstance {
             } => {
                 let wake = self.clock_ms.saturating_add(*duration_ms);
                 plan.waiter_wake_ms = Some(wake);
-                // A wake (timer or signal) re-enters a node that already owns
-                // its inverse record; pushing another would break rollback.
                 if node.state != NodeExecutionState::ActiveLatent {
                     plan.call_data = Some(NodeCallData::Waiter { wake_ms: wake });
                 }
@@ -2432,8 +2478,6 @@ impl FlowGraphInstance {
                 });
             }
             NodeKind::Choice { default_output_pin } => {
-                // A choice pauses until the player selects an output; only an
-                // explicit choice (or a force) records a route.
                 let pin = match chosen {
                     Some(pin) if !pin.is_empty() => pin.clone(),
                     _ if force && !default_output_pin.is_empty() => default_output_pin.clone(),
@@ -2455,7 +2499,9 @@ impl FlowGraphInstance {
                     poi_id: poi_id.clone(),
                 });
             }
-            NodeKind::End { jump_to_storylet, .. } => {
+            NodeKind::End {
+                jump_to_storylet, ..
+            } => {
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
@@ -2480,15 +2526,14 @@ impl FlowGraphInstance {
                     });
                 } else {
                     plan.emit = false;
-                    // Every recorded node must be revertible (REQ-CH-06), so a
-                    // plain end keeps its route on the inverse cache.
                     plan.call_data = Some(NodeCallData::Route {
                         output_pin: plan.output_pin.clone().unwrap_or_default(),
                     });
                 }
             }
             NodeKind::Condition { operator, literal } => {
-                let input = resolve_data_input(self, ctx, node_guid, "input", &mut BTreeSet::new())?;
+                let input =
+                    resolve_data_input(self, ctx, node_guid, "input", &mut BTreeSet::new())?;
                 let branch = evaluate_typed_condition(&input, *operator, literal.as_ref())?;
                 let pin = if branch { "true" } else { "false" };
                 if find_pin(def, pin, false).is_none() {
@@ -2537,21 +2582,16 @@ impl FlowGraphInstance {
             }
             NodeKind::QbnHub {
                 exit_storylet_id, ..
-            } => {
-                match storylet_id {
-                    Some(id) => {
-                        self.plan_storylet(ctx, &mut plan, id)?;
-                        if force || Some(id) == *exit_storylet_id {
-                            plan.completed = true;
-                            plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
-                        }
-                    }
-                    None => {
-                        // ExecuteNormal presents the deck; the node stays latent
-                        // until a storylet is chosen or the exit is reached.
+            } => match storylet_id {
+                Some(id) => {
+                    self.plan_storylet(ctx, &mut plan, id)?;
+                    if force || Some(id) == *exit_storylet_id {
+                        plan.completed = true;
+                        plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
                     }
                 }
-            }
+                None => {}
+            },
             NodeKind::SalienceSelector {
                 pool,
                 fallback_storylet_id,
@@ -2561,8 +2601,6 @@ impl FlowGraphInstance {
                     Some(id) => Some(id),
                     None => {
                         let seed = mix64(self.seed ^ (node_guid as u64));
-                        // Both dispatch paths must honor cooldowns. Forced runs
-                        // (replay/invoke) skip the filter.
                         let mut candidates = Vec::with_capacity(pool.len());
                         for id in pool.iter().copied() {
                             if !force && !self.off_cooldown(ctx, id) {
@@ -2573,7 +2611,11 @@ impl FlowGraphInstance {
                                 .storylet(id)
                                 .and_then(|storylet| storylet.precondition_graph.as_ref())
                             {
-                                Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
+                                Some(graph) => Self::evaluate_precondition_graph_for(
+                                    graph,
+                                    ctx,
+                                    self.acting_participant,
+                                )?,
                                 None => true,
                             };
                             if graph_eligible {
@@ -2658,11 +2700,6 @@ impl FlowGraphInstance {
                 }
             }
             NodeKind::MissionSubGraph { sub_graph_asset_id } => {
-                // The mission boundary completes when its child instance has
-                // nothing left to run. `plan` is reached without `force` only
-                // through `execute_mission`, which always starts the child
-                // first, so a never-started child is not mistaken for a
-                // finished one.
                 let child_finished = self.nodes[index]
                     .sub_graph
                     .as_ref()
@@ -2680,21 +2717,13 @@ impl FlowGraphInstance {
                 section_duration_ms,
                 ..
             } => {
-                // Re-entering a completed section restarts its timeline from
-                // zero instead of reporting a phantom completion at the end.
                 let cursor = if node.state == NodeExecutionState::Completed {
                     0
                 } else {
                     node.section_clock_ms
                 };
-                plan.section_clock_ms = Some(if force {
-                    *section_duration_ms
-                } else {
-                    cursor
-                });
+                plan.section_clock_ms = Some(if force { *section_duration_ms } else { cursor });
                 plan.call_data = Some(NodeCallData::SceneSection {
-                    // Undo data must describe the real prior state, even when
-                    // the new plan restarts a completed section from zero.
                     previous_clock_ms: node.section_clock_ms,
                     previous_poses: Vec::new(),
                     completion_commit: None,
@@ -2764,8 +2793,6 @@ impl FlowGraphInstance {
             if plan.commit {
                 self.record_call(&entry, &plan.delta)?;
             } else {
-                // A replay branch must not append commits to the history DAG,
-                // but mission-scoped nodes still record into their scope.
                 match self
                     .asset
                     .node(entry.node_guid)
@@ -2834,19 +2861,17 @@ impl FlowGraphInstance {
             } else {
                 NodeExecutionState::ActiveLatent
             };
-            // AND-gate fan-in reads this set on the next arrival. Completion
-            // consumes the set so a later re-entry starts from zero pins.
             if plan.completed {
                 node.arrived_input_pins.clear();
             } else {
-                node.arrived_input_pins
-                    .clone_from(&plan.arrived_input_pins);
+                node.arrived_input_pins.clone_from(&plan.arrived_input_pins);
             }
         }
         if plan.completed {
             self.node_invocations.remove(&plan.node_guid);
         } else {
-            self.node_invocations.insert(plan.node_guid, self.current_invocation);
+            self.node_invocations
+                .insert(plan.node_guid, self.current_invocation);
         }
         self.pending_passion_events.extend(passion_events);
         if let Some(storylet_id) = plan.storylet_id {
@@ -2861,11 +2886,7 @@ impl FlowGraphInstance {
                     .node(destination)
                     .is_some_and(|def| !def.input_pins.is_empty())
                 {
-                    emitted.push(self.enqueue_token(
-                        destination,
-                        0,
-                        plan.remaining_budget_ms,
-                    ));
+                    emitted.push(self.enqueue_token(destination, 0, plan.remaining_budget_ms));
                 }
             } else {
                 emitted.extend(self.emit_tokens(
@@ -2878,9 +2899,6 @@ impl FlowGraphInstance {
         Ok(emitted)
     }
 
-    /// Append one record. Nodes inside a mission scope write only to that
-    /// mission node's local history; the mission node itself writes globally
-    /// (REQ-CH-04).
     fn record_call(
         &mut self,
         entry: &CallHistoryEntry,
@@ -2899,8 +2917,6 @@ impl FlowGraphInstance {
                         scope: mission,
                     })?;
                 self.nodes[index].local_call_history.push(entry.clone());
-                // Scoped calls were always committed to the DAG; keep that so
-                // checkout/reconcile can undo and replay them.
                 self.history.commit_for(entry, delta);
             }
             None => {
@@ -2911,7 +2927,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Remove the last record for a node, used by revert paths.
     fn remove_record(
         &mut self,
         node_guid: u32,
@@ -2920,23 +2935,36 @@ impl FlowGraphInstance {
     ) -> Result<(), GraphError> {
         let scope = self.asset.node(node_guid).and_then(|def| def.mission_scope);
         let history = match scope {
-            Some(mission) => &self.nodes[self.node_index(mission).ok_or(GraphError::MissionScopeNotFound { node_guid, scope: mission })?].local_call_history,
+            Some(mission) => {
+                &self.nodes[self
+                    .node_index(mission)
+                    .ok_or(GraphError::MissionScopeNotFound {
+                        node_guid,
+                        scope: mission,
+                    })?]
+                .local_call_history
+            }
             None => &self.global_call_history,
         };
-        let position = history.iter().rposition(|entry| entry.node_guid == node_guid && entry.chosen_storylet_id == storylet_id);
+        let position = history.iter().rposition(|entry| {
+            entry.node_guid == node_guid && entry.chosen_storylet_id == storylet_id
+        });
         if let Some(position) = position {
-            // A Learn node's delta identifies exactly which knowledge rows its
-            // invocation inserted. Other graph instances may reuse the same
-            // source index, so never rebase rows by index alone.
             let mut ordinal = BTreeMap::<u32, usize>::new();
             let mut rebases = Vec::new();
             let mut telling_rebases = Vec::new();
             for (index, entry) in history.iter().enumerate() {
-                if !self.asset.node(entry.node_guid).is_some_and(|def| matches!(def.kind, NodeKind::Learn { .. } | NodeKind::Reveal { .. })) { continue; }
+                if !self.asset.node(entry.node_guid).is_some_and(|def| {
+                    matches!(def.kind, NodeKind::Learn { .. } | NodeKind::Reveal { .. })
+                }) {
+                    continue;
+                }
                 let count = ordinal.entry(entry.node_guid).or_default();
                 if index > position {
                     if let Some(node_index) = self.node_index(entry.node_guid) {
-                        if let Some(NodeCallData::Delta { delta }) = self.nodes[node_index].call_data.get(*count) {
+                        if let Some(NodeCallData::Delta { delta }) =
+                            self.nodes[node_index].call_data.get(*count)
+                        {
                             for &(holder, fact) in &delta.knowledge_added {
                                 rebases.push((holder, fact, index as u32));
                             }
@@ -2950,17 +2978,24 @@ impl FlowGraphInstance {
             }
             if let Some(state) = state {
                 for (holder, fact, old_index) in rebases {
-                    if let Some(row) = state.knowledge.rows.iter_mut().find(|row| row.holder == holder && row.fact == fact && row.source_event == old_index) {
+                    if let Some(row) = state.knowledge.rows.iter_mut().find(|row| {
+                        row.holder == holder && row.fact == fact && row.source_event == old_index
+                    }) {
                         row.source_event -= 1;
                     }
                 }
                 for (holder, told, old_index) in telling_rebases {
-                    if let Some(row) = state.telling.rows.iter_mut().find(|row| row.holder == holder && row.entry == told && row.source_event == old_index) {
+                    if let Some(row) = state.telling.rows.iter_mut().find(|row| {
+                        row.holder == holder && row.entry == told && row.source_event == old_index
+                    }) {
                         row.source_event -= 1;
                     }
                 }
             } else {
-                debug_assert!(rebases.is_empty() && telling_rebases.is_empty(), "history removal without state must be tail-only");
+                debug_assert!(
+                    rebases.is_empty() && telling_rebases.is_empty(),
+                    "history removal without state must be tail-only"
+                );
             }
         }
         if let Some(mission) = scope {
@@ -3009,12 +3044,7 @@ impl FlowGraphInstance {
             .collect()
     }
 
-    fn enqueue_token(
-        &mut self,
-        node_guid: u32,
-        pin_index: u16,
-        budget_ms: i64,
-    ) -> SignalToken {
+    fn enqueue_token(&mut self, node_guid: u32, pin_index: u16, budget_ms: i64) -> SignalToken {
         let token = SignalToken {
             token_id: self.next_token_id,
             graph_instance_id: self.instance_id,
@@ -3026,21 +3056,20 @@ impl FlowGraphInstance {
         };
         self.next_token_id += 1;
         self.tokens.push(token.clone());
-        self.token_invocations.insert(token.token_id, self.current_invocation);
+        self.token_invocations
+            .insert(token.token_id, self.current_invocation);
         token
     }
 
-    /// True when the storylet has no millisecond cooldown outstanding at the
-    /// instance clock. Unknown ids are treated as ready; callers validate those.
     fn off_cooldown(&self, ctx: &RuntimeContext, storylet_id: u16) -> bool {
-        ctx.dispatcher
-            .storylet(storylet_id)
-            .is_none_or(|storylet| match self.last_completed_ms.get(&storylet_id) {
+        ctx.dispatcher.storylet(storylet_id).is_none_or(|storylet| {
+            match self.last_completed_ms.get(&storylet_id) {
                 Some(last) => {
                     UnifiedDispatcher::cooldown_remaining_ms(storylet, *last, self.clock_ms) == 0
                 }
                 None => true,
-            })
+            }
+        })
     }
 
     fn node_cost(&self, node_guid: u32) -> Result<i64, GraphError> {
@@ -3051,7 +3080,6 @@ impl FlowGraphInstance {
         Ok(def.cost_ms)
     }
 
-    /// Smallest active token id, so consumption order is reproducible.
     fn next_active_token_index(&self) -> Option<usize> {
         let mut best: Option<(u64, usize)> = None;
         for (index, token) in self.tokens.iter().enumerate() {
@@ -3083,7 +3111,6 @@ impl FlowGraphInstance {
             None => ctx.state.global_tags.contains_all(mask),
         }
     }
-    /// Evaluate flow and data edges without scheduling data dependencies.
     pub fn evaluate_precondition_graph(
         asset: &FlowGraphAsset,
         ctx: &RuntimeContext,
@@ -3096,93 +3123,274 @@ impl FlowGraphInstance {
         ctx: &RuntimeContext,
         acting_participant: PartIx,
     ) -> Result<bool, GraphError> {
-        fn value(asset: &FlowGraphAsset, ctx: &RuntimeContext, acting_participant: PartIx, guid: u32, seen: &mut BTreeSet<u32>) -> Result<DataValue, GraphError> {
-            if !seen.insert(guid) { return Err(GraphError::ZeroCostCycle { node_guid: guid }); }
-            let node = asset.node(guid).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+        fn value(
+            asset: &FlowGraphAsset,
+            ctx: &RuntimeContext,
+            acting_participant: PartIx,
+            guid: u32,
+            seen: &mut BTreeSet<u32>,
+        ) -> Result<DataValue, GraphError> {
+            if !seen.insert(guid) {
+                return Err(GraphError::ZeroCostCycle { node_guid: guid });
+            }
+            let node = asset
+                .node(guid)
+                .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
             let mut input = |pin: &str| -> Result<DataValue, GraphError> {
-                let edge = asset.data_edges.iter().find(|e| e.target_node_guid == guid && e.target_pin_name == pin)
+                let edge = asset
+                    .data_edges
+                    .iter()
+                    .find(|e| e.target_node_guid == guid && e.target_pin_name == pin)
                     .ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
                 value(asset, ctx, acting_participant, edge.source_node_guid, seen)
             };
-            let out = match &node.kind {
-                NodeKind::Colocated { participant } => DataValue::Bool(participants_colocated(ctx.state, acting_participant, *participant, guid)?),
-                NodeKind::Knows { holder, fact, confirmed_only } => {
-                    let participant = match holder { HolderRef::Acting => acting_participant, HolderRef::Participant(p) => *p };
-                    if usize::from(participant) >= ctx.state.participants.len() { return Err(GraphError::ParticipantNotFound { node_guid: guid, participant }); }
-                    DataValue::Bool(ctx.state.knowledge.knows(participant, *fact).is_some_and(|row| !confirmed_only || row.kind.is_confirmed()))
-                }
-                NodeKind::GetEntity { entity_id } => DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() { node.entity_path.clone() } else { entity_id.clone() }),
-                NodeKind::InventoryHas => {
-                    let DataValue::EntityRef(owner) = input("entity")? else { return Err(GraphError::Inventory { node_guid: guid, message: "owner must be an entity".into() }); };
-                    let DataValue::EntityRef(item) = input("item")? else { return Err(GraphError::Inventory { node_guid: guid, message: "item must be an entity".into() }); };
-                    let (items, _) = inventory_state(ctx.state, &owner, &item, guid)?;
-                    DataValue::Bool(items.iter().any(|value| matches!(value, AttributeValue::EntityRef(id) if id == &item)))
-                }
-                NodeKind::HasEntityTag { entity_id, tag, match_mode } => {
-                    let registry = ctx.registry.ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-                    let id = registry.id(tag).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-                    let mask = *registry.ancestors_mask(id).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-                    let target = match asset.data_edges.iter().find(|e| e.target_node_guid == guid && e.target_pin_name == "target") {
-                        Some(edge) => match value(asset, ctx, acting_participant, edge.source_node_guid, &mut BTreeSet::new())? { DataValue::EntityRef(value) => value, _ => return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }) },
-                        None => entity_id.clone(),
-                    };
-                    let container = if target.is_empty() || target.eq_ignore_ascii_case("world") {
-                        &ctx.state.global_tags
-                    } else {
-                        let vertex = ctx.state.vertex(&target).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
-                        &ctx.state.entity_tags[vertex.entity_index.ok_or(GraphError::NodeNotFound { node_guid: guid })? as usize]
-                    };
-                    let result = if match_mode.eq_ignore_ascii_case("any") { container.intersects(&mask) } else { container.contains_all(&mask) };
-                    DataValue::Bool(result)
-                }
-                NodeKind::Compare { operator, literal } => {
-                    DataValue::Bool(evaluate_typed_condition(&input("input")?, *operator, Some(literal))?)
-                }
-                NodeKind::GetEntityProperty { property_key, .. } => {
-                    let DataValue::EntityRef(entity) = input("entity")? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
-                    let vertex = ctx.state.vertex(&entity).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
-                    attribute_to_data_value(vertex.attributes.get(&format!("prop.{property_key}")).ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?)
-                        .ok_or(GraphError::UnsupportedNode { node_guid: guid, category: node.category })?
-                }
-                NodeKind::And | NodeKind::Or => {
-                    let edges: Vec<_> = asset.data_edges.iter().filter(|e| e.target_node_guid == guid).collect();
-                    if edges.is_empty() { return Err(GraphError::NoDeclaredRoute { node_guid: guid }); }
-                    let mut values = edges.iter().map(|e| value(asset, ctx, acting_participant, e.source_node_guid, seen));
-                    let DataValue::Bool(mut result) = values.next().unwrap()? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
-                    for next in values { let DataValue::Bool(v) = next? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); }; result = if matches!(&node.kind, NodeKind::And) { result && v } else { result || v }; }
-                    DataValue::Bool(result)
-                }
-                NodeKind::Condition { operator, literal } => {
-                    let input = input("input")?;
-                    DataValue::Bool(evaluate_typed_condition(&input, *operator, literal.as_ref())?)
-                }
-                _ => return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }),
-            };
+            let out =
+                match &node.kind {
+                    NodeKind::Colocated { participant } => DataValue::Bool(participants_colocated(
+                        ctx.state,
+                        acting_participant,
+                        *participant,
+                        guid,
+                    )?),
+                    NodeKind::Knows {
+                        holder,
+                        fact,
+                        confirmed_only,
+                    } => {
+                        let participant = match holder {
+                            HolderRef::Acting => acting_participant,
+                            HolderRef::Participant(p) => *p,
+                        };
+                        if usize::from(participant) >= ctx.state.participants.len() {
+                            return Err(GraphError::ParticipantNotFound {
+                                node_guid: guid,
+                                participant,
+                            });
+                        }
+                        DataValue::Bool(
+                            ctx.state
+                                .knowledge
+                                .knows(participant, *fact)
+                                .is_some_and(|row| !confirmed_only || row.kind.is_confirmed()),
+                        )
+                    }
+                    NodeKind::GetEntity { entity_id } => {
+                        DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() {
+                            node.entity_path.clone()
+                        } else {
+                            entity_id.clone()
+                        })
+                    }
+                    NodeKind::InventoryHas => {
+                        let DataValue::EntityRef(owner) = input("entity")? else {
+                            return Err(GraphError::Inventory {
+                                node_guid: guid,
+                                message: "owner must be an entity".into(),
+                            });
+                        };
+                        let DataValue::EntityRef(item) = input("item")? else {
+                            return Err(GraphError::Inventory {
+                                node_guid: guid,
+                                message: "item must be an entity".into(),
+                            });
+                        };
+                        let (items, _) = inventory_state(ctx.state, &owner, &item, guid)?;
+                        DataValue::Bool(items.iter().any(
+                            |value| matches!(value, AttributeValue::EntityRef(id) if id == &item),
+                        ))
+                    }
+                    NodeKind::HasEntityTag {
+                        entity_id,
+                        tag,
+                        match_mode,
+                    } => {
+                        let registry = ctx.registry.ok_or(GraphError::RegistryRequired {
+                            node_guid: guid,
+                            tag_name: tag.clone(),
+                        })?;
+                        let id = registry.id(tag).ok_or(GraphError::RegistryRequired {
+                            node_guid: guid,
+                            tag_name: tag.clone(),
+                        })?;
+                        let mask =
+                            *registry
+                                .ancestors_mask(id)
+                                .ok_or(GraphError::RegistryRequired {
+                                    node_guid: guid,
+                                    tag_name: tag.clone(),
+                                })?;
+                        let target =
+                            match asset.data_edges.iter().find(|e| {
+                                e.target_node_guid == guid && e.target_pin_name == "target"
+                            }) {
+                                Some(edge) => match value(
+                                    asset,
+                                    ctx,
+                                    acting_participant,
+                                    edge.source_node_guid,
+                                    &mut BTreeSet::new(),
+                                )? {
+                                    DataValue::EntityRef(value) => value,
+                                    _ => {
+                                        return Err(GraphError::UnsupportedNode {
+                                            node_guid: guid,
+                                            category: node.category,
+                                        });
+                                    }
+                                },
+                                None => entity_id.clone(),
+                            };
+                        let container = if target.is_empty() || target.eq_ignore_ascii_case("world")
+                        {
+                            &ctx.state.global_tags
+                        } else {
+                            let vertex = ctx
+                                .state
+                                .vertex(&target)
+                                .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+                            &ctx.state.entity_tags[vertex
+                                .entity_index
+                                .ok_or(GraphError::NodeNotFound { node_guid: guid })?
+                                as usize]
+                        };
+                        let result = if match_mode.eq_ignore_ascii_case("any") {
+                            container.intersects(&mask)
+                        } else {
+                            container.contains_all(&mask)
+                        };
+                        DataValue::Bool(result)
+                    }
+                    NodeKind::Compare { operator, literal } => DataValue::Bool(
+                        evaluate_typed_condition(&input("input")?, *operator, Some(literal))?,
+                    ),
+                    NodeKind::GetEntityProperty { property_key, .. } => {
+                        let DataValue::EntityRef(entity) = input("entity")? else {
+                            return Err(GraphError::UnsupportedNode {
+                                node_guid: guid,
+                                category: node.category,
+                            });
+                        };
+                        let vertex = ctx
+                            .state
+                            .vertex(&entity)
+                            .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+                        attribute_to_data_value(
+                            vertex
+                                .attributes
+                                .get(&format!("prop.{property_key}"))
+                                .ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?,
+                        )
+                        .ok_or(GraphError::UnsupportedNode {
+                            node_guid: guid,
+                            category: node.category,
+                        })?
+                    }
+                    NodeKind::And | NodeKind::Or => {
+                        let edges: Vec<_> = asset
+                            .data_edges
+                            .iter()
+                            .filter(|e| e.target_node_guid == guid)
+                            .collect();
+                        if edges.is_empty() {
+                            return Err(GraphError::NoDeclaredRoute { node_guid: guid });
+                        }
+                        let mut values = edges.iter().map(|e| {
+                            value(asset, ctx, acting_participant, e.source_node_guid, seen)
+                        });
+                        let DataValue::Bool(mut result) = values.next().unwrap()? else {
+                            return Err(GraphError::UnsupportedNode {
+                                node_guid: guid,
+                                category: node.category,
+                            });
+                        };
+                        for next in values {
+                            let DataValue::Bool(v) = next? else {
+                                return Err(GraphError::UnsupportedNode {
+                                    node_guid: guid,
+                                    category: node.category,
+                                });
+                            };
+                            result = if matches!(&node.kind, NodeKind::And) {
+                                result && v
+                            } else {
+                                result || v
+                            };
+                        }
+                        DataValue::Bool(result)
+                    }
+                    NodeKind::Condition { operator, literal } => {
+                        let input = input("input")?;
+                        DataValue::Bool(evaluate_typed_condition(
+                            &input,
+                            *operator,
+                            literal.as_ref(),
+                        )?)
+                    }
+                    _ => {
+                        return Err(GraphError::UnsupportedNode {
+                            node_guid: guid,
+                            category: node.category,
+                        });
+                    }
+                };
             seen.remove(&guid);
             Ok(out)
         }
-        fn walk(asset: &FlowGraphAsset, ctx: &RuntimeContext, acting_participant: PartIx, guid: u32, seen: &mut BTreeSet<u32>) -> Result<bool, GraphError> {
-            if !seen.insert(guid) { return Err(GraphError::ZeroCostCycle { node_guid: guid }); }
-            let node = asset.node(guid).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+        fn walk(
+            asset: &FlowGraphAsset,
+            ctx: &RuntimeContext,
+            acting_participant: PartIx,
+            guid: u32,
+            seen: &mut BTreeSet<u32>,
+        ) -> Result<bool, GraphError> {
+            if !seen.insert(guid) {
+                return Err(GraphError::ZeroCostCycle { node_guid: guid });
+            }
+            let node = asset
+                .node(guid)
+                .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
             let result = match &node.kind {
-                NodeKind::End { precondition_result, .. } => *precondition_result,
+                NodeKind::End {
+                    precondition_result,
+                    ..
+                } => *precondition_result,
                 NodeKind::Condition { .. } => {
-                    let DataValue::Bool(branch) = value(asset, ctx, acting_participant, guid, &mut BTreeSet::new())? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
+                    let DataValue::Bool(branch) =
+                        value(asset, ctx, acting_participant, guid, &mut BTreeSet::new())?
+                    else {
+                        return Err(GraphError::UnsupportedNode {
+                            node_guid: guid,
+                            category: node.category,
+                        });
+                    };
                     let pin = if branch { "true" } else { "false" };
-                    let edge = asset.edges.iter().find(|e| e.source_node_guid == guid && e.source_pin_name == pin).ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
+                    let edge = asset
+                        .edges
+                        .iter()
+                        .find(|e| e.source_node_guid == guid && e.source_pin_name == pin)
+                        .ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
                     walk(asset, ctx, acting_participant, edge.target_node_guid, seen)?
                 }
                 _ => {
-                    let edge = asset.edges.iter().find(|e| e.source_node_guid == guid).ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
+                    let edge = asset
+                        .edges
+                        .iter()
+                        .find(|e| e.source_node_guid == guid)
+                        .ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
                     walk(asset, ctx, acting_participant, edge.target_node_guid, seen)?
                 }
             };
             seen.remove(&guid);
             Ok(result)
         }
-        walk(asset, ctx, acting_participant, asset.start_node_guid, &mut BTreeSet::new())
+        walk(
+            asset,
+            ctx,
+            acting_participant,
+            asset.start_node_guid,
+            &mut BTreeSet::new(),
+        )
     }
-
 }
 
 fn data_value_to_attribute(value: &DataValue) -> Option<AttributeValue> {
@@ -3193,7 +3401,11 @@ fn data_value_to_attribute(value: &DataValue) -> Option<AttributeValue> {
         DataValue::String(v) => AttributeValue::String(v.clone()),
         DataValue::Asset(v) => AttributeValue::Asset(v.clone()),
         DataValue::EntityRef(v) => AttributeValue::EntityRef(v.clone()),
-        DataValue::Array(v) => AttributeValue::Array(v.iter().map(data_value_to_attribute).collect::<Option<Vec<_>>>()?),
+        DataValue::Array(v) => AttributeValue::Array(
+            v.iter()
+                .map(data_value_to_attribute)
+                .collect::<Option<Vec<_>>>()?,
+        ),
         DataValue::Float(_) => return None,
     })
 }
@@ -3205,109 +3417,308 @@ fn attribute_to_data_value(value: &AttributeValue) -> Option<DataValue> {
         AttributeValue::String(v) => DataValue::String(v.clone()),
         AttributeValue::Asset(v) => DataValue::Asset(v.clone()),
         AttributeValue::EntityRef(v) => DataValue::EntityRef(v.clone()),
-        AttributeValue::Array(v) => DataValue::Array(v.iter().map(attribute_to_data_value).collect::<Option<Vec<_>>>()?),
+        AttributeValue::Array(v) => DataValue::Array(
+            v.iter()
+                .map(attribute_to_data_value)
+                .collect::<Option<Vec<_>>>()?,
+        ),
         AttributeValue::Tag(v) => DataValue::Int(i64::from(*v)),
         AttributeValue::Float(_) => return None,
     })
 }
 
-fn participants_colocated(world: &WorldStateTable, actor: PartIx, other: PartIx, node_guid: u32) -> Result<bool, GraphError> {
-    let actor_location = world.participants.location.get(actor as usize).ok_or(GraphError::ParticipantNotFound { node_guid, participant: actor })?;
-    let other_location = world.participants.location.get(other as usize).ok_or(GraphError::ParticipantNotFound { node_guid, participant: other })?;
+fn participants_colocated(
+    world: &WorldStateTable,
+    actor: PartIx,
+    other: PartIx,
+    node_guid: u32,
+) -> Result<bool, GraphError> {
+    let actor_location =
+        world
+            .participants
+            .location
+            .get(actor as usize)
+            .ok_or(GraphError::ParticipantNotFound {
+                node_guid,
+                participant: actor,
+            })?;
+    let other_location =
+        world
+            .participants
+            .location
+            .get(other as usize)
+            .ok_or(GraphError::ParticipantNotFound {
+                node_guid,
+                participant: other,
+            })?;
     Ok(actor != other && actor_location.is_some() && actor_location == other_location)
 }
-fn resolve_data_input(instance: &FlowGraphInstance, ctx: &RuntimeContext, target: u32, pin: &str, seen: &mut BTreeSet<u32>) -> Result<DataValue, GraphError> {
-    let edge = instance.asset.data_edges.iter().find(|e| e.target_node_guid == target && e.target_pin_name == pin)
+fn resolve_data_input(
+    instance: &FlowGraphInstance,
+    ctx: &RuntimeContext,
+    target: u32,
+    pin: &str,
+    seen: &mut BTreeSet<u32>,
+) -> Result<DataValue, GraphError> {
+    let edge = instance
+        .asset
+        .data_edges
+        .iter()
+        .find(|e| e.target_node_guid == target && e.target_pin_name == pin)
         .ok_or(GraphError::NoDeclaredRoute { node_guid: target })?;
     resolve_data_node(instance, ctx, edge.source_node_guid, seen)
 }
 
-fn resolve_data_node(instance: &FlowGraphInstance, ctx: &RuntimeContext, guid: u32, seen: &mut BTreeSet<u32>) -> Result<DataValue, GraphError> {
-    if !seen.insert(guid) { return Err(GraphError::ZeroCostCycle { node_guid: guid }); }
-    let node = instance.asset.node(guid).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+fn resolve_data_node(
+    instance: &FlowGraphInstance,
+    ctx: &RuntimeContext,
+    guid: u32,
+    seen: &mut BTreeSet<u32>,
+) -> Result<DataValue, GraphError> {
+    if !seen.insert(guid) {
+        return Err(GraphError::ZeroCostCycle { node_guid: guid });
+    }
+    let node = instance
+        .asset
+        .node(guid)
+        .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
     let result = match &node.kind {
-        NodeKind::Colocated { participant } => DataValue::Bool(participants_colocated(ctx.state, instance.acting_participant, *participant, guid)?),
-        NodeKind::Knows { holder, fact, confirmed_only } => {
-            let participant = match holder { HolderRef::Acting => instance.acting_participant, HolderRef::Participant(p) => *p };
-            if usize::from(participant) >= ctx.state.participants.len() { return Err(GraphError::ParticipantNotFound { node_guid: guid, participant }); }
-            DataValue::Bool(ctx.state.knowledge.knows(participant, *fact).is_some_and(|row| !confirmed_only || row.kind.is_confirmed()))
+        NodeKind::Colocated { participant } => DataValue::Bool(participants_colocated(
+            ctx.state,
+            instance.acting_participant,
+            *participant,
+            guid,
+        )?),
+        NodeKind::Knows {
+            holder,
+            fact,
+            confirmed_only,
+        } => {
+            let participant = match holder {
+                HolderRef::Acting => instance.acting_participant,
+                HolderRef::Participant(p) => *p,
+            };
+            if usize::from(participant) >= ctx.state.participants.len() {
+                return Err(GraphError::ParticipantNotFound {
+                    node_guid: guid,
+                    participant,
+                });
+            }
+            DataValue::Bool(
+                ctx.state
+                    .knowledge
+                    .knows(participant, *fact)
+                    .is_some_and(|row| !confirmed_only || row.kind.is_confirmed()),
+            )
         }
 
-        NodeKind::GetEntity { entity_id } => DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() { node.entity_path.clone() } else { entity_id.clone() }),
-        NodeKind::InventoryHas => {
-            let DataValue::EntityRef(owner) = resolve_data_input(instance, ctx, guid, "entity", seen)? else { return Err(GraphError::Inventory { node_guid: guid, message: "owner must be an entity".into() }); };
-            let DataValue::EntityRef(item) = resolve_data_input(instance, ctx, guid, "item", seen)? else { return Err(GraphError::Inventory { node_guid: guid, message: "item must be an entity".into() }); };
-            let (items, _) = inventory_state(ctx.state, &owner, &item, guid)?;
-            DataValue::Bool(items.iter().any(|value| matches!(value, AttributeValue::EntityRef(id) if id == &item)))
+        NodeKind::GetEntity { entity_id } => {
+            DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() {
+                node.entity_path.clone()
+            } else {
+                entity_id.clone()
+            })
         }
-        NodeKind::HasEntityTag { entity_id, tag, match_mode } => {
-            let registry = ctx.registry.ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-            let id = registry.id(tag).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-            let mask = *registry.ancestors_mask(id).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-            let target = match instance.asset.data_edges.iter().find(|e| e.target_node_guid == guid && e.target_pin_name == "target") {
-                Some(edge) => match resolve_data_node(instance, ctx, edge.source_node_guid, seen)? { DataValue::EntityRef(value) => value, _ => return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }) },
+        NodeKind::InventoryHas => {
+            let DataValue::EntityRef(owner) =
+                resolve_data_input(instance, ctx, guid, "entity", seen)?
+            else {
+                return Err(GraphError::Inventory {
+                    node_guid: guid,
+                    message: "owner must be an entity".into(),
+                });
+            };
+            let DataValue::EntityRef(item) = resolve_data_input(instance, ctx, guid, "item", seen)?
+            else {
+                return Err(GraphError::Inventory {
+                    node_guid: guid,
+                    message: "item must be an entity".into(),
+                });
+            };
+            let (items, _) = inventory_state(ctx.state, &owner, &item, guid)?;
+            DataValue::Bool(
+                items
+                    .iter()
+                    .any(|value| matches!(value, AttributeValue::EntityRef(id) if id == &item)),
+            )
+        }
+        NodeKind::HasEntityTag {
+            entity_id,
+            tag,
+            match_mode,
+        } => {
+            let registry = ctx.registry.ok_or(GraphError::RegistryRequired {
+                node_guid: guid,
+                tag_name: tag.clone(),
+            })?;
+            let id = registry.id(tag).ok_or(GraphError::RegistryRequired {
+                node_guid: guid,
+                tag_name: tag.clone(),
+            })?;
+            let mask = *registry
+                .ancestors_mask(id)
+                .ok_or(GraphError::RegistryRequired {
+                    node_guid: guid,
+                    tag_name: tag.clone(),
+                })?;
+            let target = match instance
+                .asset
+                .data_edges
+                .iter()
+                .find(|e| e.target_node_guid == guid && e.target_pin_name == "target")
+            {
+                Some(edge) => {
+                    match resolve_data_node(instance, ctx, edge.source_node_guid, seen)? {
+                        DataValue::EntityRef(value) => value,
+                        _ => {
+                            return Err(GraphError::UnsupportedNode {
+                                node_guid: guid,
+                                category: node.category,
+                            });
+                        }
+                    }
+                }
                 None => entity_id.clone(),
             };
-            let container = if target.is_empty() || target.eq_ignore_ascii_case("world") { &ctx.state.global_tags } else {
-                let vertex = ctx.state.vertex(&target).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
-                &ctx.state.entity_tags[vertex.entity_index.ok_or(GraphError::NodeNotFound { node_guid: guid })? as usize]
+            let container = if target.is_empty() || target.eq_ignore_ascii_case("world") {
+                &ctx.state.global_tags
+            } else {
+                let vertex = ctx
+                    .state
+                    .vertex(&target)
+                    .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+                &ctx.state.entity_tags[vertex
+                    .entity_index
+                    .ok_or(GraphError::NodeNotFound { node_guid: guid })?
+                    as usize]
             };
-            DataValue::Bool(if match_mode.eq_ignore_ascii_case("any") { container.intersects(&mask) } else { container.contains_all(&mask) })
+            DataValue::Bool(if match_mode.eq_ignore_ascii_case("any") {
+                container.intersects(&mask)
+            } else {
+                container.contains_all(&mask)
+            })
         }
         NodeKind::Compare { operator, literal } => {
             let input = resolve_data_input(instance, ctx, guid, "input", seen)?;
             DataValue::Bool(evaluate_typed_condition(&input, *operator, Some(literal))?)
         }
         NodeKind::GetEntityProperty { property_key, .. } => {
-            let DataValue::EntityRef(entity) = resolve_data_input(instance, ctx, guid, "entity", seen)? else {
-                return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category });
+            let DataValue::EntityRef(entity) =
+                resolve_data_input(instance, ctx, guid, "entity", seen)?
+            else {
+                return Err(GraphError::UnsupportedNode {
+                    node_guid: guid,
+                    category: node.category,
+                });
             };
-            let vertex = ctx.state.vertex(&entity).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
-            let value = vertex.attributes.get(&format!("prop.{property_key}")).ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
-            attribute_to_data_value(value).ok_or(GraphError::UnsupportedNode { node_guid: guid, category: node.category })?
+            let vertex = ctx
+                .state
+                .vertex(&entity)
+                .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+            let value = vertex
+                .attributes
+                .get(&format!("prop.{property_key}"))
+                .ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
+            attribute_to_data_value(value).ok_or(GraphError::UnsupportedNode {
+                node_guid: guid,
+                category: node.category,
+            })?
         }
         NodeKind::And | NodeKind::Or => {
-            let edges: Vec<_> = instance.asset.data_edges.iter().filter(|e| e.target_node_guid == guid).collect();
-            if edges.is_empty() { return Err(GraphError::NoDeclaredRoute { node_guid: guid }); }
-            let mut values = edges.into_iter().map(|e| resolve_data_node(instance, ctx, e.source_node_guid, seen));
-            let DataValue::Bool(mut out) = values.next().unwrap()? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
+            let edges: Vec<_> = instance
+                .asset
+                .data_edges
+                .iter()
+                .filter(|e| e.target_node_guid == guid)
+                .collect();
+            if edges.is_empty() {
+                return Err(GraphError::NoDeclaredRoute { node_guid: guid });
+            }
+            let mut values = edges
+                .into_iter()
+                .map(|e| resolve_data_node(instance, ctx, e.source_node_guid, seen));
+            let DataValue::Bool(mut out) = values.next().unwrap()? else {
+                return Err(GraphError::UnsupportedNode {
+                    node_guid: guid,
+                    category: node.category,
+                });
+            };
             for value in values {
-                let DataValue::Bool(v) = value? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
-                out = if matches!(&node.kind, NodeKind::And) { out && v } else { out || v };
+                let DataValue::Bool(v) = value? else {
+                    return Err(GraphError::UnsupportedNode {
+                        node_guid: guid,
+                        category: node.category,
+                    });
+                };
+                out = if matches!(&node.kind, NodeKind::And) {
+                    out && v
+                } else {
+                    out || v
+                };
             }
             DataValue::Bool(out)
         }
         _ => {
-            let raw = node.payload.get("value").cloned().ok_or(GraphError::UnsupportedNode { node_guid: guid, category: node.category })?;
-            serde_json::from_value(raw).map_err(|_| GraphError::UnsupportedNode { node_guid: guid, category: node.category })?
+            let raw = node
+                .payload
+                .get("value")
+                .cloned()
+                .ok_or(GraphError::UnsupportedNode {
+                    node_guid: guid,
+                    category: node.category,
+                })?;
+            serde_json::from_value(raw).map_err(|_| GraphError::UnsupportedNode {
+                node_guid: guid,
+                category: node.category,
+            })?
         }
     };
     seen.remove(&guid);
     Ok(result)
 }
 
-fn inventory_state<'a>(state: &'a WorldStateTable, owner: &str, item: &str, node_guid: u32) -> Result<(&'a [AttributeValue], usize), GraphError> {
-    let invalid = |message: &str| GraphError::Inventory { node_guid, message: message.into() };
-    let item_vertex = state.vertex(item).ok_or_else(|| invalid("item entity does not exist"))?;
+fn inventory_state<'a>(
+    state: &'a WorldStateTable,
+    owner: &str,
+    item: &str,
+    node_guid: u32,
+) -> Result<(&'a [AttributeValue], usize), GraphError> {
+    let invalid = |message: &str| GraphError::Inventory {
+        node_guid,
+        message: message.into(),
+    };
+    let item_vertex = state
+        .vertex(item)
+        .ok_or_else(|| invalid("item entity does not exist"))?;
     if item_vertex.attributes.get("prop.__inventory_item") != Some(&AttributeValue::Bool(true)) {
         return Err(invalid("item entity does not have the Item trait"));
     }
-    let vertex = state.vertex(owner).ok_or_else(|| invalid("inventory owner does not exist"))?;
+    let vertex = state
+        .vertex(owner)
+        .ok_or_else(|| invalid("inventory owner does not exist"))?;
     let Some(AttributeValue::Array(items)) = vertex.attributes.get("prop.__inventory_items") else {
         return Err(invalid("entity does not have the InventoryOwner trait"));
     };
-    let (Some(AttributeValue::Int(columns)), Some(AttributeValue::Int(rows))) =
-        (vertex.attributes.get("prop.__inventory_columns"), vertex.attributes.get("prop.__inventory_rows")) else {
-            return Err(invalid("inventory dimensions are missing"));
-        };
-    if !(1..=20).contains(columns) || !(1..=20).contains(rows) || items.iter().any(|v| !matches!(v, AttributeValue::EntityRef(_))) {
+    let (Some(AttributeValue::Int(columns)), Some(AttributeValue::Int(rows))) = (
+        vertex.attributes.get("prop.__inventory_columns"),
+        vertex.attributes.get("prop.__inventory_rows"),
+    ) else {
+        return Err(invalid("inventory dimensions are missing"));
+    };
+    if !(1..=20).contains(columns)
+        || !(1..=20).contains(rows)
+        || items
+            .iter()
+            .any(|v| !matches!(v, AttributeValue::EntityRef(_)))
+    {
         return Err(invalid("invalid inventory dimensions or item references"));
     }
     let capacity = (*columns as usize) * (*rows as usize);
-    if items.len() > capacity { return Err(invalid("inventory exceeds its capacity")); }
+    if items.len() > capacity {
+        return Err(invalid("inventory exceeds its capacity"));
+    }
     Ok((items, capacity))
 }
-
 
 fn default_precondition_result() -> bool {
     true
@@ -3332,16 +3743,10 @@ fn default_output(def: &FlowNodeDef) -> String {
 }
 
 impl FlowGraphInstance {
-    /// Reset the instance and seed the start node's token. Execution happens on
-    /// the next `tick`, which owns the frame budget the first token is charged
-    /// against.
     pub fn start(&mut self) -> Result<Vec<SignalToken>, GraphError> {
         self.start_at_node(self.asset.start_node_guid)
     }
 
-    /// Reset the instance and seed a token at a stable authored entry point.
-    /// Dispatchers use this to enter a selected storylet without rebuilding
-    /// the aggregate project graph.
     pub fn start_at_node(&mut self, node_guid: u32) -> Result<Vec<SignalToken>, GraphError> {
         if self
             .asset
@@ -3357,11 +3762,6 @@ impl FlowGraphInstance {
         Ok(vec![token])
     }
 
-    /// Advance one frame. The clock moves first, latent waiters that are ready
-    /// wake in node GUID order, then active tokens are consumed in ascending
-    /// token id order against the frame budget. A token whose node costs more
-    /// than the remaining budget is deferred to a later frame instead of being
-    /// dropped.
     pub fn tick(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3408,7 +3808,11 @@ impl FlowGraphInstance {
                     by_node.entry(command.node_guid).or_default().push(command);
                 }
                 for frame in frames {
-                    self.current_invocation = self.node_invocations.get(&frame.node_guid).copied().unwrap_or(0);
+                    self.current_invocation = self
+                        .node_invocations
+                        .get(&frame.node_guid)
+                        .copied()
+                        .unwrap_or(0);
                     let commands = by_node.remove(&frame.node_guid).unwrap_or_default();
                     executed.extend(self.apply_section_frame(
                         frame,
@@ -3420,10 +3824,6 @@ impl FlowGraphInstance {
                 }
             }
         }
-        // A mission keeps running across frames: the token loop below only
-        // consumes the parent's tokens, so a child instance that is still
-        // working is continued here, in node GUID order. Nodes with a token
-        // pending this frame are handled by that loop instead.
         let running: Vec<u32> = self
             .nodes
             .iter()
@@ -3476,43 +3876,40 @@ impl FlowGraphInstance {
             let mut token = self.tokens[index].clone();
             let cost = self.node_cost(token.target_node_guid)?;
             if cost > remaining && (executions > 0 || frame_budget_ms == 0) {
-                // Defer exactly one frame and keep the unused budget; deferring
-                // by `cost` would livelock a node that costs more than a frame.
                 let deferred = &mut self.tokens[index];
                 deferred.set_active(false);
                 deferred.set_deferred(true);
-                deferred.deferred_until_ms = checked_token_ms(
-                    self.clock_ms.saturating_add(frame_budget_ms.max(1)),
-                )?;
+                deferred.deferred_until_ms =
+                    checked_token_ms(self.clock_ms.saturating_add(frame_budget_ms.max(1)))?;
                 continue;
             }
-            // The token carries this token's share of the frame budget. The
-            // first execution may overrun the frame so a node costing more than
-            // one frame still makes progress.
             token.time_budget_ms = clamp_token_ms(remaining.max(cost));
             remaining = (remaining - cost).max(0);
             executions += 1;
             executed.push(token);
-            self.current_invocation = self.token_invocations.get(&token.token_id).copied().unwrap_or(0);
+            self.current_invocation = self
+                .token_invocations
+                .get(&token.token_id)
+                .copied()
+                .unwrap_or(0);
             let emitted = self.execute_input_at_index(
                 ctx,
                 token.target_node_guid,
                 token.target_pin_index,
                 &token,
             )?;
-            // New tokens appended by this node remain active in the same frame.
             self.tokens[index].set_active(false);
             self.tokens[index].set_deferred(false);
             executed.extend(emitted);
         }
-        // Consumed tokens are never reused; keep the ring buffer bounded.
-        self.tokens.retain(|token| token.is_active() || token.is_deferred());
-        self.token_invocations.retain(|id, _| self.tokens.iter().any(|token| token.token_id == *id));
+        self.tokens
+            .retain(|token| token.is_active() || token.is_deferred());
+        self.token_invocations
+            .retain(|id, _| self.tokens.iter().any(|token| token.token_id == *id));
         self.current_invocation = 0;
         Ok(executed)
     }
 
-    /// ExecuteNormal: run a node when a token arrives at a named input pin.
     pub fn execute_input(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3530,7 +3927,6 @@ impl FlowGraphInstance {
         self.execute_input_at_index(ctx, node_guid, pin_index, token)
     }
 
-    /// ExecuteNormal with the pin already resolved to an index.
     pub fn execute_input_at_index(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3538,7 +3934,11 @@ impl FlowGraphInstance {
         pin_index: u16,
         token: &SignalToken,
     ) -> Result<Vec<SignalToken>, GraphError> {
-        self.current_invocation = self.token_invocations.get(&token.token_id).copied().unwrap_or(0);
+        self.current_invocation = self
+            .token_invocations
+            .get(&token.token_id)
+            .copied()
+            .unwrap_or(0);
         if token.graph_instance_id != self.instance_id {
             return Err(GraphError::TokenInstanceMismatch {
                 token_instance_id: token.graph_instance_id,
@@ -3553,11 +3953,17 @@ impl FlowGraphInstance {
                 pin_name: pin_index.to_string(),
             })?
             .to_string();
-        if self.node(node_guid).is_some_and(|node| node.state == NodeExecutionState::ActiveLatent)
-            && self.node_invocations.get(&node_guid).copied().unwrap_or(0) != self.current_invocation
+        if self
+            .node(node_guid)
+            .is_some_and(|node| node.state == NodeExecutionState::ActiveLatent)
+            && self.node_invocations.get(&node_guid).copied().unwrap_or(0)
+                != self.current_invocation
         {
             let category = self.asset.node(node_guid).unwrap().category;
-            return Err(GraphError::UnsupportedNode { node_guid, category });
+            return Err(GraphError::UnsupportedNode {
+                node_guid,
+                category,
+            });
         }
         let cost = self.node_cost(node_guid)?;
         let budget_ms = i64::from(token.time_budget_ms);
@@ -3573,13 +3979,7 @@ impl FlowGraphInstance {
             .node(node_guid)
             .is_some_and(|def| matches!(&def.kind, NodeKind::MissionSubGraph { .. }))
         {
-            return self.execute_mission(
-                ctx,
-                node_guid,
-                &input_pin,
-                budget_ms - cost,
-                false,
-            );
+            return self.execute_mission(ctx, node_guid, &input_pin, budget_ms - cost, false);
         }
         let plan = self.plan(
             ctx,
@@ -3596,7 +3996,6 @@ impl FlowGraphInstance {
         result
     }
 
-    /// Resolve a dynamic branch by choosing an output pin.
     pub fn choose(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3620,7 +4019,6 @@ impl FlowGraphInstance {
         result
     }
 
-    /// Run one storylet on a QBN hub or salience selector.
     pub fn select_storylet(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3636,8 +4034,6 @@ impl FlowGraphInstance {
             NodeKind::SalienceSelector { pool, .. } => Some(pool),
             _ => None,
         };
-        // A dispatcher node with an empty pool rejects every id; testing
-        // `!pool.is_empty()` would accept anything.
         if let Some(pool) = pool {
             if !pool.contains(&storylet_id) {
                 return Err(GraphError::StoryletNotInDeck {
@@ -3653,7 +4049,11 @@ impl FlowGraphInstance {
                         .map_err(GraphError::Dispatch)?
                         && self.off_cooldown(ctx, storylet_id)
                         && match storylet.precondition_graph.as_ref() {
-                            Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
+                            Some(graph) => Self::evaluate_precondition_graph_for(
+                                graph,
+                                ctx,
+                                self.acting_participant,
+                            )?,
                             None => true,
                         }
                 }
@@ -3669,18 +4069,35 @@ impl FlowGraphInstance {
         self.commit_storylet_selection(ctx, node_guid, storylet_id)
     }
 
-    /// Complete a previously validated selection after its scene has played.
-    pub fn complete_reserved_storylet(&mut self, ctx: &mut RuntimeContext, node_guid: u32, storylet_id: u16) -> Result<Vec<SignalToken>, GraphError> {
-        let def = self.asset.node(node_guid).ok_or(GraphError::NodeNotFound { node_guid })?;
+    pub fn complete_reserved_storylet(
+        &mut self,
+        ctx: &mut RuntimeContext,
+        node_guid: u32,
+        storylet_id: u16,
+    ) -> Result<Vec<SignalToken>, GraphError> {
+        let def = self
+            .asset
+            .node(node_guid)
+            .ok_or(GraphError::NodeNotFound { node_guid })?;
         match &def.kind {
             NodeKind::QbnHub { deck, .. } if deck.contains(&storylet_id) => {}
             NodeKind::SalienceSelector { pool, .. } if pool.contains(&storylet_id) => {}
-            _ => return Err(GraphError::StoryletNotInDeck { node_guid, storylet_id }),
+            _ => {
+                return Err(GraphError::StoryletNotInDeck {
+                    node_guid,
+                    storylet_id,
+                });
+            }
         }
         self.commit_storylet_selection(ctx, node_guid, storylet_id)
     }
 
-    fn commit_storylet_selection(&mut self, ctx: &mut RuntimeContext, node_guid: u32, storylet_id: u16) -> Result<Vec<SignalToken>, GraphError> {
+    fn commit_storylet_selection(
+        &mut self,
+        ctx: &mut RuntimeContext,
+        node_guid: u32,
+        storylet_id: u16,
+    ) -> Result<Vec<SignalToken>, GraphError> {
         self.current_invocation = self.node_invocations.get(&node_guid).copied().unwrap_or(0);
         let index = self
             .node_index(node_guid)
@@ -3704,20 +4121,27 @@ impl FlowGraphInstance {
         result
     }
 
-    /// Queue a selected storylet entry without resetting the active hub or history.
     pub fn enter_storylet(&mut self, node_guid: u32) -> Result<(), GraphError> {
         self.enter_storylet_invocation(node_guid, 0)
     }
 
-    pub fn enter_storylet_invocation(&mut self, node_guid: u32, invocation: u64) -> Result<(), GraphError> {
-        let node = self.asset.node(node_guid).ok_or(GraphError::NodeNotFound { node_guid })?;
-        if node.input_pins.is_empty() { return Err(GraphError::NodeHasNoPins { node_guid }); }
+    pub fn enter_storylet_invocation(
+        &mut self,
+        node_guid: u32,
+        invocation: u64,
+    ) -> Result<(), GraphError> {
+        let node = self
+            .asset
+            .node(node_guid)
+            .ok_or(GraphError::NodeNotFound { node_guid })?;
+        if node.input_pins.is_empty() {
+            return Err(GraphError::NodeHasNoPins { node_guid });
+        }
         self.current_invocation = invocation;
         self.enqueue_token(node_guid, 0, 0);
         self.current_invocation = 0;
         Ok(())
     }
-    /// The deck a hub would present right now, in dispatcher order.
     pub fn present_deck(
         &self,
         ctx: &RuntimeContext,
@@ -3726,7 +4150,12 @@ impl FlowGraphInstance {
         self.present_deck_for(ctx, node_guid, self.acting_participant)
     }
 
-    pub fn present_deck_for(&self, ctx: &RuntimeContext, node_guid: u32, participant: PartIx) -> Result<Vec<u16>, GraphError> {
+    pub fn present_deck_for(
+        &self,
+        ctx: &RuntimeContext,
+        node_guid: u32,
+        participant: PartIx,
+    ) -> Result<Vec<u16>, GraphError> {
         let def = self
             .asset
             .node(node_guid)
@@ -3747,7 +4176,12 @@ impl FlowGraphInstance {
                 continue;
             }
             let eligible = match ctx.dispatcher.storylet(storylet_id) {
-                Some(storylet) if !storylet.played_by.is_empty() && !storylet.played_by.contains(&participant) => false,
+                Some(storylet)
+                    if !storylet.played_by.is_empty()
+                        && !storylet.played_by.contains(&participant) =>
+                {
+                    false
+                }
                 Some(storylet) => match storylet.precondition_graph.as_ref() {
                     Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, participant)?,
                     None => true,
@@ -3761,9 +4195,6 @@ impl FlowGraphInstance {
         Ok(ready)
     }
 
-    /// Deck filtered by turn-based cooldowns. A storylet whose cooldown cannot be
-    /// converted to milliseconds is reported as a typed incompatibility so the
-    /// caller keeps the legacy turn path for it rather than the runtime guessing.
     pub fn present_deck_with_turn_cooldowns(
         &self,
         ctx: &RuntimeContext,
@@ -3806,8 +4237,6 @@ impl FlowGraphInstance {
         Ok((expires - self.clock_ms).max(0))
     }
 
-    /// Salience coverage for a selector, so a caller can prove the pool is not
-    /// starved before the node runs (REQ-SD-03).
     pub fn salience_coverage(
         &self,
         ctx: &RuntimeContext,
@@ -3834,12 +4263,13 @@ impl FlowGraphInstance {
             let Some(def) = ctx.dispatcher.storylet(storylet_id) else {
                 continue;
             };
-            // Same fail-closed arc-phase and ending exclusion as selection.
             if def.required_arc_phases.is_empty() {
                 continue;
             }
             let graph_eligible = match def.precondition_graph.as_ref() {
-                Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
+                Some(graph) => {
+                    Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?
+                }
                 None => true,
             };
             if ctx
@@ -3911,8 +4341,6 @@ impl FlowGraphInstance {
             let node = &mut self.nodes[index];
             node.state = NodeExecutionState::Completed;
             node.chosen_output_pin = Some(DEFAULT_OUTPUT_PIN.to_string());
-            // The inverse record was pushed when the waiter became latent; a
-            // second one here would leave an unmatched entry for rollback.
             executed.extend(self.emit_tokens(node_guid, DEFAULT_OUTPUT_PIN, 0));
         }
         self.current_invocation = 0;
@@ -3921,8 +4349,6 @@ impl FlowGraphInstance {
 }
 
 impl FlowGraphInstance {
-    /// ForceComplete: run a node instantly without a token, as the replay and
-    /// invoke paths do.
     pub fn force_complete(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3942,8 +4368,6 @@ impl FlowGraphInstance {
         output_pin: &str,
         storylet_id: Option<u16>,
     ) -> Result<BijectiveDelta, GraphError> {
-        // Older persisted histories can carry an empty input pin; replay used
-        // to synthesize the default, so keep that behavior.
         let input_pin = if input_pin.is_empty() {
             DEFAULT_INPUT_PIN
         } else {
@@ -3985,11 +4409,6 @@ impl FlowGraphInstance {
             if self.nodes[index].state == NodeExecutionState::Completed {
                 return Ok(BijectiveDelta::default());
             }
-            // ForceComplete completes the mission boundary. When the child is
-            // fresh and the adapter supplied its scoped array, that array is
-            // replayed into the child so the world state is rebuilt without
-            // serializing it (REQ-CH-03); otherwise the child graph is driven
-            // by frame ticks, not by a force.
             let scoped = self.nodes[index].local_call_history.clone();
             let nested = self.nodes[index]
                 .sub_graph
@@ -4070,8 +4489,6 @@ impl FlowGraphInstance {
         Ok(delta)
     }
 
-    /// CancelAndRevert: pop this node's inverse cache and undo exactly,
-    /// including waypoint edge use counts and revealed property values.
     pub fn cancel_and_revert(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4165,9 +4582,6 @@ impl FlowGraphInstance {
             NodeCallData::Waiter { .. } => self.nodes[index].waiter_wake_ms = 0,
             NodeCallData::Route { .. } => self.nodes[index].chosen_output_pin = None,
             NodeCallData::Mission { .. } => {
-                // Snapshot the child's scoped mirrors before unwinding: they
-                // are the replay source for the forward reconcile pass, but a
-                // plain reset would discard them.
                 let mirrors = self.nodes[index]
                     .sub_graph
                     .as_deref()
@@ -4178,7 +4592,6 @@ impl FlowGraphInstance {
                     child.reset();
                     child.restore_mission_mirrors(&mirrors);
                 }
-                // Do not sync: that would erase the mirror we just restored.
             }
             NodeCallData::Delta { .. }
             | NodeCallData::Poi { .. }
@@ -4186,8 +4599,6 @@ impl FlowGraphInstance {
         }
         let cancelled_storylet = record_storylet(&record);
         self.remove_record(node_guid, cancelled_storylet, Some(ctx.state))?;
-        // A direct revert of the current head must move the head to its parent;
-        // otherwise a later checkout/reconcile cancels the same call again.
         let head = self.history.head;
         if head != 0 {
             let commit = &self.history.commits[head];
@@ -4207,10 +4618,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Process a scene time window. Forward windows are half-open `[t0, t1)`;
-    /// backward scrubbing uses `(t1, t0]` and inverts the activity mapping.
-    /// Parts are sorted by priority key then combiner entity, arbitrated per
-    /// entity, and dispatched in that order (REQ-SC-02, REQ-SC-03).
     pub fn process_time_window(
         &mut self,
         node_guid: u32,
@@ -4219,8 +4626,6 @@ impl FlowGraphInstance {
         self.process_time_window_inner(node_guid, delta_ms, true, true, 0)
     }
 
-    /// Scrub a scene window without touching call history or emitting tokens.
-    /// Used by preview clients that apply the result to a throwaway instance.
     pub fn preview_time_window(
         &mut self,
         node_guid: u32,
@@ -4239,11 +4644,9 @@ impl FlowGraphInstance {
     ) -> Result<Vec<ActionPart>, GraphError> {
         let frame = self.plan_section_frame(node_guid, delta_ms)?;
         let parts = frame.parts.clone();
-        let applied = self.composer.execute_sorted_action_parts(
-            node_guid,
-            &frame.parts,
-            frame.is_reverse,
-        )?;
+        let applied =
+            self.composer
+                .execute_sorted_action_parts(node_guid, &frame.parts, frame.is_reverse)?;
         self.apply_section_frame(
             frame,
             &applied,
@@ -4254,8 +4657,6 @@ impl FlowGraphInstance {
         Ok(parts)
     }
 
-    /// First half of a scene window: resolve the time slice and its parts
-    /// without mutating the clock, composer, call_data, or history.
     fn plan_section_frame(
         &self,
         node_guid: u32,
@@ -4336,12 +4737,9 @@ impl FlowGraphInstance {
             }
         }
         if delta_ms < 0 {
-            // Only commands that actually won arbitration during forward play
-            // may write a pose on the way back.
             parts.retain(|part| {
                 self.composer.applied.iter().any(|command| {
-                    command.node_guid == node_guid
-                        && command.event_id == part.event_ref.event_id
+                    command.node_guid == node_guid && command.event_id == part.event_ref.event_id
                 })
             });
         }
@@ -4365,8 +4763,6 @@ impl FlowGraphInstance {
             previous_poses,
         })
     }
-    /// Second half: apply a frame's arbitrated commands and update its clock,
-    /// inverse cache, completion record, and emitted tokens.
     fn apply_section_frame(
         &mut self,
         frame: SectionFrame,
@@ -4408,14 +4804,13 @@ impl FlowGraphInstance {
                 node.state = NodeExecutionState::Completed;
                 node.chosen_output_pin = Some(DEFAULT_OUTPUT_PIN.to_string());
             } else if frame.reopened {
-                // Scrubbing back below the end reopens the section; otherwise
-                // the clock disagrees with `Completed` and forward play can
-                // never emit completion again.
                 node.state = NodeExecutionState::ActiveLatent;
                 node.chosen_output_pin = None;
             }
         }
-        if frame.just_completed { self.node_invocations.remove(&node_guid); }
+        if frame.just_completed {
+            self.node_invocations.remove(&node_guid);
+        }
         let mut emitted = Vec::new();
         if frame.just_completed {
             let entry = CallHistoryEntry {
@@ -4433,8 +4828,7 @@ impl FlowGraphInstance {
                 self.record_call(&entry, &BijectiveDelta::default())?;
                 let commit = self.history.head;
                 if let Some(NodeCallData::SceneSection {
-                    completion_commit,
-                    ..
+                    completion_commit, ..
                 }) = self.nodes[index].call_data.last_mut()
                 {
                     *completion_commit = Some(commit);
@@ -4444,28 +4838,20 @@ impl FlowGraphInstance {
                 emitted = self.emit_tokens(node_guid, DEFAULT_OUTPUT_PIN, completion_budget_ms);
             }
         } else if frame.reopened && record_completion {
-            // Drop the completion record so a later forward pass records it
-            // once. Only a tail completion can be removed without rewriting
-            // the DAG; anything else must go through checkout first.
-            let recorded = self.nodes[index]
-                .call_data
-                .iter()
-                .rev()
-                .find_map(|record| match record {
-                    NodeCallData::SceneSection {
-                        completion_commit, ..
-                    } => *completion_commit,
-                    _ => None,
-                });
+            let recorded =
+                self.nodes[index]
+                    .call_data
+                    .iter()
+                    .rev()
+                    .find_map(|record| match record {
+                        NodeCallData::SceneSection {
+                            completion_commit, ..
+                        } => *completion_commit,
+                        _ => None,
+                    });
             let head = self.history.head;
-            // A non-tail completion cannot be removed without reverting its
-            // descendants; the section still reopens so previews remain
-            // usable, and `checkout` is the path that reconciles the DAG.
             let removable = recorded.map_or_else(
-                || {
-                    head != 0
-                        && self.history.commits[head].entry.node_guid == node_guid
-                },
+                || head != 0 && self.history.commits[head].entry.node_guid == node_guid,
                 |commit| commit == head,
             );
             if removable && head != 0 {
@@ -4477,8 +4863,6 @@ impl FlowGraphInstance {
         Ok(emitted)
     }
 
-    /// The step the NPC would take from the current topic, without changing
-    /// anything.
     pub fn next_topic_step(
         &self,
         ctx: &RuntimeContext,
@@ -4513,8 +4897,6 @@ impl FlowGraphInstance {
             .map_err(GraphError::Dispatch)
     }
 
-    /// Player diverts the conversation onto a specific topic edge. The step is
-    /// recorded so the exact inverse restores the prior topic and edge-use count.
     pub fn divert_topic(
         &mut self,
         _ctx: &mut RuntimeContext,
@@ -4594,11 +4976,6 @@ impl FlowGraphInstance {
         result
     }
 
-    /// Attach the child asset a mission node owns (REQ-CH-04, spec §8.2). The
-    /// adapter builds instances top-down, one call per mission node. The child
-    /// asset must validate, must match the node's `sub_graph_asset_id`, and must
-    /// not already appear in this instance's ancestor chain — that is what makes
-    /// a mission cycle impossible.
     pub fn attach_mission_asset(
         &mut self,
         node_guid: u32,
@@ -4645,8 +5022,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Attach every authored mission asset and recursively attach its children.
-    /// Asset identity in a MissionSubGraph node is the target storylet ID.
     pub fn attach_mission_assets(
         &mut self,
         mission_assets: &BTreeMap<String, FlowGraphAsset>,
@@ -4685,15 +5060,11 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// The nested instance a mission node owns, when one is attached.
     pub fn mission_instance(&self, node_guid: u32) -> Option<&FlowGraphInstance> {
         self.node(node_guid)
             .and_then(|node| node.sub_graph.as_deref())
     }
 
-    /// The scoped array the adapter serializes for a mission node (REQ-CH-02,
-    /// REQ-CH-04). The engine keeps it in sync with the attached child's own
-    /// history; for legacy same-asset mission scopes it is the scoped list.
     pub fn mission_call_history(&self, node_guid: u32) -> &[CallHistoryEntry] {
         match self.node_index(node_guid) {
             Some(index) => &self.nodes[index].local_call_history,
@@ -4701,9 +5072,6 @@ impl FlowGraphInstance {
         }
     }
 
-    /// True while this instance still has work pending: an active token or a
-    /// latent node. A mission boundary completes only when its child reaches
-    /// this point.
     fn has_pending_work(&self) -> bool {
         self.tokens
             .iter()
@@ -4714,7 +5082,6 @@ impl FlowGraphInstance {
                 .any(|node| node.state == NodeExecutionState::ActiveLatent)
     }
 
-    /// Mirror the child instance's history into the mission node's scoped array.
     fn sync_mission_history(&mut self, node_guid: u32) -> Result<(), GraphError> {
         let index = self
             .node_index(node_guid)
@@ -4729,9 +5096,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Unwind a mission's local history in reverse (REQ-CH-04). Only the child
-    /// instance's records are touched; the mission node's own record is the
-    /// caller's responsibility.
     fn unwind_mission_history(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4750,11 +5114,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Execute one mission node: run the attached child against the shared world
-    /// state, then decide the mission boundary itself. The mission node records
-    /// globally with an empty delta — a boundary marker — because every real
-    /// delta lives in the child instance, so a revert never applies the same
-    /// change twice.
     fn execute_mission(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4778,9 +5137,6 @@ impl FlowGraphInstance {
             .node_index(node_guid)
             .ok_or(GraphError::NodeNotFound { node_guid })?;
         if self.nodes[index].state == NodeExecutionState::Completed {
-            // Re-entering would double-apply the child while replay cannot
-            // distinguish invocations; reject until scoped histories carry an
-            // invocation ordinal.
             return Err(GraphError::MissionReentry { node_guid });
         }
         let first_activation = self.nodes[index].state == NodeExecutionState::Idle;
@@ -4795,7 +5151,9 @@ impl FlowGraphInstance {
             if first_activation {
                 child.start()?;
                 for token in &child.tokens {
-                    child.token_invocations.insert(token.token_id, self.current_invocation);
+                    child
+                        .token_invocations
+                        .insert(token.token_id, self.current_invocation);
                 }
             }
             child.tick(ctx, budget_ms)?
@@ -4808,8 +5166,6 @@ impl FlowGraphInstance {
         executed.extend(emitted);
         Ok(executed)
     }
-    /// Unwind a mission to its start. Only the mission's local history is
-    /// unwound; the mission node's own global record is left intact (REQ-CH-04).
     pub fn rollback_mission_to_start(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4832,8 +5188,6 @@ impl FlowGraphInstance {
             .ok_or(GraphError::NodeNotFound { node_guid })?;
         let attached = self.nodes[index].sub_graph.is_some();
         if attached {
-            // Spec §8.2: unwind the child instance's records in reverse, clear
-            // the scoped array, then restart the child from its start node.
             {
                 let child = self.nodes[index].sub_graph.as_mut().unwrap();
                 let local = child.call_history().to_vec();
@@ -4850,8 +5204,6 @@ impl FlowGraphInstance {
         }
         self.nodes[index].local_call_history.clear();
         let node = &mut self.nodes[index];
-        // An attached mission stays open so the restarted child continues on the
-        // next frame; an unattached mission node returns to Idle as before.
         node.state = if attached {
             NodeExecutionState::ActiveLatent
         } else {
@@ -4911,7 +5263,6 @@ impl<'a> RuntimeContext<'a> {
 }
 
 impl FlowGraphInstance {
-    /// Replay a call history from a clean instance (REQ-CH-03).
     pub fn replay_history(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4920,13 +5271,6 @@ impl FlowGraphInstance {
         self.replay_history_with_missions(ctx, entries, &BTreeMap::new())
     }
 
-    /// Replay a global history plus the scoped mission arrays (REQ-CH-03). The
-    /// world state is rebuilt by re-running the recorded nodes; nothing about
-    /// the world itself is serialized. `mission_histories` is keyed by mission
-    /// node GUID and replayed at the point that node is force-completed, so
-    /// mission effects land in the same order as the original run. Node GUIDs
-    /// are unique across the instance tree, so nested missions resolve against
-    /// the same map.
     pub fn replay_history_with_missions(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4978,7 +5322,6 @@ impl FlowGraphInstance {
         result
     }
 
-    /// Replay a save file, validating every record against the asset first.
     pub fn replay_save(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -5012,16 +5355,11 @@ impl FlowGraphInstance {
         self.clear_pending_passion_threshold_events();
         result
     }
-    /// Reconcile with an external history (REQ-CH-06): find the lowest common
-    /// ancestor by prefix comparison, revert to it, then append the divergent
-    /// suffix as new commits. Returns the new head.
     pub fn reconcile_history(
         &mut self,
         ctx: &mut RuntimeContext,
         target: &[CallHistoryEntry],
     ) -> Result<usize, GraphError> {
-        // `path_to` starts at the root sentinel commit 0, which carries no
-        // entry; compare only real commits.
         let current: Vec<usize> = self
             .history
             .path_to(self.history.head)?
@@ -5053,9 +5391,6 @@ impl FlowGraphInstance {
         Ok(self.history.head)
     }
 
-    /// Move the head to an existing commit: revert to the LCA with the stored
-    /// deltas, then re-run the forward branch. A recomputed delta that differs
-    /// from the stored one means the history and the graph disagree.
     pub fn checkout(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -5064,7 +5399,6 @@ impl FlowGraphInstance {
         let lca = self.history.lca(self.history.head, target_commit)?;
         self.revert_to_commit(ctx, lca)?;
         let path = self.history.path_to(target_commit)?;
-        // Ancestors of the LCA are already applied; replay only the suffix.
         let start = path
             .iter()
             .position(|&commit| commit == lca)
@@ -5077,10 +5411,6 @@ impl FlowGraphInstance {
             let record = self.history.commits[commit].clone();
             let state_snapshot = ctx.state.clone();
             let instance_snapshot = self.clone();
-            // Re-run the recorded call through the same path as a live
-            // execution so scene timelines and mission children replay too.
-            // `commit: false` keeps the DAG untouched; the target commit is
-            // already stored, and appending a copy would orphan it.
             let delta = self.force_complete_with_input_commit(
                 ctx,
                 record.entry.node_guid,
@@ -5115,9 +5445,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Invoke the story up to a point of interest (REQ-CH-02): post-order seek
-    /// with an explicit stack, resolve each hub's prerequisite chain, then
-    /// force-complete the path and the POI.
     pub fn invoke_story_to_poi(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -5206,19 +5533,20 @@ impl FlowGraphInstance {
         Ok(path)
     }
 
-    /// Queue the authored outgoing edges after a point-of-interest seek.
     pub fn resume_from_poi(&mut self, node_guid: u32) -> Result<(), GraphError> {
-        let def = self.asset.node(node_guid).ok_or(GraphError::NodeNotFound { node_guid })?;
+        let def = self
+            .asset
+            .node(node_guid)
+            .ok_or(GraphError::NodeNotFound { node_guid })?;
         if !matches!(def.kind, NodeKind::Poi { .. }) {
-            return Err(GraphError::UnsupportedNode { node_guid, category: def.category });
+            return Err(GraphError::UnsupportedNode {
+                node_guid,
+                category: def.category,
+            });
         }
         self.emit_tokens(node_guid, DEFAULT_OUTPUT_PIN, 0);
         Ok(())
     }
-    /// Post-order seek from a POI back through the graph. AND gates take every
-    /// incoming edge; ANY, choice, and multi-fan-in nodes take the declared
-    /// route, falling back to the first incoming edge in deterministic order.
-    /// Completed nodes stop that branch.
     fn seek_backward(
         &self,
         target: u32,
@@ -5242,9 +5570,6 @@ impl FlowGraphInstance {
                 let (_, output_pin) =
                     route.ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
                 let input_pin = if matches!(def.kind, NodeKind::LogicAll) {
-                    // The gate completes on its last arriving branch, which is
-                    // the last predecessor in deterministic edge order; replay
-                    // compares this recorded pin against live execution.
                     self.asset
                         .incoming_edges(guid)
                         .last()
@@ -5310,10 +5635,6 @@ impl FlowGraphInstance {
         Ok(entries)
     }
 
-    /// Greedy prerequisite chain for a hub: pick deck members that are eligible
-    /// against a simulated copy of the world and contribute a tag the exit
-    /// storylet still needs, ordered by display priority then storylet id, then
-    /// append the exit.
     fn qbn_prerequisite_chain(
         &self,
         ctx: &RuntimeContext,
@@ -5423,9 +5744,6 @@ impl FlowGraphInstance {
     }
 }
 
-/// Rebase a saved call history onto an updated asset (REQ-CH-07): drop records
-/// whose node or storylet no longer exists, then bridge consecutive records that
-/// are no longer directly connected.
 pub fn rebase_call_history(
     updated: &FlowGraphAsset,
     dispatcher: &UnifiedDispatcher,
@@ -5486,7 +5804,10 @@ fn evaluate_typed_condition(
     let Some(literal) = literal else {
         return match input {
             DataValue::Bool(value) => Ok(*value),
-            _ => Err(GraphError::UnsupportedNode { node_guid: 0, category: NodeCategory::LogicGate }),
+            _ => Err(GraphError::UnsupportedNode {
+                node_guid: 0,
+                category: NodeCategory::LogicGate,
+            }),
         };
     };
     let ordering = match (input, literal) {
@@ -5600,8 +5921,6 @@ mod tests {
         }
     }
 
-
-
     fn mission_node(node_guid: u32, asset_id: &str) -> FlowNodeDef {
         FlowNodeDef {
             category: NodeCategory::ScopedContainer,
@@ -5657,10 +5976,12 @@ mod tests {
         let dispatcher = UnifiedDispatcher::default();
         let mut state = WorldStateTable::with_capacity(1);
         let mut context = RuntimeContext::new(&mut state, &dispatcher);
-        assert!(instance
-            .signal_event(&mut context, "player.open_door")
-            .unwrap()
-            .is_empty());
+        assert!(
+            instance
+                .signal_event(&mut context, "player.open_door")
+                .unwrap()
+                .is_empty()
+        );
         instance.start().unwrap();
         instance.tick(&mut context, 0).unwrap();
         assert_eq!(
@@ -5678,10 +5999,12 @@ mod tests {
             instance.node(2).unwrap().state,
             NodeExecutionState::Completed
         );
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 2));
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 2)
+        );
         instance.tick(&mut context, 0).unwrap();
         let end_calls = instance
             .global_call_history
@@ -5745,14 +6068,18 @@ mod tests {
         instance.start().unwrap();
         instance.tick(&mut context, 0).unwrap();
 
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 2));
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 3));
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 2)
+        );
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 3)
+        );
     }
     #[test]
     fn graph_transform_node_is_reversible_through_call_history_cache() {
@@ -5890,18 +6217,24 @@ mod tests {
             .invoke_story_to_poi(&mut context, 3, &BTreeMap::new())
             .unwrap();
 
-        assert!(!instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 1));
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 2));
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 3));
+        assert!(
+            !instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 1)
+        );
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 2)
+        );
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 3)
+        );
     }
     #[test]
     fn active_scene_sections_advance_on_tick_and_reconcile_exactly() {
@@ -5956,10 +6289,12 @@ mod tests {
         );
         assert_eq!(instance.node(2).unwrap().section_clock_ms, 50);
         assert_eq!(instance.composer.actor_pose["actor:guide"], "pose:walk");
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 2));
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 2)
+        );
         instance.reconcile_history(&mut context, &[]).unwrap();
         assert!(instance.composer.actor_pose.is_empty());
         assert_eq!(instance.node(2).unwrap().state, NodeExecutionState::Idle);
@@ -6111,15 +6446,14 @@ mod tests {
         instance.reconcile_history(&mut context, &[]).unwrap();
         assert!(instance.call_history().is_empty());
         assert_eq!(instance.node(1).unwrap().current_topic_id, "opening");
-        assert!(instance
-            .node(1)
-            .unwrap()
-            .edge_use_counts
-            .values()
-            .all(|count| *count == 0));
+        assert!(
+            instance
+                .node(1)
+                .unwrap()
+                .edge_use_counts
+                .values()
+                .all(|count| *count == 0)
+        );
         assert!(context.state.global_tags.is_empty());
     }
 }
-
-
-

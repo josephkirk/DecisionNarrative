@@ -1,5 +1,3 @@
-//! Selection profiles, gates, fallback/terminal policy, and weighted choice.
-
 use std::collections::BTreeMap;
 
 use crate::chrono_catalog::StoryletIndex;
@@ -83,8 +81,6 @@ impl Default for SelectionGate {
 }
 
 impl SelectionProfile {
-    /// Canonical opt-in ending profile. The fallback storylet key is authored by
-    /// the project; no ending is invented at runtime.
     pub fn ending(fallback: impl Into<String>) -> Self {
         Self {
             key: "ending".into(),
@@ -281,8 +277,6 @@ pub enum SelectionError {
     InvalidGate { gate: String },
 }
 
-/// One-shot weighted pick. The caller supplies candidates already filtered by
-/// exact eligibility; a zero total applies the profile fallback policy.
 pub fn weighted_pick_one(
     candidates: &[WeightedCandidate],
     rng: &mut SelectionRng,
@@ -362,8 +356,6 @@ pub fn validate_gates(profile: &SelectionProfile) -> Result<(), SelectionError> 
     Ok(())
 }
 
-/// Resolve one profile. Priority/Salience selection is supplied by the caller
-/// as an ordered candidate list; weighted selection uses the profile policy.
 pub fn select_profile(
     profile: &SelectionProfile,
     ordered_candidates: &[StoryletIndex],

@@ -6,6 +6,39 @@ use storylet_engine::chrono_runtime::{
 use storylet_engine::chrono_state::{GameplayTagRegistry, PassionRegistry, WorldStateTable};
 use storylet_engine::run::{RunAction, RunContent, RunKernel, RunStart};
 
+fn test_act(
+    run: &mut RunKernel,
+    content: &RunContent,
+    actor: u16,
+    action: RunAction,
+) -> Result<u32, storylet_engine::RunError> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let seat = match run.world().participants.controller[actor as usize] {
+        storylet_engine::chrono_participants::Controller::Human { seat } => seat,
+        storylet_engine::chrono_participants::Controller::Rule => {
+            return Err(storylet_engine::RunError::InvalidAction(
+                "rule authority not supported by test helper".into(),
+            ));
+        }
+    };
+    let proposal = storylet_engine::ActionProposal {
+        schema_version: 1,
+        actor,
+        action,
+        expected_revision: run.revision(),
+        idempotency_key: format!("test-{}", NEXT.fetch_add(1, Ordering::Relaxed)),
+        provenance: None,
+    };
+    run.propose(
+        content,
+        storylet_engine::Authority::Human { seat },
+        proposal,
+    )
+    .map(|receipt| receipt.step)
+    .map_err(|rejection| storylet_engine::RunError::InvalidAction(rejection.reason))
+}
+
 fn pin(name: &str, input: bool) -> PinDefinition {
     PinDefinition {
         pin_name: name.into(),
@@ -75,7 +108,7 @@ fn fixture() -> RunContent {
 fn start_auto_advances_to_first_interaction() {
     let content = fixture();
     let run = RunKernel::start(&content, RunStart::Beginning, 42).unwrap();
-    let scene = run.view(&content, 0).scene.unwrap();
+    let scene = run.architect_view(&content, 0).scene.unwrap();
     assert_eq!(scene.node_guid, 1);
     assert_eq!(scene.choices.len(), 2);
 }
@@ -87,15 +120,28 @@ fn act_choose_appends_step_and_replay_matches() {
         node_guid: 1,
         output_pin: 0,
     };
-    assert_eq!(run.act(&content, 0, action.clone()).unwrap(), 1);
-    let view = run.view(&content, 0);
+    assert_eq!(test_act(&mut run, &content, 0, action.clone()).unwrap(), 1);
+    let view = run.architect_view(&content, 0);
     assert_eq!(view.steps.len(), 1);
     assert_eq!(view.current_step, 1);
-    let proposal=storylet_engine::ActionProposal{schema_version:1,actor:0,action,idempotency_key:"replay-1".into(),expected_revision:0,provenance:None};
-    let replayed = RunKernel::replay(&content, RunStart::Beginning, 42, &[(storylet_engine::Authority::Human{seat:0},proposal)]).unwrap();
+    let proposal = storylet_engine::ActionProposal {
+        schema_version: 1,
+        actor: 0,
+        action,
+        idempotency_key: "replay-1".into(),
+        expected_revision: 0,
+        provenance: None,
+    };
+    let replayed = RunKernel::replay(
+        &content,
+        RunStart::Beginning,
+        42,
+        &[(storylet_engine::Authority::Human { seat: 0 }, proposal)],
+    )
+    .unwrap();
     assert_eq!(
         serde_json::to_value(view).unwrap(),
-        serde_json::to_value(replayed.view(&content, 0)).unwrap()
+        serde_json::to_value(replayed.architect_view(&content, 0)).unwrap()
     );
 }
 #[test]
@@ -117,7 +163,8 @@ fn run_actions_have_a_stable_wire_shape() {
 fn act_after_rewind_creates_branch() {
     let content = fixture();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 42).unwrap();
-    run.act(
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::Choose {
@@ -126,8 +173,10 @@ fn act_after_rewind_creates_branch() {
         },
     )
     .unwrap();
-    run.rewind(0).unwrap();
-    run.act(
+    run.rewind(storylet_engine::Authority::Architect, 0)
+        .unwrap();
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::Choose {
@@ -136,7 +185,7 @@ fn act_after_rewind_creates_branch() {
         },
     )
     .unwrap();
-    let view = run.view(&content, 0);
+    let view = run.architect_view(&content, 0);
     assert_eq!(view.branches.len(), 2);
     assert_ne!(
         view.branches[0].steps[0].action,
@@ -153,18 +202,21 @@ fn stalled_graph_returns_stalled() {
     };
     content.root_asset.nodes[1].category = NodeCategory::Waiter;
     let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    assert!(matches!(
-        run.act(
+    let before = serde_json::to_vec(&run).unwrap_or_default();
+    assert!(
+        test_act(
+            &mut run,
             &content,
             0,
             RunAction::Choose {
                 node_guid: 1,
                 output_pin: 0
             }
-        ),
-        Err(storylet_engine::run::RunError::Stalled { .. })
-    ));
-    assert_eq!(run.view(&content, 0).current_step, 0);
+        )
+        .is_err()
+    );
+    assert_eq!(serde_json::to_vec(&run).unwrap_or_default(), before);
+    assert_eq!(run.architect_view(&content, 0).current_step, 0);
 }
 #[test]
 fn why_not_explains_missing_fact() {
@@ -183,10 +235,11 @@ fn why_not_explains_missing_fact() {
     });
     content.dispatcher.rebuild_index();
     let run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    assert!(run
-        .why_not(&content, 0, 10)
-        .iter()
-        .any(|m| m.storylet.id == 1 && m.reason == "needs fact \"light doused\""));
+    assert!(
+        run.why_not(&content, 0, 10)
+            .iter()
+            .any(|m| m.storylet.id == 1 && m.reason == "needs fact \"light doused\"")
+    );
 }
 #[test]
 fn content_roundtrip_rebuilds_dispatcher_index() {
@@ -213,13 +266,29 @@ fn replay_is_deterministic_over_twenty_choices() {
         })
         .collect::<Vec<_>>();
     for (p, action) in &actions {
-        run.act(&content, *p, action.clone()).unwrap();
+        test_act(&mut run, &content, *p, action.clone()).unwrap();
     }
-    let recorded=actions.iter().enumerate().map(|(i,(p,a))|(storylet_engine::Authority::Human{seat:0},storylet_engine::ActionProposal{schema_version:1,actor:*p,action:a.clone(),idempotency_key:format!("replay-{i}"),expected_revision:i as u64,provenance:None})).collect::<Vec<_>>();
-    let replay=RunKernel::replay(&content,RunStart::Beginning,987,&recorded).unwrap();
+    let recorded = actions
+        .iter()
+        .enumerate()
+        .map(|(i, (p, a))| {
+            (
+                storylet_engine::Authority::Human { seat: 0 },
+                storylet_engine::ActionProposal {
+                    schema_version: 1,
+                    actor: *p,
+                    action: a.clone(),
+                    idempotency_key: format!("replay-{i}"),
+                    expected_revision: i as u64,
+                    provenance: None,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let replay = RunKernel::replay(&content, RunStart::Beginning, 987, &recorded).unwrap();
     assert_eq!(
-        serde_json::to_value(run.view(&content, 0)).unwrap(),
-        serde_json::to_value(replay.view(&content, 0)).unwrap()
+        serde_json::to_value(run.architect_view(&content, 0)).unwrap(),
+        serde_json::to_value(replay.architect_view(&content, 0)).unwrap()
     );
 }
 #[test]
@@ -248,7 +317,7 @@ fn storylet_start_invokes_its_poi() {
     content.dispatcher.storylets[0].payload_node_guid = 1;
     content.catalog.insert("opening", false, 0, 0.0).unwrap();
     let run = RunKernel::start(&content, RunStart::Storylet { storylet: 0 }, 4).unwrap();
-    assert_eq!(run.view(&content, 0).scene.unwrap().node_guid, 1);
+    assert_eq!(run.architect_view(&content, 0).scene.unwrap().node_guid, 1);
 }
 #[test]
 fn why_not_excludes_storylets_at_other_places() {
@@ -328,8 +397,9 @@ fn nested_mission_choice_is_playable() {
     content.root_asset.nodes.push(child.nodes[0].clone());
     content.mission_assets.insert("test".into(), child);
     let mut run = RunKernel::start(&content, RunStart::Beginning, 3).unwrap();
-    assert_eq!(run.view(&content, 0).scene.unwrap().node_guid, 1);
-    run.act(
+    assert_eq!(run.architect_view(&content, 0).scene.unwrap().node_guid, 1);
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::Choose {
@@ -338,9 +408,10 @@ fn nested_mission_choice_is_playable() {
         },
     )
     .unwrap();
-    assert!(run.view(&content, 0).scene.is_none());
-    run.rewind(0).unwrap();
-    assert_eq!(run.view(&content, 0).scene.unwrap().node_guid, 1);
+    assert!(run.architect_view(&content, 0).scene.is_none());
+    run.rewind(storylet_engine::Authority::Architect, 0)
+        .unwrap();
+    assert_eq!(run.architect_view(&content, 0).scene.unwrap().node_guid, 1);
 }
 
 mod support;
@@ -349,10 +420,12 @@ fn weirs_crossing_explains_why_teodor_cannot_be_pressed_yet() {
     let content = support::weirs_crossing::content();
     let run = RunKernel::start(&content, RunStart::Beginning, 7).unwrap();
     let misses = run.why_not(&content, 0, 10);
-    assert!(misses
-        .iter()
-        .any(|m| m.storylet.id == support::weirs_crossing::PRESS_TEODOR
-            && m.reason == "needs fact \"light doused\""));
+    assert!(
+        misses
+            .iter()
+            .any(|m| m.storylet.id == support::weirs_crossing::PRESS_TEODOR
+                && m.reason == "needs fact \"light doused\"")
+    );
     assert_eq!(
         content
             .initial_world
@@ -428,12 +501,13 @@ fn movement_requires_a_connected_location() {
         weight: 1.0,
     }];
     let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    assert!(run.act(&content, 0, RunAction::Move { to: 3 }).is_err());
-    assert!(run.act(&content, 0, RunAction::Move { to: 2 }).is_err());
-    run.act(&content, 0, RunAction::Move { to: 1 }).unwrap();
-    assert_eq!(run.world.active_location(0), Some(1));
-    run.rewind(0).unwrap();
-    assert_eq!(run.world.active_location(0), Some(0));
+    assert!(test_act(&mut run, &content, 0, RunAction::Move { to: 3 }).is_err());
+    assert!(test_act(&mut run, &content, 0, RunAction::Move { to: 2 }).is_err());
+    test_act(&mut run, &content, 0, RunAction::Move { to: 1 }).unwrap();
+    assert_eq!(run.world().active_location(0), Some(1));
+    run.rewind(storylet_engine::Authority::Architect, 0)
+        .unwrap();
+    assert_eq!(run.world().active_location(0), Some(0));
 }
 #[test]
 fn waypoint_exposes_adjacent_topic_actions() {
@@ -479,7 +553,7 @@ fn waypoint_exposes_adjacent_topic_actions() {
     };
     content.root_asset.nodes[0].category = NodeCategory::ScopedContainer;
     let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    let scene = run.view(&content, 0).scene.unwrap();
+    let scene = run.architect_view(&content, 0).scene.unwrap();
     assert_eq!(
         scene.choices[0].action,
         RunAction::Topic {
@@ -487,8 +561,7 @@ fn waypoint_exposes_adjacent_topic_actions() {
             edge_id: 1
         }
     );
-    run.act(&content, 0, scene.choices[0].action.clone())
-        .unwrap();
+    test_act(&mut run, &content, 0, scene.choices[0].action.clone()).unwrap();
 }
 #[test]
 fn rewind_restores_storylet_before_new_choice() {
@@ -532,7 +605,8 @@ fn rewind_restores_storylet_before_new_choice() {
     content.dispatcher.rebuild_index();
     content.storylet_titles.insert(1, "Next".into());
     let mut run = RunKernel::start(&content, RunStart::Beginning, 2).unwrap();
-    run.act(
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::Choose {
@@ -541,7 +615,8 @@ fn rewind_restores_storylet_before_new_choice() {
         },
     )
     .unwrap();
-    run.act(
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::PlayStorylet {
@@ -550,9 +625,16 @@ fn rewind_restores_storylet_before_new_choice() {
         },
     )
     .unwrap();
-    assert_eq!(run.view(&content, 0).scene.unwrap().storylet.id, 1);
-    run.rewind(0).unwrap();
-    assert_eq!(run.view(&content, 0).scene.unwrap().storylet.id, 0);
+    assert_eq!(
+        run.architect_view(&content, 0).scene.unwrap().storylet.id,
+        1
+    );
+    run.rewind(storylet_engine::Authority::Architect, 0)
+        .unwrap();
+    assert_eq!(
+        run.architect_view(&content, 0).scene.unwrap().storylet.id,
+        0
+    );
 }
 #[test]
 fn selecting_storylet_enters_its_own_scene() {
@@ -581,7 +663,8 @@ fn selecting_storylet_enters_its_own_scene() {
     });
     content.dispatcher.rebuild_index();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    run.act(
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::PlayStorylet {
@@ -590,13 +673,14 @@ fn selecting_storylet_enters_its_own_scene() {
         },
     )
     .unwrap();
-    assert_eq!(run.view(&content, 0).scene.unwrap().node_guid, 6);
+    assert_eq!(run.architect_view(&content, 0).scene.unwrap().node_guid, 6);
 }
 #[test]
 fn weirs_crossing_lamp_soot_unlocks_pressing_teodor() {
     let content = support::weirs_crossing::content();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 7).unwrap();
-    run.act(
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::Choose {
@@ -605,12 +689,14 @@ fn weirs_crossing_lamp_soot_unlocks_pressing_teodor() {
         },
     )
     .unwrap();
-    assert!(!run
-        .view(&content, 0)
-        .also_here
-        .iter()
-        .any(|s| s.id == support::weirs_crossing::PRESS_TEODOR));
-    run.act(
+    assert!(
+        !run.architect_view(&content, 0)
+            .also_here
+            .iter()
+            .any(|s| s.id == support::weirs_crossing::PRESS_TEODOR)
+    );
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::PlayStorylet {
@@ -619,8 +705,16 @@ fn weirs_crossing_lamp_soot_unlocks_pressing_teodor() {
         },
     )
     .unwrap();
-    assert_eq!(run.view(&content, 0).scene.as_ref().unwrap().node_guid, 20);
-    run.act(
+    assert_eq!(
+        run.architect_view(&content, 0)
+            .scene
+            .as_ref()
+            .unwrap()
+            .node_guid,
+        20
+    );
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::Choose {
@@ -629,14 +723,22 @@ fn weirs_crossing_lamp_soot_unlocks_pressing_teodor() {
         },
     )
     .unwrap();
-    assert!(run
-        .view(&content, 0)
-        .also_here
-        .iter()
-        .any(|s| s.id == support::weirs_crossing::PRESS_TEODOR));
+    assert!(
+        run.architect_view(&content, 0)
+            .also_here
+            .iter()
+            .any(|s| s.id == support::weirs_crossing::PRESS_TEODOR)
+    );
     let fact = content.registry.id("fact.light_doused").unwrap();
-    assert!(run.world.knowledge.knows(0, fact).is_some());
-    assert!(run.world.knowledge.knows(1, fact).is_some());
+    assert!(run.world().knowledge.knows(0, fact).is_some());
+    assert!(run.world().knowledge.knows(1, fact).is_some());
+    let source = run.world().knowledge.knows(0, fact).unwrap().source_event;
+    let chain = run.explain(source).unwrap();
+    assert!(
+        chain
+            .iter()
+            .any(|event| event.id == source && event.actor == 0)
+    );
 }
 #[test]
 fn weirs_crossing_seeded_random_valid_actions_replay() {
@@ -646,7 +748,7 @@ fn weirs_crossing_seeded_random_valid_actions_replay() {
     let mut actions = Vec::new();
     for _ in 0..20 {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let view = run.view(&content, 0);
+        let view = run.architect_view(&content, 0);
         let action = if let Some(scene) = view.scene {
             let index = (seed as usize) % scene.choices.len();
             scene.choices[index].action.clone()
@@ -657,14 +759,30 @@ fn weirs_crossing_seeded_random_valid_actions_replay() {
                 storylet: view.also_here[index].id,
             }
         };
-        run.act(&content, 0, action.clone()).unwrap();
+        test_act(&mut run, &content, 0, action.clone()).unwrap();
         actions.push((0, action));
     }
-    let recorded=actions.iter().enumerate().map(|(i,(p,a))|(storylet_engine::Authority::Human{seat:0},storylet_engine::ActionProposal{schema_version:1,actor:*p,action:a.clone(),idempotency_key:format!("replay-{i}"),expected_revision:i as u64,provenance:None})).collect::<Vec<_>>();
-    let replayed=RunKernel::replay(&content,RunStart::Beginning,99,&recorded).unwrap();
+    let recorded = actions
+        .iter()
+        .enumerate()
+        .map(|(i, (p, a))| {
+            (
+                storylet_engine::Authority::Human { seat: 0 },
+                storylet_engine::ActionProposal {
+                    schema_version: 1,
+                    actor: *p,
+                    action: a.clone(),
+                    idempotency_key: format!("replay-{i}"),
+                    expected_revision: i as u64,
+                    provenance: None,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let replayed = RunKernel::replay(&content, RunStart::Beginning, 99, &recorded).unwrap();
     assert_eq!(
-        serde_json::to_value(run.view(&content, 0)).unwrap(),
-        serde_json::to_value(replayed.view(&content, 0)).unwrap()
+        serde_json::to_value(run.architect_view(&content, 0)).unwrap(),
+        serde_json::to_value(replayed.architect_view(&content, 0)).unwrap()
     );
 }
 #[test]
@@ -728,7 +846,8 @@ fn exit_storylet_finishes_before_hub_effects_and_continuation() {
     });
     content.dispatcher.rebuild_index();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    run.act(
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::PlayStorylet {
@@ -737,11 +856,12 @@ fn exit_storylet_finishes_before_hub_effects_and_continuation() {
         },
     )
     .unwrap();
-    assert_eq!(run.view(&content, 0).scene.unwrap().node_guid, 6);
-    assert!(!run.world.global_tags.bit(effect));
-    assert!(!run.world.global_tags.bit(after));
-    assert!(!run.instance.completed_storylets.contains(1));
-    run.act(
+    assert_eq!(run.architect_view(&content, 0).scene.unwrap().node_guid, 6);
+    assert!(!run.world().global_tags.bit(effect));
+    assert!(!run.world().global_tags.bit(after));
+    assert!(!run.instance().completed_storylets.contains(1));
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::Choose {
@@ -750,49 +870,98 @@ fn exit_storylet_finishes_before_hub_effects_and_continuation() {
         },
     )
     .unwrap();
-    assert!(run.world.global_tags.bit(effect));
-    assert!(run.world.global_tags.bit(after));
-    assert!(run.instance.completed_storylets.contains(1));
+    assert!(run.world().global_tags.bit(effect));
+    assert!(run.world().global_tags.bit(after));
+    assert!(run.instance().completed_storylets.contains(1));
 }
 
 #[test]
 fn selected_scene_ignores_unrelated_waiter_on_unchosen_branch() {
-    use storylet_engine::chrono_runtime::NodeExecutionState;
     let mut content = fixture();
     let hub = FlowNodeDef {
-        node_guid: 5, node_type_id: "hub".into(), category: NodeCategory::DynamicDispatcher,
-        kind: NodeKind::QbnHub { deck: vec![1], exit_storylet_id: None },
-        input_pins: vec![pin("In", true)], output_pins: vec![pin("Out", false)],
+        node_guid: 5,
+        node_type_id: "hub".into(),
+        category: NodeCategory::DynamicDispatcher,
+        kind: NodeKind::QbnHub {
+            deck: vec![1],
+            exit_storylet_id: None,
+        },
+        input_pins: vec![pin("In", true)],
+        output_pins: vec![pin("Out", false)],
         ..Default::default()
     };
     let mut choice = content.root_asset.nodes[0].clone();
     choice.node_guid = 6;
     let waiter = FlowNodeDef {
-        node_guid: 7, node_type_id: "waiter".into(), category: NodeCategory::Waiter,
-        kind: NodeKind::Waiter { duration_ms: 1_000_000, required_tags: Default::default(), wait_event: String::new() },
-        input_pins: vec![pin("In", true)], output_pins: vec![pin("Out", false)],
+        node_guid: 7,
+        node_type_id: "waiter".into(),
+        category: NodeCategory::Waiter,
+        kind: NodeKind::Waiter {
+            duration_ms: 1_000_000,
+            required_tags: Default::default(),
+            wait_event: String::new(),
+        },
+        input_pins: vec![pin("In", true)],
+        output_pins: vec![pin("Out", false)],
         ..Default::default()
     };
     content.root_asset.nodes.extend([hub, choice, waiter]);
     content.root_asset.start_node_guid = 5;
     content.root_asset.edges.extend([
-        EdgeConnection { source_node_guid: 6, source_pin_name: "left".into(), target_node_guid: 2, target_pin_name: "In".into() },
-        EdgeConnection { source_node_guid: 6, source_pin_name: "right".into(), target_node_guid: 7, target_pin_name: "In".into() },
+        EdgeConnection {
+            source_node_guid: 6,
+            source_pin_name: "left".into(),
+            target_node_guid: 2,
+            target_pin_name: "In".into(),
+        },
+        EdgeConnection {
+            source_node_guid: 6,
+            source_pin_name: "right".into(),
+            target_node_guid: 7,
+            target_pin_name: "In".into(),
+        },
     ]);
-    content.dispatcher.storylets.push(StoryletDef { storylet_id: 1, payload_node_guid: 6, is_repeatable: true, ..Default::default() });
+    content.dispatcher.storylets.push(StoryletDef {
+        storylet_id: 1,
+        payload_node_guid: 6,
+        is_repeatable: true,
+        ..Default::default()
+    });
     content.dispatcher.rebuild_index();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    // A separate earlier invocation is still waiting when this scene starts.
-    let unrelated = run.instance.nodes.iter_mut().find(|n| n.node_guid == 7).unwrap();
-    unrelated.state = NodeExecutionState::ActiveLatent;
-    unrelated.waiter_wake_ms = 1_000_000;
-    run.act(&content, 0, RunAction::PlayStorylet { node_guid: 5, storylet: 1 }).unwrap();
-    // The runtime stores one state per GUID: reject overlapping invocations
-    // instead of silently stealing the already-active waiter's ownership.
-    assert!(run.act(&content, 0, RunAction::Choose { node_guid: 6, output_pin: 1 }).is_err());
-    assert_eq!(run.instance.node(7).unwrap().waiter_wake_ms, 1_000_000);
-    run.act(&content, 0, RunAction::Choose { node_guid: 6, output_pin: 0 }).unwrap();
-    assert!(run.instance.completed_storylets.contains(1));
+    test_act(
+        &mut run,
+        &content,
+        0,
+        RunAction::PlayStorylet {
+            node_guid: 5,
+            storylet: 1,
+        },
+    )
+    .unwrap();
+    assert!(
+        test_act(
+            &mut run,
+            &content,
+            0,
+            RunAction::Choose {
+                node_guid: 6,
+                output_pin: 1
+            }
+        )
+        .is_err()
+    );
+    test_act(
+        &mut run,
+        &content,
+        0,
+        RunAction::Choose {
+            node_guid: 6,
+            output_pin: 0,
+        },
+    )
+    .unwrap();
+    assert!(run.instance().completed_storylets.contains(1));
 }
 
 #[test]
@@ -803,7 +972,10 @@ fn invocation_ownership_round_trips_and_old_instances_default_to_unscoped() {
     instance.enter_storylet_invocation(1, 42).unwrap();
     let value = serde_json::to_value(&instance).unwrap();
     let restored: FlowGraphInstance = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(restored.token_invocations.get(&restored.tokens[0].token_id), Some(&42));
+    assert_eq!(
+        restored.token_invocations.get(&restored.tokens[0].token_id),
+        Some(&42)
+    );
     let mut old = value;
     old.as_object_mut().unwrap().remove("token_invocations");
     old.as_object_mut().unwrap().remove("node_invocations");
@@ -865,7 +1037,8 @@ fn selected_storylet_can_change_its_own_entry_requirement() {
     });
     content.dispatcher.rebuild_index();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    run.act(
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::PlayStorylet {
@@ -874,7 +1047,8 @@ fn selected_storylet_can_change_its_own_entry_requirement() {
         },
     )
     .unwrap();
-    run.act(
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::Choose {
@@ -883,7 +1057,7 @@ fn selected_storylet_can_change_its_own_entry_requirement() {
         },
     )
     .unwrap();
-    assert!(!run.world.global_tags.bit(tag));
+    assert!(!run.world().global_tags.bit(tag));
 }
 #[test]
 fn exit_storylet_waits_for_latent_work_before_releasing_hub() {
@@ -940,7 +1114,8 @@ fn exit_storylet_waits_for_latent_work_before_releasing_hub() {
     });
     content.dispatcher.rebuild_index();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    run.act(
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::PlayStorylet {
@@ -949,9 +1124,9 @@ fn exit_storylet_waits_for_latent_work_before_releasing_hub() {
         },
     )
     .unwrap();
-    assert_eq!(run.view(&content, 0).scene.unwrap().node_guid, 7);
-    assert!(!run.world.global_tags.bit(tag));
-    assert!(run.instance.clock_ms >= 3000);
+    assert_eq!(run.architect_view(&content, 0).scene.unwrap().node_guid, 7);
+    assert!(!run.world().global_tags.bit(tag));
+    assert!(run.instance().clock_ms >= 3000);
 }
 
 #[test]
@@ -1035,7 +1210,8 @@ fn exit_storylet_waits_for_latent_work_after_deferred_jump() {
         ]);
         content.dispatcher.rebuild_index();
         let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-        run.act(
+        test_act(
+            &mut run,
             &content,
             0,
             RunAction::PlayStorylet {
@@ -1044,9 +1220,9 @@ fn exit_storylet_waits_for_latent_work_after_deferred_jump() {
             },
         )
         .unwrap();
-        assert_eq!(run.view(&content, 0).scene.unwrap().node_guid, 8);
-        assert!(!run.world.global_tags.bit(tag));
-        assert!(run.instance.clock_ms >= 3000);
+        assert_eq!(run.architect_view(&content, 0).scene.unwrap().node_guid, 8);
+        assert!(!run.world().global_tags.bit(tag));
+        assert!(run.instance().clock_ms >= 3000);
     }
 }
 #[test]
@@ -1095,7 +1271,8 @@ fn mission_hub_can_enter_another_storylet_in_root_asset() {
     });
     content.dispatcher.rebuild_index();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    run.act(
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::PlayStorylet {
@@ -1104,8 +1281,9 @@ fn mission_hub_can_enter_another_storylet_in_root_asset() {
         },
     )
     .unwrap();
-    assert_eq!(run.view(&content, 0).scene.unwrap().node_guid, 1);
-    run.act(
+    assert_eq!(run.architect_view(&content, 0).scene.unwrap().node_guid, 1);
+    test_act(
+        &mut run,
         &content,
         0,
         RunAction::Choose {
@@ -1114,7 +1292,12 @@ fn mission_hub_can_enter_another_storylet_in_root_asset() {
         },
     )
     .unwrap();
-    assert!(run.view(&content, 0).also_here.iter().any(|s| s.id == 1));
+    assert!(
+        run.architect_view(&content, 0)
+            .also_here
+            .iter()
+            .any(|s| s.id == 1)
+    );
 }
 
 #[test]
@@ -1122,32 +1305,78 @@ fn selected_root_choice_is_not_routed_to_dormant_mission_copy() {
     use storylet_engine::chrono_runtime::NodeExecutionState;
     let mut content = fixture();
     let choice = content.root_asset.nodes[0].clone();
-    let child = FlowGraphAsset { asset_id: "child".into(), start_node_guid: 1,
-        nodes: vec![choice], edges: vec![], data_edges: vec![] };
-    let hub = FlowNodeDef { node_guid: 5, node_type_id: "hub".into(),
+    let child = FlowGraphAsset {
+        asset_id: "child".into(),
+        start_node_guid: 1,
+        nodes: vec![choice],
+        edges: vec![],
+        data_edges: vec![],
+    };
+    let hub = FlowNodeDef {
+        node_guid: 5,
+        node_type_id: "hub".into(),
         category: NodeCategory::DynamicDispatcher,
-        kind: NodeKind::QbnHub { deck: vec![1], exit_storylet_id: None },
-        input_pins: vec![pin("In", true)], output_pins: vec![pin("Out", false)],
-        ..Default::default() };
-    let mission = FlowNodeDef { node_guid: 10, node_type_id: "mission".into(),
+        kind: NodeKind::QbnHub {
+            deck: vec![1],
+            exit_storylet_id: None,
+        },
+        input_pins: vec![pin("In", true)],
+        output_pins: vec![pin("Out", false)],
+        ..Default::default()
+    };
+    let mission = FlowNodeDef {
+        node_guid: 10,
+        node_type_id: "mission".into(),
         category: NodeCategory::ScopedContainer,
-        kind: NodeKind::MissionSubGraph { sub_graph_asset_id: "child".into() },
-        input_pins: vec![pin("In", true)], output_pins: vec![pin("Out", false)],
-        ..Default::default() };
+        kind: NodeKind::MissionSubGraph {
+            sub_graph_asset_id: "child".into(),
+        },
+        input_pins: vec![pin("In", true)],
+        output_pins: vec![pin("Out", false)],
+        ..Default::default()
+    };
     content.root_asset.nodes.extend([hub, mission]);
     content.root_asset.start_node_guid = 5;
     content.mission_assets.insert("child".into(), child);
-    content.dispatcher.storylets.push(StoryletDef { storylet_id: 1, payload_node_guid: 1,
-        is_repeatable: true, ..Default::default() });
+    content.dispatcher.storylets.push(StoryletDef {
+        storylet_id: 1,
+        payload_node_guid: 1,
+        is_repeatable: true,
+        ..Default::default()
+    });
     content.dispatcher.rebuild_index();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    run.act(&content, 0, RunAction::PlayStorylet { node_guid: 5, storylet: 1 }).unwrap();
-    run.act(&content, 0, RunAction::Choose { node_guid: 1, output_pin: 0 }).unwrap();
-    assert_eq!(run.instance.mission_instance(10).unwrap().node(1).unwrap().state, NodeExecutionState::Idle);
-    assert!(run.instance.completed_storylets.contains(1));
+    test_act(
+        &mut run,
+        &content,
+        0,
+        RunAction::PlayStorylet {
+            node_guid: 5,
+            storylet: 1,
+        },
+    )
+    .unwrap();
+    test_act(
+        &mut run,
+        &content,
+        0,
+        RunAction::Choose {
+            node_guid: 1,
+            output_pin: 0,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        run.instance()
+            .mission_instance(10)
+            .unwrap()
+            .node(1)
+            .unwrap()
+            .state,
+        NodeExecutionState::Idle
+    );
+    assert!(run.instance().completed_storylets.contains(1));
 }
-
-// --- Inspect: provenance and chronicle ---------------------------------------
 
 use storylet_engine::chrono_chronicle::{ChronicleEntry, ChronicleTable};
 use storylet_engine::chrono_participants::KnowKind;
@@ -1173,24 +1402,33 @@ fn edge(from: u32, from_pin: &str, to: u32) -> EdgeConnection {
     }
 }
 
-/// `choice(left) -> chain of mutators -> end`; `right -> end`.
 fn chain_fixture(chain: Vec<NodeKind>) -> RunContent {
     let mut content = fixture();
-    content.registry = GameplayTagRegistry::compile(["fact".to_string(), "fact.clue".to_string()]).unwrap();
+    content.registry =
+        GameplayTagRegistry::compile(["fact".to_string(), "fact.clue".to_string()]).unwrap();
     content.root_asset.edges.clear();
     let mut previous = (1u32, "left".to_string());
     for (offset, kind) in chain.into_iter().enumerate() {
         let guid = 10 + offset as u32;
         content.root_asset.nodes.push(mutator(guid, kind));
-        content.root_asset.edges.push(edge(previous.0, &previous.1, guid));
+        content
+            .root_asset
+            .edges
+            .push(edge(previous.0, &previous.1, guid));
         previous = (guid, "Out".to_string());
     }
-    content.root_asset.edges.push(edge(previous.0, &previous.1, 2));
+    content
+        .root_asset
+        .edges
+        .push(edge(previous.0, &previous.1, 2));
     content.root_asset.edges.push(edge(1, "right", 2));
     content
 }
 fn choose(pin: u16) -> RunAction {
-    RunAction::Choose { node_guid: 1, output_pin: pin }
+    RunAction::Choose {
+        node_guid: 1,
+        output_pin: pin,
+    }
 }
 
 #[test]
@@ -1201,7 +1439,7 @@ fn inspect_marks_testimony_unconfirmed_and_links_source_step() {
         visibility: Visibility::Private,
     }]);
     let mut run = RunKernel::start(&content, RunStart::Beginning, 3).unwrap();
-    run.act(&content, 0, choose(0)).unwrap();
+    test_act(&mut run, &content, 0, choose(0)).unwrap();
     let inspect = run.inspect(&content, 0);
     assert_eq!(inspect.knows.len(), 1);
     let row = &inspect.knows[0];
@@ -1219,7 +1457,7 @@ fn inspect_evidence_is_confirmed() {
         visibility: Visibility::Private,
     }]);
     let mut run = RunKernel::start(&content, RunStart::Beginning, 3).unwrap();
-    run.act(&content, 0, choose(0)).unwrap();
+    test_act(&mut run, &content, 0, choose(0)).unwrap();
     assert!(run.inspect(&content, 0).knows[0].confirmed);
 }
 
@@ -1244,11 +1482,14 @@ fn canon_entry(key: &str, story_time: i64) -> ChronicleEntry {
 
 #[test]
 fn inspect_chronicle_numbers_told_entries_in_telling_order() {
-    // Canon order after sorting: p1 (0), p2 (1), p3 (2). P2 is told first, then P1; P3 is never told.
     let mut content = chain_fixture(vec![reveal(1), reveal(0)]);
-    content.chronicle = ChronicleTable::new(vec![canon_entry("p1", 10), canon_entry("p2", 20), canon_entry("p3", 30)]);
+    content.chronicle = ChronicleTable::new(vec![
+        canon_entry("p1", 10),
+        canon_entry("p2", 20),
+        canon_entry("p3", 30),
+    ]);
     let mut run = RunKernel::start(&content, RunStart::Beginning, 3).unwrap();
-    run.act(&content, 0, choose(0)).unwrap();
+    test_act(&mut run, &content, 0, choose(0)).unwrap();
     let rows = run.inspect(&content, 0).chronicle;
     let told: Vec<_> = rows.iter().map(|r| (r.key.as_str(), r.told)).collect();
     assert_eq!(told, [("p1", Some(2)), ("p2", Some(1)), ("p3", None)]);
@@ -1267,22 +1508,42 @@ fn inspect_chronicle_is_per_participant_and_empty_without_canon() {
 fn view_exposes_the_hub_node_so_clients_can_play_also_here_storylets() {
     let content = support::weirs_crossing::content();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 7).unwrap();
-    run.act(&content, 0, RunAction::Choose { node_guid: 1, output_pin: 0 }).unwrap();
-    let view = run.view(&content, 0);
+    test_act(
+        &mut run,
+        &content,
+        0,
+        RunAction::Choose {
+            node_guid: 1,
+            output_pin: 0,
+        },
+    )
+    .unwrap();
+    let view = run.architect_view(&content, 0);
     assert!(!view.also_here.is_empty());
-    // The advertised hub plus a listed storylet is a valid action.
     let hub = view.hub.expect("a hub is pending");
     assert_eq!(hub, 10);
     let first = view.also_here[0].id;
-    run.act(&content, 0, RunAction::PlayStorylet { node_guid: hub, storylet: first }).unwrap();
-    assert!(run.view(&content, 0).hub.is_none() || run.view(&content, 0).scene.is_some());
+    test_act(
+        &mut run,
+        &content,
+        0,
+        RunAction::PlayStorylet {
+            node_guid: hub,
+            storylet: first,
+        },
+    )
+    .unwrap();
+    assert!(
+        run.architect_view(&content, 0).hub.is_none()
+            || run.architect_view(&content, 0).scene.is_some()
+    );
 }
 
 #[test]
 fn view_has_no_hub_when_a_plain_choice_is_pending() {
     let content = fixture();
     let run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    assert!(run.view(&content, 0).hub.is_none());
+    assert!(run.architect_view(&content, 0).hub.is_none());
 }
 
 #[test]
@@ -1292,11 +1553,38 @@ fn hub_does_not_offer_or_play_storylets_at_another_location() {
     let tag = content.registry.id("fact.logbook").unwrap();
     missing_place.set_bit(tag).unwrap();
     let storylet = support::weirs_crossing::LAMP_SOOT;
-    content.storylet_location_tags.insert(storylet, missing_place);
+    content
+        .storylet_location_tags
+        .insert(storylet, missing_place);
     let mut run = RunKernel::start(&content, RunStart::Beginning, 7).unwrap();
-    run.act(&content, 0, RunAction::Choose { node_guid: 1, output_pin: 0 }).unwrap();
-    assert!(!run.view(&content, 0).also_here.iter().any(|s| s.id == storylet));
-    assert!(run.act(&content, 0, RunAction::PlayStorylet { node_guid: 10, storylet }).is_err());
+    test_act(
+        &mut run,
+        &content,
+        0,
+        RunAction::Choose {
+            node_guid: 1,
+            output_pin: 0,
+        },
+    )
+    .unwrap();
+    assert!(
+        !run.architect_view(&content, 0)
+            .also_here
+            .iter()
+            .any(|s| s.id == storylet)
+    );
+    assert!(
+        test_act(
+            &mut run,
+            &content,
+            0,
+            RunAction::PlayStorylet {
+                node_guid: 10,
+                storylet
+            }
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -1309,18 +1597,45 @@ fn predicting_a_destination_uses_its_location_without_moving_the_player() {
     let storylet = support::weirs_crossing::LAMP_SOOT;
     content.storylet_location_tags.insert(storylet, mask);
     let mut run = RunKernel::start(&content, RunStart::Beginning, 7).unwrap();
-    run.act(&content, 0, RunAction::Choose { node_guid: 1, output_pin: 0 }).unwrap();
-    assert!(!run.view(&content, 0).also_here.iter().any(|s| s.id == storylet));
-    assert!(run.storylets_at(&content, 0, 1).iter().any(|s| s.id == storylet));
-    assert_eq!(run.world.active_location(0), Some(0));
+    test_act(
+        &mut run,
+        &content,
+        0,
+        RunAction::Choose {
+            node_guid: 1,
+            output_pin: 0,
+        },
+    )
+    .unwrap();
+    assert!(
+        !run.architect_view(&content, 0)
+            .also_here
+            .iter()
+            .any(|s| s.id == storylet)
+    );
+    assert!(
+        run.storylets_at(&content, 0, 1)
+            .iter()
+            .any(|s| s.id == storylet)
+    );
+    assert_eq!(run.world().active_location(0), Some(0));
 }
 
 #[test]
 fn exploration_view_preserves_current_choices_without_copying_the_timeline() {
     let content = support::weirs_crossing::content();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 7).unwrap();
-    run.act(&content, 0, RunAction::Choose { node_guid: 1, output_pin: 0 }).unwrap();
-    let full = run.view(&content, 0);
+    test_act(
+        &mut run,
+        &content,
+        0,
+        RunAction::Choose {
+            node_guid: 1,
+            output_pin: 0,
+        },
+    )
+    .unwrap();
+    let full = run.architect_view(&content, 0);
     let compact = run.exploration_view(&content, 0);
     assert_eq!(compact.scene, full.scene);
     assert_eq!(compact.also_here, full.also_here);
@@ -1329,3 +1644,4 @@ fn exploration_view_preserves_current_choices_without_copying_the_timeline() {
     assert_eq!(compact.current_step, full.current_step);
     assert!(compact.steps.is_empty() && compact.branches.is_empty());
 }
+

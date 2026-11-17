@@ -43,7 +43,6 @@ const isMain = props.pane.id === MAIN_PANE;
 
 function isolatedRouter(path: string): Router {
   const history = createMemoryHistory();
-  // Links inside a side pane still open the right studio page in a new browser tab.
   history.createHref = (location: string) => `${window.location.pathname}#${location}`;
   const router = createRouter({ history, routes: STUDIO_ROUTES });
   const route = {} as Record<string, unknown>;
@@ -78,7 +77,6 @@ function onDragOver(event: DragEvent) {
   event.preventDefault();
   const rect = body.value.getBoundingClientRect();
   const side = dropSide(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
-  // Moving a pane never adds one, so it may dock on an edge even at the pane limit.
   zone.value = !pane && side !== "center" && !canSplit() ? "center" : side;
   zoneKind.value = pane ? "pane" : "tree";
   if (event.dataTransfer) event.dataTransfer.dropEffect = pane ? "move" : "copy";
@@ -110,7 +108,6 @@ const dropLabel = computed(() => {
   return zone.value === "center" ? "Open here" : `Split ${zone.value}`;
 });
 
-/** Header drag repositions the pane; drags that start on a header button stay clicks. */
 let pressedOnAction = false;
 function onHeadPointerDown(event: PointerEvent) {
   pressedOnAction = event.target instanceof Element && !!event.target.closest(".studio-pane__actions");

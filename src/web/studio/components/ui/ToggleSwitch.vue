@@ -1,5 +1,4 @@
 <script setup lang="ts">
-/** On/off switch with its label; the whole row is the hit target. */
 const model = defineModel<boolean>({ required: true });
 defineProps<{ label: string; hint?: string; disabled?: boolean }>();
 </script>

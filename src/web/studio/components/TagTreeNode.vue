@@ -55,7 +55,6 @@ const emit = defineEmits<{
       </template>
     </div>
 
-    <!-- References for this node if expanded -->
     <div
       v-if="node.entry && (!node.children.length || expandedPaths.has(node.fullPath))"
       class="tag-tree-refs"
@@ -78,7 +77,6 @@ const emit = defineEmits<{
       </div>
     </div>
 
-    <!-- Recursive Children -->
     <template v-if="expandedPaths.has(node.fullPath)">
       <TagTreeNode
         v-for="child in node.children"

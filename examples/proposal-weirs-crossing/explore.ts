@@ -1,11 +1,3 @@
-// Weir's Crossing: viability prototype for docs/design/proposal-human-first-nonlinear-narrative.md
-//
-// This models the proposal's three non-linear axes on a tiny authored world, then explores it
-// with seeded random players. It is not engine code; it checks whether the proposed contracts
-// (participant-scoped knowledge with provenance, a fixed authored past told in any order,
-// co-presence witnessing, NPC agency on a clock, and coverage-gap detection) behave as claimed.
-//
-// Run: bun examples/proposal-weirs-crossing/explore.ts [runs]
 
 type Loc = "lighthouse" | "harbor" | "inn" | "customs" | "rock";
 type KnowKind = "evidence" | "witnessed" | "told" | "rumor" | "recollection" | "testimony" | "inference";
@@ -22,7 +14,6 @@ const ADJ: Record<Loc, Loc[]> = {
   rock: ["lighthouse"],
 };
 
-// The authored past (fabula). Fixed canon: recollections may reveal it in any order, never change it.
 const CANON_PAST: Record<string, string> = {
   P1: "22:00 lighthouse - Ilse lights the lamp and logs the storm",
   P2: "23:00 harbor - an unlit boat lands crates; a customs lantern on the shingle",
@@ -37,21 +28,21 @@ interface Event { id: number; slot: number; actor: string; action: string; cause
 interface Storylet {
   id: string;
   at: Loc | "anywhere";
-  playableBy?: string[];          // participant ids; default: any player
-  needs?: string[];               // all known by the acting participant
-  needsAny?: string[];            // at least one known
-  lacks?: string[];               // none known
-  present?: string[];             // actors that must be co-located (and not gone)
-  absent?: string[];              // actors that must NOT be co-located
-  worldNot?: string[];            // world props that must be unset
+  playableBy?: string[];
+  needs?: string[];
+  needsAny?: string[];
+  lacks?: string[];
+  present?: string[];
+  absent?: string[];
+  worldNot?: string[];
   minPlayersPresent?: number;
   once: "participant" | "world" | "never";
   learn?: [string, KnowKind][];
   revealPast?: string[];
   set?: string[];
-  visible?: boolean;              // co-located actors witness the outcome facts
-  rosaHears?: string[];           // facts Rosa learns as rumour ("told") if played at the inn
-  fallback?: boolean;             // generic filler, not story progress
+  visible?: boolean;
+  rosaHears?: string[];
+  fallback?: boolean;
   origin?: "human" | "llm-draft-approved";
 }
 
@@ -59,10 +50,8 @@ const BASE_STORYLETS: Storylet[] = [
   { id: "lamp_soot", at: "lighthouse", once: "participant", learn: [["light_doused", "evidence"]] },
   { id: "ilse_logbook", at: "lighthouse", once: "participant", revealPast: ["P1"], learn: [["where.rock", "evidence"]] },
   { id: "harbor_master_tides", at: "harbor", once: "participant", learn: [["tide.table", "told"]] },
-  // Teodor plays his own memory when he is a participant...
   { id: "teodor_lantern_memory", at: "harbor", playableBy: ["teodor"], once: "participant",
     revealPast: ["P2"], learn: [["crates_landed", "recollection"], ["benedek.suspected", "recollection"], ["belief.ilse_neglected", "testimony"]] },
-  // ...or Mara presses the NPC Teodor for it, once she has a reason to.
   { id: "press_teodor", at: "harbor", playableBy: ["mara"], present: ["teodor"], needs: ["light_doused"], once: "participant",
     revealPast: ["P2"], learn: [["crates_landed", "testimony"], ["benedek.suspected", "testimony"], ["belief.ilse_neglected", "testimony"]] },
   { id: "customs_ledger", at: "customs", absent: ["benedek"], needs: ["crates_landed"], once: "participant",
@@ -77,7 +66,6 @@ const BASE_STORYLETS: Storylet[] = [
   { id: "watch_the_water", at: "anywhere", once: "never", fallback: true },
 ];
 
-// Drafted by an LLM from the coverage report, edited and approved by the designer (v2 only).
 const BLUFF: Storylet = {
   id: "bluff_benedek", at: "anywhere", present: ["benedek"], needs: ["benedek.suspected"], lacks: ["benedek.identified"],
   needsAny: ["light_doused", "crates_landed"], worldNot: ["benedek.delayed"], once: "world",
@@ -85,7 +73,6 @@ const BLUFF: Storylet = {
   origin: "llm-draft-approved",
 };
 
-// ---------- deterministic RNG ----------
 function rng(seed: number) {
   let a = seed >>> 0;
   return () => {
@@ -138,7 +125,6 @@ function run(seed: number, coop: boolean, storylets: Storylet[], policy: Policy)
   const gone = (id: string) => id === "benedek" && world.has("benedek.gone");
   const coLocated = (loc: Loc) => Object.values(actors).filter((x) => x.loc === loc && !gone(x.id));
 
-  // Seed Rosa with the ferryman's rumour (authored initial knowledge, with provenance).
   learn(actors.rosa, "benedek.suspected", "rumor", emit(0, "ferryman", "told_rosa", "inn"));
 
   const eligible = (s: Storylet, a: Actor, slot: number): boolean => {
@@ -176,7 +162,6 @@ function run(seed: number, coop: boolean, storylets: Storylet[], policy: Policy)
     if (a.knows.get("benedek.identified")?.sourceEvent === ev) res.m2Route ??= s.id;
   };
 
-  // Traversal persona "investigator": a goal-directed QA bot, not a model of real players.
   const RANK = ["find_ilse", "confront_benedek", "bluff_benedek"];
   const progressAt = (a: Actor, loc: Loc, slot: number) => {
     const real = a.loc; a.loc = loc;
@@ -194,7 +179,7 @@ function run(seed: number, coop: boolean, storylets: Storylet[], policy: Policy)
   };
   type Opt = { w: number; go: () => void; label: string; kind: "story" | "fallback" | "move" | "notes"; to?: Loc };
   const investigate = (a: Actor, slot: number, options: Opt[], partner?: Actor): Opt => {
-    if (rand() < 0.15) return weighted(options, rand); // exploration noise so the bot covers more than one path
+    if (rand() < 0.15) return weighted(options, rand);
     const stories = options.filter((o) => o.kind === "story");
     const ranked = stories.find((o) => RANK.includes(o.label));
     if (ranked) return ranked;
@@ -216,16 +201,12 @@ function run(seed: number, coop: boolean, storylets: Storylet[], policy: Policy)
   };
 
   for (let slot = 0; slot < SLOTS.length; slot++) {
-    // World clock: the tide. Found by the invariant check on the first run (participants were left on
-    // the rock after the causeway flooded); the author then added this rule.
     if (TIDE_RULE && !LOW_TIDE_SLOTS.has(slot)) for (const a of Object.values(actors)) if (a.loc === "rock") {
       emit(slot, "tide", `drives_${a.id}_back`, "rock"); a.loc = "lighthouse"; res.strandings++;
     }
-    // World clock: Benedek's schedule (customs mornings, inn evenings).
     if (!gone("benedek")) actors.benedek.loc = slot % 2 === 0 ? "customs" : "inn";
 
     for (let step = 0; step < ACTIONS_PER_SLOT; step++) {
-      // NPC agency: Rosa repeats what she heard to whoever shares the inn; Benedek reacts to being named.
       if (!gone("benedek") && actors.benedek.loc === "inn") {
         const heard = [...actors.rosa.knows.entries()].find(([f]) => f.startsWith("heard:") && f.endsWith(":benedek.suspected"));
         if (heard && !actors.benedek.knows.has("i.am.suspected")) {
@@ -246,14 +227,12 @@ function run(seed: number, coop: boolean, storylets: Storylet[], policy: Policy)
           options.push({ w: 1, label: `move:${to}`, kind: "move", to, go: () => { emit(slot, a.id, `move:${to}`, a.loc); a.loc = to; } });
         }
         if (a.loc === "rock" && !LOW_TIDE_SLOTS.has(slot)) res.violations.push("participant on rock at high tide");
-        // Co-op: compare notes with a co-located player (knowledge moves only by an in-world act).
         const partner = players.find((p) => p !== a && p.loc === a.loc);
         if (partner) options.push({ w: 1.5, label: "compare_notes", kind: "notes", go: () => {
           const ev = emit(slot, a.id, "compare_notes", a.loc);
           for (const [f] of partner.knows) learn(a, f, "told", ev);
           for (const [f] of a.knows) learn(partner, f, "told", ev);
         } });
-        // Coverage hole: the participant holds the intent (suspects Benedek, faces him) but no storylet affords it.
         const facingBenedek = !gone("benedek") && !world.has("benedek.delayed") && a.loc === actors.benedek.loc;
         if (facingBenedek && a.knows.has("benedek.suspected") && !a.knows.has("benedek.identified")) {
           res.holeMoments++;
@@ -264,7 +243,6 @@ function run(seed: number, coop: boolean, storylets: Storylet[], policy: Policy)
       }
     }
 
-    // End of slot: Benedek leaves early if tipped off, otherwise on the D2 evening ferry.
     if (!gone("benedek") && !world.has("benedek.delayed")) {
       const tipped = actors.benedek.knows.get("i.am.suspected");
       if (tipped || slot === 3) {
@@ -281,7 +259,6 @@ function run(seed: number, coop: boolean, storylets: Storylet[], policy: Policy)
     }
   }
 
-  // Invariants: every belief has an in-world source event; nobody knows the past without a telling.
   for (const a of Object.values(actors)) for (const [f, k] of a.knows) {
     if (!events[k.sourceEvent]) res.violations.push(`${a.id} knows ${f} without a source event`);
     if (f.startsWith("past.") && !revealOrder.includes(f.slice(5))) res.violations.push(`${a.id} knows ${f} but it was never told`);
@@ -334,7 +311,6 @@ for (const policy of ["wanderer", "investigator"] as Policy[]) {
   report("v2 co-op + approved LLM-drafted bluff", true, [...BASE_STORYLETS, BLUFF], runs, policy);
 }
 
-// Replay determinism: the same seed, content, and policy must reproduce the same history.
 let mismatches = 0;
 for (let i = 0; i < 2000; i++) {
   const a = JSON.stringify(run(5000 + i, true, [...BASE_STORYLETS, BLUFF], "wanderer"));

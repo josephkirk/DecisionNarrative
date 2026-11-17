@@ -13,10 +13,8 @@ function readStored(): AppearanceSettings {
 
 export const appearance = reactive<AppearanceSettings>(readStored());
 
-/** Pane opacity over a user image: lower when blurred (glass), higher when the image stays sharp. */
 const GLASS_ALPHA = { "image-blur": { pane: 72, sidebar: 66 }, image: { pane: 88, sidebar: 84 } } as const;
 
-/** Writes the preset's variables and backdrop state onto <html> so every surface follows. */
 export function applyAppearance(settings: AppearanceSettings = appearance, root: HTMLElement = document.documentElement) {
   const preset = presetById(settings.preset);
   for (const other of THEME_PRESETS) for (const name of Object.keys(other.vars)) root.style.removeProperty(name);
@@ -33,7 +31,6 @@ export function applyAppearance(settings: AppearanceSettings = appearance, root:
   root.dataset.backdrop = backdrop;
 }
 
-/** Persists settings; returns false when the browser refuses (e.g. storage quota for a large image). */
 function persist(settings: AppearanceSettings): boolean {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
@@ -51,7 +48,6 @@ watch(appearance, (settings) => {
   if (!persist(settings)) storageError?.("The background image is too large to remember on this device; it will reset on reload.");
 }, { deep: true });
 
-/** Decodes an image file and downscales it to a JPEG data URL suitable for the backdrop. */
 export async function backdropFromFile(file: File): Promise<string> {
   if (!file.type.startsWith("image/")) throw new Error("Choose an image file (PNG, JPEG, WebP or GIF).");
   const bitmap = await createImageBitmap(file);

@@ -1,23 +1,14 @@
-/**
- * Vector canvas document: layered shapes stored as JSON in an entity
- * property. Gameplay shapes (markers, entity references, storylet
- * references) also declare entity properties so storylets can change the
- * canvas at runtime through ordinary Apply Command nodes.
- */
 import type { EntityProperty } from "../../contracts.ts";
 
 export const CANVAS_PROPERTY_KEY = "canvas_doc";
-/** Runtime property: id of the canvas version the last Modify Canvas node applied ("" = the entity's canvas). */
 export const CANVAS_VERSION_KEY = "canvas_version";
 export const STATE_PREFIX = "map_";
 
 export type ShapeKind = "rect" | "ellipse" | "line" | "path" | "text" | "note" | "marker" | "entity" | "storylet";
 export const GAMEPLAY_KINDS: ShapeKind[] = ["marker", "entity", "storylet"];
 
-/** Sticky note paper colours. */
 export const NOTE_COLORS = ["#ffe066", "#ffadad", "#a0e7a0", "#a0d8ff", "#e0bbff"];
 
-/** Icons a marker can use. `id` is what gets stored; `glyph` is drawn. */
 export const MARKER_ICONS: Array<{ id: string; glyph: string; label: string }> = [
   { id: "pin", glyph: "📍", label: "Pin" },
   { id: "door", glyph: "🚪", label: "Door (closed)" },
@@ -55,51 +46,32 @@ export interface CanvasShape {
   layer: string;
   kind: ShapeKind;
   x: number; y: number; w: number; h: number;
-  /** Polyline points relative to (x, y): [x0, y0, x1, y1, ...]. */
   points?: number[];
-  /** Text shapes and sticky notes. */
   text?: string;
-  /** Name shown on the canvas. */
   label?: string;
-  /** Long text shown when hovering the shape. */
   description?: string;
   stroke: string; fill: string; strokeWidth: number;
-  /** Marker only: icon id from MARKER_ICONS. */
   icon?: string;
-  /** Entity this shape references (any entity, e.g. an item or character). */
   entity_id?: string;
-  /** Storylet this shape references. */
   storylet_id?: string;
-  /** Initial runtime state. */
   present: boolean;
 }
 
 export interface CanvasSnapshot { layers: CanvasLayer[]; shapes: CanvasShape[] }
-/** A Modify Canvas node that owns a canvas version. */
 export interface CanvasVersionSource { storylet_id: string; storylet_title?: string; node_id: string }
 export interface CanvasRevision {
   at: number; label: string; snapshot: CanvasSnapshot;
-  /** Set on versions written by a Modify Canvas node. */
   id?: string;
   source?: CanvasVersionSource;
-  /*
-   * Temp history: node edits are staged until the storylet is saved.
-   * Saving the storylet commits them; closing or reopening it unsaved discards them.
-   */
-  /** Edited in the node; the storylet that owns the node is not saved yet. */
   draft?: CanvasSnapshot;
-  /** New version; not committed until the storylet is saved. */
   uncommitted?: boolean;
-  /** Node deleted; removed when the storylet is saved. */
   pending_delete?: boolean;
 }
 
-/** The snapshot a node version applies: the staged edit if there is one. */
 export function versionSnapshot(revision: CanvasRevision): CanvasSnapshot {
   return revision.draft ?? revision.snapshot;
 }
 
-/** Human-readable temp state of a node version, or "" when committed. */
 export function versionTempState(revision: CanvasRevision): string {
   if (revision.pending_delete) return "removal pending";
   if (revision.uncommitted) return "new, storylet not saved";
@@ -111,7 +83,6 @@ export interface CanvasDoc extends CanvasSnapshot {
   version: 1;
   width: number;
   height: number;
-  /** Persisted history, newest last. */
   revisions: CanvasRevision[];
 }
 
@@ -152,7 +123,6 @@ export function snapshotOf(doc: CanvasSnapshot): CanvasSnapshot {
   return JSON.parse(JSON.stringify({ layers: doc.layers, shapes: doc.shapes }));
 }
 
-/** Trim old edit revisions; versions owned by Modify Canvas nodes are always kept. */
 function trimRevisions(revisions: CanvasRevision[]): CanvasRevision[] {
   let extra = revisions.filter((revision) => !revision.source).length - MAX_REVISIONS;
   return revisions.filter((revision) => revision.source || extra-- <= 0);
@@ -162,15 +132,10 @@ export function pushRevision(doc: CanvasDoc, label: string, at = Date.now()): Ca
   return { ...doc, revisions: trimRevisions([...doc.revisions, { at, label, snapshot: snapshotOf(doc) }]) };
 }
 
-/** Remove the version a deleted Modify Canvas node owned. */
 export function removeNodeVersion(doc: CanvasDoc, id: string): CanvasDoc {
   return { ...doc, revisions: doc.revisions.filter((revision) => revision.id !== id) };
 }
 
-/**
- * Stage a node's canvas edit (temp history). A committed version keeps its
- * snapshot and gets a draft; a new version is added as uncommitted.
- */
 export function stageNodeVersion(doc: CanvasDoc, version: { id: string; label: string; source: CanvasVersionSource; snapshot: CanvasSnapshot }, at = Date.now()): CanvasDoc {
   const existing = nodeVersion(doc, version.id);
   const snapshot = snapshotOf(version.snapshot);
@@ -180,7 +145,6 @@ export function stageNodeVersion(doc: CanvasDoc, version: { id: string; label: s
   return { ...doc, revisions: trimRevisions([...doc.revisions.filter((revision) => revision.id !== version.id), entry]) };
 }
 
-/** Stage removal of a deleted node's version; an uncommitted one goes away at once. */
 export function stageNodeVersionRemoval(doc: CanvasDoc, id: string): CanvasDoc {
   const existing = nodeVersion(doc, id);
   if (!existing) return doc;
@@ -192,14 +156,9 @@ function ownedBy(revision: CanvasRevision, storyletId: string, nodeIds?: Set<str
   const source = revision.source;
   if (!source) return false;
   if (source.storylet_id === storyletId) return true;
-  // A storylet saved for the first time: its versions were staged without an id.
   return source.storylet_id === "" && (!nodeIds || nodeIds.has(source.node_id));
 }
 
-/**
- * The storylet was saved with these Modify Canvas nodes: commit their staged
- * versions and drop versions whose node is gone.
- */
 export function commitStoryletVersions(doc: CanvasDoc, storyletId: string, nodeIds: Set<string>): CanvasDoc {
   const revisions: CanvasRevision[] = [];
   for (const revision of doc.revisions) {
@@ -211,7 +170,6 @@ export function commitStoryletVersions(doc: CanvasDoc, storyletId: string, nodeI
   return { ...doc, revisions };
 }
 
-/** The storylet was closed or reopened unsaved: throw its staged changes away. */
 export function discardStoryletVersions(doc: CanvasDoc, storyletId: string): CanvasDoc {
   const revisions: CanvasRevision[] = [];
   for (const revision of doc.revisions) {
@@ -223,7 +181,6 @@ export function discardStoryletVersions(doc: CanvasDoc, storyletId: string): Can
   return { ...doc, revisions };
 }
 
-/** True when the storylet has staged (temp) versions on this canvas. */
 export function hasTempVersions(doc: CanvasDoc, storyletId: string): boolean {
   return doc.revisions.some((revision) => ownedBy(revision, storyletId) && !!versionTempState(revision));
 }
@@ -232,23 +189,17 @@ export function nodeVersion(doc: CanvasDoc, id: string | undefined): CanvasRevis
   return id ? doc.revisions.find((revision) => revision.id === id) : undefined;
 }
 
-/**
- * Write the canvas version owned by a Modify Canvas node. A node owns exactly
- * one version: saving again replaces it (moved to newest) instead of adding.
- */
 export function upsertNodeVersion(doc: CanvasDoc, version: { id: string; label: string; source: CanvasVersionSource; snapshot: CanvasSnapshot }, at = Date.now()): CanvasDoc {
   const entry: CanvasRevision = { at, label: version.label, snapshot: snapshotOf(version.snapshot), id: version.id, source: version.source };
   return { ...doc, revisions: trimRevisions([...doc.revisions.filter((revision) => revision.id !== version.id), entry]) };
 }
 
-/** Load a saved revision. Does not add a revision: history stays unchanged. */
 export function restoreRevision(doc: CanvasDoc, index: number): CanvasDoc {
   const revision = doc.revisions[index];
   if (!revision) return doc;
   return { ...doc, ...snapshotOf(revision.snapshot) };
 }
 
-/** In-memory undo/redo over snapshots. */
 export class UndoStack {
   private past: CanvasSnapshot[] = [];
   private future: CanvasSnapshot[] = [];
@@ -278,10 +229,8 @@ export function isGameplay(shape: Pick<CanvasShape, "kind">): boolean { return G
 function slug(id: string): string { return id.toLowerCase().replace(/[^a-z0-9_]/g, "_"); }
 export function presentKey(shape: Pick<CanvasShape, "id">): string { return `${STATE_PREFIX}${slug(shape.id)}_present`; }
 export function iconKey(shape: Pick<CanvasShape, "id">): string { return `${STATE_PREFIX}${slug(shape.id)}_icon`; }
-/** Typed reference property: the canvas owner references the placed entity or storylet. */
 export function refKey(shape: Pick<CanvasShape, "id">): string { return `${STATE_PREFIX}${slug(shape.id)}_ref`; }
 
-/** Resolves the name of the entity or storylet a shape references. */
 export type RefName = (shape: CanvasShape) => string | undefined;
 
 export function shapeDisplayName(shape: CanvasShape, refName?: RefName): string {
@@ -293,10 +242,6 @@ export function shapeDisplayName(shape: CanvasShape, refName?: RefName): string 
   return shape.entity_id ?? shape.storylet_id ?? `${shape.kind} ${shape.id.slice(-4)}`;
 }
 
-/**
- * Gameplay shapes across the canvas and every node version. Shapes that exist
- * only in a node version start absent (they appear when that node runs).
- */
 export function gameplayUniverse(doc: CanvasDoc): CanvasShape[] {
   const byId = new Map<string, CanvasShape>();
   for (const shape of doc.shapes.filter(isGameplay)) byId.set(shape.id, shape);
@@ -308,12 +253,6 @@ export function gameplayUniverse(doc: CanvasDoc): CanvasShape[] {
   return [...byId.values()];
 }
 
-/**
- * Rebuild the entity properties for a canvas: the document itself, the active
- * version, and the runtime state of each gameplay shape (including shapes
- * that only exist in node versions). Unrelated properties are kept; state
- * properties for deleted shapes are removed.
- */
 export function syncCanvasProperties(properties: EntityProperty[], doc: CanvasDoc): EntityProperty[] {
   const wanted = new Map<string, EntityProperty>();
   for (const shape of gameplayUniverse(doc)) {
@@ -336,22 +275,15 @@ export function syncCanvasProperties(properties: EntityProperty[], doc: CanvasDo
   return [...rest, docProperty, versionProperty, ...wanted.values()];
 }
 
-/* ---------- Modify Canvas node ---------- */
 
-/** The node points at the one canvas version it owns in the entity's history. */
 export interface ModifyCanvasConfig {
   canvas_entity: string;
   version_id: string;
-  /** Bumped on every Save version so the storylet becomes dirty and gets saved. */
   saved_at?: number;
 }
 
 export interface StateChange { shape: CanvasShape; key: string; value: boolean | string; type: "bool" | "string"; text: string }
 
-/**
- * Gameplay state the version sets, relative to the entity's canvas. Only
- * differences are written, so several nodes on one canvas compose.
- */
 export function versionChanges(doc: CanvasDoc, version: CanvasSnapshot, refName?: RefName): StateChange[] {
   const base = new Map(doc.shapes.filter(isGameplay).map((shape) => [shape.id, shape]));
   const after = new Map(version.shapes.filter(isGameplay).map((shape) => [shape.id, shape]));
@@ -365,7 +297,6 @@ export function versionChanges(doc: CanvasDoc, version: CanvasSnapshot, refName?
     if (wasPresent !== isPresent) {
       changes.push({ shape, key: presentKey(shape), value: isPresent, type: "bool", text: `${isPresent ? "Add" : "Remove"} ${noun}: ${name}` });
     }
-    // New shapes declare their own icon (see gameplayUniverse), so only existing markers need an icon command.
     if (shape.kind === "marker" && before && next && isPresent) {
       const icon = next.icon ?? DEFAULT_MARKER_ICON;
       if (icon !== (before.icon ?? DEFAULT_MARKER_ICON)) {
@@ -386,7 +317,6 @@ export function validateModifyCanvas(config: ModifyCanvasConfig, doc: CanvasDoc 
   return [];
 }
 
-/** Apply runtime property values (e.g. from a run snapshot) to the canvas. */
 export function applyState(doc: CanvasDoc, values: Record<string, unknown>): CanvasDoc {
   return {
     ...doc,

@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { participantOptions, togglePlayedBy } from "../../src/web/studio/storyletModel.ts";
-import type { EntityTemplateRecord } from "../../src/web/studio/contracts.ts";
+import type { EntityRecord } from "../../src/web/studio/contracts.ts";
 
 const entity = (id: string, traits: string[] = []) =>
-  ({ id, name: id.toUpperCase(), traits: traits.map((template_id) => ({ id: "t", template_id, values: {} })) }) as unknown as EntityTemplateRecord;
+  ({ id, name: id.toUpperCase(), traits: traits.map((template_id) => ({ id: "t", template_id, values: {} })) }) as unknown as EntityRecord;
 
 test("participantOptions lists only entities with the participant trait, by name", () => {
   const options = participantOptions([entity("rosa", ["system.participant"]), entity("crate"), entity("anna", ["system.participant"])]);

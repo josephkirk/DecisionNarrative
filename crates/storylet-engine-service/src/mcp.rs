@@ -1,4 +1,3 @@
-//! Native MCP (Model Context Protocol) stdio and HTTP support for DecisionNarrative.
 
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
@@ -136,7 +135,7 @@ pub async fn handle_mcp_message(service: &StudioService, msg: &Value) -> Option<
 fn get_tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "narrative_platform",
-        "description": "Operate the local DecisionNarrative platform: inspect workspace context and authored entity templates, gameplay tags, and other content, and exercise deterministic Rust playtests.",
+        "description": "Operate the local DecisionNarrative platform: inspect workspace context and authored entities, gameplay tags, and other content, and exercise deterministic Rust playtests.",
         "inputSchema": {
             "type": "object",
             "required": ["operation"],

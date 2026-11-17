@@ -1,4 +1,3 @@
-//! Single SQLite store implementation for DecisionNarrative Storylet Studio.
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -8,14 +7,11 @@ use storylet_engine::{RuntimeSessionState, WorldEvent};
 use crate::narrative_graph::NarrativeGraph;
 
 use crate::contracts::{
-    AssetRecord, EntityRecord, EntityTemplateRecord, EventRecord, FolderRecord, GameplayTagRecord,
+    AssetRecord, EntityRecord, EventRecord, FolderRecord, GameplayTagRecord,
     LibraryPageResult, LibraryQuery, LibrarySummaryItem, ProjectBundleContent, ProjectMetadata,
     ScenarioRecord, StoryletRecord, TraitTemplateRecord, SYSTEM_TRAIT_TEMPLATES,
 };
 use serde_json::{json, Value};
-/// Older records may carry an `ending` flag written before the graph became
-/// authoritative. Normalize on read so library filters and approvals see the
-/// same value the next save will persist.
 fn normalize_storylet_ending(mut storylet: StoryletRecord) -> StoryletRecord {
     if let Some(graph) = storylet.graph.clone() {
         storylet.ending = graph.ending_from_graph();
@@ -56,7 +52,7 @@ impl Store {
             let marker: Option<String> = self.conn.query_row(
                 "SELECT value FROM store_metadata WHERE key = 'schema_version'", [],
                 |row| row.get(0)).optional()?;
-            if marker.as_deref() != Some("6") { return Err(rusqlite::Error::InvalidQuery); }
+            if marker.as_deref() != Some("7") { return Err(rusqlite::Error::InvalidQuery); }
             for column in ["last_result_json", "mutation_revision"] {
                 let present: bool = self.conn.query_row(
                     "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chrono_playtest_sessions') WHERE name=?1)",
@@ -123,7 +119,7 @@ impl Store {
              CREATE INDEX IF NOT EXISTS idx_runtime_events_session
                  ON runtime_events(session_id, event_id);")?;
         self.conn.execute(
-            "INSERT OR IGNORE INTO store_metadata (key, value) VALUES ('schema_version', '6')", [])?;
+            "INSERT OR IGNORE INTO store_metadata (key, value) VALUES ('schema_version', '7')", [])?;
         let exists: bool = self.conn.query_row(
             "SELECT 1 FROM project_metadata WHERE singleton = 1", [], |_| Ok(true))
             .optional()?.is_some();
@@ -139,7 +135,6 @@ impl Store {
         Ok(())
     }
 
-    // --- Project Metadata ---
 
     pub fn get_project_metadata(&self) -> Result<ProjectMetadata, rusqlite::Error> {
         self.conn.query_row(
@@ -176,7 +171,6 @@ impl Store {
         Ok(rev)
     }
 
-    // --- Generic Content Records ---
 
     pub fn get_content_json(
         &self,
@@ -235,11 +229,6 @@ impl Store {
         Ok(count > 0)
     }
 
-    pub fn list_entity_templates(&self) -> Result<Vec<EntityTemplateRecord>, rusqlite::Error> {
-        Ok(self.list_content_json("entity_templates")?.into_iter()
-            .filter_map(|s| serde_json::from_str(&s).ok()).collect())
-    }
-
     pub fn list_entities(&self) -> Result<Vec<EntityRecord>, rusqlite::Error> {
         Ok(self.list_content_json("entities")?.into_iter()
             .filter_map(|s| serde_json::from_str(&s).ok()).collect())
@@ -276,8 +265,6 @@ impl Store {
     }
 
 
-    /// Rewrite only the JSON payload of an existing row, leaving its revision
-    /// and approval columns untouched (folder moves must not re-approve).
     pub fn update_content_json(
         &self,
         entity: &str,
@@ -377,7 +364,6 @@ impl Store {
         Ok(Some(st))
     }
 
-    // --- Library Paged Query ---
 
     pub fn query_library(
         &self,
@@ -532,7 +518,6 @@ impl Store {
         })
     }
 
-    // --- Studio Interaction Context ---
 
     pub fn save_interaction_context(
         &self,
@@ -585,7 +570,6 @@ impl Store {
         Ok(None)
     }
 
-    // --- Transactional Project Content Replacement ---
 
     pub fn replace_project_content(
         &mut self,
@@ -599,8 +583,6 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM content_records", [])?;
-        // A bundle can carry the revision it was exported at. Importing it must
-        // still move the counter forward so live sessions see new content.
         let current_revision: i64 = tx
             .query_row(
                 "SELECT revision FROM project_metadata WHERE singleton = 1",
@@ -631,20 +613,6 @@ impl Store {
             now,
         )?;
 
-        insert_rows(
-            &tx,
-            "entity_templates",
-            content.entity_templates.iter().map(|template| {
-                Ok((
-                    template.id.clone(),
-                    serde_json::to_string(template)
-                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
-                    1,
-                    None,
-                ))
-            }),
-            now,
-        )?;
         insert_rows(
             &tx,
             "gameplay_tags",
@@ -749,9 +717,6 @@ impl Store {
         Ok(next_revision as u64)
     }
 
-    /// ChronoFlow v5 playtest sessions (REQ-CH-02): only the call-history
-    /// arrays, the random seed, and pinned authoring metadata are stored — never
-    /// a serialized runtime instance or world snapshot.
     pub fn save_chrono_playtest_row(&self, row: &ChronoPlaytestRow) -> Result<(), rusqlite::Error> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
@@ -892,9 +857,6 @@ impl Store {
 
 }
 
-/// One persisted ChronoFlow playtest session. JSON columns hold the global call
-/// history, the per-mission scoped call histories, and the pinned ID-space
-/// fingerprint; the runtime is rebuilt from them on load (REQ-CH-03).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChronoPlaytestRow {
     pub session_id: String,
@@ -908,8 +870,6 @@ pub struct ChronoPlaytestRow {
     pub pinned_id_space_json: String,
     pub global_call_history_json: String,
     pub scoped_call_histories_json: String,
-    /// Latent node descriptors and active tokens, so a rebuilt session resumes
-    /// a paused interaction instead of replaying to an idle graph.
     pub pending_state_json: String,
     pub last_idempotency_key: String,
     pub last_result_json: String,
@@ -1032,7 +992,7 @@ pub fn ensure_world_entity(conn: &rusqlite::Connection) -> Result<(), rusqlite::
         "SELECT 1 FROM content_records WHERE entity='entities' AND id='world'",
         [], |_| Ok(true)).optional()?.unwrap_or(false);
     if !exists {
-        let world = json!({"id":"world","name":"World","tags":[]});
+        let world = serde_json::to_value(crate::entities::default_world_entity()).expect("world entity serializes");
         conn.execute(
             "INSERT INTO content_records (entity,id,data_json,revision,updated_at)
              VALUES ('entities','world',?1,1,0)", params![world.to_string()])?;

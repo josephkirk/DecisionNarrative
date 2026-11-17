@@ -1,7 +1,3 @@
-// Worst-case data visual audit: seeds realistic long, short, non-Latin, emoji and huge values, then scans
-// every studio view for clipped, spilled, overlapping, occluded or low-contrast text.
-// Run: bun run build && node tests/visual/stress-visual.ts  (Node: Playwright cannot drive Chromium from Bun).
-// THEMES=kojima,cyberpunk,... (default kojima) VIEWPORTS=desk,narrow,phone,split3 (default all).
 import { chromium, type Page } from "playwright-core";
 import fs from "node:fs";
 import os from "node:os";
@@ -43,7 +39,6 @@ async function api(method: string, p: string, body?: unknown) {
   return text ? JSON.parse(text) : null;
 }
 
-// ---- Worst-case fixture: every value is something a real author could type. ----
 const PERSON = "Aleksandra Wiśniewska-Kowalczyk, Keeper of the Northwind Lighthouse";
 const URL = "https://northwind-industries-holdings.example.com/archive/correspondence/2024/aleksandra.wisniewska-kowalczyk/letter-0042-final-v12.md";
 const EMAIL = "bartholomew.fitzgerald@northwind-industries-holdings.example.com";
@@ -65,9 +60,9 @@ async function seed() {
   }
   const deepTag = DEEP_TAG.join(".");
 
-  await api("POST", "/api/v3/content/folders", { id: "f-long", name: FOLDER, root: "entity_templates", parent_id: null });
-  await api("POST", "/api/v3/content/folders", { id: "f-long-2", name: "Unsorted letters awaiting Aleksandra Wiśniewska-Kowalczyk's review", root: "entity_templates", parent_id: "f-long" });
-  await api("POST", "/api/v3/content/folders", { id: "f-jo", name: "Jo", root: "entity_templates", parent_id: "f-long-2" });
+  await api("POST", "/api/v3/content/folders", { id: "f-long", name: FOLDER, root: "entities", parent_id: null });
+  await api("POST", "/api/v3/content/folders", { id: "f-long-2", name: "Unsorted letters awaiting Aleksandra Wiśniewska-Kowalczyk's review", root: "entities", parent_id: "f-long" });
+  await api("POST", "/api/v3/content/folders", { id: "f-jo", name: "Jo", root: "entities", parent_id: "f-long-2" });
   await api("POST", "/api/v3/content/folders", { id: "f-story", name: FOLDER, root: "storylets", parent_id: null });
 
   await api("POST", "/api/v3/content/trait_templates", {
@@ -88,8 +83,8 @@ async function seed() {
     versions: [{ id: "v1", file_path: "assets/environments/northwind/lighthouse/exterior/Northwind_Lighthouse_Exterior_Dusk_Establishing_Shot_v12-final-FINAL.png",
       creator: PERSON, tool_version: "Blender 4.2.3 LTS (hash 0f8a2b1c9d) + Substance Painter 10.1.2", description: prose, created_at: 1_700_000_000_000, tags: [deepTag], custom_data: {}, thumbnail: null, storage: [] }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
-    id: "long-person", name: PERSON, description: prose, tags: [deepTag, "mood.melancholic", "x"], folder_id: "f-long", thumbnail: null,
+  await api("POST", "/api/v3/content/entities", {
+    id: "long-person", is_template: true, name: PERSON, description: prose, tags: [deepTag, "mood.melancholic", "x"], folder_id: "f-long", thumbnail: null,
     properties: [
       { id: "p1", key: "correspondence_archive_url", name: "Correspondence archive URL", type: "string", value: URL },
       { id: "p2", key: "letters_written_since_the_first_winter_of_the_flood", name: "Letters written since the first winter of the flood", type: "int", value: 1284000 },
@@ -101,10 +96,10 @@ async function seed() {
     traits: [{ id: "t1", template_id: "ledger", values: { archive_url: URL, letters_written_since_the_first_winter_of_the_flood: 1284000, topics: [deepTag] } }],
   });
   for (const [id, name] of [["jo", "Jo"], ["nguyen", "Nguyễn Thị Minh Khai"], ["sakura", "渡辺さくら（北風灯台の灯台守）"], ["kitsune", "🦊 Kitsune of the Ninth Tail"]]) {
-    await api("POST", "/api/v3/content/entity_templates", { id, name, description: "", tags: [], folder_id: "f-long-2", thumbnail: null, properties: [], traits: [] });
+    await api("POST", "/api/v3/content/entities", { id, name, description: "", tags: [], folder_id: "f-long-2", thumbnail: null, properties: [], traits: [] });
   }
   for (let i = 1; i <= 24; i++) {
-    await api("POST", "/api/v3/content/entity_templates", { id: `clerk-${i}`, name: `Archive clerk ${i}`, description: "", tags: [], folder_id: null, thumbnail: null, properties: [], traits: [] });
+    await api("POST", "/api/v3/content/entities", { id: `clerk-${i}`, name: `Archive clerk ${i}`, description: "", tags: [], folder_id: null, thumbnail: null, properties: [], traits: [] });
   }
   await api("POST", "/api/v3/content/entities", {
     id: "inst-long", template_id: "long-person", name: `${PERSON} (as she was in the winter of the flood)`, tags: [deepTag], description: prose, folder_id: null,
@@ -147,7 +142,6 @@ async function seed() {
   }
 }
 
-// ---- In-page scanner ----
 type Finding = { kind: string; severity: "broken" | "warn"; sel: string; text: string; detail: string };
 function scanPage(): Finding[] {
   const found: Finding[] = [];
@@ -160,7 +154,6 @@ function scanPage(): Finding[] {
     }
     return parts.join(">");
   };
-  // Hidden from users: inert/aria-hidden subtrees and the body of a closed <details>.
   const inert = (el: Element) => !!el.closest("[inert],[aria-hidden='true']") || (!!el.closest("details:not([open])") && !el.closest("summary"));
   const shown = (el: Element) => {
     const r = el.getBoundingClientRect();
@@ -179,7 +172,6 @@ function scanPage(): Finding[] {
     const list: { el: Element; rect: DOMRect; scroller: boolean }[] = [];
     for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
       const s = getComputedStyle(a);
-      // Pan/zoom canvases clip like scroll containers: off-view content is reached by panning.
       if (s.overflowX !== "visible" || s.overflowY !== "visible") list.push({ el: a, rect: a.getBoundingClientRect(), scroller: /auto|scroll/.test(s.overflowX + s.overflowY) || a.classList.contains("graph-canvas-container") });
     }
     return list;
@@ -208,7 +200,6 @@ function scanPage(): Finding[] {
     if (!tr) continue;
     const text = el.textContent!.trim().replace(/\s+/g, " ").slice(0, 50);
     const cs = getComputedStyle(el);
-    // Clipping: the first clipping ancestor that cuts the text. Scroll containers are fine (content scrolls into view).
     let scrolledAway = false;
     const ownClip = cs.overflowX !== "visible" && tr.r > el.getBoundingClientRect().right + 1;
     if (ownClip) {
@@ -236,7 +227,6 @@ function scanPage(): Finding[] {
     }
     if (scrolledAway) continue;
     if (tr.r > vw + 1 || tr.l < -1) found.push({ kind: "offscreen", severity: "broken", sel: sel(el), text, detail: `x ${Math.round(tr.l)}..${Math.round(tr.r)} of ${vw}` });
-    // Spill: text leaves the nearest painted box (background or border) without being clipped.
     for (let a = el.parentElement, i = 0; a && i < 6; a = a.parentElement, i++) {
       const s = getComputedStyle(a);
       const painted = parse(s.backgroundColor).a > 0.05 || parseFloat(s.borderLeftWidth) > 0 || parseFloat(s.borderRightWidth) > 0;
@@ -245,7 +235,6 @@ function scanPage(): Finding[] {
       if (tr.r > r.right + 2 || tr.l < r.left - 2) found.push({ kind: "spill", severity: "broken", sel: sel(el), text, detail: `leaves ${sel(a)} by ${Math.round(Math.max(tr.r - r.right, r.left - tr.l))}px` });
       break;
     }
-    // Contrast against composited backgrounds.
     let fg = parse(cs.color);
     if (fg.a > 0 && !el.closest(":disabled,[aria-disabled='true'],.is-disabled")) {
       let opacity = 1;
@@ -270,9 +259,12 @@ function scanPage(): Finding[] {
         if (ratio < (large ? 3 : 4.5)) found.push({ kind: "contrast", severity: "broken", sel: sel(el), text, detail: `${ratio.toFixed(2)}:1` });
       }
     }
+    if (cs.overflowY !== "visible") {
+      const own = el.getBoundingClientRect();
+      tr = { ...tr, t: Math.max(tr.t, own.top), b: Math.min(tr.b, own.bottom) };
+    }
     boxes.push({ el, r: tr });
   }
-  // Overlapping text from different elements, where one actually paints over the other.
   for (let i = 0; i < boxes.length; i++) {
     for (let j = i + 1; j < boxes.length; j++) {
       const a = boxes[i], b = boxes[j];
@@ -283,7 +275,6 @@ function scanPage(): Finding[] {
       found.push({ kind: "overlap", severity: "broken", sel: `${sel(a.el)} × ${sel(b.el)}`, text: `${a.el.textContent!.trim().slice(0, 24)} × ${b.el.textContent!.trim().slice(0, 24)}`, detail: `${Math.round(w)}×${Math.round(h)}` });
     }
   }
-  // Occluded or undersized controls.
   for (const el of document.querySelectorAll("button,a[href],input:not([type=hidden]),select,textarea,[role=button],[role=tab],[role=menuitem]")) {
     if (inert(el) || !shown(el) || (el as HTMLButtonElement).disabled || getComputedStyle(el).pointerEvents === "none") continue;
     const r = el.getBoundingClientRect();
@@ -298,7 +289,6 @@ function scanPage(): Finding[] {
   return found;
 }
 
-// ---- Routes, states, viewports ----
 type Step = { name: string; path: string; act?: (page: Page) => Promise<void> };
 const steps: Step[] = [
   { name: "library", path: "/storylets" },
@@ -312,10 +302,10 @@ const steps: Step[] = [
     await p.locator(".graph-toolbar").getByRole("button", { name: "Fit", exact: true }).click();
     await p.locator(".graph-node.choice .node-body .field-label").first().click();
   } },
-  { name: "entity", path: "/entity-templates/long-person" },
-  { name: "entity-tab-2", path: "/entity-templates/long-person", act: async (p) => { await p.locator(".entity-tab").nth(1).click(); } },
-  { name: "entity-tab-3", path: "/entity-templates/long-person", act: async (p) => { await p.locator(".entity-tab").nth(2).click(); } },
-  { name: "entity-short", path: "/entity-templates/jo" },
+  { name: "entity", path: "/entities/long-person" },
+  { name: "entity-tab-2", path: "/entities/long-person", act: async (p) => { await p.locator(".entity-tab").nth(1).click(); } },
+  { name: "entity-tab-3", path: "/entities/long-person", act: async (p) => { await p.locator(".entity-tab").nth(2).click(); } },
+  { name: "entity-short", path: "/entities/jo" },
   { name: "instance", path: "/entities/inst-long" },
   { name: "trait", path: "/trait-templates/ledger", act: async (p) => {
     if (await p.getByRole("checkbox", { name: /Only one unique trait/ }).isDisabled()) throw new Error("Custom trait uniqueness must remain editable");
@@ -331,7 +321,7 @@ const steps: Step[] = [
     if (!await p.getByText("One per entity", { exact: true }).isVisible()) throw new Error("Single-instance constraint missing");
     if (!await p.getByText("This built-in trait's uniqueness cannot be changed.", { exact: true }).isVisible()) throw new Error("System trait restriction explanation missing");
   } },
-  { name: "exclusive-traits", path: "/entity-templates/long-person", act: async (p) => {
+  { name: "exclusive-traits", path: "/entities/long-person", act: async (p) => {
     await p.locator(".entity-tab").nth(1).click();
     const select = p.getByRole("combobox", { name: "Trait to add" });
     for (const id of ["system.location", "system.fact", "item"]) {
@@ -373,8 +363,8 @@ const steps: Step[] = [
     }
   } },
   { name: "asset", path: "/assets/asset-long" },
-  { name: "folder", path: "/browse/entity_templates/f-long-2" },
-  { name: "folder-root", path: "/browse/entity_templates" },
+  { name: "folder", path: "/browse/entities/f-long-2" },
+  { name: "folder-root", path: "/browse/entities" },
   { name: "codex", path: "/codex" },
   { name: "tags", path: "/tags" },
   { name: "project", path: "/project" },
@@ -390,7 +380,7 @@ const split3 = (main: string) => ({
   id: "root", kind: "split", direction: "row", ratio: 0.5, children: [
     { id: "main", kind: "pane", path: main },
     { id: "s2", kind: "split", direction: "column", ratio: 0.5, children: [
-      { id: "p2", kind: "pane", path: "/entity-templates/long-person" }, { id: "p3", kind: "pane", path: "/browse/entity_templates/f-long-2" },
+      { id: "p2", kind: "pane", path: "/entities/long-person" }, { id: "p3", kind: "pane", path: "/browse/entities/f-long-2" },
     ] },
   ],
 });
@@ -398,7 +388,7 @@ const split3 = (main: string) => ({
 let browser;
 let broken = 0;
 try {
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { /* starting */ } await sleep(200); }
+  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { } await sleep(200); }
   await seed();
   browser = await chromium.launch({ executablePath: chromePath, headless: true });
   const report: string[] = [];
@@ -409,7 +399,7 @@ try {
       const page = await context.newPage();
       const errors: string[] = [];
       page.on("pageerror", (e) => errors.push(String(e)));
-      page.on("dialog", (d) => void d.dismiss());
+      page.on("dialog", (d) => void (d.message() === "Discard unsaved changes?" ? d.accept() : d.dismiss()));
       for (const step of steps.filter((s) => !process.env.STEPS || process.env.STEPS.split(",").includes(s.name))) {
         if (vp.split && step.name !== "storylet-dialog" && step.name !== "library") continue;
         await page.goto(`${base}/#/storylets`);

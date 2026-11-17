@@ -3,7 +3,6 @@ import type {
   AssetRecord,
   AuthoringOptions,
   EntityRecord,
-  EntityTemplateRecord,
   FolderRecord,
   EventRecord,
   ProjectMetadata,
@@ -16,7 +15,6 @@ export interface GlobalStudioState {
   project: ProjectMetadata | null;
   authoringOptions: AuthoringOptions | null;
   entities: EntityRecord[];
-  entityTemplates: EntityTemplateRecord[];
   gameplayTags: GameplayTagRecord[];
   folders: FolderRecord[];
   traitTemplates: TraitTemplateRecord[];
@@ -30,7 +28,6 @@ export const studioState = reactive<GlobalStudioState>({
   project: null,
   authoringOptions: null,
   entities: [],
-  entityTemplates: [],
   gameplayTags: [],
   folders: [],
   traitTemplates: [],
@@ -39,10 +36,6 @@ export const studioState = reactive<GlobalStudioState>({
   events: [],
   notification: null,
 });
-
-export function setEntityTemplates(entityTemplates: EntityTemplateRecord[]) {
-  studioState.entityTemplates = entityTemplates;
-}
 
 export function setEntities(entities: EntityRecord[]) {
   studioState.entities = entities;
