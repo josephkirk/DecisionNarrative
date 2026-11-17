@@ -642,7 +642,7 @@ fn rule_knowledge_has_a_source_step_when_triggered_by_wait() {
     assert!(chain.iter().any(|event| event.actor == 1
         && event.action
             == RunAction::PlayStorylet {
-                node_guid: 1,
+                node_guid: 110,
                 storylet: 1
             }));
     let rule_event = chain

@@ -47,6 +47,22 @@ fn transfer_and_tell_replay_to_identical_kernel_and_event_log() {
         storylet_engine::chrono_participants::KnowKind::Told
     );
     assert_eq!(told.told_by, Some(0));
+    assert!(!replay.explain(1).unwrap().last().unwrap().deltas.is_empty());
+    let apple_count = replay
+        .world()
+        .vertices
+        .iter()
+        .filter_map(|vertex| vertex.attributes.get("prop.__inventory_items"))
+        .filter_map(|items| match items {
+            storylet_engine::chrono_state::AttributeValue::Array(items) => Some(items),
+            _ => None,
+        })
+        .flatten()
+        .filter(|item| {
+            **item == storylet_engine::chrono_state::AttributeValue::EntityRef("apple".into())
+        })
+        .count();
+    assert_eq!(apple_count, 1);
     assert_eq!(
         replay
             .explain(told.source_event)
