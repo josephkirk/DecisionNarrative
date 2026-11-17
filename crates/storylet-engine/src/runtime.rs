@@ -1,4 +1,3 @@
-//! In-memory playtest sessions driven exclusively by the Rust engine.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -73,7 +72,6 @@ pub struct SessionSnapshot {
     pub world: WorldState,
 }
 
-/// Versioned, host-neutral durable session state. Hosts may store this as JSON.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeSessionState {
     pub format_version: u32,
@@ -111,8 +109,6 @@ struct PlaytestSession {
     director: DirectorState,
 }
 
-/// Owns ephemeral sessions. A new runtime starts empty; sessions can be
-/// snapshotted and restored by a host without coupling the engine to storage.
 #[derive(Clone, Debug, Default)]
 pub struct StoryletRuntime {
     sessions: BTreeMap<String, PlaytestSession>,
@@ -239,13 +235,10 @@ impl StoryletRuntime {
         Ok(snapshot)
     }
 
-    /// Remove a playtest session and all of its in-memory runtime state.
     pub fn delete_session(&mut self, session_id: &str) -> bool {
         self.sessions.remove(session_id).is_some()
     }
 
-    /// Fork a session at an existing event. The fork replays the prefix through
-    /// the same transaction path and rebuilds storylet lifecycle state.
     pub fn fork_session(
         &mut self,
         source_session_id: &str,
@@ -262,9 +255,6 @@ impl StoryletRuntime {
             });
         }
         let source = self.session(source_session_id)?.clone();
-        // Rebuild the director alongside the event prefix. Storylet choices are
-        // replayed through their lifecycle transaction; all other events use
-        // the ordinary world transaction.
         let mut replayed_world = build_world(&source.project, &source.scenario_id)
             .map_err(RuntimeError::InvalidProject)?;
         let mut director = DirectorState::default();
@@ -421,8 +411,6 @@ impl StoryletRuntime {
         }
         validate_command_references(&session.project, &command)?;
 
-        // Resolve the player action and all resulting NPC actions against a
-        // working snapshot. A failed NPC effect cannot leave half a turn.
         let mut world = session.world.clone();
         let player = apply_command(&mut world, command)?;
         let npc = if player.event.advanced_turn && !player.duplicate {
@@ -485,8 +473,6 @@ impl StoryletRuntime {
             .cloned()
             .ok_or(RuntimeError::Engine(EngineError::ChoiceNotFound))?;
 
-        // Retry an already committed choice before evaluating lifecycle again.
-        // This allows a lost HTTP response to be retried after the scene closes.
         if let Some(event_id) = session.world.applied_commands.get(idempotency_key) {
             let recorded = session
                 .world

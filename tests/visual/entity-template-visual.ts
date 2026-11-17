@@ -1,5 +1,3 @@
-// Visual test: entities can be templates: tree has no Entity Templates root, right-click toggle, header indicator, Choose template picker.
-// Run: STORYLET_SERVICE_BIN=<bin> node tests/visual/entity-template-visual.ts
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import os from "node:os";
@@ -43,7 +41,7 @@ function check(name: string, ok: boolean, detail = "") {
 
 let browser;
 try {
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { /* starting */ } await sleep(200); }
+  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { } await sleep(200); }
   const traits = await api("GET", "/api/v3/content/trait_templates");
   const character = traits.find((t: { key: string }) => t.key === "character");
   await api("POST", "/api/v3/content/entities", { id: "knight", name: "Knight", description: "Armored", traits: [{ id: "k1", template_id: character.id, values: {} }] });
@@ -64,7 +62,6 @@ try {
   check("plain entity has no template badge", (await row("Knight").locator(".project-tree__template-badge").count()) === 0);
   check("header shows Standalone Entity before toggle", (await page.locator(".template-pill").count()) === 0 && (await page.locator(".entity-standalone-text").count()) === 1);
 
-  // Right-click toggle
   await row("Knight").click({ button: "right" });
   const toggle = page.locator('.project-tree__context-menu [aria-label="Use as template"]');
   await toggle.waitFor();
@@ -81,7 +78,6 @@ try {
   await page.keyboard.press("Escape");
   await page.mouse.click(700, 500);
 
-  // Choose template picker: None creates empty entity
   const before = (await api("GET", "/api/v3/content/entities")).length;
   const entitiesRoot = page.locator(".project-tree__row--root", { hasText: "Entities" }).first();
   await entitiesRoot.hover();
@@ -106,7 +102,6 @@ try {
   const none = afterNone.find((e: { name: string }) => e.name === "New Entity");
   check("None creates an empty entity without template", !!none && none.template_id === null && none.traits.length === 0 && none.is_template === false, JSON.stringify(none));
 
-  // Template choice copies traits and records the template
   await entitiesRoot.hover();
   await entitiesRoot.getByRole("button", { name: /Actions for Entities|New/ }).first().click();
   await page.locator(".project-tree__menu-item").first().click();
@@ -120,13 +115,11 @@ try {
   check("template choice copies traits and sets template_id", !!fromTpl && fromTpl.template_id === "knight" && fromTpl.traits.length === 1 && fromTpl.traits[0].id !== "k1", JSON.stringify(fromTpl));
   await page.screenshot({ path: path.join(outDir, "entity-template-instance.png") });
 
-  // An entity made from a template cannot become a template itself: the menu item is disabled.
   await row("New Knight").click({ button: "right" });
   check("instance cannot be marked as template in the menu", await page.locator('.project-tree__context-menu [aria-label="Use as template"]').isDisabled());
   await page.keyboard.press("Escape");
   await page.mouse.click(700, 500);
 
-  // Toggling from the tree while the editor has the same unsaved change leaves no stuck "Unsaved" state.
   await row("Rock").click();
   await page.getByRole("checkbox", { name: "Use as template" }).check();
   await page.locator(".entity-unsaved-pill").waitFor();
@@ -135,7 +128,6 @@ try {
   await page.locator(".entity-unsaved-pill").waitFor({ state: "detached", timeout: 5000 });
   check("tree toggle clears matching unsaved template edit", (await api("GET", "/api/v3/content/entities/rock")).is_template === true);
 
-  // Unmarking a referenced template is rejected with a visible error
   await row("Knight").click({ button: "right" });
   await page.locator('.project-tree__context-menu [aria-label="Use as template"]').click();
   await sleep(600);

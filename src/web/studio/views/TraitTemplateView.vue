@@ -38,7 +38,6 @@ const propertiesProblem = computed(() => {
 const usedBy = computed(() =>
   studioState.entities.filter((entity) => entity.traits.some((trait) => trait.template_id === templateId)),
 );
-// Included traits
 const includedTemplates = computed(() => {
   const ids = draft.value?.includes ?? [];
   return ids
@@ -46,7 +45,6 @@ const includedTemplates = computed(() => {
     .filter((t): t is TraitTemplateRecord => t !== undefined);
 });
 
-// Helper to check if template `checkId` directly or indirectly includes `targetId`
 function includesTransitively(checkId: string, targetId: string, visited = new Set<string>()): boolean {
   if (checkId === targetId) return true;
   if (visited.has(checkId)) return false;
@@ -65,7 +63,6 @@ const availableIncludes = computed(() => {
   return studioState.traitTemplates.filter((t) => {
     if (t.id === templateId) return false;
     if (currentIncludes.has(t.id)) return false;
-    // Cycle prevention: if t already includes templateId transitively, adding it would create a cycle!
     if (includesTransitively(t.id, templateId)) return false;
     return true;
   });
@@ -179,7 +176,6 @@ function confirmDiscard(): boolean {
 
 onBeforeRouteLeave(confirmDiscard);
 onBeforeRouteUpdate(confirmDiscard);
-/** Mouse wheels scroll the tab strip sideways when tabs overflow a narrow pane. */
 function scrollTabs(event: WheelEvent) {
   const strip = event.currentTarget as HTMLElement;
   if (strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
@@ -190,7 +186,6 @@ function scrollTabs(event: WheelEvent) {
 
 <template>
   <div v-if="draft" class="entity-page-surface scroll-fade-mask">
-    <!-- Hero Card matching EntityView -->
     <header class="entity-hero-card">
       <div class="entity-hero-left">
         <ThumbnailPicker
@@ -252,7 +247,6 @@ function scrollTabs(event: WheelEvent) {
       </div>
     </header>
 
-    <!-- Tabs matching EntityView -->
     <nav class="entity-tabs" aria-label="Trait sections" @wheel="scrollTabs">
       <button :class="['entity-tab', activeTab === 'properties' && 'is-active']" @click="activeTab = 'properties'">
         <svg aria-hidden="true" class="tab-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -273,9 +267,7 @@ function scrollTabs(event: WheelEvent) {
       </button>
     </nav>
 
-    <!-- Properties Tab -->
     <section v-show="activeTab === 'properties'" class="entity-content-stack">
-      <!-- 1. Identity & Rules -->
       <div class="content-block">
         <p v-if="draft.system" class="system-trait-notice">This built-in trait is required by the project and cannot be changed or deleted. You can create a separate trait for custom rules.</p>
         <div class="content-block-head">
@@ -313,7 +305,6 @@ function scrollTabs(event: WheelEvent) {
         </div>
       </div>
 
-      <!-- 2. Description -->
       <div class="content-block">
         <div class="content-block-head">
           <span class="block-title">Description</span>
@@ -330,7 +321,6 @@ function scrollTabs(event: WheelEvent) {
         ></textarea>
       </div>
 
-      <!-- 3. Typed Properties -->
       <div class="content-block">
         <div class="content-block-head">
           <span class="block-title">Typed properties</span>
@@ -352,7 +342,6 @@ function scrollTabs(event: WheelEvent) {
         />
       </div>
 
-      <!-- 4. Inherited Properties (if any) -->
       <div v-if="inheritedProperties.length" class="content-block">
         <div class="content-block-head">
           <span class="block-title">Inherited properties</span>
@@ -378,7 +367,6 @@ function scrollTabs(event: WheelEvent) {
       </div>
     </section>
 
-    <!-- Includes Tab -->
     <section v-show="activeTab === 'includes'" class="entity-content-stack">
       <div class="content-block">
         <div class="content-block-head">
@@ -424,7 +412,6 @@ function scrollTabs(event: WheelEvent) {
       </div>
     </section>
 
-    <!-- References / Used By Tab -->
     <section v-show="activeTab === 'references'" class="entity-content-stack">
       <div class="content-block">
         <div class="content-block-head">
@@ -450,7 +437,6 @@ function scrollTabs(event: WheelEvent) {
     </section>
   </div>
 
-  <!-- Loading Skeleton -->
   <div v-else class="entity-page-surface" aria-label="Loading trait">
     <div class="skeleton-hero-card">
       <div class="skeleton-avatar"></div>

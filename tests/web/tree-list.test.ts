@@ -8,16 +8,12 @@ describe("treeListRows", () => {
       nodes: ["cycle-b", "root-1", "cycle-a", "root-2", "isolated"],
       edges: [
         { from: "root-1", to: "child-1" },
-        // cycle-a and cycle-b form a rootless cycle (both have in-degree 1)
         { from: "cycle-a", to: "cycle-b" },
         { from: "cycle-b", to: "cycle-a" },
       ],
       direction: "right",
     };
 
-    // Filtered by nodes in graph: "child-1" is not in graph.nodes so it is ignored.
-    // True roots in graph.nodes order: root-1, root-2, isolated
-    // Rootless component nodes: cycle-b appears first in graph.nodes, so it becomes canonical root for that component
     const rows = treeListRows(graph, new Set());
 
     expect(rows.map((r) => ({ nodeId: r.nodeId, depth: r.depth, reference: r.reference }))).toEqual([
@@ -29,13 +25,11 @@ describe("treeListRows", () => {
       { nodeId: "cycle-b", depth: 2, reference: true },
     ]);
 
-    // Root rows omit edge
     expect("edge" in rows[0]!).toBe(false);
     expect("edge" in rows[1]!).toBe(false);
     expect("edge" in rows[2]!).toBe(false);
     expect("edge" in rows[3]!).toBe(false);
 
-    // All emitted rows have unique keys
     const keys = rows.map((r) => r.key);
     expect(new Set(keys).size).toBe(keys.length);
   });
@@ -147,16 +141,12 @@ describe("treeListRows", () => {
       direction: "right",
     };
 
-    // When "mid-a" is collapsed, leaf-a1 and leaf-a2 must be hidden.
-    // They must NOT appear as root rows later!
     const collapsedMidA = treeListRows(graph, new Set(["mid-a"]));
     expect(collapsedMidA.map((r) => r.nodeId)).toEqual(["root", "mid-a", "mid-b", "leaf-b1"]);
 
-    // mid-a still has hasChildren: true so UI can render the expand chevron
     const midARow = collapsedMidA.find((r) => r.nodeId === "mid-a")!;
     expect(midARow.hasChildren).toBe(true);
 
-    // When root is collapsed, all descendants are hidden
     const collapsedRoot = treeListRows(graph, new Set(["root"]));
     expect(collapsedRoot.map((r) => r.nodeId)).toEqual(["root"]);
     expect(collapsedRoot[0]!.hasChildren).toBe(true);
@@ -177,28 +167,24 @@ describe("treeListRows", () => {
 
     expect(rows).toHaveLength(4);
 
-    // Root row
     expect(rows[0]!.nodeId).toBe("character");
     expect(rows[0]!.depth).toBe(0);
     expect(rows[0]!.reference).toBe(false);
     expect(rows[0]!.hasChildren).toBe(true);
     expect("edge" in rows[0]!).toBe(false);
 
-    // Canonical sword
     expect(rows[1]!.nodeId).toBe("sword");
     expect(rows[1]!.depth).toBe(1);
     expect(rows[1]!.reference).toBe(false);
     expect(rows[1]!.hasChildren).toBe(true);
     expect(rows[1]!.edge).toEqual({ from: "character", to: "sword", relationship: "wields" });
 
-    // Canonical shield under sword
     expect(rows[2]!.nodeId).toBe("shield");
     expect(rows[2]!.depth).toBe(2);
     expect(rows[2]!.reference).toBe(false);
     expect(rows[2]!.hasChildren).toBe(false);
     expect(rows[2]!.edge).toEqual({ from: "sword", to: "shield", relationship: "pairs_with" });
 
-    // Reference shield under character
     expect(rows[3]!.nodeId).toBe("shield");
     expect(rows[3]!.depth).toBe(1);
     expect(rows[3]!.reference).toBe(true);
@@ -243,7 +229,6 @@ describe("treeListRows", () => {
         { from: "root", to: "c" },
         { from: "root", to: "a" },
         { from: "root", to: "b->c" },
-        // Two edges with distinct endpoint pairs that would collide under naive `${from}->${to}`
         { from: "a->b", to: "c" },
         { from: "a", to: "b->c" },
       ],

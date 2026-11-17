@@ -5,7 +5,6 @@ use serde_json::Value;
 
 use crate::{WorldState, number_value};
 
-/// Runtime presence and eligibility information for one generic character.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ActorState {
     #[serde(default)]
@@ -185,7 +184,6 @@ pub struct CandidateEvaluation {
     pub final_weight: f64,
 }
 
-/// Evaluate the complete definition list, including rejected items and reasons.
 pub fn evaluate_storylets(
     definitions: &[StoryletDefinition],
     world: &WorldState,
@@ -206,8 +204,6 @@ pub fn evaluate_storylets(
     evaluations
 }
 
-/// Produce a deterministic weighted ordering of eligible storylets without replacement.
-/// The same seed and cursor reproduce the same deck; ineligible content never enters it.
 pub fn seeded_weighted_shuffle(
     world: &mut WorldState,
     candidates: &[CandidateEvaluation],
@@ -537,7 +533,6 @@ pub struct StoryletExecutionResult {
     pub divert_target: Option<String>,
 }
 
-/// Start an eligible storylet and reserve all bound actors atomically.
 pub fn start_storylet(
     definition: &StoryletDefinition,
     _candidate: &CandidateEvaluation,
@@ -585,7 +580,6 @@ pub fn start_storylet(
     Ok(instance)
 }
 
-/// Commit one approved choice through the shared world transaction path.
 pub fn execute_storylet_choice(
     definition: &StoryletDefinition,
     instance_id: &str,
@@ -627,7 +621,6 @@ pub fn execute_storylet_choice(
         terminal: definition.ending,
     };
 
-    // A lost response can be safely retried after the scene has already closed.
     if world.applied_commands.contains_key(idempotency_key) {
         let command_result = crate::apply_command(world, command)?;
         let completed = director
@@ -733,7 +726,6 @@ pub fn execute_storylet_choice(
     })
 }
 
-/// Suspend a scene without losing its cursor. Actor reservations are released.
 pub fn suspend_storylet(
     instance_id: &str,
     director: &mut DirectorState,
@@ -761,7 +753,6 @@ pub fn suspend_storylet(
     Ok(())
 }
 
-/// Resume only if the same definition revision, triggers, and role bindings remain valid.
 pub fn resume_storylet(
     definition: &StoryletDefinition,
     instance_id: &str,

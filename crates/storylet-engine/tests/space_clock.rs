@@ -18,7 +18,6 @@ fn pin(name: &str, input: bool) -> PinDefinition {
     PinDefinition { pin_name: name.into(), is_input: input }
 }
 
-/// A choice node with two exits to one end node, set in a three-place world with a five-slot clock.
 fn content() -> RunContent {
     let choice = FlowNodeDef {
         node_guid: 1,
@@ -67,7 +66,6 @@ fn content() -> RunContent {
         }),
         connections: vec![
             Connection { from: LIGHTHOUSE, to: HARBOR, open_slots: None, requires_fact: None, on_close: None },
-            // The rock is only reachable in slots 1 and 3 (D2 morning, D3 morning).
             Connection { from: LIGHTHOUSE, to: ROCK, open_slots: Some(0b01010), requires_fact: None, on_close: Some(OnClose::Return { to: LIGHTHOUSE }) },
             Connection { from: ROCK, to: LIGHTHOUSE, open_slots: None, requires_fact: None, on_close: None },
         ],
@@ -190,7 +188,6 @@ fn move_follows_connections_and_spends_an_action() {
     let place = run.view(&content, 0).place.unwrap();
     assert_eq!(place.name, "Harbor");
     assert_eq!(place.actions_left, Some(1));
-    // Harbor has no outgoing connection, and the rock is closed in slot 0.
     assert!(run.act(&content, 0, RunAction::Move { to: ROCK }).is_err());
 }
 
@@ -212,7 +209,6 @@ fn timeless_project_spends_nothing() {
     let place = run.view(&content, 0).place.unwrap();
     assert_eq!(place.actions_left, None);
     assert_eq!(place.clock_label, None);
-    // Scheduled connections are always open without a clock.
     assert!(moves_for(&run.world, &content, 0).iter().all(|m| m.enabled));
 }
 
@@ -225,7 +221,6 @@ fn clock_state_survives_rewind() {
     assert_eq!(run.view(&content, 0).place.unwrap().actions_left, Some(2));
 }
 
-// --- Rule participants -------------------------------------------------------
 
 use storylet_engine::chrono_participants::Controller;
 use storylet_engine::chrono_runtime::Visibility;
@@ -259,8 +254,6 @@ fn flow(from: u32, to: u32) -> EdgeConnection {
     EdgeConnection { source_node_guid: from, source_pin_name: "Out".into(), target_node_guid: to, target_pin_name: "In".into() }
 }
 
-/// Adds Rosa and Benedek (rule participants at the harbor) and one gossip
-/// storylet per entry of `gossip`: `(storylet id, fact it teaches, display priority)`.
 fn with_rules(gossip: &[(u16, &str, i32)]) -> RunContent {
     let mut content = content();
     content.registry = GameplayTagRegistry::compile(
@@ -298,18 +291,15 @@ fn rule_storylet_plays_at_slot_start() {
     let fact_a = registry_fact(&content, "fact.a");
     let mut run = started(&content);
     assert!(run.world.knowledge.knows(BENEDEK, fact_a).is_none());
-    // The player ends the turn; the slot advances and Rosa gossips to Benedek, who shares her place.
     run.act(&content, 0, RunAction::Wait).unwrap();
     let row = run.world.knowledge.knows(BENEDEK, fact_a).expect("Benedek overheard the gossip");
     assert_eq!(row.kind, KnowKind::Witnessed);
     assert_eq!(run.world.knowledge.knows(ROSA, fact_a).unwrap().kind, KnowKind::Told);
-    // The player was not at the harbor.
     assert!(run.world.knowledge.knows(0, fact_a).is_none());
 }
 
 #[test]
 fn rule_pass_one_play_per_participant() {
-    // Both storylets belong to Rosa; the higher display priority goes first, one per pass.
     let content = with_rules(&[(1, "fact.a", 0), (2, "fact.b", 5)]);
     let (fact_a, fact_b) = (registry_fact(&content, "fact.a"), registry_fact(&content, "fact.b"));
     let mut run = started(&content);

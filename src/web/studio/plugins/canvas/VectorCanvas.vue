@@ -13,11 +13,6 @@ import {
 import { allEntities as listEntities, refInfo, refName, STORYLET_COLOR } from "./refs.ts";
 import CanvasShapeView from "./CanvasShapeView.vue";
 
-/**
- * `entity` mode (the entity's Canvas tab): every edit is a history revision
- * saved on the entity. `node` mode (a Modify Canvas node): edits a working
- * copy with undo only, no history; the caller saves it as one version.
- */
 const props = withDefaults(defineProps<{ entity?: EntityRecord; readonly?: boolean; mode?: "entity" | "node"; initialDoc?: CanvasDoc }>(), { mode: "entity" });
 const emit = defineEmits<{ (e: "patch", value: Partial<EntityRecord>): void; (e: "change", value: CanvasDoc): void }>();
 const nodeMode = computed(() => props.mode === "node");
@@ -82,7 +77,6 @@ const canUndo = computed(() => (undoVersion.value, undo.canUndo));
 const canRedo = computed(() => (undoVersion.value, undo.canRedo));
 const isLocked = (shape: CanvasShape) => props.readonly || !!layerById.value.get(shape.layer)?.locked;
 
-/* ---------- history ---------- */
 function persist(next: CanvasDoc) {
   doc.value = next;
   if (nodeMode.value) { emit("change", next); return; }
@@ -100,7 +94,6 @@ function doUndo() { const prev = undo.undo(doc.value); if (prev) { undoVersion.v
 function doRedo() { const next = undo.redo(doc.value); if (next) { undoVersion.value++; persist({ ...doc.value, ...next }); } }
 function restore(index: number) { undo.record(doc.value); undoVersion.value++; persist(restoreRevision(doc.value, index)); }
 
-/* ---------- layers ---------- */
 function addLayer() {
   const id = newId("ly_");
   change("Add layer", (d) => d.layers.push({ id, name: `Layer ${d.layers.length + 1}`, visible: true, locked: false, opacity: 1 }));
@@ -124,7 +117,6 @@ function removeLayer(id: string) {
   if (activeLayer.value === id) activeLayer.value = doc.value.layers.at(-1)?.id ?? "";
 }
 
-/* ---------- shapes ---------- */
 function updateSelected(patch: Partial<CanvasShape>, label = "Edit shape") {
   const id = selectedId.value; if (!id) return;
   change(label, (d) => { const shape = d.shapes.find((entry) => entry.id === id); if (shape) Object.assign(shape, patch); });
@@ -145,7 +137,6 @@ function openReference(shape: CanvasShape) {
   if (route) void router.push(route);
 }
 
-/* ---------- pointer ---------- */
 function toWorld(event: MouseEvent) {
   const rect = svgRef.value!.getBoundingClientRect();
   return { x: (event.clientX - rect.left - panX.value) / zoom.value, y: (event.clientY - rect.top - panY.value) / zoom.value };

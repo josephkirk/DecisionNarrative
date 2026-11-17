@@ -49,7 +49,7 @@ export interface DialogueLineItem {
   kind: "line";
   id: string;
   speaker_role: string;
-  target_role: string; // default "player"
+  target_role: string;
   content: string;
   emotion_tag?: string;
   action_tag?: string;
@@ -63,7 +63,7 @@ export interface DialogueIdleActionItem {
   id: string;
   action_type: "lookat" | "emote";
   actor_role: string;
-  target: string; // "player" or role name
+  target: string;
   emote?: string;
   duration?: number;
 }
@@ -243,11 +243,8 @@ export interface NarrativeNode {
   operation?: "set" | "add" | "subtract" | "toggle";
   operator?: AttributeOp;
   value?: unknown;
-  // Entity membership predicates use Has Entity Tag dot-notation.
-  /** Contributed node type; only set when type is "plugin". */
   plugin_type?: string;
   plugin_config?: Record<string, unknown>;
-  /** Lowering metadata kept on core nodes generated from a plugin node. */
   plugin?: unknown;
 }
 
@@ -287,7 +284,6 @@ type StoryletGraphSource = Pick<StoryletRecord, "graph" | "content" | "parameter
   ending?: boolean;
 };
 export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph {
-  // A new draft begins with an empty placeholder; initialize the usable graph.
   if (st.graph && typeof st.graph === "object" && Array.isArray((st.graph as NarrativeGraph).nodes) && (st.graph as NarrativeGraph).nodes.length > 0) {
     return JSON.parse(JSON.stringify(st.graph));
   }
@@ -295,7 +291,6 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
   const nodes: NarrativeNode[] = [];
   const edges: NarrativeEdge[] = [];
 
-  // Start node
   nodes.push({
     id: "node_start",
     type: "start",
@@ -307,7 +302,6 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
     text: "Begin Discovery",
   });
 
-  // Dialog node
   const prose = st.content.sceneOpening || st.content.text_template || "Scene opening text...";
   const speaker = st.content.speaker_id || (st.parameters[0]?.param_name ?? "player");
 
@@ -347,7 +341,6 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
       to_port: "input",
   });
 
-  // Choice node
   if (st.choices.length > 0) {
     const opts: ChoiceOption[] = st.choices.map((c, idx) => ({
       id: c.choice_id || `choice_${idx + 1}`,
@@ -376,7 +369,6 @@ export function buildGraphFromStorylet(st: StoryletGraphSource): NarrativeGraph 
       to_port: "input",
     });
 
-    // Destination nodes for choices
     st.choices.forEach((c, idx) => {
       if (typeof c.effects?.["$move_player"] === "string") {
         const locationNodeId = `node_location_${idx + 1}`;

@@ -1,7 +1,3 @@
-// Worst-case data visual audit: seeds realistic long, short, non-Latin, emoji and huge values, then scans
-// every studio view for clipped, spilled, overlapping, occluded or low-contrast text.
-// Run: bun run build && node tests/visual/stress-visual.ts  (Node: Playwright cannot drive Chromium from Bun).
-// THEMES=kojima,cyberpunk,... (default kojima) VIEWPORTS=desk,narrow,phone,split3 (default all).
 import { chromium, type Page } from "playwright-core";
 import fs from "node:fs";
 import os from "node:os";
@@ -43,7 +39,6 @@ async function api(method: string, p: string, body?: unknown) {
   return text ? JSON.parse(text) : null;
 }
 
-// ---- Worst-case fixture: every value is something a real author could type. ----
 const PERSON = "Aleksandra Wiśniewska-Kowalczyk, Keeper of the Northwind Lighthouse";
 const URL = "https://northwind-industries-holdings.example.com/archive/correspondence/2024/aleksandra.wisniewska-kowalczyk/letter-0042-final-v12.md";
 const EMAIL = "bartholomew.fitzgerald@northwind-industries-holdings.example.com";
@@ -147,7 +142,6 @@ async function seed() {
   }
 }
 
-// ---- In-page scanner ----
 type Finding = { kind: string; severity: "broken" | "warn"; sel: string; text: string; detail: string };
 function scanPage(): Finding[] {
   const found: Finding[] = [];
@@ -160,7 +154,6 @@ function scanPage(): Finding[] {
     }
     return parts.join(">");
   };
-  // Hidden from users: inert/aria-hidden subtrees and the body of a closed <details>.
   const inert = (el: Element) => !!el.closest("[inert],[aria-hidden='true']") || (!!el.closest("details:not([open])") && !el.closest("summary"));
   const shown = (el: Element) => {
     const r = el.getBoundingClientRect();
@@ -179,7 +172,6 @@ function scanPage(): Finding[] {
     const list: { el: Element; rect: DOMRect; scroller: boolean }[] = [];
     for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
       const s = getComputedStyle(a);
-      // Pan/zoom canvases clip like scroll containers: off-view content is reached by panning.
       if (s.overflowX !== "visible" || s.overflowY !== "visible") list.push({ el: a, rect: a.getBoundingClientRect(), scroller: /auto|scroll/.test(s.overflowX + s.overflowY) || a.classList.contains("graph-canvas-container") });
     }
     return list;
@@ -208,7 +200,6 @@ function scanPage(): Finding[] {
     if (!tr) continue;
     const text = el.textContent!.trim().replace(/\s+/g, " ").slice(0, 50);
     const cs = getComputedStyle(el);
-    // Clipping: the first clipping ancestor that cuts the text. Scroll containers are fine (content scrolls into view).
     let scrolledAway = false;
     const ownClip = cs.overflowX !== "visible" && tr.r > el.getBoundingClientRect().right + 1;
     if (ownClip) {
@@ -236,7 +227,6 @@ function scanPage(): Finding[] {
     }
     if (scrolledAway) continue;
     if (tr.r > vw + 1 || tr.l < -1) found.push({ kind: "offscreen", severity: "broken", sel: sel(el), text, detail: `x ${Math.round(tr.l)}..${Math.round(tr.r)} of ${vw}` });
-    // Spill: text leaves the nearest painted box (background or border) without being clipped.
     for (let a = el.parentElement, i = 0; a && i < 6; a = a.parentElement, i++) {
       const s = getComputedStyle(a);
       const painted = parse(s.backgroundColor).a > 0.05 || parseFloat(s.borderLeftWidth) > 0 || parseFloat(s.borderRightWidth) > 0;
@@ -245,7 +235,6 @@ function scanPage(): Finding[] {
       if (tr.r > r.right + 2 || tr.l < r.left - 2) found.push({ kind: "spill", severity: "broken", sel: sel(el), text, detail: `leaves ${sel(a)} by ${Math.round(Math.max(tr.r - r.right, r.left - tr.l))}px` });
       break;
     }
-    // Contrast against composited backgrounds.
     let fg = parse(cs.color);
     if (fg.a > 0 && !el.closest(":disabled,[aria-disabled='true'],.is-disabled")) {
       let opacity = 1;
@@ -270,14 +259,12 @@ function scanPage(): Finding[] {
         if (ratio < (large ? 3 : 4.5)) found.push({ kind: "contrast", severity: "broken", sel: sel(el), text, detail: `${ratio.toFixed(2)}:1` });
       }
     }
-    // Lines hidden by the element's own vertical clip (e.g. line-clamp) paint nothing, so they cannot overlap.
     if (cs.overflowY !== "visible") {
       const own = el.getBoundingClientRect();
       tr = { ...tr, t: Math.max(tr.t, own.top), b: Math.min(tr.b, own.bottom) };
     }
     boxes.push({ el, r: tr });
   }
-  // Overlapping text from different elements, where one actually paints over the other.
   for (let i = 0; i < boxes.length; i++) {
     for (let j = i + 1; j < boxes.length; j++) {
       const a = boxes[i], b = boxes[j];
@@ -288,7 +275,6 @@ function scanPage(): Finding[] {
       found.push({ kind: "overlap", severity: "broken", sel: `${sel(a.el)} × ${sel(b.el)}`, text: `${a.el.textContent!.trim().slice(0, 24)} × ${b.el.textContent!.trim().slice(0, 24)}`, detail: `${Math.round(w)}×${Math.round(h)}` });
     }
   }
-  // Occluded or undersized controls.
   for (const el of document.querySelectorAll("button,a[href],input:not([type=hidden]),select,textarea,[role=button],[role=tab],[role=menuitem]")) {
     if (inert(el) || !shown(el) || (el as HTMLButtonElement).disabled || getComputedStyle(el).pointerEvents === "none") continue;
     const r = el.getBoundingClientRect();
@@ -303,7 +289,6 @@ function scanPage(): Finding[] {
   return found;
 }
 
-// ---- Routes, states, viewports ----
 type Step = { name: string; path: string; act?: (page: Page) => Promise<void> };
 const steps: Step[] = [
   { name: "library", path: "/storylets" },
@@ -403,7 +388,7 @@ const split3 = (main: string) => ({
 let browser;
 let broken = 0;
 try {
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { /* starting */ } await sleep(200); }
+  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { } await sleep(200); }
   await seed();
   browser = await chromium.launch({ executablePath: chromePath, headless: true });
   const report: string[] = [];
@@ -414,7 +399,6 @@ try {
       const page = await context.newPage();
       const errors: string[] = [];
       page.on("pageerror", (e) => errors.push(String(e)));
-      // Steps move on from unsaved edits (e.g. exclusive-traits); choose "Discard" like a user would. Other dialogs stay dismissed.
       page.on("dialog", (d) => void (d.message() === "Discard unsaved changes?" ? d.accept() : d.dismiss()));
       for (const step of steps.filter((s) => !process.env.STEPS || process.env.STEPS.split(",").includes(s.name))) {
         if (vp.split && step.name !== "storylet-dialog" && step.name !== "library") continue;

@@ -1,8 +1,3 @@
-//! Dense runtime tables: storylet instances and scopes.
-//!
-//! The table is deliberately independent of the scheduler. It provides the
-//! allocation, generation, free-list, and per-scope completion storage that a
-//! scheduler can adopt without changing its execution semantics.
 
 use crate::chrono_catalog::StoryletIndex;
 use crate::chrono_completion::{ScopeCompletion, StoryletBitset};
@@ -59,7 +54,6 @@ impl std::fmt::Display for TableError {
 
 impl std::error::Error for TableError {}
 
-/// Structure-of-arrays instance table with generation-checked free-list reuse.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoryletInstanceTable {
     pub storylet_index: Vec<StoryletIndex>,
@@ -184,7 +178,6 @@ impl StoryletInstanceTable {
     }
 }
 
-/// Scope rows. Completion bits are owned here; call history remains canonical.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScopeHandle {
     pub index: u16,
@@ -305,7 +298,7 @@ impl ScopeTable {
             });
         }
         self.rows[handle.index as usize] = ScopeCompletion::default();
-        self.flags[handle.index as usize] = u8::MAX; // released marker
+        self.flags[handle.index as usize] = u8::MAX;
         self.generation[handle.index as usize] =
             self.generation[handle.index as usize].wrapping_add(1);
         self.next_free[handle.index as usize] = self.free_head;
@@ -329,8 +322,6 @@ impl ScopeTable {
         })
     }
 
-    /// Resolve the inherited view with direct parent indexing and a fixed-size
-    /// visited buffer. No heap allocation and no linear parent scan.
     pub fn visible_bits(&self, index: u16) -> Result<StoryletBitset, TableError> {
         let scope = self.get(index).ok_or(TableError::UnknownScope { index })?;
         let mut bits = scope.bits;

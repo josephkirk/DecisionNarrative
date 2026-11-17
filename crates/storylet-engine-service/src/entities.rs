@@ -1,8 +1,3 @@
-//! Entities, traits, and asset authoring rules.
-//!
-//! Entities are authored as generic [`EntityRecord`] values. Runtime
-//! records are projections selected by the entity's gameplay tags and
-//! populated from flattened typed properties.
 
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,10 +10,6 @@ use crate::contracts::{
 };
 use crate::files;
 
-/// Parse only the current project bundle schema.
-///
-/// Bundle migration is intentionally not performed: earlier schema versions must
-/// be rejected rather than silently reinterpreted as current content.
 pub fn parse_project_bundle(value: &Value) -> Result<ProjectBundle, String> {
     let object = value
         .as_object()
@@ -35,8 +26,6 @@ pub fn parse_project_bundle(value: &Value) -> Result<ProjectBundle, String> {
     serde_json::from_value(value.clone()).map_err(|error| error.to_string())
 }
 
-/// Entities, traits, assets, folders, and storylet ids used to validate
-/// Authored records and references used to validate a workspace.
 #[derive(Clone, Debug, Default)]
 pub struct WorkspaceIndex {
     pub entities: Vec<EntityRecord>,
@@ -47,7 +36,6 @@ pub struct WorkspaceIndex {
     pub storylet_ids: BTreeSet<String>,
 }
 
-/// Records projected from entities for the runtime adapters.
 #[derive(Clone, Debug, Default)]
 pub struct RuntimeRecords {
     pub locations: Vec<LocationRecord>,
@@ -128,7 +116,6 @@ pub fn default_world_entity() -> EntityRecord {
 }
  
 
-/// Authored entities that become runtime rows: every entity (templates included) except the intrinsic world.
 pub fn runtime_entities(entities: &[EntityRecord]) -> Vec<EntityRecord> {
     entities.iter().filter(|entity| entity.id != WORLD_ENTITY_ID).cloned().collect()
 }
@@ -163,8 +150,6 @@ fn trim_tags(tags: &[String]) -> Vec<String> {
     out
 }
 
-/// The asset-link shape stored in `PropertyType::Asset` values.
-/// Links reference the asset only; the latest version is resolved at read time.
 pub fn asset_link(value: &Value) -> Option<String> {
     value.get("asset_id")?.as_str().map(str::to_string)
 }
@@ -195,7 +180,6 @@ pub fn value_shape_matches(property_type: PropertyType, is_array: bool, value: &
     scalar_shape_matches(property_type, value)
 }
 
-/// Generic playtests have no entity-scoped custom-property representation.
 pub fn generic_playtest_projection_issues(entities: &[EntityRecord]) -> Vec<String> {
     entities.iter().filter(|entity| !entity.properties.is_empty())
         .map(|entity| format!("entity '{}': generic playtests cannot represent typed custom properties; use Chrono playtests", entity.id))
@@ -310,7 +294,6 @@ pub fn location_record(
         attributes,
     })
 }
-/// Recursively collect typed properties from a template and its included templates.
 pub fn collect_template_properties(
     template: &TraitTemplateRecord,
     templates: &[TraitTemplateRecord],
@@ -328,7 +311,6 @@ pub fn collect_template_properties(
     let _ = templates;
 }
 
-/// Numeric bounds declared on a trait property apply to every number in the value.
 fn value_within_bounds(property: &TraitPropertyDefinition, value: &Value) -> bool {
     let within = |number: &Value| number.as_f64().is_none_or(|n| property.min.is_none_or(|min| n >= min) && property.max.is_none_or(|max| n <= max));
     match value {
@@ -337,20 +319,16 @@ fn value_within_bounds(property: &TraitPropertyDefinition, value: &Value) -> boo
     }
 }
 
-/// Flattened runtime attributes: `prop.<key>` and trait property namespaces.
 fn property_value_matches(property_type: PropertyType, is_array: bool, value: &Value) -> bool {
     value_shape_matches(property_type, is_array, value)
 }
 
-/// Flattened runtime attributes: `prop.<key>` and trait property namespaces.
 pub fn runtime_attributes(entity: &EntityRecord, templates: &[TraitTemplateRecord]) -> Value {
     let mut properties = Map::new();
     let mut traits = Map::new();
     let has_inventory_trait = entity.traits.iter().any(|instance| templates.iter().any(|template|
         template.id == instance.template_id && matches!(template.key.as_str(), crate::inventory::INVENTORY_OWNER_KEY | crate::inventory::ITEM_KEY)));
     for property in &entity.properties {
-        // Inventory's typed runtime projection is inserted separately; flattening
-        // its array into indexed JSON attributes would leave stale entries after mutation.
         if has_inventory_trait && ["__inventory_items", "__inventory_rows", "__inventory_columns", "__inventory_item"].contains(&property.key.as_str()) { continue; }
         let value = if property.value.is_null() {
             default_value(property.property_type, property.is_array)
@@ -361,7 +339,6 @@ pub fn runtime_attributes(entity: &EntityRecord, templates: &[TraitTemplateRecor
     }
     for instance in &entity.traits {
         let Some(template) = templates.iter().find(|t| t.id == instance.template_id) else { continue };
-        // The mutable inventory state lives in the typed runtime projection.
         if template.key == crate::inventory::INVENTORY_OWNER_KEY { continue; }
         let mut all_properties = Vec::new();
         collect_template_properties(template, templates, &mut BTreeSet::new(), &mut all_properties);
@@ -445,7 +422,6 @@ pub fn runtime_records_with_world(
     records
 }
 
-/// Resolve a `prop.`/`trait.` attribute path against an entity's runtime attributes.
 pub fn attribute_path(root: &Value, key: &str) -> Option<Value> {
     let trimmed = key.trim();
     if !(trimmed.starts_with("prop.") || trimmed.starts_with("trait.")) {
@@ -538,7 +514,6 @@ pub fn validate_folder_ref(
     Ok(())
 }
 
-/// Enforce the template relationship rules shared by save and bundle validation.
 pub fn validate_template_link(entity: &EntityRecord, entities: &[EntityRecord]) -> Result<(), String> {
     if entity.id == WORLD_ENTITY_ID {
         if entity.is_template {
@@ -627,7 +602,6 @@ pub fn prepare_entity(
     Ok(entity)
 }
 
-/// Reject authored trait values outside the numeric bounds their property declares.
 pub fn validate_trait_value_bounds(traits: &[crate::contracts::TraitInstance], templates: &[TraitTemplateRecord], prefix: &str) -> Result<(), String> {
     for instance in traits {
         let Some(template) = templates.iter().find(|template| template.id == instance.template_id) else { continue };
@@ -744,7 +718,6 @@ pub fn prepare_trait_template(
         template.key_auto = true;
     } else {
         let mut key = key;
-        // Mirrors the game-ID rule: only a server-generated key follows a rename.
         let auto = match stored {
             Some(previous) if key == previous.key => previous.key_auto,
             _ => false,
@@ -791,15 +764,12 @@ pub fn prepare_trait_template(
     Ok(template)
 }
 
-/// Blank optional ids mean "unset"; storing `""` would hide items from both the
-/// root listing and every folder.
 pub fn normalize_optional_id(value: &mut Option<String>) {
     if value.as_deref().is_some_and(|id| id.trim().is_empty()) {
         *value = None;
     }
 }
 
-/// Canonicalize imported content so stored rows equal their own re-save.
 pub fn canonicalize_content(content: &mut ProjectBundleContent) {
     for storylet in &mut content.storylets {
         normalize_optional_id(&mut storylet.folder_id);
@@ -857,8 +827,6 @@ fn validate_storage(version: &mut AssetVersionRecord, prefix: &str) -> Result<()
     Ok(())
 }
 
-/// Canonical asset values shared by authoring saves and bundle import, so a
-/// stored version never differs from its own re-save (append-only safety).
 pub fn normalize_asset(asset: &mut AssetRecord) {
     asset.name = asset.name.trim().to_string();
     if asset.thumbnail.as_deref().is_some_and(|value| value.trim().is_empty()) {
@@ -1083,8 +1051,6 @@ fn check_item_folder(
     }
 }
 
-/// Authoring-level validation of a whole bundle: folder graph, item placement,
-/// identity uniqueness, and cross-references.
 pub fn validate_bundle_content(content: &ProjectBundleContent) -> Vec<String> {
     let mut issues = Vec::new();
     for spec in SYSTEM_TRAIT_TEMPLATES {
@@ -1360,21 +1326,18 @@ mod tests {
         ];
         let index = WorkspaceIndex { templates: templates.clone(), ..WorkspaceIndex::default() };
 
-        // 1. Valid nonnegative integers pass
         let valid_payload = json!({
             "name": "Skill Node",
             "traits": [{ "template_id": "tid-tree-item", "values": { "level": 0, "cost": 10 } }]
         });
         assert!(prepare_entity(&valid_payload, None, &index).is_ok());
 
-        // 2. Absent values remain valid (pre-existing items)
         let absent_payload = json!({
             "name": "Skill Node",
             "traits": [{ "template_id": "tid-tree-item", "values": {} }]
         });
         assert!(prepare_entity(&absent_payload, None, &index).is_ok());
 
-        // 3. Negative level is rejected on save independently of membership in any graph
         let neg_level_payload = json!({
             "name": "Skill Node",
             "traits": [{ "template_id": "tid-tree-item", "values": { "level": -1 } }]
@@ -1382,14 +1345,12 @@ mod tests {
         let err_record = prepare_entity(&neg_level_payload, None, &index).unwrap_err();
         assert!(err_record.contains("TreeItem 'level' must be a nonnegative integer"), "got {err_record}");
 
-        // 4. Negative cost is rejected
         let neg_cost_payload = json!({
             "name": "Skill Node",
             "traits": [{ "template_id": "tid-tree-item", "values": { "cost": -2 } }]
         });
         assert!(prepare_entity(&neg_cost_payload, None, &index).unwrap_err().contains("TreeItem 'cost' must be a nonnegative integer"));
 
-        // 5. Guard trait template default prevents negative displayed default
         let neg_default_trait_payload = json!({
             "id": "tid-tree-item",
             "key": "tree_item",
@@ -1587,7 +1548,6 @@ mod tests {
     #[test]
     fn trait_template_thumbnail_normalization_and_validation() {
         let index = WorkspaceIndex::default();
-        // 1. Valid project-relative path
         let payload = json!({
             "id": "t1",
             "key": "skill",
@@ -1598,7 +1558,6 @@ mod tests {
         let prepared = prepare_trait_template(&payload, None, &index).unwrap();
         assert_eq!(prepared.thumbnail.as_deref(), Some("project-files/thumbnails/skill.png"));
 
-        // 2. Valid web URL
         let payload_url = json!({
             "id": "t2",
             "key": "buff",
@@ -1609,7 +1568,6 @@ mod tests {
         let prepared_url = prepare_trait_template(&payload_url, None, &index).unwrap();
         assert_eq!(prepared_url.thumbnail.as_deref(), Some("https://example.com/buff.jpg"));
 
-        // 3. Empty string normalizes to None
         let payload_empty = json!({
             "id": "t3",
             "key": "spell",
@@ -1620,7 +1578,6 @@ mod tests {
         let prepared_empty = prepare_trait_template(&payload_empty, None, &index).unwrap();
         assert_eq!(prepared_empty.thumbnail, None);
 
-        // 4. Null normalizes to None
         let payload_null = json!({
             "id": "t4",
             "key": "aura",
@@ -1631,7 +1588,6 @@ mod tests {
         let prepared_null = prepare_trait_template(&payload_null, None, &index).unwrap();
         assert_eq!(prepared_null.thumbnail, None);
 
-        // 5. Omitted field defaults to None
         let payload_omitted = json!({
             "id": "t5",
             "key": "curse",
@@ -1641,7 +1597,6 @@ mod tests {
         let prepared_omitted = prepare_trait_template(&payload_omitted, None, &index).unwrap();
         assert_eq!(prepared_omitted.thumbnail, None);
 
-        // 6. Invalid paths are rejected
         for invalid in [
             "project-files/../secret.png",
             "/thumbnails/skill.png",
@@ -1659,7 +1614,6 @@ mod tests {
             assert!(prepare_trait_template(&payload_invalid, None, &index).is_err());
         }
 
-        // 7. System traits cannot modify thumbnail
         let system_trait: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "system.character",
             "key": "character",
@@ -1697,7 +1651,6 @@ mod tests {
         }
         content.entities.push(default_world_entity());
 
-        // Valid custom trait with thumbnail
         content.trait_templates.push(serde_json::from_value(json!({
             "id": "custom.valid",
             "key": "valid_trait",
@@ -1707,7 +1660,6 @@ mod tests {
         })).unwrap());
         assert!(validate_bundle_content(&content).is_empty());
 
-        // Invalid custom trait with thumbnail
         content.trait_templates.push(serde_json::from_value(json!({
             "id": "custom.invalid",
             "key": "invalid_trait",

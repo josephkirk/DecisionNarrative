@@ -1,7 +1,3 @@
-//! Personality and passion-style stress benchmark using typed tag state.
-//!
-//! Personality predicates are represented by authored tags. The benchmark keeps
-//! the dense actor/trait workload without the removed metric/quality registry.
 
 use std::time::Instant;
 use storylet_engine::chrono_state::{GameplayTagRegistry, TagBitset};
@@ -27,7 +23,6 @@ fn main() {
                 }
             }
         }
-        // Simulate approval/hostility predicates as boolean tag intersections.
         let approved = state.bit(0) && state.bit((TRAITS + 1) as u16);
         let hostile = state.bit((2 * TRAITS + 2) as u16) && !approved;
         checksum = checksum.wrapping_add(state.words().iter().copied().sum::<u64>());

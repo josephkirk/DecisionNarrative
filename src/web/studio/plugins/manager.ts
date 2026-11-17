@@ -1,8 +1,3 @@
-/**
- * Plugin manager: owns which known plugins are loaded. Disabling a plugin
- * disposes its context, which removes everything it registered. The disabled
- * set is a per-browser preference kept in localStorage.
- */
 import { markRaw, reactive } from "vue";
 import { registry, root, type Context, type Plugin } from "./runtime.ts";
 
@@ -24,7 +19,7 @@ function readDisabled(): string[] {
   try { return JSON.parse(globalThis.localStorage?.getItem(STORAGE_KEY) ?? "[]") as string[]; } catch { return []; }
 }
 function writeDisabled(names: string[]) {
-  try { globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(names)); } catch { /* best effort */ }
+  try { globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(names)); } catch { }
 }
 
 const state: { entries: Entry[]; disabled: string[] } = reactive({ entries: [], disabled: readDisabled() }) as { entries: Entry[]; disabled: string[] };

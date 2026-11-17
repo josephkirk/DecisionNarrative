@@ -40,7 +40,6 @@ function eventValue(event: Event): string {
   return (event.target as HTMLInputElement | HTMLSelectElement).value;
 }
 
-// Registered role choices; player remains the runtime actor sentinel.
 const availableRoles = computed(() => uniqueTagNames([
   ...roleTagOptions.value,
   ...props.storylet.parameters.map((p) => p.param_name),
@@ -214,7 +213,6 @@ const locationTags = computed({
 const locationOptions = computed(() => studioState.entities.filter((entity) => hasTraitKey(entity, studioState.traitTemplates, "location")).sort((a, b) => a.name.localeCompare(b.name)));
 
 
-// Dialogue Sections & Items
 function addSection(node: NarrativeNode) {
   if (!node.sections) node.sections = [];
   const secId = `sec_${Date.now().toString(36)}`;
@@ -273,7 +271,6 @@ function removeChoice(node: NarrativeNode, index: number) {
   emitGraphUpdate();
 }
 
-// Audio inspection & Duration Calculation
 async function handleAudioBrowse(event: Event, item: any) {
   const input = event.target as HTMLInputElement;
   if (!input.files || input.files.length === 0) return;
@@ -313,13 +310,11 @@ async function checkAudioBackend(item: any) {
       notify(`File '${item.audio_path}' not found on server`, "info");
     }
   } catch {
-    // ignore
   }
 }
 
 
 
-// Graph Transform Node (ChronoFlow v5)
 const graphLayers: GraphLayer[] = ["location", "character", "item", "fact"];
 const attributeOps: AttributeOp[] = ["eq", "neq", "gt", "gte", "lt", "lte"];
 const attributeValueTypes: AttributeValueType[] = ["int", "float", "bool", "string", "tag"];
@@ -398,7 +393,6 @@ function removeRecordAttribute(node: NarrativeNode, attributes: Record<string, A
   emitGraphUpdate(node);
 }
 
-// Passion Mutation Node (ChronoFlow v5)
 function addPassionRow(node: NarrativeNode, list: "micro_deltas" | "active_ops") {
   if (!isPassionMutationNode(node)) return;
   const entries: unknown[] = node.op[list];
@@ -445,7 +439,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 
 <template>
   <aside class="property-inspector-panel">
-    <!-- 1. NODE PROPERTIES (when a node is selected) -->
     <div v-if="selectedNode" class="inspector-content">
       <div class="panel-header">
         <div style="display:flex; align-items:center; gap:8px; min-width:0;">
@@ -462,7 +455,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         <input id="node-title-input" v-model="selectedNode.title" aria-label="Node title" class="form-input" @input="emitGraphUpdate(selectedNode)" />
       </div>
 
-      <!-- DIALOG NODE -->
       <div v-if="selectedNode.type === 'dialog'">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
           <label class="field-label" style="margin-bottom:0;">Dialogue Sections</label>
@@ -483,7 +475,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
 
           <div class="section-items">
             <div v-for="(item, iIdx) in sec.items" :key="item.id" class="dialogue-item-card" :data-tag-item-id="item.id">
-              <!-- LINE ITEM -->
               <div v-if="item.kind === 'line'">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                   <span class="item-kind-label item-kind-label--line"><StudioIcon name="chat" /> Dialogue</span>
@@ -522,7 +513,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
                   <TagEditor v-model="item.action_target" :options="targetRoles" :allow-create="false" :multiple="false" label="Action target" placeholder="Choose role" @update:model-value="emitGraphUpdate(selectedNode)" />
                 </div>
 
-                <!-- Audio Link & Duration -->
                 <div style="background:rgba(0,0,0,0.25); padding:6px; border-radius:6px;">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                     <label class="field-sublabel" style="margin-bottom:0;">Audio Path & Duration</label>
@@ -539,7 +529,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
                 </div>
               </div>
 
-              <!-- IDLE ACTION ITEM -->
               <div v-else-if="item.kind === 'idle_action'">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                   <span class="item-kind-label item-kind-label--idle"><StudioIcon name="settings" /> Idle action</span>
@@ -643,13 +632,11 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
       </div>
 
 
-      <!-- BOOLEAN CONDITION SWITCH -->
       <div v-else-if="selectedNode.type === 'condition'">
         <div class="field-label">Condition Node</div>
         <p class="field-help">Routes the boolean received from a connected predicate node through True or False.</p>
       </div>
 
-      <!-- GRAPH TRANSFORM NODE -->
       <div v-else-if="isGraphTransformNode(selectedNode)">
         <div class="field-row-heading"><label class="field-label">Left-Hand Side Pattern</label></div>
 
@@ -793,7 +780,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         <p class="field-help">The left-hand side matches graph vertices and edges; the right-hand side applies the rewrite. Pattern indexes refer to matched left-hand side vertices.</p>
       </div>
 
-      <!-- PASSION MUTATION NODE -->
       <div v-else-if="isPassionMutationNode(selectedNode)">
         <div class="field-row-heading">
           <label class="field-label">Micro Passion Deltas</label>
@@ -907,7 +893,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         </div>
       </div>
 
-      <!-- ADD / REMOVE ENTITY TAG -->
       <div v-else-if="selectedNode.type === 'add_entity_tag' || selectedNode.type === 'remove_entity_tag'">
         <div class="panel-header">
           <h3 class="panel-title">{{ selectedNode.type === 'add_entity_tag' ? 'Add Entity Tag' : 'Remove Entity Tag' }}</h3>
@@ -929,7 +914,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
         </div>
       </div>
 
-      <!-- HAS ENTITY TAG -->
       <div v-else-if="selectedNode.type === 'plugin'" data-testid="plugin-node-inspector">
         <component
           :is="nodeTypeContribution(selectedNode.plugin_type)!.inspector"
@@ -1018,7 +1002,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
       </div>
 
 
-      <!-- END NODE -->
       <div v-else-if="selectedNode.type === 'end'">
         <div v-if="props.graphMode === 'preconditions'" class="form-group">
           <label class="field-label">Candidate result</label>
@@ -1048,13 +1031,11 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
       </div>
     </div>
 
-    <!-- Storylet settings (when clicked on empty canvas) -->
     <div v-else-if="props.graphMode === 'preconditions'" class="inspector-content">
       <div class="panel-header"><h3 class="panel-title">Precondition Graph</h3></div>
       <p class="field-help">Has Entity Tag, Get Entity Property, And, and Or emit typed boolean values through data pins. Connect the result to a Condition Node to choose the True or False flow. Entity tags use dotted notation.</p>
     </div>
 
-    <!-- Storylet settings (when clicked on empty canvas) -->
     <div v-else class="inspector-content">
       <div class="panel-header">
         <h3 class="panel-title">Storylet Settings</h3>
@@ -1132,7 +1113,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
           <option value="private">Private</option><option value="co_located">Co-located witnesses</option>
         </select>
       </div>
-      <!-- ACTOR ROLES -->
       <div class="form-group">
         <label class="field-label">Character Roles Required</label>
         <TagEditor v-model="requiredRoleNames" :options="roleTagOptions" :allow-create="false" label="Required character roles" placeholder="Choose roles" />
@@ -1178,7 +1158,6 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
   white-space: nowrap;
 }
 
-/* Untyped (plugin and logic) nodes get a neutral chip; typed ones keep their pin colour with dark ink. */
 .type-badge {
   flex: none;
   max-width: 14rem;

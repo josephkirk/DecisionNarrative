@@ -39,10 +39,9 @@ export const paneState = reactive<{ layout: PaneNode; activeId: string; maximize
 });
 
 watch(() => paneState.layout, (layout) => {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(layout)); } catch { /* Layout persistence is best effort. */ }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(layout)); } catch { }
 }, { deep: true });
 
-/** Routers by pane id; the main pane registers the application router. */
 const routers = shallowReactive(new Map<string, Router>());
 
 export function registerPaneRouter(id: string, router: Router) { routers.set(id, router); }
@@ -55,7 +54,6 @@ export function focusPane(id: string) {
   if (findPane(paneState.layout, id)) paneState.activeId = id;
 }
 
-/** Phones show only the main pane, so navigation must land there. */
 const phone = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 768px)") : null;
 
 function activeRouter(): Router | undefined {
@@ -63,7 +61,6 @@ function activeRouter(): Router | undefined {
   return routers.get(paneState.activeId) ?? routers.get(MAIN_PANE);
 }
 
-/** Router-shaped facade for code that should navigate whichever pane has focus. */
 export const focusedRouter = {
   push: (to: Parameters<Router["push"]>[0]) => activeRouter()?.push(to) ?? Promise.resolve(),
   replace: (to: Parameters<Router["replace"]>[0]) => activeRouter()?.replace(to) ?? Promise.resolve(),
@@ -83,7 +80,6 @@ function newPaneId(): string {
   return `pane-${Date.now().toString(36)}-${sequence}`;
 }
 
-/** Opens `path` beside `targetId`. Returns the new pane id, or null at the pane limit. */
 export function openSplit(targetId: string, side: DropSide, path: string): string | null {
   if (!canSplit()) return null;
   const id = newPaneId();
@@ -97,7 +93,6 @@ export function resizeSplit(splitId: string, ratio: number) {
   paneState.layout = setRatio(paneState.layout, splitId, ratio);
 }
 
-/** Drops pane `movingId` onto `targetId`: an edge docks it on that side, the center swaps the two. */
 export function dockPane(movingId: string, targetId: string, side: DropSide | "center") {
   paneState.layout = side === "center" ? swapPanes(paneState.layout, movingId, targetId) : movePane(paneState.layout, movingId, targetId, side);
   paneState.maximizedId = null;
@@ -108,10 +103,6 @@ export function toggleMaximize(id: string) {
   paneState.maximizedId = paneState.maximizedId === id ? null : id;
 }
 
-/**
- * Closes a pane after its view agrees to leave (unsaved-change guards run).
- * Closing the main pane moves the first other pane's route into it.
- */
 export async function closeStudioPane(id: string): Promise<void> {
   const others = panes(paneState.layout).filter((pane) => pane.id !== MAIN_PANE);
   if (!others.length) return;
@@ -131,7 +122,6 @@ export async function closeStudioPane(id: string): Promise<void> {
   if (paneState.maximizedId && !findPane(paneState.layout, paneState.maximizedId)) paneState.maximizedId = null;
 }
 
-/** Route of a dragged project-tree row, or null when the drag carries something else. */
 export function treeDragPath(event: DragEvent): string | null {
   try {
     const payload = JSON.parse(event.dataTransfer?.getData(TREE_DRAG_TYPE) || "null") as { kind?: string; root?: string; id?: string } | null;
@@ -146,7 +136,6 @@ export function isTreeDrag(event: DragEvent): boolean {
   return !!event.dataTransfer?.types.includes(TREE_DRAG_TYPE);
 }
 
-/** Id of the pane whose header is being dragged, or null for other drags. */
 export function paneDragId(event: DragEvent): string | null {
   const id = event.dataTransfer?.getData(PANE_DRAG_TYPE) || draggingPane;
   return id && findPane(paneState.layout, id) ? id : null;
@@ -156,7 +145,6 @@ export function isPaneDrag(event: DragEvent): boolean {
   return !!event.dataTransfer?.types.includes(PANE_DRAG_TYPE);
 }
 
-/** dragover can't read drag data, so the source pane is remembered here to hide self-drops. */
 let draggingPane: string | null = null;
 export function setDraggingPane(id: string | null) { draggingPane = id; }
 export function draggingPaneId(): string | null { return draggingPane; }
@@ -179,7 +167,6 @@ const ROOT_TITLES: Record<string, string> = {
   assets: "Assets",
 };
 
-/** Human title and icon for the route a pane shows. */
 export function paneHeading(route: RouteLocationNormalizedLoaded | undefined): { title: string; icon: string } {
   if (!route?.name) return { title: "Loading…", icon: "file" };
   const name = String(route.name);

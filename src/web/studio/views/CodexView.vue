@@ -81,7 +81,6 @@ function updateJsonField(field: "trigger" | "effects", event: Event) {
   try {
     editingItem.value[field] = raw ? JSON.parse(raw) : {};
   } catch {
-    // Invalid JSON preserved until valid
   }
 }
 
@@ -108,7 +107,6 @@ function setFacts(value: string | string[]) {
 
 <template>
   <div class="codex">
-    <!-- Master list -->
     <aside class="codex__list" aria-label="Events">
       <div class="codex__list-head">
         <SegmentedControl
@@ -147,7 +145,6 @@ function setFacts(value: string | string[]) {
       </div>
     </aside>
 
-    <!-- Detail edit canvas -->
     <section class="codex__detail">
       <EmptyState v-if="!editingItem" icon="scroll" title="No event selected" hint="Select an event from the list or create a new one.">
         <button class="btn btn-primary" type="button" @click="createNew"><StudioIcon name="plus" /> New event</button>

@@ -1,6 +1,5 @@
 import type { RouteRecordRaw } from "vue-router";
 
-// Components load lazily so this table can be imported (and tested) without a Vue compiler.
 export const STUDIO_ROUTES: RouteRecordRaw[] = [
   { path: "/", redirect: "/storylets" },
   { path: "/browse/:root/:folderId?", name: "browse", component: () => import("./views/FolderView.vue") },

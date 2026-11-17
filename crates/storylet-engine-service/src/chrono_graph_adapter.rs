@@ -1,4 +1,3 @@
-//! Stable compilation of authored narrative graphs into the v5 token runtime.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -40,8 +39,6 @@ pub struct CompiledNarrativeGraphs {
     pub mission_assets: BTreeMap<String, FlowGraphAsset>,
 }
 
-/// Compile every storylet graph into one immutable project topology. The start
-/// node of each storylet remains a stable entry point for QBN and End jumps.
 pub fn compile_narrative_graphs(
     project_id: &str,
     storylets: &[StoryletRecord],
@@ -247,9 +244,6 @@ fn compile_storylet_asset(
     })?;
     Ok(asset)
 }
-/// Compile an authored pure precondition graph into the runtime asset used by
-/// candidate evaluation. It intentionally reuses the normal node/edge compiler
-/// so graph errors stay explicit and precondition graphs remain the sole eligibility contract.
 pub fn compile_precondition_graph(
     storylet: &StoryletRecord,
     graph: &NarrativeGraph,
@@ -286,7 +280,6 @@ pub fn compile_precondition_graph(
     )
     .map_err(|error| format!("storylet {} precondition graph compile failed: {error}", storylet.id))
 }
-/// Attach compiled authored precondition assets after world/entity indices exist.
 pub fn bind_precondition_graphs(
     compiled: &mut CompiledChronoDispatch,
     storylets: &[StoryletRecord],
@@ -306,7 +299,6 @@ pub fn bind_precondition_graphs(
 }
 
 
-/// Binds QBN/Teleport dispatch results to the stable Start GUIDs compiled above.
 pub fn bind_storylet_start_nodes(
     compiled: &mut CompiledChronoDispatch,
     graphs: &CompiledNarrativeGraphs,
@@ -333,8 +325,6 @@ pub fn resolve_entity_tag(
     tag: &str,
     _entity_game_ids: Option<&BTreeMap<String, String>>,
 ) -> String {
-    // Gameplay tags are catalog-canonical names. Entity identity selects the
-    // graph target; it must never become part of the tag namespace.
     tag.trim().to_owned()
 }
 
@@ -451,7 +441,6 @@ fn compile_node_kind(
     };
     Ok(mapped)
 }
-/// Validate authored property nodes against the entity selected by their data input.
 pub fn validate_entity_property_graph(graph: &NarrativeGraph, entities: &[EntityRecord]) -> Result<(), String> {
     let node_by_id: BTreeMap<&str, &NarrativeNode> =
         graph.nodes.iter().map(|node| (node.id.as_str(), node)).collect();
@@ -1289,7 +1278,6 @@ mod tests {
     }
     #[test]
     fn lowered_modify_canvas_plugin_node_opens_gate_and_removes_key() {
-        // Shape the studio produces when it lowers a Modify Canvas plugin node.
         let storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
             "id": "unlock", "title": "Unlock", "content": { "text_template": "The gate." }, "effects": {}, "created_at": 1,
             "graph": {

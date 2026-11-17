@@ -1,4 +1,3 @@
-//! Native MCP (Model Context Protocol) stdio and HTTP support for DecisionNarrative.
 
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};

@@ -1,6 +1,4 @@
-//! Seeded random generator used by the coverage explorer.
 
-/// Mulberry32, matching the Weir's Crossing prototype's 32-bit sequence.
 #[derive(Clone, Debug)]
 pub struct SeededRng(u32);
 
@@ -18,8 +16,6 @@ impl SeededRng {
     }
 }
 
-/// First step of a shortest currently enabled route to one of the targets.
-/// The search uses the participant's actual knowledge and the current clock.
 fn first_move_toward(
     world: &crate::chrono_state::WorldStateTable,
     content: &crate::run::RunContent,
@@ -415,9 +411,6 @@ fn random_index(rng: &mut SeededRng, len: usize) -> usize {
     ((u64::from(rng.next_u32()) * len as u64) >> 32) as usize
 }
 
-/// Explore the authored content exclusively through the same actions used by Play.
-/// Explore independent seeds concurrently while merging results in seed order.
-/// Unique telling orders are unioned, rather than summed across workers.
 pub fn explore(content: &RunContent, cfg: &ExploreConfig) -> ExploreReport {
     let count = cfg.runs.min(50_000);
     let workers = std::thread::available_parallelism()
@@ -664,8 +657,6 @@ fn explore_chunk(
                         let choice = candidates.iter().find(|a| {
                             matches!(a, RunAction::Choose { .. } | RunAction::Topic { .. })
                         });
-                        // Evaluate potential destinations against a copy of the actual world;
-                        // eligibility is still determined by the normal deck view.
                         let mut destinations = Vec::new();
                         if view.hub.is_some() {
                             for &place in configured.entity_names.keys() {

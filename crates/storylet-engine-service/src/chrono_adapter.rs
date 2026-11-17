@@ -1,7 +1,3 @@
-//! Lossless compilation of authored Studio storylets into the dense ChronoFlow dispatcher.
-//!
-//! The adapter keeps existing project records as the authoring boundary. Runtime IDs are
-//! assigned in stable storylet-ID order and bounded by the engine's fixed completion mask.
 
 use std::collections::{BTreeMap, BTreeSet};
 use serde_json::Value;
@@ -458,11 +454,9 @@ fn map_cluster_type(value: &str) -> Result<StoryletClusterType, String> {
 #[derive(Clone, Debug)]
 pub struct ChronoWorldSeed {
     pub state: WorldStateTable,
-    /// Stable dense row for each location, character, item, or fact entity.
     pub entity_indices: BTreeMap<String, u16>,
 }
 
-/// Build the fixed-capacity world rows from the current project and resolved start.
 pub fn initialize_chrono_world(
     compiled: &CompiledChronoDispatch,
     storylets: &[StoryletRecord],
@@ -517,8 +511,6 @@ pub fn initialize_chrono_world(
     }
 
 
-    // Seed the dramatic arc phase so arc-gated content is reachable without an
-    // unrelated mutation writing the tag.
     if let Some(phase) = scenario
         .map(|scenario| scenario.current_arc_phase.trim())
         .filter(|phase| !phase.is_empty())
@@ -1227,9 +1219,6 @@ mod participant_seed_tests {
     }
 }
 
-/// Compiles canon events with a story time into the chronicle, sorted by
-/// `(story_time, id)`. Fact tags must be registered; a location must be a
-/// known entity.
 pub fn compile_chronicle(
     events: &[crate::contracts::EventRecord],
     registry: &storylet_engine::chrono_state::GameplayTagRegistry,
@@ -1295,8 +1284,6 @@ mod chronicle_compile_tests {
     }
 }
 
-/// Compiles scheduled connections and the clock from entity traits.
-/// `connected_zones` become always-open connections.
 pub fn compile_space(
     world: &crate::contracts::EntityRecord,
     entities: &[EntityRecord],
@@ -1425,7 +1412,6 @@ mod space_compile_tests {
         assert!(clock.is_none());
         assert_eq!(connections.len(), 1);
         let c = &connections[0];
-        // Entity indices are alphabetical: harbor = 0, lighthouse = 1.
         assert_eq!((c.from, c.to, c.open_slots, c.requires_fact, c.on_close), (1, 0, None, None, None));
     }
 
@@ -1444,8 +1430,6 @@ mod space_compile_tests {
     }
 }
 
-/// Resolves each storylet's authored `played_by` entity ids to participant
-/// indices. Must run after `participant_indices` is known.
 pub fn bind_played_by(compiled: &mut storylet_engine::run::RunContent, storylets: &[crate::contracts::StoryletRecord]) -> Result<(), String> {
     for storylet in storylets.iter().filter(|s| !s.played_by.is_empty()) {
         let Some(index) = compiled.storylet_index(&storylet.id) else { continue };

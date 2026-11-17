@@ -1,4 +1,3 @@
-//! Single SQLite store implementation for DecisionNarrative Storylet Studio.
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -13,9 +12,6 @@ use crate::contracts::{
     ScenarioRecord, StoryletRecord, TraitTemplateRecord, SYSTEM_TRAIT_TEMPLATES,
 };
 use serde_json::{json, Value};
-/// Older records may carry an `ending` flag written before the graph became
-/// authoritative. Normalize on read so library filters and approvals see the
-/// same value the next save will persist.
 fn normalize_storylet_ending(mut storylet: StoryletRecord) -> StoryletRecord {
     if let Some(graph) = storylet.graph.clone() {
         storylet.ending = graph.ending_from_graph();
@@ -139,7 +135,6 @@ impl Store {
         Ok(())
     }
 
-    // --- Project Metadata ---
 
     pub fn get_project_metadata(&self) -> Result<ProjectMetadata, rusqlite::Error> {
         self.conn.query_row(
@@ -176,7 +171,6 @@ impl Store {
         Ok(rev)
     }
 
-    // --- Generic Content Records ---
 
     pub fn get_content_json(
         &self,
@@ -271,8 +265,6 @@ impl Store {
     }
 
 
-    /// Rewrite only the JSON payload of an existing row, leaving its revision
-    /// and approval columns untouched (folder moves must not re-approve).
     pub fn update_content_json(
         &self,
         entity: &str,
@@ -372,7 +364,6 @@ impl Store {
         Ok(Some(st))
     }
 
-    // --- Library Paged Query ---
 
     pub fn query_library(
         &self,
@@ -527,7 +518,6 @@ impl Store {
         })
     }
 
-    // --- Studio Interaction Context ---
 
     pub fn save_interaction_context(
         &self,
@@ -580,7 +570,6 @@ impl Store {
         Ok(None)
     }
 
-    // --- Transactional Project Content Replacement ---
 
     pub fn replace_project_content(
         &mut self,
@@ -594,8 +583,6 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM content_records", [])?;
-        // A bundle can carry the revision it was exported at. Importing it must
-        // still move the counter forward so live sessions see new content.
         let current_revision: i64 = tx
             .query_row(
                 "SELECT revision FROM project_metadata WHERE singleton = 1",
@@ -730,9 +717,6 @@ impl Store {
         Ok(next_revision as u64)
     }
 
-    /// ChronoFlow v5 playtest sessions (REQ-CH-02): only the call-history
-    /// arrays, the random seed, and pinned authoring metadata are stored — never
-    /// a serialized runtime instance or world snapshot.
     pub fn save_chrono_playtest_row(&self, row: &ChronoPlaytestRow) -> Result<(), rusqlite::Error> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
@@ -873,9 +857,6 @@ impl Store {
 
 }
 
-/// One persisted ChronoFlow playtest session. JSON columns hold the global call
-/// history, the per-mission scoped call histories, and the pinned ID-space
-/// fingerprint; the runtime is rebuilt from them on load (REQ-CH-03).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChronoPlaytestRow {
     pub session_id: String,
@@ -889,8 +870,6 @@ pub struct ChronoPlaytestRow {
     pub pinned_id_space_json: String,
     pub global_call_history_json: String,
     pub scoped_call_histories_json: String,
-    /// Latent node descriptors and active tokens, so a rebuilt session resumes
-    /// a paused interaction instead of replaying to an idle graph.
     pub pending_state_json: String,
     pub last_idempotency_key: String,
     pub last_result_json: String,

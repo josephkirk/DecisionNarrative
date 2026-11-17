@@ -1,4 +1,3 @@
-//! Inventory trait projection and graph input validation for deterministic playtests.
 use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
@@ -6,7 +5,6 @@ use serde_json::{json, Value};
 use crate::contracts::{EntityProperty, EntityRecord, PropertyType, TraitTemplateRecord};
 use crate::narrative_graph::{NarrativeEdgeKind, NarrativeGraph, NarrativeNodeData};
 
-/// Stable trait keys whose runtime schema (`ITEMS`/`ITEM` projections) is owned by this module.
 pub const INVENTORY_OWNER_KEY: &str = "inventory_owner";
 pub const ITEM_KEY: &str = "item";
 
@@ -19,8 +17,6 @@ fn runtime_property(key: &str, property_type: PropertyType, is_array: bool, valu
     EntityProperty { id: key.into(), key: key.into(), name: key.into(), property_type, is_array, multiline: false, value }
 }
 
-/// Project authored trait values into runtime-only typed properties. No project
-/// entity is written: replay reconstructs the same projection from the revision.
 pub fn project_inventory_entities(
     entities: &mut [EntityRecord],
     templates: &[TraitTemplateRecord],
@@ -57,7 +53,6 @@ pub fn project_inventory_entities(
     Ok(())
 }
 
-/// Check the actual graph inputs and traits again on the service boundary.
 pub fn validate_inventory_graph(graph: &NarrativeGraph, entities: &[EntityRecord]) -> Result<(), String> {
     for node in &graph.nodes {
         if !matches!(node.data, NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {}) { continue; }

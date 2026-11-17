@@ -37,14 +37,10 @@ pub struct RunContent {
     pub participant_indices: BTreeMap<String, u16>,
     #[serde(default)]
     pub implicit_participant: bool,
-    /// Canon events in story-time order, for `Reveal` nodes and Inspect.
     #[serde(default)]
     pub chronicle: crate::chrono_chronicle::ChronicleTable,
-    /// Scheduled connections between places. Empty = use the `connected` edges
-    /// of the world graph (always open).
     #[serde(default)]
     pub connections: Vec<crate::chrono_space::Connection>,
-    /// The world clock; `None` = timeless.
     #[serde(default)]
     pub clock: Option<crate::chrono_space::Clock>,
 }
@@ -102,15 +98,11 @@ pub struct RunStep {
     pub participant: PartIx,
     pub action: RunAction,
     pub label: String,
-    /// What the world did because of this step (for example someone driven back).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
-    /// Storylets rule participants played because of this step.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rule_plays: Vec<RulePlay>,
 }
-/// A storylet a rule participant played on its own; its causal parent is the
-/// step that carries it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RulePlay {
@@ -122,7 +114,6 @@ pub struct RulePlay {
 pub struct StoryletRef {
     pub id: u16,
     pub title: String,
-    /// The authored storylet id, for links back to the editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
 }
@@ -131,7 +122,6 @@ pub struct StoryletRef {
 pub struct ParticipantView {
     pub id: PartIx,
     pub name: String,
-    /// `false` for rule participants, which the UI never offers as a seat.
     #[serde(default = "default_true")]
     pub human: bool,
 }
@@ -143,10 +133,8 @@ fn default_true() -> bool {
 pub struct PlaceView {
     pub id: u16,
     pub name: String,
-    /// Current slot label; absent in a timeless project.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock_label: Option<String>,
-    /// Actions this participant has left in the current slot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions_left: Option<u8>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -187,8 +175,6 @@ pub struct RunView {
     pub place: Option<PlaceView>,
     pub scene: Option<SceneView>,
     pub also_here: Vec<StoryletRef>,
-    /// The pending storylet hub's node: with a listed storylet it forms a
-    /// `PlayStorylet` action.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hub: Option<u32>,
     pub nothing_here: bool,
@@ -542,8 +528,6 @@ impl RunKernel {
         run.snapshots[0].push(initial);
         Ok((run, stalled))
     }
-    /// Preview eligible storylets at a destination without changing the run.
-    /// The caller must still use a legal Move action to travel there.
     pub fn storylets_at(&self, content: &RunContent, participant: PartIx, location: u16) -> Vec<StoryletRef> {
         if participant as usize >= self.world.participants.len() || location as usize >= self.world.entity_tags.len() { return Vec::new(); }
         let Some(guid) = self.pending() else { return Vec::new() };
@@ -560,7 +544,6 @@ impl RunKernel {
     pub fn view(&self, content: &RunContent, participant: PartIx) -> RunView {
         self.view_internal(content, participant, true)
     }
-    /// Current interaction without the accumulated timeline, for headless traversal.
     pub fn exploration_view(&self, content: &RunContent, participant: PartIx) -> RunView {
         self.view_internal(content, participant, false)
     }
@@ -970,9 +953,6 @@ impl RunKernel {
         let _ = content;
         Ok((self.current_step, stalled))
     }
-    /// Spends the actor's action (all of them for `Wait`) and, once every human
-    /// is out of actions, advances the clock. Returns what the world did as a
-    /// result, as plain-language notes for the step.
     fn spend_action(&mut self, content: &RunContent, participant: PartIx, action: &RunAction) -> (Vec<String>, bool) {
         let Some(state) = self.world.clock.as_mut() else {
             return (Vec::new(), false);
@@ -1006,10 +986,6 @@ impl RunKernel {
         (notes, advanced)
     }
 
-    /// Each rule participant, in participant order, plays at most one eligible
-    /// storylet that lists it in `played_by`: highest display priority first,
-    /// then lowest storylet index. Rule storylets run off-stage on a scratch
-    /// instance, so they must not need an interaction.
     fn rule_pass(&mut self, content: &RunContent) -> Result<Vec<RulePlay>, RunError> {
         let mut plays = Vec::new();
         let participants = self.world.participants.len() as PartIx;
@@ -1097,8 +1073,6 @@ impl RunKernel {
             scratch.tick(&mut ctx, 1000).map_err(|e| RunError::Engine(e.to_string()))?;
             ticks += 1;
         }
-        // Rule plays are recorded on the triggering run step. A high-bit
-        // source refers to that step, distinct from graph call-history indices.
         let source = 0x8000_0000 | (self.current_step + 1);
         for row in &mut self.world.knowledge.rows {
             if !known_before.contains(&(row.holder, row.fact)) {
@@ -1285,9 +1259,6 @@ pub struct AdvancedView {
     pub interaction: Option<String>,
 }
 impl RunKernel {
-    /// The run step during which the call-history event `event` happened: the
-    /// first step whose snapshot has recorded more than `event` calls. Step 0
-    /// is the automatic advance at the start.
     pub fn step_of_event(&self, event: u32) -> Option<u32> {
         if event & 0x8000_0000 != 0 {
             let step = event & 0x7fff_ffff;

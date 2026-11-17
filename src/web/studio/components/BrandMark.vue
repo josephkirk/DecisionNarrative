@@ -1,9 +1,4 @@
 <script setup lang="ts">
-/**
- * Erzählstudio mark: an "E" whose middle arm forks into two outcomes (a told story
- * with its moment of choice). Same geometry as src/web/assets/erzaehlstudio-logo.svg,
- * but painted with theme tokens so it follows the active theme.
- */
 </script>
 
 <template>

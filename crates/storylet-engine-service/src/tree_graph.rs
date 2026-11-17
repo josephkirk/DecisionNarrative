@@ -5,7 +5,6 @@ pub const TREE_GRAPH_KEY: &str = "tree_graph";
 pub const TREE_ITEM_KEY: &str = "tree_item";
 
 const VALID_DIRECTIONS: &[&str] = &["right", "left", "down", "up", "radial"];
-/// A save only affects tree integrity when a graph changes or an item marker is removed.
 pub fn requires_validation(
     index: &crate::entities::WorkspaceIndex,
     before: &[crate::contracts::TraitInstance],
@@ -24,15 +23,6 @@ pub fn requires_validation(
     graph_changed || item_removed
 }
 
-/// Validates TreeItem trait instances on an entity.
-///
-/// Specifically: for any trait instance belonging to the `tree_item` trait template,
-/// if `level` or `cost` is declared on that template as a scalar integer (`PropertyType::Int && !is_array`),
-/// then if the field is present in `instance.values`, it must be a nonnegative integer (>= 0).
-/// Absent values remain valid.
-/// If `level` or `cost` is declared as a non-int or array type, or not declared on the template,
-/// unsigned integer validation is not enforced (preserving existing user-authored definitions).
-/// Other properties are not required to exist and unrelated fields are not rejected.
 pub fn validate_tree_item_traits(
     traits: &[crate::contracts::TraitInstance],
     templates: &[crate::contracts::TraitTemplateRecord],
@@ -52,7 +42,6 @@ pub fn validate_tree_item_traits(
                 continue;
             };
 
-            // Only enforce when currently declared TreeItem property is scalar int
             if prop_def.property.property_type != crate::contracts::PropertyType::Int
                 || prop_def.property.is_array
             {
@@ -74,9 +63,6 @@ pub fn validate_tree_item_traits(
     Ok(())
 }
 
-/// Validates defaults on TreeItem trait templates.
-/// Specifically: for the `tree_item` trait template, if `level` or `cost` is declared
-/// as a scalar int, its default value (if provided and not null) must not be a negative number.
 pub fn validate_tree_item_template(
     template: &crate::contracts::TraitTemplateRecord,
     prefix: &str,
@@ -109,10 +95,6 @@ pub fn validate_tree_item_template(
 }
 
 
-/// Validates all `tree_graph` trait instances in the workspace index.
-///
-/// `replacement` optionally substitutes an existing entity/template by ID or adds a new one.
-/// `removed_id` optionally omits an entity/template by ID from the effective workspace.
 pub fn validate_tree_graphs(
     index: &crate::entities::WorkspaceIndex,
     replacement: Option<(&str, &str, &[crate::contracts::TraitInstance])>,
@@ -129,8 +111,6 @@ pub fn validate_tree_graphs(
         .find(|t| t.key == TREE_ITEM_KEY)
         .map(|t| &t.id);
 
-    // Build the effective set of all entities and tree items.
-    // Map entity id -> (name, traits)
     let mut effective_entities: BTreeMap<&str, (&str, &[crate::contracts::TraitInstance])> = BTreeMap::new();
 
     for entity in &index.entities {
@@ -146,7 +126,6 @@ pub fn validate_tree_graphs(
         }
     }
 
-    // Determine which entities in the effective workspace possess the TreeItem trait.
     let mut tree_items: BTreeSet<&str> = BTreeSet::new();
     if let Some(item_tid) = tree_item_template_id {
         for (&id, (_, traits)) in &effective_entities {
@@ -156,8 +135,6 @@ pub fn validate_tree_graphs(
         }
     }
 
-    // Determine all owners with the TreeGraph trait to validate.
-    // "Visit all existing owners except IDs replaced/removed, plus replacement."
     let mut owners: Vec<(&str, &str, &[crate::contracts::TraitInstance])> = Vec::new();
 
     let rep_id_opt = replacement.map(|r| r.0);
@@ -178,7 +155,6 @@ pub fn validate_tree_graphs(
         }
     }
 
-    // Sort owners deterministically by ID to ensure stable error ordering
     owners.sort_by_key(|owner| owner.0);
 
     let mut issues = Vec::new();
@@ -190,7 +166,6 @@ pub fn validate_tree_graphs(
             let mut valid_nodes: BTreeSet<&str> = BTreeSet::new();
             let mut valid_edges: BTreeSet<(&str, &str)> = BTreeSet::new();
 
-            // 1. Validate `nodes`
             match instance.values.get("nodes") {
                 None => {}
                 Some(Value::Array(nodes_arr)) => {
@@ -237,7 +212,6 @@ pub fn validate_tree_graphs(
                 }
             }
 
-            // 2. Validate `edges`
             match instance.values.get("edges") {
                 None => {}
                 Some(Value::Array(edges_arr)) => {
@@ -291,7 +265,6 @@ pub fn validate_tree_graphs(
                         }
 
                         if from_valid && to_valid {
-                            // Borrow strings from valid_nodes for zero-copy set lookup
                             let from_borrowed = *valid_nodes.get(from_str).unwrap();
                             let to_borrowed = *valid_nodes.get(to_str).unwrap();
                             valid_edges.insert((from_borrowed, to_borrowed));
@@ -310,7 +283,6 @@ pub fn validate_tree_graphs(
                 }
             }
 
-            // 3. Validate `direction`
             match instance.values.get("direction") {
                 None => {}
                 Some(Value::String(dir_str)) => {
@@ -327,8 +299,6 @@ pub fn validate_tree_graphs(
                 }
             }
 
-            // 4. Validate `positions`
-            // Graph trait adds `positions` optional string, containing JSON object mapping direction -> node ID -> {x:number, y:number}
             match instance.values.get("positions") {
                 None => {}
                 Some(Value::String(pos_str)) => {
@@ -1267,12 +1237,10 @@ mod tests {
 
         let index = make_test_index(templates, entities);
 
-        // Test 1: removed_id removes item-2
         let issues_removed = validate_tree_graphs(&index, None, Some("item-2"));
         assert_eq!(issues_removed.len(), 1);
         assert!(issues_removed[0].contains("node 'item-2' references missing entity"));
 
-        // Test 2: replacement updates item-1 with no traits (removing TreeItem)
         let replacement_traits: [TraitInstance; 0] = [];
         let issues_replacement = validate_tree_graphs(
             &index,
@@ -1758,7 +1726,6 @@ mod tests {
     fn test_appearance_node_locked_valid_and_invalid() {
         let templates = standard_templates();
 
-        // 1. Valid locked booleans
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
             { "id": "item-2", "name": "Item 2", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
@@ -1784,7 +1751,6 @@ mod tests {
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.is_empty(), "expected valid node locked, got: {issues:?}");
 
-        // 2. Invalid locked on node (non-boolean)
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
             {
@@ -1808,7 +1774,6 @@ mod tests {
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.iter().any(|i| i.contains("appearance for node 'item-1' has invalid locked, must be a boolean")));
 
-        // 3. Invalid locked in defaults.node (only allowed on per-node appearance)
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
             {
@@ -1837,7 +1802,6 @@ mod tests {
     fn test_appearance_images_valid() {
         let templates = standard_templates();
 
-        // 1. Empty images array survives validation
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
             {
@@ -1859,7 +1823,6 @@ mod tests {
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.is_empty(), "expected empty images to be valid, got: {issues:?}");
 
-        // 2. Multiple valid images with various accepted file references and coordinates
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
             {
@@ -1932,7 +1895,6 @@ mod tests {
     fn test_appearance_images_malformed_and_invalid_values() {
         let templates = standard_templates();
 
-        // Non-array images
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
             {
@@ -1954,7 +1916,6 @@ mod tests {
         let issues = validate_tree_graphs(&index, None, None);
         assert!(issues.iter().any(|i| i.contains("appearance 'images' must be an array")));
 
-        // Malformed image items
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
             {
@@ -2137,7 +2098,6 @@ mod tests {
             }
         ])).unwrap();
 
-        // 1. Valid nonnegative integers pass
         let valid_traits: Vec<TraitInstance> = serde_json::from_value(json!([
             {
                 "id": "t1",
@@ -2147,7 +2107,6 @@ mod tests {
         ])).unwrap();
         assert!(validate_tree_item_traits(&valid_traits, &templates, "owner").is_ok());
 
-        // 2. Absent values remain valid
         let absent_traits: Vec<TraitInstance> = serde_json::from_value(json!([
             {
                 "id": "t1",
@@ -2157,7 +2116,6 @@ mod tests {
         ])).unwrap();
         assert!(validate_tree_item_traits(&absent_traits, &templates, "owner").is_ok());
 
-        // 3. Negative level is rejected
         let neg_level: Vec<TraitInstance> = serde_json::from_value(json!([
             {
                 "id": "t1",
@@ -2168,7 +2126,6 @@ mod tests {
         let err = validate_tree_item_traits(&neg_level, &templates, "owner").unwrap_err();
         assert!(err.contains("TreeItem 'level' must be a nonnegative integer"), "got {err}");
 
-        // 4. Negative cost is rejected
         let neg_cost: Vec<TraitInstance> = serde_json::from_value(json!([
             {
                 "id": "t1",
@@ -2179,7 +2136,6 @@ mod tests {
         let err = validate_tree_item_traits(&neg_cost, &templates, "owner").unwrap_err();
         assert!(err.contains("TreeItem 'cost' must be a nonnegative integer"), "got {err}");
 
-        // 5. Non-integer level is rejected
         let float_level: Vec<TraitInstance> = serde_json::from_value(json!([
             {
                 "id": "t1",
@@ -2190,7 +2146,6 @@ mod tests {
         let err = validate_tree_item_traits(&float_level, &templates, "owner").unwrap_err();
         assert!(err.contains("TreeItem 'level' must be a nonnegative integer"), "got {err}");
 
-        // 6. Non-int declared type on TreeItem template is preserved (no unsigned int enforcement)
         let string_templates: Vec<TraitTemplateRecord> = serde_json::from_value(json!([
             {
                 "id": "tree-item-id",
@@ -2210,7 +2165,6 @@ mod tests {
         ])).unwrap();
         assert!(validate_tree_item_traits(&string_level, &string_templates, "owner").is_ok());
 
-        // 7. Array declared type is preserved
         let array_templates: Vec<TraitTemplateRecord> = serde_json::from_value(json!([
             {
                 "id": "tree-item-id",
@@ -2230,7 +2184,6 @@ mod tests {
         ])).unwrap();
         assert!(validate_tree_item_traits(&array_cost, &array_templates, "owner").is_ok());
 
-        // 8. Template with no properties does not require other properties to exist
         let empty_templates: Vec<TraitTemplateRecord> = serde_json::from_value(json!([
             {
                 "id": "tree-item-id",
@@ -2248,7 +2201,6 @@ mod tests {
         ])).unwrap();
         assert!(validate_tree_item_traits(&empty_instance, &empty_templates, "owner").is_ok());
 
-        // 9. Out-of-range value exceeding i64::MAX is rejected to align with value_shape_matches(PropertyType::Int)
         let out_of_range: Vec<TraitInstance> = serde_json::from_value(json!([
             {
                 "id": "t1",
@@ -2262,7 +2214,6 @@ mod tests {
 
     #[test]
     fn test_tree_item_template_default_guard() {
-        // Valid nonnegative defaults
         let valid_tpl: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "tree-item-id",
             "key": "tree_item",
@@ -2274,7 +2225,6 @@ mod tests {
         })).unwrap();
         assert!(validate_tree_item_template(&valid_tpl, "prefix").is_ok());
 
-        // Negative default for level fails
         let neg_level_tpl: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "tree-item-id",
             "key": "tree_item",
@@ -2286,7 +2236,6 @@ mod tests {
         let err = validate_tree_item_template(&neg_level_tpl, "prefix").unwrap_err();
         assert!(err.contains("TreeItem 'level' default must be a nonnegative integer"), "got {err}");
 
-        // Negative default for cost fails
         let neg_cost_tpl: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "tree-item-id",
             "key": "tree_item",
@@ -2298,7 +2247,6 @@ mod tests {
         let err = validate_tree_item_template(&neg_cost_tpl, "prefix").unwrap_err();
         assert!(err.contains("TreeItem 'cost' default must be a nonnegative integer"), "got {err}");
 
-        // Null default passes (unset)
         let null_default_tpl: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "tree-item-id",
             "key": "tree_item",
@@ -2309,7 +2257,6 @@ mod tests {
         })).unwrap();
         assert!(validate_tree_item_template(&null_default_tpl, "prefix").is_ok());
 
-        // Positive fractional default fails
         let frac_default_tpl: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "tree-item-id",
             "key": "tree_item",
@@ -2321,7 +2268,6 @@ mod tests {
         let err = validate_tree_item_template(&frac_default_tpl, "prefix").unwrap_err();
         assert!(err.contains("TreeItem 'level' default must be a nonnegative integer"), "got {err}");
 
-        // String default fails
         let str_default_tpl: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "tree-item-id",
             "key": "tree_item",
@@ -2333,7 +2279,6 @@ mod tests {
         let err = validate_tree_item_template(&str_default_tpl, "prefix").unwrap_err();
         assert!(err.contains("TreeItem 'level' default must be a nonnegative integer"), "got {err}");
 
-        // Object default fails
         let obj_default_tpl: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "tree-item-id",
             "key": "tree_item",

@@ -68,12 +68,12 @@ const showThumbnails = ref(true);
 try {
   showGrid.value = localStorage.getItem("studio.tree.showGrid") !== "false";
   showThumbnails.value = localStorage.getItem("studio.tree.showThumbnails") !== "false";
-} catch { /* Preferences remain available for this session. */ }
+} catch { }
 watch([showGrid, showThumbnails], ([grid, thumbnails]) => {
   try {
     localStorage.setItem("studio.tree.showGrid", String(grid));
     localStorage.setItem("studio.tree.showThumbnails", String(thumbnails));
-  } catch { /* Storage may be unavailable. */ }
+  } catch { }
 });
 function dismissMenu(event: Event) {
   if (event instanceof KeyboardEvent && event.key !== "Escape") return;
@@ -303,7 +303,6 @@ function openContext(event: MouseEvent, node?: string, edge?: number) {
   const anchor = event.currentTarget instanceof Element ? event.currentTarget.getBoundingClientRect() : rect;
   const rawX = (event.clientX || anchor.left + anchor.width / 2) - rect.left;
   const rawY = (event.clientY || anchor.bottom) - rect.top;
-  // Position at the anchor; the contextMenu watcher clamps with the menu's measured size.
   const x = Math.max(0, rawX);
   const y = Math.max(0, rawY);
   menuSearch.value = "";
@@ -474,7 +473,6 @@ function beginLink(id: string, event: PointerEvent) {
   const distance = zone.classList.contains("zone-top") ? bounds.bottom - event.clientY
     : zone.classList.contains("zone-bottom") ? event.clientY - bounds.top
     : zone.classList.contains("zone-left") ? bounds.right - event.clientX : event.clientX - bounds.left;
-  // Keep a narrow connection-start area at the node edge when a wire overlaps the zone.
   if (hit && distance > 5 * zoomFactor.value) { wireDown(Number(hit.dataset.index), event); return; }
   if (!hit) source.value = id;
   linkDrag.value = { from: id, pointer: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, moved: false };

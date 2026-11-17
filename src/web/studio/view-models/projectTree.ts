@@ -33,7 +33,6 @@ function loadExpanded(): Set<string> {
       }
     }
   } catch {
-    // Fall through to defaults when storage is unavailable or corrupt.
   }
   return new Set(defaultExpandedKeys());
 }
@@ -44,7 +43,6 @@ function newId(): string {
   return `id-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
-/** The picker centers in a pane; tree actions have no pane of their own, so they use the focused one. */
 function pickerAnchor(origin: HTMLElement | null): HTMLElement | null {
   if (origin?.closest(".studio-pane")) return origin;
   return document.querySelector<HTMLElement>(`.studio-pane[data-pane-id="${paneState.activeId}"]`) ?? origin;
@@ -59,7 +57,6 @@ export interface DragPayload {
 }
 
 export function useProjectTree() {
-  // Tree actions navigate whichever split pane has focus.
   const router = focusedRouter;
   const expanded = ref<Set<string>>(loadExpanded());
   const query = ref("");
@@ -70,7 +67,6 @@ export function useProjectTree() {
       try {
         localStorage.setItem(EXPANDED_KEY, JSON.stringify([...value]));
       } catch {
-        // Persisting the collapsed state is best effort.
       }
     },
     { deep: true },
@@ -345,7 +341,6 @@ export function useProjectTree() {
     }
   }
 
-  /** Marks or unmarks an entity as a template; the service rejects unmarking while others still use it. */
   async function toggleTemplate(row: TreeRow) {
     if (row.kind !== "item" || row.root !== "entities" || !row.id) return;
     const entity = studioState.entities.find((candidate) => candidate.id === row.id);

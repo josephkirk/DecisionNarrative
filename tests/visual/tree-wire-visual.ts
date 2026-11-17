@@ -1,5 +1,3 @@
-// Visual regression test: wire drag reconnect and new connection must not shift nodes.
-// Run: node tests/visual/tree-wire-visual.ts
 import { chromium, type Locator } from "playwright-core";
 import fs from "node:fs";
 import os from "node:os";
@@ -106,12 +104,10 @@ async function getEdgeMidpoint(locator: Locator) {
 
 let browser;
 try {
-  // Wait for service to be ready
   for (let i = 0; i < 50; i++) {
     try {
       if ((await fetch(base + "/api/v3/project")).ok) break;
     } catch {
-      /* starting */
     }
     await sleep(200);
   }
@@ -125,7 +121,6 @@ try {
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("dialog", (d) => void d.accept());
 
-  // 1. Initialize trait templates by navigating to the studio
   await page.goto(`${base}/#/storylets`);
   let graphTrait: { id: string; key: string } | undefined;
   let itemTrait: { id: string; key: string } | undefined;
@@ -139,7 +134,6 @@ try {
   check("tree traits created on app load", !!graphTrait && !!itemTrait);
   if (!graphTrait || !itemTrait) throw new Error("TreeGraph or TreeItem trait template not found");
 
-  // 2. POST 4 TreeItem entities: Item A, B, C in graph, Item D available outside
   await api("POST", "/api/v3/content/entities", {
     id: "item-a",
     name: "Item A",
@@ -161,7 +155,6 @@ try {
     traits: [{ id: "ti-d", template_id: itemTrait.id, values: {} }],
   });
 
-  // Tree owner with initial 3 auto-layout nodes and 1 edge (A -> B)
   await api("POST", "/api/v3/content/entities", {
     id: "tree-owner",
     name: "Tree Owner",
@@ -179,7 +172,6 @@ try {
     ],
   });
 
-  // 3. Open Tree tab
   await page.goto(`${base}/#/entities/tree-owner`);
   await page.reload();
   const treeTab = page.getByRole("button", { name: "Tree", exact: true });
@@ -193,7 +185,6 @@ try {
   await nodeB.waitFor();
   await nodeC.waitFor();
 
-  // 4. Check canvas toolbar: view options, export option, no add-item widget
   const viewOptionsSummary = page.locator(".tree-options summary");
   await viewOptionsSummary.waitFor();
   check("canvas has view options control", await viewOptionsSummary.isVisible());
@@ -207,7 +198,6 @@ try {
   const addToTreeBtn = page.getByRole("button", { name: "Add to tree" });
   check("no add-item widget in canvas toolbar", (await addDropdown.count()) === 0 && (await addToTreeBtn.count()) === 0);
 
-  // 5. Add item through canvas context menu
   const canvasActionsBtn = page.getByRole("button", { name: "Canvas actions" });
   await canvasActionsBtn.waitFor();
   await canvasActionsBtn.click();
@@ -225,15 +215,12 @@ try {
 
   const allNodes = { "item-a": nodeA, "item-b": nodeB, "item-c": nodeC, "item-d": nodeD };
 
-  // 6. Record inline positions before wire reconnect
   const positionsBeforeReconnect = await getInlinePositions(allNodes);
 
-  // Verify initial edge target via accessible label
   const initialEdge = page.locator('.tree-edge-hit[aria-label*="Connection from Item A to Item B"]');
   await initialEdge.waitFor({ state: "attached" });
   check("initial edge target verified via accessible label", (await initialEdge.count()) === 1);
 
-  // 7. Wire drag reconnect: drag edge from Item B to Item C using real mouse
   const edgeMidpoint = await getEdgeMidpoint(initialEdge);
 
   const nodeCBox = (await nodeC.boundingBox())!;
@@ -242,25 +229,21 @@ try {
   await page.mouse.move(nodeCBox.x + nodeCBox.width / 2, nodeCBox.y + nodeCBox.height / 2, { steps: 10 });
   await page.mouse.up();
 
-  // Verify actual edge target after reconnect via accessible label
   const reconnectedEdge = page.locator('.tree-edge-hit[aria-label*="Connection from Item A to Item C"]');
   await reconnectedEdge.waitFor({ state: "attached" });
   check("reconnected edge target verified via accessible label", (await reconnectedEdge.count()) === 1);
 
-  // Compare inline positions: all existing nodes must not move
   const positionsAfterReconnect = await getInlinePositions(allNodes);
   for (const id of Object.keys(allNodes)) {
     assertPositionsEqual(positionsAfterReconnect[id]!, positionsBeforeReconnect[id]!, `${id} after wire reconnect`);
   }
 
-  // Restore the original auto-layout before checking a new connection.
   await page.reload();
   await page.getByRole("button", { name: "Tree", exact: true }).click();
   await canvasActionsBtn.click();
   await addCandidateBtn.click();
   await nodeD.waitFor();
 
-  // 8. New connection: drag wire from Item B connect zone to Item D using real mouse
   const positionsBeforeNewConnect = await getInlinePositions(allNodes);
 
   const connectZone = nodeB.locator(".tree-connect-zone.zone-right");
@@ -273,18 +256,15 @@ try {
   await page.mouse.move(nodeDBox.x + nodeDBox.width / 2, nodeDBox.y + nodeDBox.height / 2, { steps: 10 });
   await page.mouse.up();
 
-  // Verify new edge target via accessible label
   const newEdge = page.locator('.tree-edge-hit[aria-label*="Connection from Item B to Item D"]');
   await newEdge.waitFor({ state: "attached" });
   check("new connection target verified via accessible label", (await newEdge.count()) === 1);
 
-  // Compare inline positions: all existing nodes must not move
   const positionsAfterNewConnect = await getInlinePositions(allNodes);
   for (const id of Object.keys(allNodes)) {
     assertPositionsEqual(positionsAfterNewConnect[id]!, positionsBeforeNewConnect[id]!, `${id} after new connection`);
   }
 
-  // 9. Double-click wire to name relationship
   const newEdgeMidpoint = await getEdgeMidpoint(newEdge);
   await page.mouse.dblclick(newEdgeMidpoint.x, newEdgeMidpoint.y);
 
@@ -299,7 +279,6 @@ try {
   check("save relationship button enabled after entering non-blank name", !(await saveRelBtn.isDisabled()));
   await saveRelBtn.click();
 
-  // 10. Visible relationship label rendered on wire
   const edgeLabel = page.locator(".tree-edge-label", { hasText: "causes" });
   await edgeLabel.waitFor({ state: "visible" });
   check("visible relationship label rendered on wire", await edgeLabel.isVisible());
@@ -320,7 +299,6 @@ try {
   await relInput.fill("causes");
   await saveRelBtn.click();
 
-  // 11. Reconnect preservation: drag named wire from Item D to Item C
   const namedEdgeMidpoint = await getEdgeMidpoint(namedEdge);
   await page.mouse.move(namedEdgeMidpoint.x, namedEdgeMidpoint.y);
   await page.mouse.down();
@@ -344,7 +322,6 @@ try {
   check("cancelling returns focus to the edit action", await page.locator(".tree-relationship-toggle").evaluate((element) => document.activeElement === element));
   await page.keyboard.press("Escape");
 
-  // 12. Contextual edit: right-click wire opens context menu with Edit/Remove options
   const reconnectedEdgeMidpoint = await getEdgeMidpoint(reconnectedNamedEdge);
   await page.mouse.click(reconnectedEdgeMidpoint.x, reconnectedEdgeMidpoint.y, { button: "right" });
 
@@ -370,7 +347,6 @@ try {
   await editedEdge.waitFor({ state: "attached" });
   check("wire accessible label updated after contextual edit", (await editedEdge.count()) === 1);
 
-  // 13. Contextual removal: Remove relationship removes label but keeps wire
   const editedEdgeMidpoint = await getEdgeMidpoint(editedEdge);
   await page.mouse.click(editedEdgeMidpoint.x, editedEdgeMidpoint.y, { button: "right" });
   await removeRelBtn.waitFor({ state: "visible" });
@@ -381,7 +357,6 @@ try {
   check("wire remains after relationship removal", (await unnamedEdge.count()) === 1);
   check("relationship label removed after contextual removal", (await page.locator(".tree-edge-label").count()) === 0);
 
-  // 14. Assert persisted data after saving and reloading
   const unnamedMidpoint = await getEdgeMidpoint(unnamedEdge);
   await page.mouse.dblclick(unnamedMidpoint.x, unnamedMidpoint.y);
   await relInput.waitFor({ state: "visible" });
@@ -399,7 +374,6 @@ try {
   ]);
   check("relationship save accepted by service", saveResponse.status() === 201, `status ${saveResponse.status()}`);
 
-  // Reload page to verify persisted state in UI
   await page.reload();
   const reloadTreeTab = page.getByRole("button", { name: "Tree", exact: true });
   await reloadTreeTab.waitFor();
@@ -414,7 +388,6 @@ try {
   await persistedEdge.waitFor({ state: "attached" });
   check("persisted wire accessible label preserved after reload", (await persistedEdge.count()) === 1);
 
-  // Assert persisted data in the backend database
   const savedEntity = await api("GET", "/api/v3/content/entities/tree-owner");
   const ownerTrait = savedEntity.traits.find((t: { template_id: string }) => t.template_id === graphTrait!.id);
   const persistedEdges = (ownerTrait?.values?.edges ?? []).map((e: string) => JSON.parse(e));
@@ -434,7 +407,6 @@ try {
   check("export contains named relationship", exported.graph.edges.some((edge: { from: string; to: string; relationship?: string }) =>
     edge.from === "item-b" && edge.to === "item-c" && edge.relationship === "leads to"));
 
-  // Starting on an occupied connection zone must create a new wire, not reconnect the old one.
   const occupiedZone = await nodeA.locator(".tree-connect-zone.zone-right").boundingBox();
   const destination = await nodeC.boundingBox();
   if (!occupiedZone || !destination) throw new Error("Missing node or connection zone");

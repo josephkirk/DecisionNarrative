@@ -70,7 +70,6 @@ function isTyping(target: EventTarget | null): boolean {
 function onKeydown(e: KeyboardEvent) {
   if (isTyping(e.target) || e.altKey || e.metaKey) return;
   if (e.ctrlKey && e.key.toLowerCase() === "z") e.preventDefault();
-  // Tab only moves between participants when nothing is focused, so it never traps keyboard navigation.
   if (e.key === "Tab" && e.target !== document.body) return;
   if (e.key === "Tab") e.preventDefault();
   void play.onKey({ key: e.key, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey });

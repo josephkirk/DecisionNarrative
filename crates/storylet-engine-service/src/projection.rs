@@ -1,4 +1,3 @@
-//! Conversion from authored Storylet Studio content into engine ProjectBundle.
 
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -32,8 +31,6 @@ pub fn project_workspace(
     scenario: Option<&ScenarioRecord>,
 ) -> ProjectResult {
     let mut issues = Vec::new();
-    // V1 has only a flat world-property map, not typed properties on Entities.
-    // The V1 playtest entry point rejects this data instead of dropping it.
     let property_defs = BTreeMap::new();
 
     let mut location_defs = BTreeMap::new();
@@ -107,7 +104,6 @@ pub fn project_workspace(
         );
     }
 
-    // Only approved storylets enter the runtime bundle
     let mut storylet_defs = BTreeMap::new();
     let mut approved_storylet_ids = Vec::new();
     for st in storylets {
@@ -128,8 +124,6 @@ pub fn project_workspace(
             }
         }
 
-        // Preconditions are evaluated from the authored NarrativeGraph by the graph runtime.
-        // The legacy list representation is intentionally not projected here.
         let trigger = PredicateSet::default();
 
         let choices = st
@@ -282,9 +276,6 @@ pub fn project_workspace(
         let resolved = resolve_scenario_start(scen, locations, characters);
         issues.extend(resolved.issues);
 
-        // V1 exposes only one global property map. Entity-scoped scenario
-        // overrides have no faithful representation, including the
-        // single-entity case; retain no lossy projection and report it.
         let initial_properties = BTreeMap::new();
         if !resolved.effective_properties.is_empty() {
             issues.push(format!(

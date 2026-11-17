@@ -105,7 +105,6 @@ fn learn_then_revert_restores_world() {
     world.apply_learn(row(0, 7, KnowKind::Witnessed, 3), &mut delta);
     assert!(world.knowledge.knows(0, 7).is_some());
     assert_eq!(delta.knowledge_added, vec![(0, 7)]);
-    // A duplicate learn is a no-op and must not be recorded for revert.
     world.apply_learn(row(0, 7, KnowKind::Rumor, 9), &mut delta);
     assert_eq!(delta.knowledge_added.len(), 1);
     revert_delta(&mut world, &delta).unwrap();
@@ -255,7 +254,6 @@ fn seed_current_location_after_ensure_participants_moves_participant_zero() {
     assert_eq!(world.active_location(0), Some(3));
 }
 
-// --- Graph nodes: Learn, MoveParticipant, Knows ---------------------------
 
 use storylet_engine::chrono_dispatch::UnifiedDispatcher;
 use storylet_engine::chrono_runtime::{
@@ -307,7 +305,6 @@ const START: u32 = 1;
 const MUTATOR: u32 = 2;
 const END: u32 = 3;
 
-/// `Start -> mutator -> End`, started and ready to tick.
 fn linear_instance(mutator: NodeKind, acting: u16) -> FlowGraphInstance {
     let asset = FlowGraphAsset {
         asset_id: "participants".to_owned(),
@@ -337,7 +334,6 @@ fn learn(kind: KnowKind, visibility: Visibility) -> NodeKind {
     }
 }
 
-/// Participants 0 and 1 at location 3, participant 2 at location 4.
 fn three_participant_world() -> WorldStateTable {
     let mut world = WorldStateTable::new();
     world
@@ -365,7 +361,6 @@ fn learn_records_call_history_source() {
         .iter()
         .position(|entry| entry.node_guid == MUTATOR)
         .unwrap();
-    // The start node's entry comes first, so the index is not trivially 0.
     assert_eq!(learn_index, 1);
     let row = ctx.state.knowledge.knows(0, 7).unwrap();
     assert_eq!(row.source_event, learn_index as u32);
@@ -402,7 +397,6 @@ fn private_learn_creates_no_witness_rows() {
     assert!(ctx.state.knowledge.knows(0, 7).is_none());
 }
 
-/// `Condition(input <- Knows)`; returns whether the `true` branch ran.
 fn knows_branch(world: &mut WorldStateTable, holder: HolderRef, confirmed_only: bool) -> bool {
     const CONDITION: u32 = 1;
     const KNOWS: u32 = 2;
@@ -474,7 +468,6 @@ fn knows_confirmed_only_rejects_rumor() {
     world.knowledge.learn(row(0, 7, KnowKind::Rumor, 0));
     assert!(!knows_branch(&mut world, HolderRef::Acting, true));
     assert!(knows_branch(&mut world, HolderRef::Acting, false));
-    // A holder that does not know the fact at all is false either way.
     world.participants.push("npc", 1, Controller::Rule, None);
     assert!(!knows_branch(&mut world, HolderRef::Participant(1), false));
 }
@@ -630,7 +623,6 @@ fn removing_earlier_call_rebases_later_knowledge_source() {
         },
         NodeCategory::Mutator,
     ));
-    // Add the corresponding runtime instance by reconstructing from the asset.
     instance = FlowGraphInstance::new(1, instance.asset, 7).unwrap();
     instance.force_complete(&mut ctx, 4, "Out", None).unwrap();
     instance
@@ -742,7 +734,6 @@ fn unrelated_graph_knowledge_does_not_block_or_rebase_cancel() {
     let dispatcher = UnifiedDispatcher::new(vec![]);
     let mut ctx = RuntimeContext::new(&mut world, &dispatcher);
     let mut other = linear_instance(learn(KnowKind::Evidence, Visibility::Private), 1);
-    // Put the other graph's Learn at index 5.
     for _ in 0..5 {
         other.force_complete(&mut ctx, START, "Out", None).unwrap();
     }

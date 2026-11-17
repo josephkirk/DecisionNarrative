@@ -20,8 +20,6 @@ const isValid = ref(false);
 watch(
   () => metadata.name,
   (name) => {
-    // Keep the field truthful after a load or a bundle replace; user edits still
-    // own the value between loads because metadata only changes on those events.
     nameInput.value = name;
   },
 );
@@ -77,7 +75,6 @@ async function handleImport() {
     </header>
 
     <div class="view-content" style="max-width:680px; margin:0 auto; width:100%;">
-      <!-- Project Name -->
       <div class="form-group" style="padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px; margin-bottom:20px;">
         <label class="form-label">Project Name</label>
         <div style="display:flex; gap:10px;">
@@ -86,7 +83,6 @@ async function handleImport() {
         </div>
       </div>
 
-      <!-- Export Bundle -->
       <div style="padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px; margin-bottom:20px;">
         <h3 style="font-size:14px; font-weight:700; margin-bottom:8px;">Export project</h3>
         <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
@@ -95,7 +91,6 @@ async function handleImport() {
         <a href="/api/v3/project-bundle" class="btn btn-secondary" download>Export .storylet.json</a>
       </div>
 
-      <!-- Import Bundle -->
       <div style="padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px;">
         <h3 style="font-size:14px; font-weight:700; margin-bottom:8px;">Import & replace workspace</h3>
         <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">

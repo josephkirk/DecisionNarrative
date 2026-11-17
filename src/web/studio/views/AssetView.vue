@@ -24,7 +24,6 @@ const showVersionForm = ref(false);
 const customDataError = ref("");
 const activeTab = ref<"details" | "versions" | "references">("details");
 const dirty = computed(() => draft.value !== null && JSON.stringify(draft.value) !== savedJson.value);
-// A half-typed version is unsaved work too, even though it is not in the draft.
 const hasPendingVersion = computed(() =>
   Boolean(
     versionForm.value.file_path.trim() ||
@@ -96,7 +95,6 @@ function toggleVersionForm() {
     showVersionForm.value = true;
     return;
   }
-  // Cancelling discards the half-typed version so no hidden draft lingers.
   showVersionForm.value = false;
   versionForm.value = newVersionForm();
   customDataError.value = "";
@@ -241,7 +239,6 @@ function confirmDiscard(): boolean {
 
 onBeforeRouteLeave(confirmDiscard);
 onBeforeRouteUpdate(confirmDiscard);
-/** Mouse wheels scroll the tab strip sideways when tabs overflow a narrow pane. */
 function scrollTabs(event: WheelEvent) {
   const strip = event.currentTarget as HTMLElement;
   if (strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
@@ -252,7 +249,6 @@ function scrollTabs(event: WheelEvent) {
 
 <template>
   <div v-if="draft" class="entity-page-surface scroll-fade-mask">
-    <!-- Hero Card matching EntityView -->
     <header class="entity-hero-card">
       <div class="entity-hero-left">
         <ThumbnailPicker
@@ -298,7 +294,6 @@ function scrollTabs(event: WheelEvent) {
       </div>
     </header>
 
-    <!-- Tabs matching EntityView -->
     <nav class="entity-tabs" aria-label="Asset sections" @wheel="scrollTabs">
       <button :class="['entity-tab', activeTab === 'details' && 'is-active']" @click="activeTab = 'details'">
         <svg aria-hidden="true" class="tab-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -318,9 +313,7 @@ function scrollTabs(event: WheelEvent) {
       </button>
     </nav>
 
-    <!-- Details Tab -->
     <section v-show="activeTab === 'details'" class="entity-content-stack">
-      <!-- 1. Tags card -->
       <div class="content-block">
         <div class="content-block-head">
           <span class="block-title">Asset tags</span>
@@ -334,7 +327,6 @@ function scrollTabs(event: WheelEvent) {
         />
       </div>
 
-      <!-- 2. Overview / File Info Card -->
       <div class="content-block">
         <div class="content-block-head">
           <span class="block-title">Asset overview</span>
@@ -359,8 +351,6 @@ function scrollTabs(event: WheelEvent) {
       </div>
     </section>
 
-    <!-- Versions Tab -->
-    <!-- Preserved across tab switches with v-show as requested -->
     <section v-show="activeTab === 'versions'" class="entity-content-stack">
       <div class="content-block">
         <div class="content-block-head">
@@ -377,7 +367,6 @@ function scrollTabs(event: WheelEvent) {
           No versions yet. Click "+ Add version" to register the first file version.
         </div>
 
-        <!-- Version form card when toggled -->
         <div v-if="showVersionForm" class="version-form" style="background:rgba(255, 255, 255, 0.02); margin-top:0; margin-bottom:12px;">
           <div class="content-block-head" style="margin-bottom:12px;">
             <span style="font-size:13px; font-weight:600; color:var(--text-main);">New Asset Version</span>
@@ -478,7 +467,6 @@ function scrollTabs(event: WheelEvent) {
           </div>
         </div>
 
-        <!-- Versions list -->
         <div v-for="(version, index) in versionsNewestFirst" :key="version.id" class="version-card">
           <div class="version-card__head">
             <strong>{{ version.file_path }}</strong>
@@ -522,7 +510,6 @@ function scrollTabs(event: WheelEvent) {
       </div>
     </section>
 
-    <!-- References Tab -->
     <section v-show="activeTab === 'references'" class="entity-content-stack">
       <div class="content-block">
         <div class="content-block-head">
@@ -534,7 +521,6 @@ function scrollTabs(event: WheelEvent) {
     </section>
   </div>
 
-  <!-- Loading Skeleton -->
   <div v-else class="entity-page-surface" aria-label="Loading asset">
     <div class="skeleton-hero-card">
       <div class="skeleton-avatar"></div>

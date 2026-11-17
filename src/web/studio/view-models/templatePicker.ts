@@ -2,7 +2,6 @@ import { reactive } from "vue";
 import type { EntityRecord, TraitTemplateRecord } from "../contracts.ts";
 import { traitLabels } from "../entityModel.ts";
 
-/** Picker row id for "no template"; ReferencePicker highlights it through `selectedId`. */
 export const NO_TEMPLATE_ID = "";
 
 export interface TemplateChoice {
@@ -20,7 +19,6 @@ export const templatePicker = reactive<{ open: boolean; anchor: HTMLElement | nu
 
 let pending: ((id: string | null) => void) | null = null;
 
-/** Rows for the Choose template picker: the empty-entity row first, then every template entity. */
 export function templatePickerItems(templates: EntityRecord[], traitTemplates: TraitTemplateRecord[]): TemplateChoice[] {
   return [
     { id: NO_TEMPLATE_ID, title: "None — empty entity", subtitle: "Start without description, properties or traits" },
@@ -33,7 +31,6 @@ export function templatePickerItems(templates: EntityRecord[], traitTemplates: T
   ];
 }
 
-/** Opens the picker; resolves with the chosen id (`NO_TEMPLATE_ID` for none) or null when cancelled. */
 export function chooseTemplate(items: TemplateChoice[], anchor: HTMLElement | null): Promise<string | null> {
   settleTemplatePicker(null);
   templatePicker.items = items;

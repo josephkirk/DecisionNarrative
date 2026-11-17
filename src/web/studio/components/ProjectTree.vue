@@ -31,7 +31,6 @@ const {
 } = useProjectTree();
 
 const menuKey = ref<string | null>(null);
-/** Element the open menu came from; the template picker anchors to it. */
 let menuOrigin: HTMLElement | null = null;
 const dropKey = ref<string | null>(null);
 
@@ -108,7 +107,6 @@ function rowDragPayload(event: DragEvent, row: TreeRow) {
       id: row.id,
     }),
   );
-  // Copy lets panes take the row as "open here" or a split; move keeps folder drops working.
   if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
 }
 
@@ -121,7 +119,6 @@ function folderRecord(row: TreeRow) {
   return studioState.folders.find((folder) => folder.id === row.id);
 }
 
-/** An entity created from a template cannot itself become a template (the service rejects chains). */
 function hasTemplateParent(row: TreeRow): boolean {
   return !!studioState.entities.find((entity) => entity.id === row.id)?.template_id;
 }
@@ -130,7 +127,6 @@ function menuDefinition(row: TreeRow): ContentRootDefinition | undefined {
   return roots.find((definition) => definition.root === row.root);
 }
 
-/** Rows near the bottom of the tree open their menu upward so it never runs off-screen. */
 const menuUp = ref(false);
 const MENU_ROOM = 200;
 
@@ -338,7 +334,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Floating Context Menu -->
     <div
       v-if="contextMenu"
       class="project-tree__context-menu"
@@ -346,7 +341,6 @@ onBeforeUnmount(() => {
       :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       @click.stop
     >
-      <!-- Row: Project or empty background -->
       <template v-if="!contextMenu.row || contextMenu.row.kind === 'project'">
         <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('new-project')"><StudioIcon name="file" /> New project…</button>
         <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('refresh')"><StudioIcon name="refresh" /> Refresh workspace</button>
@@ -357,7 +351,6 @@ onBeforeUnmount(() => {
         <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('codex')"><StudioIcon name="scroll" /> Rules & events</button>
       </template>
 
-      <!-- Row: Root -->
       <template v-else-if="contextMenu.row.kind === 'root'">
         <template v-if="menuDefinition(contextMenu.row)?.newLabel">
           <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('item')"><StudioIcon name="plus" /> {{ menuDefinition(contextMenu.row)?.newLabel ?? "New item" }}</button>
@@ -368,7 +361,6 @@ onBeforeUnmount(() => {
         <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('toggle-expand')"><StudioIcon name="chevron" /> {{ contextMenu.row.expanded ? 'Collapse' : 'Expand' }}</button>
       </template>
 
-      <!-- Row: Folder -->
       <template v-else-if="contextMenu.row.kind === 'folder'">
         <template v-if="menuDefinition(contextMenu.row)?.newLabel">
           <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('item')"><StudioIcon name="plus" /> {{ menuDefinition(contextMenu.row)?.newLabel ?? "New item" }}</button>
@@ -382,7 +374,6 @@ onBeforeUnmount(() => {
         <button type="button" role="menuitem" class="project-tree__context-menu-item project-tree__context-menu-item--danger" @click="contextAction('delete-folder')"><StudioIcon name="trash" /> Delete folder</button>
       </template>
 
-      <!-- Row: Item -->
       <template v-else-if="contextMenu.row.kind === 'item'">
         <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('open')"><StudioIcon name="open" /> Open</button>
         <button type="button" role="menuitem" class="project-tree__context-menu-item" :disabled="!canSplit()" @click="contextAction('split')"><StudioIcon name="split-right" /> Open in split view</button>

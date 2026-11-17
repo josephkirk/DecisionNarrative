@@ -1,8 +1,3 @@
-/**
- * Read-modify-write of an entity's canvas document on the service, used by
- * the Modify Canvas node to stage, commit, discard and remove its version.
- * Writes run one at a time so a commit and a discard never interleave.
- */
 import { StudioApi } from "../../api.ts";
 import { refreshWorkspace } from "../../view-models/workspace.ts";
 import type { EntityRecord } from "../../contracts.ts";
@@ -32,7 +27,6 @@ export function updateEntityCanvas(entityId: string, mutate: (doc: CanvasDoc) =>
   });
 }
 
-/** Apply `mutate` to every canvas that `touches` says is affected. */
 export function updateCanvases(touches: (doc: CanvasDoc) => boolean, mutate: (doc: CanvasDoc) => CanvasDoc): Promise<void> {
   return serial(async () => {
     const targets = allEntities().filter((entity) => { const doc = canvasOf(entity); return !!doc && touches(doc); });

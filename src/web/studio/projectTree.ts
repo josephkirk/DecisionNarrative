@@ -44,7 +44,6 @@ export interface TreeItem {
   folderId: string | null;
   thumbnail: string | null;
   detail: string;
-  /** Entities that other entities can be created from. */
   isTemplate?: boolean;
 }
 
@@ -162,7 +161,6 @@ export function defaultExpandedKeys(): string[] {
   return [projectKey(), ...CONTENT_ROOTS.map((entry) => rootKey(entry.root))];
 }
 
-/** Natural order: "Clerk 2" sorts before "Clerk 10". */
 function compareLabels(left: string, right: string): number {
   return left.localeCompare(right, undefined, { sensitivity: "base", numeric: true });
 }
@@ -205,8 +203,6 @@ export function flattenTree(input: {
       matchedItems.add(itemKey(item.root, item.id));
       keepAncestors(item.root, item.folderId);
     }
-    // A folder name is a reasonable thing to search for, so a matching folder and
-    // its ancestors stay visible even when no item inside matches.
     for (const folder of input.folders) {
       if (!folder.name.toLowerCase().includes(query)) continue;
       keepAncestors(folder.root, folder.id);

@@ -24,7 +24,6 @@ describe("entity model", () => {
   expect(draft.traits[0]!.id).not.toBe("ti-1");
   expect(draft.traits[0]).toMatchObject({ template_id: "t", values: { payload: { value: 1 } } });
   expect(buildEntityDraft(source, null).traits[0]!.id).not.toBe(draft.traits[0]!.id);
-  // The copy is independent of the template.
   draft.tags.push("x"); (draft.traits[0]!.values.payload as { value: number }).value = 2;
   expect(source.tags).toEqual(["role.guard"]); expect(source.traits[0]!.values.payload).toEqual({ value: 1 });
  });

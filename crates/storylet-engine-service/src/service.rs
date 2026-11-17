@@ -1,4 +1,3 @@
-//! Application service coordinator for Storylet Studio.
 
 use rusqlite::{OptionalExtension, TransactionBehavior};
 use serde::Serialize;
@@ -85,8 +84,6 @@ pub struct StudioService {
 pub(crate) struct StudioInner {
     pub(crate) store: Store,
     runtime: StoryletRuntime,
-    /// Live ChronoFlow v5 playtest sessions (REQ-CH-02). The persisted rows are
-    /// the source of truth; these are the runtime instances rebuilt from them.
     pub(crate) chrono_sessions: BTreeMap<String, ChronoPlaytestSession>,
     pub(crate) runs: BTreeMap<String, crate::runs::CachedRun>,
 }
@@ -191,7 +188,6 @@ impl StudioService {
         })
     }
 
-    // --- Project Settings & Bundles ---
 
     pub async fn get_project_metadata(&self) -> Result<ProjectMetadata, String> {
         let inner = self.inner.lock().await;
@@ -348,7 +344,6 @@ impl StudioService {
             .map_err(|e| e.to_string())
     }
 
-    // --- Content CRUD ---
 
     pub async fn list_content(&self, entity: &str) -> Result<Value, String> {
         ensure_content_kind(entity)?;
@@ -824,7 +819,6 @@ impl StudioService {
             .map_err(|error| ContentDeleteError::Persistence(error.to_string()))
     }
 
-    /// Move an item (or a folder) into a different folder of the same root.
     pub async fn move_content_item(
         &self,
         kind: &str,
@@ -883,7 +877,6 @@ impl StudioService {
         Ok(value)
     }
 
-    /// Where an entity, gameplay tag, asset, or trait is used.
     pub async fn content_references(
         &self,
         kind: &str,
@@ -962,7 +955,6 @@ impl StudioService {
         }
     }
 
-    // --- Studio Interaction Context ---
 
     pub async fn save_interaction_context(&self, context: &Value) -> Result<(), String> {
         let inner = self.inner.lock().await;
@@ -1031,7 +1023,6 @@ impl StudioService {
         }
     }
 
-    // --- Playtests & Runtime Engine Integration ---
 
     pub async fn create_playtest_session(
         &self,
@@ -1132,7 +1123,6 @@ impl StudioService {
             .create_session(session_id.clone(), proj.bundle, &proj.scenario_id)
             .map_err(|e| e.to_string())?;
 
-        // Persist session to Store
         persist_session_to_store(&mut inner, &session_id)?;
 
         let snap_val = serde_json::to_value(&snapshot).map_err(|e| e.to_string())?;

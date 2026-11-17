@@ -1,16 +1,9 @@
-/**
- * Plugin nodes live only in the authoring graph. Before a storylet is saved
- * each one is lowered into the core nodes the engine executes; the authored
- * node rides along as metadata on the fragment's entry node so loading the
- * storylet raises it back for editing.
- */
 import type { NarrativeEdge, NarrativeGraph, NarrativeNode } from "../narrativeGraphTypes.ts";
 import type { EntityRecord } from "../contracts.ts";
 import { nodeTypeContribution, type LowerContext } from "./runtime.ts";
 
 export interface PluginNodeMeta {
   group: string;
-  /** Present only on the fragment's entry node. */
   source?: NarrativeNode;
   exit?: string;
   inputs?: NarrativeEdge[];
@@ -99,8 +92,6 @@ export function raisePluginGraph(graph: NarrativeGraph): NarrativeGraph {
     edges.push(next);
   }
   for (const meta of groups.values()) edges.push(...(meta.inputs ?? []));
-  // Older canvas fragments owned an implicit Get Entity. Raise it as an
-  // explicit graph input so existing authored versions remain editable.
   for (const [group, meta] of groups) {
     if (meta.inputs || meta.source?.plugin_type !== "canvas.modify") continue;
     const source = graph.nodes.find((node) => groupOf.get(node.id) === group && node.type === "get_entity" &&

@@ -63,7 +63,6 @@ watch(viewMode, (value) => {
   try {
     localStorage.setItem(viewModeKey(), value);
   } catch {
-    // Persisting the view mode is best effort.
   }
 });
 

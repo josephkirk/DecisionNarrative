@@ -1,4 +1,3 @@
-//! Effect transactions and write-set conflict detection.
 
 use std::error::Error;
 use std::fmt;
@@ -57,8 +56,8 @@ impl<const WORDS: usize> DenseBitset<WORDS> {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WriteSet {
     pub tags: TagBitset,
-    pub metrics: DenseBitset<8>,  // 512
-    pub entities: DenseBitset<4>, // 256
+    pub metrics: DenseBitset<8>,
+    pub entities: DenseBitset<4>,
     pub items: DenseBitset<4>,
     pub scopes: DenseBitset<4>,
     pub reservations: DenseBitset<4>,

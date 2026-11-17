@@ -19,8 +19,6 @@ export const treeGraphPlugin = definePlugin({
       if (creating || !studioState.project) return;
       creating = true;
       try {
-        // Decide from the stored list: workspace state may not have loaded trait templates yet, and a stale
-        // empty list would make this overwrite user-edited traits with defaults.
         const stored = await StudioApi.listContent<TraitTemplateRecord>("trait_templates");
         const defaults = [treeGraphTemplate(), treeItemTemplate()];
         const templates = defaults.flatMap((template) => {

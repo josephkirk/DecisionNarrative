@@ -18,7 +18,6 @@ fn entry(key: &str, story_time: i64, facts: Vec<u16>) -> ChronicleEntry {
     }
 }
 
-/// P1..P4 in story order; P2 carries facts 10 and 11.
 fn canon() -> ChronicleTable {
     ChronicleTable::new(vec![
         entry("p4", 40, vec![]),
@@ -105,7 +104,6 @@ fn revert_reveal_removes_telling_and_facts() {
     assert_eq!(state, before);
 }
 
-// --- Reveal node -----------------------------------------------------------
 
 fn pin(name: &str, is_input: bool) -> PinDefinition {
     PinDefinition { pin_name: name.to_owned(), is_input }

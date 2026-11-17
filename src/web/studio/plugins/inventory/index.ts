@@ -17,7 +17,6 @@ export const inventoryPlugin = definePlugin({
       if (creating || !studioState.project) return;
       creating = true;
       try {
-        // Decide from the stored list: workspace state may not have loaded trait templates yet.
         const stored = await StudioApi.listContent<TraitTemplateRecord>("trait_templates");
         const templates = [inventoryOwnerTemplate(), itemTemplate()].filter((template) => !stored.some((existing) => existing.key === template.key));
         if (!templates.length) return;

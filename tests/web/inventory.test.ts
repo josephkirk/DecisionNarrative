@@ -85,7 +85,7 @@ test("inventory plugin decides from the stored traits, not possibly-unloaded wor
   const priorProject = studioState.project; const priorTraits = studioState.traitTemplates;
   try {
     studioState.project = { id: "p", name: "P" } as unknown as typeof studioState.project;
-    studioState.traitTemplates = []; // workspace state has not loaded trait templates yet
+    studioState.traitTemplates = [];
     const ctx = new Context("inventory-test");
     inventoryPlugin.apply(ctx);
     await new Promise((resolve) => setTimeout(resolve, 20));

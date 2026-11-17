@@ -54,10 +54,6 @@ function assign(kind: WorkspaceKind, rows: unknown[]) {
   }
 }
 
-/**
- * The folder a record currently sits in, as last loaded from the server.
- * Returns `undefined` when the record is unknown (e.g. an unsaved draft).
- */
 export function currentFolderId(kind: WorkspaceKind, key: string): string | null | undefined {
   switch (kind) {
     case "entities": {
@@ -81,7 +77,6 @@ export function currentFolderId(kind: WorkspaceKind, key: string): string | null
   }
 }
 
-/** Reload the requested authored kinds (and the project revision) into the studio state. */
 export async function refreshWorkspace(
   kinds: readonly WorkspaceKind[] = ALL_WORKSPACE_KINDS,
 ): Promise<void> {

@@ -7,7 +7,6 @@ import { registry, nodeTypeContribution, pluginNodeDeleted } from "../plugins/ru
 import StudioIcon from "./StudioIcon.vue";
 import { countLabel } from "../countLabel.ts";
 
-/** Icon for a node type header; tag nodes carry a small +/−/? qualifier. */
 const NODE_ICONS: Partial<Record<string, string>> = {
   start: "play", dialog: "chat", choice: "branch", image: "assets", go_to_location: "pin", teleport: "pin",
   graph_transform: "link", add_entity_tag: "tag", remove_entity_tag: "tag", has_entity_tag: "tag", plugin: "plug",
@@ -28,14 +27,12 @@ const emit = defineEmits<{
   (e: "select-node", nodeId: string | null): void;
 }>();
 
-// Pan & Zoom
 const zoom = ref(1.0);
 const panX = ref(40);
 const panY = ref(60);
 const isPanning = ref(false);
 const startPan = ref({ x: 0, y: 0 });
 
-/** Vertical room the floating toolbar takes (it wraps to two rows in narrow panes); the home view starts below it. */
 const toolbarRef = ref<HTMLElement | null>(null);
 const toolbarClearance = ref(60);
 let toolbarObserver: ResizeObserver | null = null;
@@ -46,14 +43,12 @@ onMounted(() => {
   toolbarObserver.observe(toolbar);
 });
 onBeforeUnmount(() => toolbarObserver?.disconnect());
-// Follow the toolbar only while the view is still at its home position.
 watch(toolbarClearance, (next, previous) => { if (panY.value === previous && zoom.value === 1) panY.value = next; });
 function resetView() {
   zoom.value = 1;
   panX.value = 40;
   panY.value = toolbarClearance.value;
 }
-/** Zooms out (never in past 100%) and pans so every node sits in view below the toolbar. */
 function fitView() {
   const container = containerRef.value;
   if (!container || !nodes.value.length) return resetView();
@@ -73,14 +68,11 @@ function fitView() {
   panY.value = toolbarClearance.value - minY * zoom.value;
 }
 
-// Graph state
 const nodes = ref<NarrativeNode[]>([]);
 const edges = ref<NarrativeEdge[]>([]);
-// Dragging node
 const draggingNodeId = ref<string | null>(null);
 const dragStartPos = ref({ x: 0, y: 0 });
 
-// Active connection drawing (from port to mouse)
 const activeConnection = ref<{
   fromNode: string;
   fromPort: string;
@@ -90,7 +82,6 @@ const activeConnection = ref<{
   currentY: number;
 } | null>(null);
 
-// Selected elements
 const selectedNodeId = computed({ get: () => props.selectedNodeId, set: (nodeId: string | null) => emit("select-node", nodeId) });
 const selectedEdgeId = ref<string | null>(null);
 const selectedNode = computed(() => nodes.value.find((node) => node.id === selectedNodeId.value) ?? null);
@@ -154,7 +145,6 @@ function eventToWorld(e: MouseEvent): { x: number; y: number } {
   };
 }
 
-// Canvas Mouse Interactions
 function onCanvasMouseDown(e: MouseEvent) {
   if ((e.target as HTMLElement).closest(".graph-node") || (e.target as HTMLElement).closest(".socket") || (e.target as HTMLElement).closest(".graph-toolbar")) return;
   selectedNodeId.value = null;
@@ -240,7 +230,6 @@ function openMenu(e: MouseEvent, kind: "canvas" | "node" | "edge", targetId?: st
   contextMenu.value = { kind, targetId, x: e.clientX - rect.left, y: e.clientY - rect.top };
   contextWorld.value = eventToWorld(e);
   nodeSearch.value = "";
-  // The canvas clips its children, so a menu opened near an edge flips back inside it.
   void nextTick(() => {
     const menu = contextMenuRef.value, menuState = contextMenu.value;
     if (!menu || !menuState) return;
@@ -262,7 +251,6 @@ function onWheel(e: WheelEvent) {
   zoom.value = Math.max(0.3, Math.min(2.0, zoom.value + delta));
 }
 
-// Node Header Dragging
 function startNodeDrag(e: MouseEvent, node: NarrativeNode) {
   e.stopPropagation();
   selectNode(node);
@@ -274,11 +262,9 @@ function startNodeDrag(e: MouseEvent, node: NarrativeNode) {
   };
 }
 
-/** Stored widths can be tiny (imported or hand-written graphs); below this the header and choices clip. */
 const MIN_NODE_WIDTH = 140;
 const nodeWidth = (node: NarrativeNode) => Math.max(node.width ?? 0, MIN_NODE_WIDTH);
 
-/** Mouse wheels only scroll vertically; turn that into sideways scrolling so hidden node types are reachable. */
 function scrollPalette(e: WheelEvent) {
   const palette = e.currentTarget as HTMLElement;
   if (palette.scrollWidth <= palette.clientWidth) return;
@@ -286,7 +272,6 @@ function scrollPalette(e: WheelEvent) {
   palette.scrollLeft += Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
 }
 
-// Socket Connection Dragging
 function startConnection(e: MouseEvent, node: NarrativeNode, port: string, socketYOffset: number) {
   e.stopPropagation();
   let startX = node.x + nodeWidth(node);
@@ -399,14 +384,11 @@ function removeNode(nodeId: string) {
   emitUpdate();
 }
 
-/** Footprint used to keep toolbar-inserted nodes off existing cards. */
 const NEW_NODE_SIZE = { w: 260, h: 160 } as const;
 
-// Create new node of type
 function addNode(type: NodeType, pluginType?: string) {
   const nextId = `node_${pluginType ? pluginType.replace(/[^a-z0-9]/gi, "_") : type}_${Date.now().toString(36)}`;
   const fromCanvasMenu = contextMenu.value?.kind === "canvas" && contextWorld.value !== null;
-  // Toolbar inserts land in the middle of the visible canvas (below the toolbar), whatever the pane width.
   const view = containerRef.value?.getBoundingClientRect();
   const screenX = view ? Math.max(24, view.width / 2 - NEW_NODE_SIZE.w / 2) : 400;
   const screenY = view ? Math.max(toolbarClearance.value, view.height / 2 - NEW_NODE_SIZE.h / 2) : 250;
@@ -417,8 +399,6 @@ function addNode(type: NodeType, pluginType?: string) {
     ? contextWorld.value!.y
     : Math.round((-panY.value + screenY) / zoom.value);
 
-  // Toolbar inserts would otherwise land on top of existing cards; step below
-  // whichever card the slot overlaps until it is free.
   if (!fromCanvasMenu) {
     const gap = 24;
     for (let attempts = 0; attempts <= nodes.value.length; attempts += 1) {
@@ -428,7 +408,6 @@ function addNode(type: NodeType, pluginType?: string) {
       if (!blocker) break;
       y = blocker.y + (blocker.height || NEW_NODE_SIZE.h) + gap;
     }
-    // A slot pushed below the visible area scrolls into view so the new card is never placed unseen.
     const bottom = (y + NEW_NODE_SIZE.h) * zoom.value + panY.value;
     if (view && bottom > view.height - gap) panY.value -= bottom - (view.height - gap);
   }
@@ -574,7 +553,6 @@ const conditionalBranchPins = [
   { id: "false", label: "False" },
 ];
 
-// Calculate SVG Bezier Curve between ports
 function calculateBezier(x1: number, y1: number, x2: number, y2: number): string {
   const dx = Math.abs(x2 - x1) * 0.5;
   const cx1 = x1 + Math.max(50, dx);
@@ -633,7 +611,6 @@ const computedEdges = computed(() => {
     @wheel="onWheel"
     @contextmenu.prevent="onCanvasContextMenu"
   >
-    <!-- Top Floating Toolbar -->
     <div ref="toolbarRef" class="graph-toolbar">
       <div class="graph-toolbar__palette" role="toolbar" aria-label="Add node" @wheel.stop="scrollPalette">
         <button class="node-tool-btn" @click="addNode('start')">Start</button>
@@ -672,7 +649,6 @@ const computedEdges = computed(() => {
       </div>
     </div>
 
-    <!-- Canvas Transform Layer -->
     <div
       class="graph-surface"
       :style="{
@@ -680,7 +656,6 @@ const computedEdges = computed(() => {
         transformOrigin: '0 0',
       }"
     >
-      <!-- SVG Connection Lines Layer -->
       <svg class="graph-svg-layer">
         <defs>
           <marker id="socket-arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -688,16 +663,13 @@ const computedEdges = computed(() => {
           </marker>
         </defs>
 
-        <!-- Existing Edges -->
         <g v-for="edge in computedEdges" :key="edge!.id">
-          <!-- Clickable thick hit area -->
           <path
             :d="edge!.path"
             class="edge-hit-area"
             @click.stop="selectedEdgeId = edge!.id; selectedNodeId = null; emit('select-node', null)"
             @contextmenu.stop.prevent="openMenu($event, 'edge', edge!.id)"
           />
-          <!-- Visible Bezier line -->
           <path
             :d="edge!.path"
             :class="['narrative-edge-line', selectedEdgeId === edge!.id ? 'selected' : '']"
@@ -708,7 +680,6 @@ const computedEdges = computed(() => {
 
         <path v-if="scissorStart && scissorEnd" :d="`M ${scissorStart.x} ${scissorStart.y} L ${scissorEnd.x} ${scissorEnd.y}`" class="scissor-line" />
 
-        <!-- Active Dragging Connection Line -->
         <path
           v-if="activeConnection"
           :d="calculateBezier(activeConnection.startX, activeConnection.startY, activeConnection.currentX, activeConnection.currentY)"
@@ -717,7 +688,6 @@ const computedEdges = computed(() => {
         />
       </svg>
 
-      <!-- Node Cards Layer -->
       <div
         v-for="node in nodes"
         :key="node.id"
@@ -731,7 +701,6 @@ const computedEdges = computed(() => {
         @click.stop="selectNode(node)"
         @contextmenu.stop.prevent="openMenu($event, 'node', node.id)"
       >
-        <!-- Node Header -->
         <div class="node-header" @mousedown="startNodeDrag($event, node)">
           <div class="node-header-title">
             <span class="node-icon">
@@ -742,9 +711,7 @@ const computedEdges = computed(() => {
           <button type="button" class="node-close-btn" title="Delete node" aria-label="Delete node" @mousedown.stop @click.stop="removeNode(node.id)"><StudioIcon name="close" /></button>
         </div>
 
-        <!-- Node Body Content based on Type -->
         <div class="node-body">
-          <!-- START -->
           <div v-if="node.type === 'start'">
             <div class="field-label">Entrypoint</div>
             <div style="font-size:12px; font-weight:600;">{{ node.text || 'Begin Scene' }}</div>
@@ -766,7 +733,6 @@ const computedEdges = computed(() => {
             <div style="font-size:11px;">{{ node.operation || 'set' }} {{ node.property_key || 'property key' }} = {{ node.value ?? '' }}</div>
           </div>
 
-          <!-- DIALOG -->
           <div v-else-if="node.type === 'dialog'">
             <div class="field-label">Dialogue sequence</div>
             <div style="font-size:11px;">{{ countLabel(node.sections?.length ?? 0, "section") }} · {{ countLabel(node.sections?.reduce((total, section) => total + section.items.length, 0) ?? 0, "step") }}</div>
@@ -775,12 +741,10 @@ const computedEdges = computed(() => {
             </div>
           </div>
 
-          <!-- CHOICE -->
           <div v-else-if="node.type === 'choice'">
             <div class="field-label" style="margin-bottom:8px;">Choices & Branching:</div>
             <div v-for="(opt, idx) in node.choices" :key="opt.id" class="choice-option-row">
               <input v-model="opt.text" class="form-input" style="font-size:11px; padding:4px 6px; flex:1; min-width:0; text-overflow:ellipsis;" :title="opt.text" @input="emitUpdate" />
-              <!-- Sockets on each choice item -->
               <div
                 class="socket output-socket choice-socket"
                 :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }"
@@ -790,7 +754,6 @@ const computedEdges = computed(() => {
             </div>
           </div>
 
-          <!-- IMAGE -->
           <div v-else-if="node.type === 'image'">
             <div v-if="!node.image_url" style="font-size:11px; color:var(--text-muted); padding:8px 0;">
               No image URL configured.
@@ -803,7 +766,6 @@ const computedEdges = computed(() => {
             </div>
           </div>
 
-          <!-- TELEPORT / DIVERT -->
           <div v-else-if="node.type === 'teleport'">
             <div class="field-label">Target Storylet</div>
             <div style="font-size:11px;">{{ node.destination_storylet || 'Select to configure…' }}</div>
@@ -866,7 +828,6 @@ const computedEdges = computed(() => {
             <div class="field-label">Passion state change</div>
             <div style="font-size:11px;">{{ node.op?.micro_deltas?.length ?? 0 }} typed deltas · {{ node.op?.active_ops?.length ?? 0 }} active-pool ops</div>
           </div>
-          <!-- ADD / REMOVE ENTITY TAG -->
           <div v-else-if="node.type === 'add_entity_tag' || node.type === 'remove_entity_tag'">
             <div class="field-label">{{ node.type === 'add_entity_tag' ? 'Add Entity Tag' : 'Remove Entity Tag' }}</div>
             <div style="font-size:11px; font-weight:600; color:var(--text-main); margin-top:2px;">
@@ -877,7 +838,6 @@ const computedEdges = computed(() => {
             </div>
           </div>
 
-          <!-- HAS ENTITY TAG -->
           <div v-else-if="node.type === 'has_entity_tag'">
             <div class="field-label">Has Tag Query</div>
             <div style="font-size:11px; font-weight:600; margin-bottom:4px; color:var(--text-main);">
@@ -896,7 +856,6 @@ const computedEdges = computed(() => {
             <div v-else style="font-size:12px; font-weight:700; color:var(--status-danger);">{{ node.jump_to_storylet || 'Terminal ending' }}</div>
           </div>
         </div>
-        <!-- Data/flow input sockets -->
         <template v-if="node.type !== 'start'">
           <div v-if="node.type === 'apply_command' || node.type === 'condition' || (node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.entityInput && !nodeTypeContribution(node.plugin_type)?.booleanOutput)" class="socket input-socket" style="top:18px" :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }" title="Flow input" @mouseup="completeConnection($event, node, 'input')"></div>
           <div v-if="node.type === 'get_entity_property' || node.type === 'apply_command' || (node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.entityInput)" class="socket input-socket" style="top:52px" :style="{ backgroundColor: targetPinColor(node, 'entity') }" :title="node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.itemInput ? 'Inventory owner input' : 'Entity data input'" @mouseup="completeConnection($event, node, 'entity')"></div>
@@ -908,7 +867,6 @@ const computedEdges = computed(() => {
           <div v-if="!['get_entity', 'get_entity_property', 'apply_command', 'condition', 'has_entity_tag', 'knows', 'compare', 'and', 'or'].includes(node.type) && !(node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.entityInput)" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Flow input" @mouseup="completeConnection($event, node, 'input')"></div>
         </template>
 
-        <!-- Default Output Socket (Right edge) -->
         <div
           v-if="node.type !== 'choice' && node.type !== 'end' && node.type !== 'condition' && (node.type !== 'waypoint_conversation' || waypointExitPins(node).length === 0)"
           class="socket output-socket"
@@ -937,7 +895,6 @@ const computedEdges = computed(() => {
   position: relative;
   width: 100%;
   height: 100%;
-  /* clip, not hidden: focusing a partly off-screen node input must not scroll the canvas (it would shift the toolbar). */
   overflow: clip;
   background-color: var(--bg-canvas);
   background-image: radial-gradient(var(--border-muted) 1.2px, transparent 1.2px);
@@ -968,7 +925,6 @@ const computedEdges = computed(() => {
   z-index: 100;
 }
 
-/* The palette scrolls on its own so the view controls never overlap it. */
 .graph-toolbar__palette {
   display: flex;
   align-items: center;
@@ -1012,7 +968,6 @@ const computedEdges = computed(() => {
 }
 .node-tool-btn:active { transform: scale(0.96); }
 .node-tool-plugin { color: var(--accent-hover); }
-/* Narrow panes: palette gets the full first row, view controls move to their own row. */
 @container pane (max-width: 560px) {
   .graph-toolbar { flex-wrap: wrap; }
   .graph-toolbar__palette { flex: 1 1 100%; }
@@ -1064,7 +1019,6 @@ const computedEdges = computed(() => {
   pointer-events: none;
 }
 
-/* Three clamped lines end in an ellipsis instead of a hard cut mid-glyph; long URLs wrap. */
 .node-dialog-preview {
   margin-top: 6px;
   color: var(--text-muted);
@@ -1104,7 +1058,6 @@ const computedEdges = computed(() => {
   stroke-dasharray: 5 4;
 }
 
-/* Node cards: solid fill, hairline border, rounded corners, 2px type strip on top. */
 .graph-node {
   position: absolute;
   background: var(--bg-card);
@@ -1206,7 +1159,6 @@ const computedEdges = computed(() => {
   margin-bottom: 6px;
 }
 
-/* Sockets */
 .socket {
   position: absolute;
   width: 12px;
@@ -1230,8 +1182,6 @@ const computedEdges = computed(() => {
   top: 35px;
 }
 
-/* In-row sockets stay positioned so their hit area wraps the dot, not the whole row
-   (a row-sized hit area made the choice text field start a wire instead of taking focus). */
 .choice-socket {
   position: relative;
   top: auto;

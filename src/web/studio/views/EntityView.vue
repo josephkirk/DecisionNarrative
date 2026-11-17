@@ -114,7 +114,6 @@ const confirmDiscard = () => !dirty.value || window.confirm("Discard unsaved cha
 onBeforeRouteLeave(confirmDiscard);
 onBeforeRouteUpdate(confirmDiscard);
 
-/** Mouse wheels scroll the tab strip sideways when plugin tabs overflow a narrow pane. */
 function scrollTabs(event: WheelEvent) {
   const strip = event.currentTarget as HTMLElement;
   if (strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
@@ -124,7 +123,6 @@ function scrollTabs(event: WheelEvent) {
 </script>
 <template>
   <div v-if="!loading && draft" class="entity-page-surface scroll-fade-mask">
-    <!-- Top Header Card matching Image #2 -->
     <header class="entity-hero-card">
       <div class="entity-hero-left">
         <ThumbnailPicker
@@ -179,7 +177,6 @@ function scrollTabs(event: WheelEvent) {
       </div>
     </header>
 
-    <!-- Tab Navigation matching Image #2 -->
     <nav class="entity-tabs" aria-label="Entity sections" @wheel="scrollTabs">
       <button :class="['entity-tab', activeTab === 'properties' && 'is-active']" @click="activeTab = 'properties'">
         <svg aria-hidden="true" class="tab-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -202,9 +199,7 @@ function scrollTabs(event: WheelEvent) {
       </button>
     </nav>
 
-    <!-- Properties Content Stack -->
     <section v-if="activeTab === 'properties'" class="entity-content-stack">
-      <!-- Template card (when not intrinsic) -->
       <div v-if="!intrinsic" class="content-block archetype-block">
         <div class="content-block-head">
           <span class="block-title">Template</span>
@@ -245,7 +240,6 @@ function scrollTabs(event: WheelEvent) {
         </div>
       </div>
 
-      <!-- 1. Description -->
       <div class="content-block lore-block">
         <div class="content-block-head">
           <span class="block-title">Description</span>
@@ -261,7 +255,6 @@ function scrollTabs(event: WheelEvent) {
         ></textarea>
       </div>
 
-      <!-- 2. Gameplay Tags -->
       <div class="content-block tags-block">
         <div class="content-block-head">
           <span class="block-title">Gameplay tags</span>
@@ -278,7 +271,6 @@ function scrollTabs(event: WheelEvent) {
         <span v-else class="intrinsic-tags-text" :class="{ 'is-empty': !draft.tags.length }">{{ draft.tags.length ? draft.tags.join(', ') : 'No gameplay tags' }}</span>
       </div>
 
-      <!-- 3. Typed Properties -->
       <div class="content-block properties-block">
         <div class="content-block-head">
           <span class="block-title">Typed properties</span>
@@ -391,7 +383,6 @@ function scrollTabs(event: WheelEvent) {
   min-width: 220px;
 }
 
-/* Traits tab */
 .editor-column { display: flex; flex-direction: column; gap: 12px; min-width: 0; container-type: inline-size; }
 .trait-add { display: flex; gap: 8px; margin: 0; }
 .trait-add select { flex: 1; min-width: 0; }

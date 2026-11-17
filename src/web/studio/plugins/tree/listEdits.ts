@@ -18,7 +18,6 @@ interface ItemEdits {
   timer?: ReturnType<typeof setTimeout>;
 }
 
-// Edits outlive the panel so changing entity tabs cannot discard a failed save.
 export const treeItemEdits = reactive(new Map<string, ItemEdits>());
 export const treeCellDrafts = ref<Record<string, string>>(Object.create(null));
 export const treeCellErrors = ref<Record<string, string>>(Object.create(null));
@@ -60,7 +59,6 @@ function scheduleSave(state: ItemEdits): void {
   state.timer = undefined;
   if (state.scheduled || !Object.keys(state.pending).length) return;
   state.scheduled = true;
-  // Serialize workspace refreshes as well as writes to prevent stale cross-item refreshes.
   saveQueue = saveQueue.then(async () => {
     state.scheduled = false;
     const changes = state.pending;
@@ -122,7 +120,6 @@ export async function flushAllTreeItems(): Promise<boolean> {
   return ![...treeItemEdits.values()].some((state) => hasChanges(state) || !!state.error);
 }
 
-// Item edits can outlive the panel when the author switches entity tabs.
 router.beforeEach(async () => {
   if (Object.keys(treeCellDrafts.value).length) {
     notify("Finish or discard the TreeItem input before leaving.", "error");

@@ -85,7 +85,6 @@ onMounted(async () => {
   preconditionGraph.value = draft.precondition_graph?.nodes.length ? raisePluginGraph(draft.precondition_graph) : defaultPreconditionGraph();
   draft.precondition_graph = preconditionGraph.value;
   lastSavedSnapshot.value = JSON.stringify(draft);
-  // The editor now shows the stored storylet: plugins drop temp changes left by an unsaved session.
   emitPluginEvent("storylet/opened", isNew.value ? "" : String(draft.id));
   const requestedNode = route.query.node;
   if (typeof requestedNode === "string" && currentGraph.value.nodes.some((node) => node.id === requestedNode)) selectedNodeId.value = requestedNode;
@@ -139,7 +138,6 @@ async function playFromHere() {
   }
 }
 
-/** Plugin nodes are lowered to core nodes for validation and storage. */
 function lowerForEngine(): { graph: NarrativeGraph; preconditionGraph: NarrativeGraph } | null {
   const entities = studioState.entities;
   const pluginIssues = [

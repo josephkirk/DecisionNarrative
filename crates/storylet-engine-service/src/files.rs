@@ -1,8 +1,6 @@
-//! Project-local file storage for uploaded thumbnails.
 
 use std::path::{Path, PathBuf};
 
-/// Largest accepted thumbnail upload (10 MiB).
 pub const MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -29,7 +27,6 @@ fn is_web_url(reference: &str) -> bool {
     reference.starts_with("http://") || reference.starts_with("https://")
 }
 
-/// Accepts an `http(s)` URL or a relative image path inside the project.
 pub fn validate_image_ref(reference: &str) -> Result<(), String> {
     let trimmed = reference.trim();
     if trimmed.is_empty() {
@@ -62,8 +59,6 @@ fn magic_matches(extension: &str, bytes: &[u8]) -> bool {
     }
 }
 
-/// Store an uploaded thumbnail under `project-files/thumbnails/` and return the
-/// project-relative path that is persisted on records.
 pub fn store_thumbnail(root: &Path, original_name: &str, bytes: &[u8]) -> Result<String, FileError> {
     let extension = image_extension(original_name).ok_or_else(|| {
         FileError::Invalid("thumbnail must be a .png, .jpg, or .jpeg file".into())
@@ -89,8 +84,6 @@ pub fn store_thumbnail(root: &Path, original_name: &str, bytes: &[u8]) -> Result
     Ok(format!("project-files/thumbnails/{file_name}"))
 }
 
-/// Resolve a stored project-relative image path, refusing anything that escapes
-/// the project directory.
 pub fn resolve_project_file(root: &Path, relative: &str) -> Result<PathBuf, FileError> {
     let trimmed = relative.trim();
     if trimmed.is_empty() {

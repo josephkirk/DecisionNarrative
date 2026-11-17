@@ -1,4 +1,3 @@
-//! Runtime projection for TreeGraph position nodes.
 use serde_json::{json, Value};
 use crate::contracts::{EntityProperty, EntityRecord, PropertyType, TraitTemplateRecord};
 
@@ -52,7 +51,6 @@ pub fn validate_pointer_graph(graph: &crate::narrative_graph::NarrativeGraph, en
     Ok(())
 }
 
-/// Refuse tree edits that would invalidate a saved storylet's selected position.
 pub fn validate_owner_references(
     owner_id: &str,
     traits: Option<&[crate::contracts::TraitInstance]>,

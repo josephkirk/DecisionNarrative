@@ -1,4 +1,3 @@
-/** Resolves what a canvas reference shape points at: name, thumbnail, colour and route. */
 import { studioState } from "../../state.ts";
 import { traitLabels } from "../../entityModel.ts";
 import { thumbnailUrl } from "../../thumbnails.ts";

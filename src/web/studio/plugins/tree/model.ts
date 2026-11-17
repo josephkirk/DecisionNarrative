@@ -767,7 +767,6 @@ export function layoutTree(graph: TreeGraph): TreeLayout {
   };
   for (const root of roots) visit(root, 0);
   drain();
-  // A component containing only cycles has no indegree-zero root.
   for (const node of graph.nodes) {
     if (!depth.has(node)) {
       visit(node, 0);
@@ -775,7 +774,6 @@ export function layoutTree(graph: TreeGraph): TreeLayout {
     }
   }
 
-  // Find max level
   let maxLevel = 0;
   for (const d of depth.values()) {
     if (d > maxLevel) maxLevel = d;
@@ -799,7 +797,6 @@ export function layoutTree(graph: TreeGraph): TreeLayout {
   const positions: Record<string, { x: number; y: number }> = Object.create(null);
 
   if (graph.direction === "radial") {
-    // Keep rings separated even when a crowded inner level needs a large radius.
     const ringStep = 180 + Math.max(0, maxNodeHeight - CARD_HEIGHT, maxNodeWidth - CARD_WIDTH);
     const itemArc = 200 + Math.max(0, maxNodeWidth - CARD_WIDTH, maxNodeHeight - CARD_HEIGHT);
     const ringRadii: number[] = [];

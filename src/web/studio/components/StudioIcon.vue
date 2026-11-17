@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-/** Stroke icons drawn on a 24px grid (Lucide geometry), sized by font-size. */
 const PATHS: Record<string, string[]> = {
   storylets: ["M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z", "M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"],
   entities: ["M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2", "M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"],

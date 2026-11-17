@@ -84,7 +84,6 @@ function routeEntity(route: InteractionRoute): InteractionEntity | undefined {
   return undefined;
 }
 
-/** Resolves route, project, and runtime identity into a local, model-free view of current user context. */
 export function buildInteractionContext(input: {
   route: InteractionRoute;
   project: ProjectMetadata | null;

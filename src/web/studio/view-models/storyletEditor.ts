@@ -70,7 +70,7 @@ export function useStoryletEditorViewModel(storyletId?: string, folderId?: strin
         isNew.value = false;
       } else {
         draft.revision += 1;
-        draft.approved_revision = null; // Unapproved until explicit approval
+        draft.approved_revision = null;
         await StudioApi.updateContent("storylets", draft.id, draft);
         notify(`Saved draft revision ${draft.revision}`, "success");
       }

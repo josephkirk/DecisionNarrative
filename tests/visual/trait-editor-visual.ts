@@ -1,5 +1,3 @@
-// Visual test: trait property editors are driven by property `editor` metadata, not trait/property names.
-// Run: STORYLET_SERVICE_BIN=<bin> node tests/visual/trait-editor-visual.ts
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import os from "node:os";
@@ -43,7 +41,7 @@ function check(name: string, ok: boolean, detail = "") {
 
 let browser;
 try {
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { /* starting */ } await sleep(200); }
+  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { } await sleep(200); }
   await api("POST", "/api/v3/content/gameplay_tags", { id: "guard", name: "guard" });
   await api("POST", "/api/v3/content/gameplay_tags", { id: "thief", name: "thief" });
   const traits = await api("GET", "/api/v3/content/trait_templates");
@@ -51,7 +49,6 @@ try {
   const character = byKey("character"), settings = byKey("character_settings"), location = byKey("location");
   check("seeded character_settings carries editor metadata",
     settings.properties[0].editor?.selection_only === true && settings.properties[1].editor?.entity_trait_key === "location");
-  // Custom trait with arbitrary key/property names uses the same metadata; a look-alike without metadata gets none.
   await api("POST", "/api/v3/content/trait_templates", { id: "faction_rules", key: "faction_rules", name: "Faction Rules", properties: [
     { id: "p1", key: "standing", name: "Standing", type: "string", default: "", editor: { option_source: "gameplay_tags", selection_only: true } },
     { id: "p2", key: "base", name: "Base", type: "entity", default: null, editor: { entity_trait_key: "location" } },
@@ -98,7 +95,6 @@ try {
   const lookHome = (await options(card("Lookalike"), "Home Location")).map((t) => t.trim());
   check("look-alike entity property is unfiltered", lookHome.includes("Harbor") && lookHome.includes("Crate"), lookHome.join(","));
 
-  // Interaction: choose a role and a location, save, reload, values persist.
   await roleSelect.selectOption("thief");
   await card("Character Settings").locator(".trait-row", { hasText: "Home Location" }).locator("select").first().selectOption("harbor");
   await page.locator(".entity-unsaved-pill").waitFor();
@@ -112,7 +108,6 @@ try {
   check("selection restored after reload", (await roleSelect.inputValue()) === "thief");
   await page.screenshot({ path: path.join(outDir, "trait-editor-saved.png") });
 
-  // Numeric bounds from property metadata clamp typed, stepped and keyboard values in the editor.
   const score = card("Faction Rules").locator(".trait-row", { hasText: "Score" });
   const scoreInput = score.locator(".num-stepper__input");
   await scoreInput.fill("99");
@@ -132,7 +127,6 @@ try {
   const bounded = await api("GET", "/api/v3/content/entities/hero");
   check("clamped value saves successfully", bounded.traits.find((t: { id: string }) => t.id === "f1").values.score === 10);
 
-  // Fresh-project inventory plugin: owns its two traits; bounded grid size clamps in the shared editor.
   await page.goto(`${base}/#/entities/crate`);
   let inv: { id: string } | undefined, item: { id: string; unique?: boolean } | undefined;
   for (let i = 0; i < 50 && !(inv && item); i++) {
@@ -153,7 +147,6 @@ try {
   await page.screenshot({ path: path.join(outDir, "trait-editor-inventory.png") });
   await page.goto(`${base}/#/entities/hero`);
 
-  // Backend rejects an out-of-range bounded value.
   const bad = await fetch(`${base}/api/v3/content/entities`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...saved, traits: saved.traits.map((t: { id: string }) => t.id === "f1" ? { ...t, values: { score: 11 } } : t) }) });
   check("out-of-range bounded value is rejected", bad.status >= 400, String(bad.status));

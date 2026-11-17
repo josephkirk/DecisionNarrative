@@ -18,7 +18,6 @@ export const vectorCanvasPlugin = definePlugin({
   version: "1.1.0",
   description: "Adds the Canvas trait. Entities with it get a layered vector canvas with markers, sticky notes and entity/storylet references, plus a Modify Canvas story node.",
   apply(ctx) {
-    // Ensure the project has the "Canvas" trait.
     let creating = false;
     async function ensureTrait() {
       if (creating || !studioState.project || findCanvasTrait(studioState.traitTemplates)) return;
@@ -35,7 +34,6 @@ export const vectorCanvasPlugin = definePlugin({
     ctx.on("workspace/loaded", () => void ensureTrait());
     void ensureTrait();
 
-    // UI attached to an entity: only entities with the Canvas trait.
     ctx.entityPanel({
       id: "vector-canvas",
       label: "Canvas",
@@ -44,15 +42,12 @@ export const vectorCanvasPlugin = definePlugin({
       component: VectorCanvas,
     });
 
-    // UI attached to a property.
     ctx.propertyEditor({
       id: "vector-canvas-doc",
       matches: (property) => property.key === CANVAS_PROPERTY_KEY,
       component: CanvasPropertySummary,
     });
 
-    // Graph node that modifies its input and returns core nodes as output.
-    // Deleting the node stages removal of the version it owns (temp history).
     ctx.nodeType({
       ...modifyCanvasNode,
       inspector: ModifyCanvasInspector,
@@ -67,8 +62,6 @@ export const vectorCanvasPlugin = definePlugin({
       },
     });
 
-    // Temp history: commit staged canvas versions when the storylet is saved,
-    // discard them when the storylet is closed or reopened unsaved.
     const report = (what: string) => (error: unknown) =>
       notify(`Canvas plugin could not ${what}: ${error instanceof Error ? error.message : String(error)}`, "error");
     ctx.on("storylet/saved", (storyletId, graph) => {

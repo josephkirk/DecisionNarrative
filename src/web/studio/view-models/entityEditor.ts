@@ -4,7 +4,6 @@ import type { ContentReference, EntityRecord, PropertyValue, TraitInstance, Trai
 import { newTraitInstance, uniqueTraitProblem } from "../entityModel.ts";
 import { notify, studioState } from "../state.ts";
 import { refreshWorkspace, currentFolderId } from "./workspace.ts";
-/** Built-in tabs, or `plugin:<panel id>` for an entity panel contributed by a plugin. */
 export type EntityTab = "properties" | "traits" | "references" | `plugin:${string}`;
 export function useEntityEditor(entityId: string) {
   const isWorld = computed(() => entityId === "world");
@@ -64,7 +63,6 @@ export function useEntityEditor(entityId: string) {
       return false;
     }
   }
-  // The tree's "Use as template" saves outside this editor: follow the template flag without touching other edits.
   watch(() => studioState.entities.find((entity) => entity.id === entityId)?.is_template, (isTemplate) => {
     if (isTemplate === undefined || !draft.value || saving.value || loading.value) return;
     const saved = JSON.parse(savedJson.value) as EntityRecord;

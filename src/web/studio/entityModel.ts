@@ -1,14 +1,9 @@
 import type { EntityRecord, PropertyValue, TraitTemplateRecord, TraitInstance } from "./contracts.ts";
 
-/** Deep copy that also works on Vue reactive proxies, which `structuredClone` rejects. */
 function clone<T>(value: T): T {
   return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T);
 }
 
-/**
- * Draft for a new entity. With a template the description, thumbnail, tags, properties and traits are
- * copied (traits get fresh instance ids) and `template_id` records the origin; without one the entity is empty.
- */
 export function buildEntityDraft(template: EntityRecord | null, folderId: string | null): EntityRecord {
   const base = { id: "", object_id: "", game_id: "", game_id_auto: true, is_template: false, folder_id: folderId };
   if (!template) return { ...base, template_id: null, name: "New Entity", description: "", thumbnail: null, tags: [], properties: [], traits: [] };
@@ -27,7 +22,6 @@ export function buildEntityDraft(template: EntityRecord | null, folderId: string
   };
 }
 
-/** Save payload that flips only the template flag. */
 export function withTemplateFlag(entity: EntityRecord, isTemplate: boolean): EntityRecord {
   return { ...entity, is_template: isTemplate };
 }

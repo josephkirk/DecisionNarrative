@@ -32,10 +32,8 @@ const GROUPS: Array<{ kind: string; label: string; color: string }> = [
 
 const viewMode = ref<"split" | "graph" | "list">("split");
 
-// Category filters
 const activeCategories = ref<Set<string>>(new Set(GROUPS.map((g) => g.kind)));
 
-// Sync active categories when references change
 watch(
   () => props.references,
   () => {
@@ -106,7 +104,6 @@ function open(reference: ContentReference) {
 }
 }
 
-// Graph node representations & layout
 interface GraphNode {
   id: string;
   label: string;
@@ -140,7 +137,6 @@ const canvasWrapRef = ref<HTMLDivElement | null>(null);
 const nodeDragOffset = ref({ x: 0, y: 0 });
 const nodePositions = ref<Map<string, { x: number; y: number }>>(new Map());
 
-// Default layout follows the pane: centered, with a ring small enough that labels stay inside narrow panes.
 const paneSize = ref({ width: 640, height: 520 });
 let paneObserver: ResizeObserver | undefined;
 watch(canvasWrapRef, (element) => {
@@ -171,7 +167,6 @@ const graphData = computed(() => {
   const edges: GraphEdge[] = [];
 
   const count = visibleRefs.length;
-  // Labels are up to ~130px wide and the alternate ring sits 35px further out.
   const fit = Math.min(paneSize.value.width / 2 - 75, paneSize.value.height / 2 - 70) - 35;
   const radius = Math.max(50, Math.min(Math.min(220, Math.max(140, count * 18)), fit));
 
@@ -181,7 +176,6 @@ const graphData = computed(() => {
     const groupDef = GROUPS.find((g) => g.kind === ref.source_kind);
     const color = groupDef?.color ?? "#94a3b8";
 
-    // Radial layout with gentle spiral offset
     const angle = (index / Math.max(1, count)) * 2 * Math.PI - Math.PI / 2;
     const dist = radius + (index % 2 === 0 ? 0 : 35);
     const defaultX = centerNode.x + Math.cos(angle) * dist;
@@ -285,7 +279,6 @@ function resetGraphView() {
 
 <template>
   <div class="reference-container">
-    <!-- TOOLBAR WITH VIEW MODE SELECTOR -->
     <header class="reference-toolbar">
       <div style="display:flex; align-items:center; gap:10px;">
         <span class="reference-toolbar__title">Reference Explorer</span>
@@ -323,9 +316,7 @@ function resetGraphView() {
     <div v-if="props.loading" class="reference-list__empty">Loading references…</div>
     <div v-else-if="!props.references.length" class="reference-list__empty">No references found for this record.</div>
 
-    <!-- MAIN BODY -->
     <div v-else :class="['reference-body', `is-${viewMode}`]">
-      <!-- 1. GRAPHIFY NODE-LINK VIEW -->
       <section v-if="viewMode === 'graph' || viewMode === 'split'" class="reference-graph-pane">
         <div
           ref="canvasWrapRef"
@@ -335,7 +326,6 @@ function resetGraphView() {
           @mouseup="stopPan"
           @mouseleave="stopPan"
         >
-          <!-- SVG Graph -->
           <svg
             class="reference-svg"
             width="100%"
@@ -350,13 +340,11 @@ function resetGraphView() {
             </defs>
 
             <g :transform="`translate(${panX}, ${panY}) scale(${zoom})`">
-              <!-- Background grid dots -->
               <pattern id="ref-dots" width="24" height="24" patternUnits="userSpaceOnUse">
                 <circle cx="12" cy="12" r="1" fill="rgba(255,255,255,0.08)" />
               </pattern>
               <rect x="-2000" y="-2000" width="5000" height="5000" fill="url(#ref-dots)" />
 
-              <!-- Edges -->
               <g class="graph-edges">
                 <g v-for="edge in graphData.edges" :key="edge.id" class="graph-edge-group">
                   <line
@@ -369,7 +357,6 @@ function resetGraphView() {
                     :stroke-opacity="hoveredNodeId && hoveredNodeId !== edge.source.id ? 0.2 : 0.65"
                     stroke-dasharray="4,2"
                   />
-                  <!-- Edge label at midpoint -->
                   <text
                     v-if="viewMode === 'graph' || hoveredNodeId === edge.source.id"
                     :x="(edge.source.x + edge.target.x) / 2"
@@ -385,7 +372,6 @@ function resetGraphView() {
                 </g>
               </g>
 
-              <!-- Nodes -->
               <g class="graph-nodes">
                 <g
                   v-for="node in graphData.nodes"
@@ -397,21 +383,18 @@ function resetGraphView() {
                   @mouseleave="hoveredNodeId = null"
                   @click.stop="onNodeClick(node)"
                 >
-                  <!-- Outer glow ring on hover/center -->
                   <circle
                     :r="node.isCenter ? 26 : 16"
                     :fill="node.color"
                     :fill-opacity="node.isCenter ? 0.25 : 0.15"
                     filter="url(#node-glow)"
                   />
-                  <!-- Main Node Circle -->
                   <circle
                     :r="node.isCenter ? 18 : 10"
                     :fill="node.color"
                     stroke="#0f1117"
                     :stroke-width="node.isCenter ? 3 : 2"
                   />
-                  <!-- Center icon or node dot -->
                   <text
                     v-if="node.isCenter"
                     text-anchor="middle"
@@ -422,7 +405,6 @@ function resetGraphView() {
                     🎯
                   </text>
 
-                  <!-- Node Text Label -->
                   <text
                     text-anchor="middle"
                     :dy="node.isCenter ? 36 : 22"
@@ -433,7 +415,6 @@ function resetGraphView() {
                   >
                     {{ node.label.length > 20 ? node.label.slice(0, 18) + '…' : node.label }}
                   </text>
-                  <!-- Sublabel / Category -->
                   <text
                     text-anchor="middle"
                     :dy="node.isCenter ? 48 : 32"
@@ -448,14 +429,12 @@ function resetGraphView() {
             </g>
           </svg>
 
-          <!-- Graph Controls -->
           <div class="graph-zoom-controls">
             <button class="btn btn-secondary" title="Zoom In" @click="zoom = Math.min(2.5, zoom + 0.2)">+</button>
             <button class="btn btn-secondary" title="Zoom Out" @click="zoom = Math.max(0.4, zoom - 0.2)">−</button>
             <button class="btn btn-secondary" title="Reset View" @click="resetGraphView">↺</button>
           </div>
 
-          <!-- COMMUNITIES SIDEBAR (Matching Image #1) -->
           <aside class="graph-communities-panel">
             <div class="communities-header">COMMUNITIES</div>
 
@@ -485,7 +464,6 @@ function resetGraphView() {
         </div>
       </section>
 
-      <!-- 2. TRADITIONAL LIST VIEW (Matching Image #2) -->
       <section v-if="viewMode === 'list' || viewMode === 'split'" class="reference-list-pane">
         <div class="reference-list">
           <section v-for="group in grouped" :key="group.kind" class="reference-list__group">
@@ -579,7 +557,6 @@ function resetGraphView() {
   height: calc(100% - 45px);
 }
 
-/* Graph Canvas Pane */
 .reference-graph-pane {
   position: relative;
   flex: 1;
@@ -626,7 +603,6 @@ function resetGraphView() {
   font-weight: 700;
 }
 
-/* Communities Sidebar (Matching Image #1) */
 .graph-communities-panel {
   position: absolute;
   top: 16px;
@@ -693,7 +669,6 @@ function resetGraphView() {
   margin: 2px 0;
 }
 
-/* Nodes & Edges */
 .graph-node {
   cursor: pointer;
   transition: transform 0.05s ease;
@@ -708,7 +683,6 @@ function resetGraphView() {
   text-shadow: 0 1px 3px rgba(0,0,0,0.8);
 }
 
-/* List View Pane */
 .reference-list-pane {
   flex: 1;
   height: 100%;

@@ -1,4 +1,3 @@
-//! Axum HTTP router and request handlers for Storylet Studio.
 
 use axum::{
     Json, Router,
@@ -361,7 +360,6 @@ async fn query_library(
     }
 }
 
-// Content CRUD
 fn unknown_kind(entity: &str) -> Option<Response> {
     if crate::contracts::CONTENT_KINDS.contains(&entity) {
         None
@@ -593,7 +591,6 @@ async fn approve_storylet(
 
 
 
-// Scenarios
 async fn list_scenarios(State(s): State<StudioService>) -> Response {
     list_content(State(s), Path("scenarios".into())).await
 }
@@ -627,7 +624,6 @@ async fn preview_scenario(
     }
 }
 
-// Playtests
 #[derive(Deserialize)]
 struct WorkspacePlaytestRequest {
     #[serde(rename = "startLocationId")]
@@ -1043,7 +1039,6 @@ async fn fork_playtest(
     }
 }
 
-// HTTP MCP
 async fn export_playtest(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
     match s.export_playtest_session(&id).await {
         Ok(state) => (StatusCode::OK, Json(json!(state))).into_response(),

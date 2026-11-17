@@ -38,7 +38,6 @@ test("fresh designer workspace exposes intrinsic World and unified Entity APIs",
         health = await request("/health");
         if (health.ok) break;
       } catch {
-        // Wait for bind
       }
       await Bun.sleep(100);
     }

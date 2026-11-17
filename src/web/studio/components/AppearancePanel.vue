@@ -55,7 +55,6 @@ async function chooseImage(event: Event) {
   }
 }
 
-/** Arrow keys move through the 4-column preset grid, as in native radio groups. */
 const PRESET_COLUMNS = 4;
 function presetKey(event: KeyboardEvent, index: number) {
   const steps: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: PRESET_COLUMNS, ArrowUp: -PRESET_COLUMNS };

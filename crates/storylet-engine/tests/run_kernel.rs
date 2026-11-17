@@ -783,13 +783,10 @@ fn selected_scene_ignores_unrelated_waiter_on_unchosen_branch() {
     content.dispatcher.storylets.push(StoryletDef { storylet_id: 1, payload_node_guid: 6, is_repeatable: true, ..Default::default() });
     content.dispatcher.rebuild_index();
     let mut run = RunKernel::start(&content, RunStart::Beginning, 1).unwrap();
-    // A separate earlier invocation is still waiting when this scene starts.
     let unrelated = run.instance.nodes.iter_mut().find(|n| n.node_guid == 7).unwrap();
     unrelated.state = NodeExecutionState::ActiveLatent;
     unrelated.waiter_wake_ms = 1_000_000;
     run.act(&content, 0, RunAction::PlayStorylet { node_guid: 5, storylet: 1 }).unwrap();
-    // The runtime stores one state per GUID: reject overlapping invocations
-    // instead of silently stealing the already-active waiter's ownership.
     assert!(run.act(&content, 0, RunAction::Choose { node_guid: 6, output_pin: 1 }).is_err());
     assert_eq!(run.instance.node(7).unwrap().waiter_wake_ms, 1_000_000);
     run.act(&content, 0, RunAction::Choose { node_guid: 6, output_pin: 0 }).unwrap();
@@ -1148,7 +1145,6 @@ fn selected_root_choice_is_not_routed_to_dormant_mission_copy() {
     assert!(run.instance.completed_storylets.contains(1));
 }
 
-// --- Inspect: provenance and chronicle ---------------------------------------
 
 use storylet_engine::chrono_chronicle::{ChronicleEntry, ChronicleTable};
 use storylet_engine::chrono_participants::KnowKind;
@@ -1174,7 +1170,6 @@ fn edge(from: u32, from_pin: &str, to: u32) -> EdgeConnection {
     }
 }
 
-/// `choice(left) -> chain of mutators -> end`; `right -> end`.
 fn chain_fixture(chain: Vec<NodeKind>) -> RunContent {
     let mut content = fixture();
     content.registry = GameplayTagRegistry::compile(["fact".to_string(), "fact.clue".to_string()]).unwrap();
@@ -1245,7 +1240,6 @@ fn canon_entry(key: &str, story_time: i64) -> ChronicleEntry {
 
 #[test]
 fn inspect_chronicle_numbers_told_entries_in_telling_order() {
-    // Canon order after sorting: p1 (0), p2 (1), p3 (2). P2 is told first, then P1; P3 is never told.
     let mut content = chain_fixture(vec![reveal(1), reveal(0)]);
     content.chronicle = ChronicleTable::new(vec![canon_entry("p1", 10), canon_entry("p2", 20), canon_entry("p3", 30)]);
     let mut run = RunKernel::start(&content, RunStart::Beginning, 3).unwrap();
@@ -1271,7 +1265,6 @@ fn view_exposes_the_hub_node_so_clients_can_play_also_here_storylets() {
     run.act(&content, 0, RunAction::Choose { node_guid: 1, output_pin: 0 }).unwrap();
     let view = run.view(&content, 0);
     assert!(!view.also_here.is_empty());
-    // The advertised hub plus a listed storylet is a valid action.
     let hub = view.hub.expect("a hub is pending");
     assert_eq!(hub, 10);
     let first = view.also_here[0].id;

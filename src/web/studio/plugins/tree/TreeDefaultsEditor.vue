@@ -208,7 +208,6 @@ function onCustomCssInput(event: Event) {
 
 <template>
   <div class="tree-defaults-editor">
-    <!-- Conditional parse error alert -->
     <div v-if="parsed.error" class="tree-defaults-error" role="alert">
       <strong>TreeGraph Trait Error:</strong> {{ parsed.error }}
     </div>
@@ -218,7 +217,6 @@ function onCustomCssInput(event: Event) {
     </div>
 
     <div v-else class="tree-defaults-sections">
-      <!-- Section: Node Defaults -->
       <fieldset class="tree-defaults-group"><legend class="tree-defaults-legend">Node Defaults</legend>
         <div class="tree-defaults-grid">
           <div class="tree-defaults-field">
@@ -307,7 +305,6 @@ function onCustomCssInput(event: Event) {
         </div>
       </fieldset>
 
-      <!-- Section: Wire Defaults -->
       <fieldset class="tree-defaults-group"><legend class="tree-defaults-legend">Wire Defaults</legend>
         <div class="tree-defaults-grid">
           <div class="tree-defaults-field">
@@ -355,7 +352,6 @@ function onCustomCssInput(event: Event) {
         </div>
       </fieldset>
 
-      <!-- Section: Canvas Background -->
       <fieldset class="tree-defaults-group"><legend class="tree-defaults-legend">Canvas Background</legend>
         <div class="tree-defaults-grid">
           <div class="tree-defaults-field">
@@ -383,7 +379,6 @@ function onCustomCssInput(event: Event) {
         </div>
       </fieldset>
 
-      <!-- Section: Custom CSS -->
       <fieldset class="tree-defaults-group"><legend class="tree-defaults-legend">Custom Tree CSS</legend>
         <p class="form-hint css-help">CSS applies only inside this tree canvas; @import is not supported.</p>
 

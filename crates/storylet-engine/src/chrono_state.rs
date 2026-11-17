@@ -1,10 +1,3 @@
-//! Data-oriented gameplay tag bitsets, the layered world graph, and bijective
-//! (reversible) state deltas for the ChronoFlow narrative engine.
-//!
-//! This module owns the state layer only: fixed-size inline tag bitsets, the
-//! immutable dense tag registry, the structure-of-arrays world state table, and
-//! the reversible delta operators. It contains no dispatch, clock, or
-//! call-history logic, and it depends only on `std` and `serde`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -17,29 +10,16 @@ use crate::chrono_participants::{
     FactIx, KnowledgeRow, KnowledgeTable, ParticipantTable, PartIx,
 };
 
-/// Number of 64-bit words in a `TagBitset` (REQ-DOD-02).
 pub const WORD_COUNT: usize = 4;
-/// Maximum number of compilable gameplay tags: `WORD_COUNT * 64`.
 pub const MAX_TAGS: usize = WORD_COUNT * 64;
-/// Maximum number of per-entity tag containers.
 pub const MAX_ENTITIES: usize = 256;
-/// Maximum number of dense passion values.
 pub const MAX_PASSIONS: usize = 256;
-/// Longest accepted gameplay tag string.
 pub const MAX_TAG_LENGTH: usize = 128;
-/// Maximum candidate assignments explored while matching a graph pattern.
 pub const PATTERN_SEARCH_BUDGET: usize = 4096;
 
-/// Gameplay tag that marks an actor row as present at the player's current
-/// location.
 pub const LOCATION_CURRENT_TAG: &str = "location.current";
-/// WorldGraph relation that places a character row at a location; movement
-/// recomputes the marker from these edges.
 pub const LOCATED_AT_RELATION: &str = "located_at";
 
-/// Fixed-size inline gameplay tag container. Adding, removing, and querying
-/// never allocate: the storage is a contiguous inline array of `WORD_COUNT`
-/// 64-bit words (REQ-DOD-02).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TagBitset {
     words: [u64; WORD_COUNT],
@@ -56,13 +36,10 @@ impl TagBitset {
         TagBitset { words }
     }
 
-    /// The raw words, in word order.
     pub const fn words(&self) -> &[u64; WORD_COUNT] {
         &self.words
     }
 
-    /// Bit `index` within the fixed container. Indices outside the container
-    /// read as `false` because no bit can exist beyond `MAX_TAGS`.
     pub const fn bit(&self, index: u16) -> bool {
         if index as usize >= MAX_TAGS {
             return false;
@@ -86,16 +63,12 @@ impl TagBitset {
         Ok(())
     }
 
-    /// Self-inverting toggle: applying the same mask twice restores the exact
-    /// original bits (REQ-REV-01).
     pub fn apply_xor(&mut self, mask: &TagBitset) {
         for word in 0..WORD_COUNT {
             self.words[word] ^= mask.words[word];
         }
     }
 
-    /// Union into this container; used to fold effect masks into a
-    /// `MutationOp`.
     pub fn merge(&mut self, other: &TagBitset) {
         for word in 0..WORD_COUNT {
             self.words[word] |= other.words[word];
@@ -110,7 +83,6 @@ impl TagBitset {
         count
     }
 
-    /// Population count of `self & other`, used for salience specificity.
     pub fn popcount_intersection(&self, other: &TagBitset) -> u32 {
         let mut count = 0u32;
         for word in 0..WORD_COUNT {
@@ -137,8 +109,6 @@ impl TagBitset {
         true
     }
 
-    /// Branchless precondition test: all required bits present, no forbidden
-    /// bits present.
     pub fn matches_query(&self, required_all: &TagBitset, forbidden_any: &TagBitset) -> bool {
         for word in 0..WORD_COUNT {
             if self.words[word] & required_all.words[word] != required_all.words[word] {
@@ -160,7 +130,6 @@ impl TagBitset {
         true
     }
 
-    /// XOR mask between two containers, used to build a `BijectiveDelta`.
     fn xor_with(&self, other: &TagBitset) -> TagBitset {
         let mut mask = TagBitset::new();
         for word in 0..WORD_COUNT {
@@ -170,7 +139,6 @@ impl TagBitset {
     }
 }
 
-/// Semantic layer of a world graph vertex (REQ-WB-01).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
@@ -182,7 +150,6 @@ pub enum GraphLayer {
     Fact = 3,
 }
 
-/// Compact set of independent capabilities represented by one world vertex.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct GraphLayers(u8);
@@ -205,7 +172,6 @@ impl From<GraphLayer> for GraphLayers {
     }
 }
 
-/// Typed attribute value stored on a vertex.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AttributeValue {
@@ -220,7 +186,6 @@ pub enum AttributeValue {
 }
 
 impl AttributeValue {
-    /// Numeric view used by ordered attribute predicates.
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             AttributeValue::Int(value) => Some(*value as f64),
@@ -262,9 +227,6 @@ pub struct WorldVertex {
     pub vertex_id: String,
     #[serde(default)]
     pub layers: GraphLayers,
-    /// Entity row this vertex represents, when the vertex stands for an
-    /// authored entity. Movement uses this to place the current-location tag on
-    /// actor rows through WorldGraph relations.
     #[serde(default)]
     pub entity_index: Option<u16>,
     #[serde(default)]
@@ -285,15 +247,11 @@ pub struct WorldEdge {
     pub weight: f32,
 }
 
-/// Reference to a vertex: a literal id, or the vertex bound by a left-hand
-/// side vertex pattern at the given index.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum GraphBinding {
     Literal(String),
     VertexPattern(usize),
-    /// Matched LHS edge, used by `remove_edges` so a pattern can delete the
-    /// relation it matched.
     EdgePattern(usize),
 }
 
@@ -319,7 +277,6 @@ pub struct EdgePattern {
     pub target: Option<GraphBinding>,
 }
 
-/// Left-hand side of a graph transformation rule (REQ-WB-02).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GraphPattern {
     #[serde(default)]
@@ -355,7 +312,6 @@ pub struct AttributeAssignment {
     pub value: AttributeValue,
 }
 
-/// Right-hand side mutation of a graph transformation rule (REQ-WB-02).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GraphMutation {
     #[serde(default)]
@@ -376,8 +332,6 @@ pub struct GraphTransformRule {
     pub rhs: GraphMutation,
 }
 
-/// Deterministic result of matching a left-hand side pattern: matched ids in
-/// pattern order.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GraphMatch {
     #[serde(default)]
@@ -386,8 +340,6 @@ pub struct GraphMatch {
     pub edges: Vec<String>,
 }
 
-/// Local cache that makes a graph transformation exactly reversible
-/// (REQ-WB-03).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GraphDiffRecord {
     #[serde(default)]
@@ -398,18 +350,11 @@ pub struct GraphDiffRecord {
     pub added_edge_ids: Vec<String>,
     #[serde(default)]
     pub removed_edges: Vec<WorldEdge>,
-    /// vertex_id -> (attribute_key -> prior value)
     #[serde(default)]
     pub previous_attributes: BTreeMap<String, BTreeMap<String, Option<AttributeValue>>>,
 }
 
 
-/// Immutable, dense, deterministic gameplay tag registry (REQ-DOD-03).
-///
-/// `compile` assigns tag ids in sorted order, so the same input set always
-/// produces the same indices and the same closure masks. The registry stores no
-/// parent arrays per container; it stores two precomputed lookup tables plus the
-/// CSR coupling matrix and threshold rules.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GameplayTagRegistry {
     tag_to_id: BTreeMap<String, u16>,
@@ -418,7 +363,6 @@ pub struct GameplayTagRegistry {
 }
 
 impl GameplayTagRegistry {
-    /// Empty registry with no compiled tags.
     pub fn empty() -> Self {
         GameplayTagRegistry {
             tag_to_id: BTreeMap::new(),
@@ -427,8 +371,6 @@ impl GameplayTagRegistry {
         }
     }
 
-    /// Compiles hierarchical tags into dense indices in deterministic sorted
-    /// order and precomputes the ancestor and descendant closure masks.
     pub fn compile(tags: impl IntoIterator<Item = String>) -> Result<Self, ChronoStateError> {
         let mut unique = BTreeSet::new();
         for tag in tags {
@@ -503,7 +445,6 @@ impl GameplayTagRegistry {
         self.descendants.get(index as usize)
     }
 
-    /// Adds a tag together with its ancestor closure (REQ-DOD-03).
     pub fn add_hierarchical(
         &self,
         container: &mut TagBitset,
@@ -518,7 +459,6 @@ impl GameplayTagRegistry {
         Ok(())
     }
 
-    /// Hierarchical query in one bitwise AND (REQ-DOD-03).
     pub fn has_hierarchical(&self, container: &TagBitset, index: u16) -> bool {
         match self.descendants_mask(index) {
             Some(mask) => container.intersects(mask),
@@ -530,8 +470,6 @@ impl GameplayTagRegistry {
 
 
 
-/// One micro-passion slot for a Star NPC: its weight toward the macro passion
-/// and whether it is hidden from the player (`passion_pool` entry).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MicroPassionDef {
     pub npc_id: u16,
@@ -541,8 +479,6 @@ pub struct MicroPassionDef {
     pub is_hidden: bool,
 }
 
-/// Zero-sum passion link between two Star NPCs: a gain on `source_passion_id`
-/// is an equal and opposite change on `target_passion_id`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RivalPassionLink {
     pub target_character_id: u16,
@@ -551,18 +487,14 @@ pub struct RivalPassionLink {
     pub weight: f32,
 }
 
-/// Direction a passion threshold is evaluated in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PassionDirection {
-    /// Active while the passion value is at or above the trigger.
     #[default]
     Up,
-    /// Active while the passion value is at or below the trigger.
     Down,
 }
 
-/// Crossing and reversion rule for one Star NPC macro passion.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PassionThresholdRule {
     pub npc_id: u16,
@@ -579,8 +511,6 @@ pub struct PassionBounds {
     pub min: f32,
     pub max: f32,
 }
-/// A Star NPC: micro-passions, trust inertia, clamped macro bounds, and
-/// zero-sum rival links.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StarNpcDef {
     pub npc_id: u16,
@@ -590,8 +520,6 @@ pub struct StarNpcDef {
     pub zero_sum_links: Vec<RivalPassionLink>,
 }
 
-/// Star NPC definitions in deterministic order: NPCs by id, passion slots by
-/// id, links and thresholds sorted by their key fields.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PassionRegistry {
     npcs: BTreeMap<u16, StarNpcDef>,
@@ -627,8 +555,6 @@ impl PassionRegistry {
             if !registry.npcs.contains_key(&npc_id) {
                 return Err(ChronoStateError::UnknownStarNpc { npc_id });
             }
-            // Two rules owning one bit would fight over set/clear; reject the
-            // ambiguous authoring instead of emitting contradictory events.
             if !threshold_bits.insert(rule.threshold_tag_bit) {
                 return Err(ChronoStateError::DuplicateThresholdRule {
                     passion_id: npc_id,
@@ -691,7 +617,6 @@ impl PassionRegistry {
         self.npcs.get(&npc_id)
     }
 
-    /// The Star NPC that owns a passion slot.
     pub fn owner_of(&self, passion_id: u16) -> Option<u16> {
         self.passion_owner.get(&passion_id).copied()
     }
@@ -705,19 +630,11 @@ impl PassionRegistry {
     }
 }
 
-/// Data-oriented world state table (REQ-DOD-04).
-///
-/// Entity tag containers and passions are indexed by dense tag index. Vertex and
-/// edge tables are kept sorted by id so that a graph transformation and its
-/// reversal restore byte-identical tables.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorldStateTable {
-    /// QBN, arc, clue, tool, and threshold flags.
     pub global_tags: TagBitset,
-    /// Per-entity tag containers (locations, characters, items).
     #[serde(default)]
     pub entity_tags: Vec<TagBitset>,
-    /// Dense Star-NPC passion pool, active passions, and derived macro values.
     #[serde(default)]
     pub passions: PassionState,
     #[serde(default)]
@@ -728,18 +645,12 @@ pub struct WorldStateTable {
     pub current_location_entity: Option<u16>,
     #[serde(default)]
     pub current_location_tag_mask: TagBitset,
-    /// Who acts. Empty in a v5 world until `ensure_participants` adds the
-    /// implicit player. Participant 0's location is projected into
-    /// `current_location_entity`.
     #[serde(default)]
     pub participants: ParticipantTable,
-    /// Who knows which fact.
     #[serde(default)]
     pub knowledge: KnowledgeTable,
-    /// Who was told which canon entry, in telling order.
     #[serde(default)]
     pub telling: TellingTable,
-    /// The world clock; `None` in a timeless project.
     #[serde(default)]
     pub clock: Option<crate::chrono_space::ClockState>,
 }
@@ -789,9 +700,6 @@ impl WorldStateTable {
         Ok(())
     }
 
-    /// Seeds the current location and the tags it contributes to the global
-    /// mask. Call this at scenario start so a later move removes exactly the
-    /// contributed bits.
     pub fn seed_current_location(&mut self, entity_id: u16) -> Result<(), ChronoStateError> {
         if entity_id as usize >= self.entity_tags.len() {
             return Err(ChronoStateError::EntityIndexOutOfRange { index: entity_id });
@@ -808,13 +716,6 @@ impl WorldStateTable {
         Ok(())
     }
 
-    /// Normalizes participants and knowledge after construction or
-    /// deserialization. Idempotent; loaders and later tasks call it
-    /// explicitly, `new()` does not.
-    ///
-    /// - participant columns are truncated to the shortest one;
-    /// - an empty table becomes the implicit player at the current location;
-    /// - knowledge rows are sorted by `(holder, fact)`, first duplicate wins.
     pub fn ensure_participants(&mut self) {
         let table = &mut self.participants;
         let shortest = table
@@ -836,22 +737,16 @@ impl WorldStateTable {
             .dedup_by_key(|row| (row.holder, row.fact));
     }
 
-    /// Where participant `p` is, if it is anywhere.
     pub fn active_location(&self, p: PartIx) -> Option<u16> {
         self.participants.location.get(p as usize).copied().flatten()
     }
 
-    /// Records the location current when a delta starts being built from
-    /// scratch, so reverting a delta that never went through
-    /// `apply_mutation` does not clobber `current_location_entity`.
     fn stamp_previous_location(&self, delta: &mut BijectiveDelta) {
         if delta.is_empty() && delta.previous_current_location.is_none() {
             delta.previous_current_location = self.current_location_entity;
         }
     }
 
-    /// Teaches `row.holder` a fact. A holder that already knows the fact keeps
-    /// its first source and nothing is recorded in `delta`.
     pub fn apply_learn(&mut self, row: KnowledgeRow, delta: &mut BijectiveDelta) {
         self.stamp_previous_location(delta);
         if self.knowledge.learn(row) {
@@ -859,8 +754,6 @@ impl WorldStateTable {
         }
     }
 
-    /// Tells `holder` the chronicle `entry` and teaches them its `facts` with
-    /// `kind`. Returns `false` and changes nothing if they were already told.
     pub fn apply_reveal(
         &mut self,
         holder: PartIx,
@@ -881,10 +774,6 @@ impl WorldStateTable {
         true
     }
 
-    /// Moves participant `p`. Moving participant 0 also updates the
-    /// `current_location_entity` projection, its tag mask and the contributed
-    /// global tags, exactly as a player move in `apply_mutation_with_registry`
-    /// does. Panics if `p` or `to` is out of range; callers validate content.
     pub fn apply_move(&mut self, p: PartIx, to: Option<u16>, delta: &mut BijectiveDelta) {
         self.stamp_previous_location(delta);
         let from = self.participants.set_location(p, to);
@@ -907,18 +796,12 @@ impl WorldStateTable {
         self.current_location_entity = to;
     }
 
-    /// Vertex that represents an authored entity row, if one exists.
     pub fn vertex_for_entity(&self, entity_index: u16) -> Option<&WorldVertex> {
         self.vertices
             .iter()
             .find(|vertex| vertex.entity_index == Some(entity_index))
     }
 
-    /// Places `location_current_bit` on every actor row whose vertex is linked
-    /// to `location_vertex_id` by a relation of `relation_type`, and clears the
-    /// bit from every other actor row. Vertices are scanned in table order
-    /// (sorted by id) and every flip is recorded in `delta`, so rollback
-    /// restores each row exactly.
     pub fn sync_actor_presence(
         &mut self,
         delta: &mut BijectiveDelta,
@@ -987,10 +870,6 @@ impl WorldStateTable {
             .filter(|v| v.vertex_id == vertex_id)
     }
 
-    /// Apply one reversible typed property command to a vertex. Property keys are
-    /// stored exactly as supplied (callers commonly use the `prop.` namespace).
-    /// Existing values are never silently coerced: `set`, arithmetic, and toggle
-    /// all preserve the property's declared type.
     pub fn apply_property_command(
         &mut self,
         vertex_id: &str,
@@ -1052,9 +931,6 @@ impl WorldStateTable {
         Ok(diff)
     }
 
-    /// Revert a property command using the same graph-diff machinery as graph
-    /// transforms. This keeps property writes reversible without a second
-    /// property/passion value store.
     pub fn revert_property_command(
         &mut self,
         diff: &GraphDiffRecord,
@@ -1067,9 +943,6 @@ impl WorldStateTable {
         self.edges.get(index).filter(|e| e.edge_id == edge_id)
     }
 
-    /// Matches a left-hand side pattern deterministically. Patterns are tried
-    /// in declaration order and candidates in sorted id order; vertices and
-    /// edges backtrack when a later element fails. The search is bounded.
     pub fn match_graph_pattern(
         &self,
         pattern: &GraphPattern,
@@ -1108,8 +981,6 @@ impl WorldStateTable {
         budget: &mut usize,
     ) -> Result<bool, ChronoStateError> {
         if index == pattern.vertices.len() {
-            // Edges constrain the vertex assignment, so a failed edge match
-            // must send the caller back to reconsider its last vertex.
             return self.match_pattern_edges(
                 pattern,
                 0,
@@ -1135,7 +1006,6 @@ impl WorldStateTable {
             if used.contains(&vertex.vertex_id) {
                 continue;
             }
-            // Only viable candidates consume the backtracking budget.
             if *budget == 0 {
                 return Err(ChronoStateError::PatternSearchExhausted);
             }
@@ -1211,15 +1081,12 @@ impl WorldStateTable {
         Ok(false)
     }
 
-    /// Applies a graph transformation rule and returns the cache needed to
-    /// reverse it exactly (REQ-WB-03).
     pub fn apply_graph_transform(
         &mut self,
         rule: &GraphTransformRule,
     ) -> Result<GraphDiffRecord, ChronoStateError> {
         let match_ = self.match_graph_pattern(&rule.lhs)?;
 
-        // Resolve and validate the right-hand side before anything changes.
         let removed_vertex_ids = resolve_ids(&rule.rhs.remove_vertices, &match_.vertices)?;
         for id in &removed_vertex_ids {
             if id.is_empty() {
@@ -1258,8 +1125,6 @@ impl WorldStateTable {
             if id.is_empty() {
                 return Err(ChronoStateError::EmptyVertexId);
             }
-            // Removing and re-adding the same id in one rule moves or replaces
-            // the vertex instead of duplicating it.
             if (self.vertex(&id).is_some() && !removed_vertex_ids.contains(&id))
                 || added_vertices.iter().any(|v| v.vertex_id == id)
             {
@@ -1285,8 +1150,6 @@ impl WorldStateTable {
             });
         }
 
-        // Spawned vertices count as present, so a rule can create a subgraph
-        // (or retarget onto a new vertex) in one transform.
         let present: BTreeSet<String> = self
             .vertices
             .iter()
@@ -1301,7 +1164,6 @@ impl WorldStateTable {
             if id.is_empty() {
                 return Err(ChronoStateError::EmptyEdgeId);
             }
-            // A removed edge may be re-added under the same id.
             if (self.edge(&id).is_some() && !removed_edge_ids.contains(&id))
                 || added_edges.iter().any(|e| e.edge_id == id)
             {
@@ -1355,7 +1217,6 @@ impl WorldStateTable {
             assignments.push((vertex_id, assignment.key.clone(), assignment.value.clone()));
         }
 
-        // Everything is validated; now mutate and cache for exact reversal.
         let mut diff = GraphDiffRecord::default();
 
         for id in &removed_vertex_ids {
@@ -1382,9 +1243,6 @@ impl WorldStateTable {
                 .iter_mut()
                 .find(|v| v.vertex_id == vertex_id)
                 .expect("validated vertex");
-            // Only the first write in a diff records the original value;
-            // overwriting it would make the reverse restore an intermediate
-            // value.
             diff.previous_attributes
                 .entry(vertex_id)
                 .or_default()
@@ -1396,7 +1254,6 @@ impl WorldStateTable {
         Ok(diff)
     }
 
-    /// Reverses a graph transformation, restoring the exact prior tables.
     pub fn revert_graph_transform(
         &mut self,
         diff: &GraphDiffRecord,
@@ -1416,8 +1273,6 @@ impl WorldStateTable {
             }
         }
         for vertex in &diff.removed_vertices {
-            // Remove-and-re-add in one rule is legal; the added copy is removed
-            // before the original is restored.
             if self.vertex(&vertex.vertex_id).is_some()
                 && !diff.added_vertex_ids.contains(&vertex.vertex_id)
             {
@@ -1504,7 +1359,6 @@ impl WorldStateTable {
     }
 }
 
-/// One per-entity tag mutation.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityTagMutation {
     pub entity_id: u16,
@@ -1512,14 +1366,12 @@ pub struct EntityTagMutation {
     pub remove_tags: TagBitset,
 }
 
-/// Atomic mutation request (REQ-REV-01).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct MutationOp {
     pub add_global_tags: TagBitset,
     pub remove_global_tags: TagBitset,
     #[serde(default)]
     pub entity_tag_ops: Vec<EntityTagMutation>,
-    /// Reversible player movement: sets the current location entity.
     #[serde(default)]
     pub move_player: Option<u16>,
 }
@@ -1529,7 +1381,6 @@ pub struct EntityMaskPair {
     pub xor_mask: TagBitset,
 }
 
-/// Universal reversible record for tag, passion, and graph changes.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BijectiveDelta {
     pub global_xor_mask: TagBitset,
@@ -1543,13 +1394,10 @@ pub struct BijectiveDelta {
     pub passion_delta: Option<PassionDelta>,
     #[serde(default)]
     pub graph_diffs: Vec<GraphDiffRecord>,
-    /// Facts newly learned, undone with `KnowledgeTable::forget`.
     #[serde(default)]
     pub knowledge_added: Vec<(PartIx, FactIx)>,
-    /// `(participant, from, to)`, undone in reverse order.
     #[serde(default)]
     pub participant_moves: Vec<(PartIx, Option<u16>, Option<u16>)>,
-    /// Chronicle entries newly told, undone with `TellingTable::forget`.
     #[serde(default)]
     pub tellings_added: Vec<(PartIx, ChronIx)>,
 }
@@ -1567,10 +1415,6 @@ impl BijectiveDelta {
     }
 }
 
-/// The one location-change rule: removes the tags the old location contributed
-/// to `global`, adds the tags of the new location, and makes them the new
-/// location mask. Shared by player moves in `apply_mutation_with_registry` and
-/// `WorldStateTable::apply_move` so the two cannot drift.
 fn swap_location_tags(global: &mut TagBitset, location_mask: &mut TagBitset, target: TagBitset) {
     for word in 0..WORD_COUNT {
         global.words[word] &= !location_mask.words[word];
@@ -1579,8 +1423,6 @@ fn swap_location_tags(global: &mut TagBitset, location_mask: &mut TagBitset, tar
     *location_mask = target;
 }
 
-/// Applies a mutation without a registry: no coupling propagation and no
-/// threshold evaluation.
 pub fn apply_mutation(
     state: &mut WorldStateTable,
     op: &MutationOp,
@@ -1588,8 +1430,6 @@ pub fn apply_mutation(
     apply_mutation_with_registry(state, op, &GameplayTagRegistry::empty())
 }
 
-/// Applies a mutation through the registry: passion deltas, single-pass CSR
-/// zero-sum propagation, deterministic threshold evaluation, entity tag masks,
 pub fn apply_mutation_with_registry(
     state: &mut WorldStateTable,
     op: &MutationOp,
@@ -1696,7 +1536,6 @@ pub fn revert_delta(
     Ok(())
 }
 
-/// Dense Star-NPC passion values, macro values, and active-passion flags.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PassionState {
     pub micro: Vec<f32>,
@@ -1720,14 +1559,12 @@ impl PassionState {
     }
 }
 
-/// Passion changes and active-pool selection for one authored action.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PassionMutation {
     pub micro_deltas: Vec<(u16, f32)>,
     pub active_ops: Vec<(u16, bool)>,
 }
 
-/// Runtime notification for a threshold-linked narrative graph.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PassionThresholdEvent {
     pub npc_id: u16,
@@ -1736,7 +1573,6 @@ pub struct PassionThresholdEvent {
     pub activated: bool,
 }
 
-/// The exact inverse data for one passion mutation, plus its forward events.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PassionDelta {
     pub micro_undos: Vec<(u16, f32)>,
@@ -1756,8 +1592,6 @@ impl PassionDelta {
     }
 }
 
-/// Applies a passion change, propagates signed zero-sum links, recalculates
-/// weighted-average macro values from active passions, and records crossings.
 pub fn apply_passion_mutation(
     state: &mut PassionState,
     op: &PassionMutation,
@@ -1858,8 +1692,6 @@ pub fn apply_passion_mutation(
         if npc.npc_id as usize >= state.macro_values.len() {
             return Err(ChronoStateError::EntityIndexOutOfRange { index: npc.npc_id });
         }
-        // A registry compiled against a larger capacity would otherwise index
-        // these vectors out of bounds.
         if let Some(micro) = npc
             .micro_passions
             .iter()
@@ -1903,8 +1735,6 @@ pub fn apply_passion_mutation(
                     value: raw,
                 });
             }
-            // Spec macro bounds are [-100, 100]; intersect with the authored
-            // bound so an unbounded default still obeys the spec range.
             let min = npc.macro_bounds.min.max(-100.0);
             let max = npc.macro_bounds.max.min(100.0);
             if min > max {
@@ -1923,9 +1753,6 @@ pub fn apply_passion_mutation(
             .copied()
             .ok_or(ChronoStateError::EntityIndexOutOfRange { index: rule.npc_id })?;
         let new = macro_plan.get(&rule.npc_id).copied().unwrap_or(old);
-        // The bit is owned by this rule. Inferring the prior state from it
-        // would let an external write suppress or duplicate the crossing, so
-        // crossings come from the value transition only.
         let crossing = match rule.direction {
             PassionDirection::Up if old < rule.trigger_value && new >= rule.trigger_value => {
                 Some(true)
@@ -1985,7 +1812,6 @@ pub fn apply_passion_mutation(
     Ok(delta)
 }
 
-/// Restores all passion values, active flags, macro values, and threshold tags.
 pub fn revert_passion_delta(
     state: &mut PassionState,
     delta: &PassionDelta,
@@ -2605,7 +2431,6 @@ mod tests {
         });
 
         state.seed_current_location(0).unwrap();
-        // An unrelated global flag that movement must not clobber.
         state
             .global_tags
             .set_bit(tag_bit(&registry, "role.trickster"))
@@ -2634,7 +2459,6 @@ mod tests {
         assert_eq!(state, before);
         assert_eq!(serde_json::to_string(&state).unwrap(), before_json);
 
-        // A non-location move target is rejected before anything mutates.
         let rejected = apply_mutation_with_registry(
             &mut state,
             &MutationOp {

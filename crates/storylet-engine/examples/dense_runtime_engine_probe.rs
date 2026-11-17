@@ -1,13 +1,3 @@
-//! Engine-type probe for the dense runtime design.
-//!
-//! Validates two seams that a synthetic benchmark cannot:
-//! - `FlowGraphInstance` call history can rebuild completed-storylet bits.
-//! - zero-sum passion propagation writes targets not named by the explicit op.
-//!
-//! This is not production code and does not modify engine tables.
-//!
-//! Run:
-//!   cargo run --release --manifest-path crates/storylet-engine/Cargo.toml --example dense_runtime_engine_probe
 
 use storylet_engine::chrono_dispatch::{StoryletDef, UnifiedDispatcher};
 use storylet_engine::chrono_runtime::{

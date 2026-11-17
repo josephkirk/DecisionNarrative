@@ -1,4 +1,3 @@
-//! Incoming-reference discovery for authored entities, assets, and trait templates.
 use serde_json::Value;
 use crate::contracts::{
     AssetRecord, ContentReference, EntityRecord, GameplayTagRecord, PropertyType,
@@ -149,8 +148,6 @@ pub fn entity_references(
     sorted(out)
 }
 
-/// A direct entity property of `property_type` whose value contains `needle`;
-/// returns the property name as the reference field.
 fn direct_property_reference(
     entity: &EntityRecord,
     property_type: PropertyType,
@@ -175,7 +172,6 @@ fn type_label(property_type: &PropertyType) -> &'static str {
     }
 }
 
-/// Where a storylet is linked from: entity storylet properties (direct or trait).
 pub fn storylet_references(storylet_id: &str, ctx: &ReferenceContext) -> Vec<ContentReference> {
     let mut out = Vec::new();
     for entity in ctx.entities {
@@ -269,7 +265,6 @@ fn role_query(query: &str, name: &str) -> bool {
         && q.split(|c| c == '"' || c == '\'').any(|part| part == name)
 }
 
-/// Find typed authored uses of a gameplay tag, excluding arbitrary prose.
 pub fn gameplay_tag_references(target: &GameplayTagRecord, ctx: &ReferenceContext) -> Vec<ContentReference> {
     let mut out = Vec::new();
     for entity in ctx.entities {
