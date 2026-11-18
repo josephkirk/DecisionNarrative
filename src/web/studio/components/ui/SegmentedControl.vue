@@ -1,5 +1,4 @@
 <script setup lang="ts" generic="T extends string">
-/** Mutually exclusive view switch (Tree / List, Grid / List, categories). Options may carry a count pill. */
 export interface SegmentOption<V extends string = string> { value: V; label: string; count?: number }
 const model = defineModel<T>({ required: true });
 defineProps<{ options: SegmentOption<T>[]; label: string }>();

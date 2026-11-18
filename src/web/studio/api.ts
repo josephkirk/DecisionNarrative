@@ -2,7 +2,9 @@ import type {
   AuthoringOptions,
   ContentReference,
   CoverageReport,
+  DecisionProvenance,
   InspectView,
+  RunEventView,
   LibraryPageResult,
   NearMiss,
   ProjectMetadata,
@@ -45,14 +47,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return (await resp.json()) as T;
 }
 
-/** The slice of the runs client the play view-model depends on (kept small so tests can fake it). */
 export interface RunsApi {
   start(input: RunStartInput): Promise<RunEnvelope>;
   view(id: string, participant: number): Promise<RunEnvelope>;
-  act(id: string, participant: number, action: RunAction, expectedRevision: number, idempotencyKey: string): Promise<RunEnvelope>;
+  act(id: string, participant: number, action: RunAction, expectedRevision: number, idempotencyKey: string, provenance?: DecisionProvenance): Promise<RunEnvelope>;
   rewind(id: string, toStep: number, expectedRevision: number, idempotencyKey: string): Promise<RunEnvelope>;
   whyNot(id: string, participant: number): Promise<{ nearMisses: NearMiss[] }>;
   inspect(id: string, participant: number): Promise<InspectView>;
+  explain(id: string, event: number): Promise<RunEventView[]>;
   reload(id: string, expectedRevision: number, idempotencyKey: string): Promise<RunReloadResult>;
 }
 
@@ -73,12 +75,13 @@ const runs: RunsApi & {
   coverage: (runs, seed) => post<CoverageReport>("/api/v4/coverage", { runs, seed }),
   list: () => request<RunSummary[]>("/api/v4/runs"),
   view: (id, participant) => request<RunEnvelope>(`${runPath(id)}?participant=${participant}`),
-  act: (id, participant, action, expectedRevision, idempotencyKey) =>
-    post<RunEnvelope>(`${runPath(id)}/act`, { participant, action, expectedRevision, idempotencyKey }),
+  act: (id, participant, action, expectedRevision, idempotencyKey, provenance) =>
+    post<RunEnvelope>(`${runPath(id)}/act`, { participant, action, expectedRevision, idempotencyKey, provenance }),
   rewind: (id, toStep, expectedRevision, idempotencyKey) =>
     post<RunEnvelope>(`${runPath(id)}/rewind`, { toStep, expectedRevision, idempotencyKey }),
   whyNot: (id, participant) => request<{ nearMisses: NearMiss[] }>(`${runPath(id)}/why-not?participant=${participant}`),
   inspect: (id, participant) => request<InspectView>(`${runPath(id)}/inspect?participant=${participant}`),
+  explain: (id, event) => request<RunEventView[]>(`${runPath(id)}/explain?event=${event}`),
   reload: (id, expectedRevision, idempotencyKey) =>
     post<RunReloadResult>(`${runPath(id)}/reload`, { expectedRevision, idempotencyKey }),
   remove: (id, expectedRevision, idempotencyKey) =>
@@ -88,12 +91,10 @@ const runs: RunsApi & {
 export const StudioApi = {
   runs,
 
-  // Authoring options
   getAuthoringOptions(): Promise<AuthoringOptions> {
     return request<AuthoringOptions>("/api/v3/authoring-options");
   },
 
-  // Project
   getProject(): Promise<ProjectMetadata> {
     return request<ProjectMetadata>("/api/v3/project");
   },
@@ -122,7 +123,6 @@ export const StudioApi = {
       body: JSON.stringify(context),
     });
   },
-  // Library
   queryLibrary(params: Record<string, string | number>): Promise<LibraryPageResult> {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {
@@ -133,7 +133,6 @@ export const StudioApi = {
     return request<LibraryPageResult>(`/api/v3/library?${q.toString()}`);
   },
 
-  // Content CRUD
   listContent<T>(entity: string): Promise<T[]> {
     return request<T[]>(`/api/v3/content/${encodeURIComponent(entity)}`);
   },

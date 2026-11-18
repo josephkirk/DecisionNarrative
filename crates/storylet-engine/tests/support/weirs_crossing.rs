@@ -1,4 +1,3 @@
-//! Shared Rust fixture for the Weir's Crossing exploration prototype.
 use std::collections::BTreeMap;
 
 use storylet_engine::chrono_dispatch::{StoryletDef, UnifiedDispatcher};
@@ -374,25 +373,18 @@ fn require_colocated(
     });
     graph
 }
-/// Full explorer scenario: Mara starts at the inn and Teodor is an NPC.
 pub fn explorer_content() -> RunContent {
     build(false, true)
 }
 
-/// Variant for the co-op explorer cell, where Teodor takes a human seat.
 pub fn content_all_humans() -> RunContent {
     build(true, true)
 }
 
-/// Deliberately broken variant used to prove the explorer catches stranding.
 pub fn content_without_causeway_close_rule() -> RunContent {
     build(false, false)
 }
 
-/// Legacy five-storylet fixture retained for run-kernel regression tests.
-///
-/// Those tests exercise the original harbor-only scene and its unlimited
-/// action sequence. Explorer coverage uses `explorer_content()` instead.
 pub fn content() -> RunContent {
     let registry = GameplayTagRegistry::compile(
         [
@@ -695,8 +687,6 @@ fn build(teodor_is_human: bool, causeway_has_close_rule: bool) -> RunContent {
         let fact_ix = fact_for_story[id as usize].unwrap_or(0);
         let tag = registry.id(FACTS[fact_ix]).unwrap();
         if id == TEODOR_LANTERN_MEMORY {
-            // Rule participants auto-resolve their own storylets and cannot
-            // enter a player choice node.
             nodes.push(node(
                 base,
                 NodeKind::Learn {
@@ -806,8 +796,6 @@ fn build(teodor_is_human: bool, causeway_has_close_rule: bool) -> RunContent {
         titles.insert(id, title.into());
         locations.insert(id, loc_mask(places[id as usize]));
     }
-    // Four explicit endings. Their authoring identity is present even though
-    // this fixture's payloads are intentionally minimal executable scenes.
     for id in ENDING_LIGHT_RESTORED..=ENDING_LOW_WATER {
         let base = 200 + id as u32 * 3;
         nodes.extend([
@@ -841,7 +829,6 @@ fn build(teodor_is_human: bool, causeway_has_close_rule: bool) -> RunContent {
         titles.insert(id, title.into());
         locations.insert(id, loc_mask("location.harbor"));
     }
-    // The immutable past is revealed only by the corresponding investigation scenes.
     use storylet_engine::chrono_chronicle::{ChronicleEntry, ChronicleTable};
     let mut chronicle = ChronicleTable::new(vec![
         ChronicleEntry {
@@ -914,8 +901,7 @@ fn build(teodor_is_human: bool, causeway_has_close_rule: bool) -> RunContent {
             &["Out"],
         ));
         edges.push(edge(reveal, "Out", base + 2));
-    } // The global catalog starts after the setup storylet, preserving the
-    // historic IDs 0–4 used by run_kernel tests.
+    }
     let lighthouse = LIGHTHOUSE;
     let harbor = HARBOR;
     let inn = INN;
@@ -1016,8 +1002,7 @@ fn build(teodor_is_human: bool, causeway_has_close_rule: bool) -> RunContent {
             requires_fact: None,
             on_close: None,
         });
-    } // The crossing is tide-gated; require the compiled tide fact, resolved
-    // after the registry has been moved into RunContent.
+    }
     content.connections[5].requires_fact = content.registry.id("fact.tides");
     content
 }

@@ -25,10 +25,8 @@ const preview = computed(() => thumbnailUrl(props.modelValue));
 function onButtonClick(e: MouseEvent) {
   if (props.disabled || uploading.value) return;
   if (!preview.value || broken.value) {
-    // If empty, directly open file selector for fastest workflow
     fileInput.value?.click();
   } else {
-    // If already has an image, toggle the quick action popover
     showMenu.value = !showMenu.value;
   }
 }
@@ -99,7 +97,6 @@ async function onFile(event: Event) {
         </svg>
       </div>
 
-      <!-- Edit badge overlay with pencil icon in bottom right (matching Image #2) -->
       <div v-if="!props.disabled" class="thumb-avatar-badge" aria-hidden="true">
         <svg class="thumb-pencil-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -108,7 +105,6 @@ async function onFile(event: Event) {
       </div>
     </button>
 
-    <!-- Minimalist context menu if image is present -->
     <div v-if="showMenu" class="thumb-popover-menu" @click.stop>
       <button type="button" class="thumb-popover-item" @click="pickFile">
         <StudioIcon name="camera" /> Upload new image…
@@ -188,7 +184,6 @@ async function onFile(event: Event) {
   opacity: 0.6;
 }
 
-/* Bottom-right pencil badge matching Image #2 */
 .thumb-avatar-badge {
   position: absolute;
   bottom: 2px;
@@ -218,7 +213,6 @@ async function onFile(event: Event) {
   height: 10px;
 }
 
-/* Context Popover */
 .thumb-popover-menu {
   position: absolute;
   top: calc(100% + 6px);

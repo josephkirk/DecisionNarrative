@@ -59,7 +59,7 @@ ctx.entityPanel({
 });
 ```
 
-The entity editor renders applicable panels as tabs. The component receives `entity` and `readonly` props and emits `patch` with a partial entity; the host applies the patch to its editor draft. A panel may emit `save` to save the entire current entity draft. It should respect `readonly`. `AnyEntity` covers entity records and entity templates. The existing canvas panel is a concrete example of a panel that edits entity properties.
+The entity editor renders applicable panels as tabs. The component receives `entity` and `readonly` props and emits `patch` with a partial entity; the host applies the patch to its editor draft. A panel may emit `save` to save the entire current entity draft. It should respect `readonly`. `AnyEntity` covers entity records (templates are entities with `is_template: true`). The existing canvas panel is a concrete example of a panel that edits entity properties.
 
 ### Property editor
 
@@ -93,7 +93,7 @@ A `NodeTypeContribution<Config>` supplies:
 
 Registered types are offered in the **Story graph** toolbar and context menu, not the Preconditions graph toolbar. A plugin node stores `plugin_type` and `plugin_config` on an authoring `NarrativeNode`. The deletion callback is notified after confirmation, but the editor does not await it before updating the graph. `pluginNodeDeleted` catches callback errors and logs a warning; cleanup requiring stronger guarantees must account for this behavior.
 
-`LowerContext.id(suffix)` returns `${node.id}__${suffix}` for reproducible fragment IDs; use distinct suffixes. `LowerContext.entity(id)` searches the supplied entity and entity-template array; `graph` and `node` expose the authoring context. Lowering should be deterministic for a given config and graph and return valid engine-supported core nodes and edges. `LoweredFragment.entry` receives incoming flow; `exit` supplies outgoing flow. Optional `inputs` maps authoring data ports to fragment node/port destinations, allowing one incoming edge to fan out. The transform stores original incoming data edges in entry metadata to reconstruct them on raising. Flow remains single-entry/single-exit.
+`LowerContext.id(suffix)` returns `${node.id}__${suffix}` for reproducible fragment IDs; use distinct suffixes. `LowerContext.entity(id)` searches the supplied entity array; `graph` and `node` expose the authoring context. Lowering should be deterministic for a given config and graph and return valid engine-supported core nodes and edges. `LoweredFragment.entry` receives incoming flow; `exit` supplies outgoing flow. Optional `inputs` maps authoring data ports to fragment node/port destinations, allowing one incoming edge to fan out. The transform stores original incoming data edges in entry metadata to reconstruct them on raising. Flow remains single-entry/single-exit.
 
 ### Events
 
@@ -101,7 +101,7 @@ Registered types are offered in the **Story graph** toolbar and context menu, no
 
 | Event | Payload and current use |
 | --- | --- |
-| `entity/saved` | Declared with an entity or entity-template payload; no current studio emission site. |
+| `entity/saved` | Declared with an entity payload; no current studio emission site. |
 | `workspace/loaded` | No arguments; workspace rows reloaded. Canvas uses it to ensure its trait exists. |
 | `storylet/opened` | Storylet ID, or `""` for a new storylet. Emitted after loading the editor's draft. |
 | `storylet/saved` | Storylet ID and the **authoring** graph; emitted after a successful save or approval. |
@@ -177,7 +177,7 @@ The TreeGraph trait editor exposes graph-wide node and wire defaults instead of 
 
 Canvas actions can upload PNG or JPEG images. Images use project-local file references, retain their canvas coordinates and dimensions across views, and render below wires and nodes. Drag an unlocked image or its edge handles to move or resize it. Image and node context menus can lock or unlock their geometry; locked nodes still accept connections. **Save layout** persists these changes. JSON export includes image references, not the image file bytes.
 
-Connections are directed, but can form cycles or share nodes. Roots are nodes without incoming connections; a cyclic component can have no root. The layout uses a deterministic traversal for disconnected and rootless components. Drag the canvas background to pan or use the mouse wheel to zoom; keyboard arrows pan the focused canvas. Switching views preserves graph topology; dragging nodes or using arrow keys adjusts coordinates independently for each view. **Save layout** saves the entire entity draft. **Export JSON** downloads the graph, resolved current layout, and referenced item metadata; it does not export complete entity records or an importable project bundle. The skill-tree, roguelike-map, and relationship-tree examples create actual TreeItem entity templates in the project, then stage the example graph in the owner draft. Service and bundle validation reject missing or ineligible targets, malformed connections, duplicates, and invalid view directions or coordinates. Removing a node also removes its connections and saved positions. This plugin does not implement game-specific unlock or progression rules.
+Connections are directed, but can form cycles or share nodes. Roots are nodes without incoming connections; a cyclic component can have no root. The layout uses a deterministic traversal for disconnected and rootless components. Drag the canvas background to pan or use the mouse wheel to zoom; keyboard arrows pan the focused canvas. Switching views preserves graph topology; dragging nodes or using arrow keys adjusts coordinates independently for each view. **Save layout** saves the entire entity draft. **Export JSON** downloads the graph, resolved current layout, and referenced item metadata; it does not export complete entity records or an importable project bundle. The skill-tree, roguelike-map, and relationship-tree examples create actual TreeItem entities in the project, then stage the example graph in the owner draft. Service and bundle validation reject missing or ineligible targets, malformed connections, duplicates, and invalid view directions or coordinates. Removing a node also removes its connections and saved positions. This plugin does not implement game-specific unlock or progression rules.
 
 ## Adding a plugin
 

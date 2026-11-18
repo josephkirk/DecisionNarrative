@@ -1,34 +1,83 @@
-//! Axum HTTP router and request handlers for Storylet Studio.
-
 use axum::{
     Json, Router,
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{Method, StatusCode, header},
-    response::{
-        IntoResponse, Response,
-        sse::{Event, KeepAlive, Sse},
-    },
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::HashSet;
 use std::path::PathBuf;
-use tokio_stream::{StreamExt, wrappers::BroadcastStream};
-use tower_http::cors::{Any, CorsLayer};
+use std::sync::Arc;
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::services::ServeDir;
 
-use crate::chrono_playtest::{
-    ChronoPlaytestChooseRequest, ChronoPlaytestDivertRequest, ChronoPlaytestError,
-    ChronoPlaytestInvokeRequest, ChronoPlaytestReconcileRequest, ChronoPlaytestRollbackRequest,
-    ChronoPlaytestScrubRequest, ChronoPlaytestSignalRequest, ChronoPlaytestTickRequest,
-    CreateChronoPlaytestRequest,
-};
 use crate::contracts::LibraryQuery;
 use crate::service::{ContentDeleteError, StudioService};
+
+pub fn default_allowed_origins() -> Vec<String> {
+    [
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3001",
+        "http://localhost:3001",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+async fn reject_disallowed_origins(
+    State(allowed): State<Arc<HashSet<String>>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let state_changing =
+        !matches!(*request.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+    if (state_changing || request.uri().path() == "/mcp")
+        && *request.method() != Method::OPTIONS
+        && let Some(origin) = request.headers().get(header::ORIGIN)
+    {
+        let origin = String::from_utf8_lossy(origin.as_bytes()).into_owned();
+        if allowed.contains(&origin) {
+            return next.run(request).await;
+        }
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": format!("Origin '{origin}' is not allowed") })),
+        )
+            .into_response();
+    }
+    next.run(request).await
+}
+
 pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Router {
+    build_router_with_origins(service, static_dir, &[])
+}
+
+pub fn build_router_with_origins(
+    service: StudioService,
+    static_dir: Option<PathBuf>,
+    extra_origins: &[String],
+) -> Router {
+    let allowed: Arc<HashSet<String>> = Arc::new(
+        default_allowed_origins()
+            .into_iter()
+            .chain(extra_origins.iter().map(|origin| origin.trim().to_string()))
+            .filter(|origin| !origin.is_empty())
+            .collect(),
+    );
+    let cors_origins: Vec<axum::http::HeaderValue> = allowed
+        .iter()
+        .filter_map(|origin| origin.parse().ok())
+        .collect();
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(AllowOrigin::list(cors_origins))
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -83,83 +132,23 @@ pub fn build_router(service: StudioService, static_dir: Option<PathBuf>) -> Rout
         )
         .route("/api/v3/scenarios/preview", post(preview_scenario))
         .route("/api/v3/audio/inspect", get(inspect_audio_file))
-        .route(
-            "/api/v3/playtests/from-workspace",
-            post(create_playtest_from_workspace),
-        )
-        .route(
-            "/api/v3/playtests",
-            get(list_playtests).post(create_playtest),
-        )
-        .route("/api/v3/playtests/restore", post(restore_playtest))
-        .route(
-            "/api/v3/playtests/{id}",
-            get(get_playtest_snapshot).delete(delete_playtest),
-        )
-        .route(
-            "/api/v3/playtests/{id}/commands",
-            post(apply_playtest_command),
-        )
-        .route(
-            "/api/v3/playtests/{id}/choices",
-            post(apply_playtest_choice),
-        )
-        .route("/api/v3/playtests/{id}/director", get(evaluate_director))
-        .route("/api/v3/playtests/{id}/events", get(get_playtest_events))
-        .route("/api/v3/playtests/{id}/stream", get(playtest_stream))
-        .route("/api/v3/playtests/{id}/fork", post(fork_playtest))
-        .route("/api/v3/playtests/{id}/export", get(export_playtest))
-        .route(
-            "/api/v3/chrono/playtests",
-            get(list_chrono_playtests).post(create_chrono_playtest),
-        )
-        .route(
-            "/api/v3/chrono/playtests/{id}",
-            get(get_chrono_playtest),
-        )
-        .route(
-            "/api/v3/chrono/playtests/{id}/tick",
-            post(tick_chrono_playtest),
-        )
-        .route(
-            "/api/v3/chrono/playtests/{id}/signal",
-            post(signal_chrono_playtest),
-        )
-        .route(
-            "/api/v3/chrono/playtests/{id}/choose",
-            post(choose_chrono_playtest),
-        )
-        .route(
-            "/api/v3/chrono/playtests/{id}/divert",
-            post(divert_chrono_playtest),
-        )
-        .route(
-            "/api/v3/chrono/playtests/{id}/invoke",
-            post(invoke_chrono_playtest),
-        )
-        .route(
-            "/api/v3/chrono/playtests/{id}/rollback",
-            post(rollback_chrono_playtest),
-        )
-        .route(
-            "/api/v3/chrono/playtests/{id}/scrub",
-            post(scrub_chrono_playtest),
-        )
-        .route(
-            "/api/v3/chrono/playtests/{id}/reconcile",
-            post(reconcile_chrono_playtest),
-        )
         .route("/api/v4/run-content", get(crate::runs::run_content))
         .route("/api/v4/coverage", post(crate::runs::coverage))
         .route("/api/v4/runs", get(crate::runs::list).post(crate::runs::start))
         .route("/api/v4/runs/{id}", get(crate::runs::view).delete(crate::runs::delete))
         .route("/api/v4/runs/{id}/act", post(crate::runs::act))
+        .route("/api/v4/runs/{id}/observe", get(crate::runs::observe))
+        .route("/api/v4/runs/{id}/explain", get(crate::runs::explain))
         .route("/api/v4/runs/{id}/rewind", post(crate::runs::rewind))
         .route("/api/v4/runs/{id}/why-not", get(crate::runs::why_not))
         .route("/api/v4/runs/{id}/inspect", get(crate::runs::inspect))
         .route("/api/v4/runs/{id}/reload", post(crate::runs::reload))
         .route("/mcp", post(handle_http_mcp))
         .layer(cors)
+        .layer(middleware::from_fn_with_state(
+            allowed,
+            reject_disallowed_origins,
+        ))
         .with_state(service);
 
     if let Some(dir) = static_dir {
@@ -361,7 +350,6 @@ async fn query_library(
     }
 }
 
-// Content CRUD
 fn unknown_kind(entity: &str) -> Option<Response> {
     if crate::contracts::CONTENT_KINDS.contains(&entity) {
         None
@@ -593,7 +581,6 @@ async fn approve_storylet(
 
 
 
-// Scenarios
 async fn list_scenarios(State(s): State<StudioService>) -> Response {
     list_content(State(s), Path("scenarios".into())).await
 }
@@ -627,46 +614,6 @@ async fn preview_scenario(
     }
 }
 
-// Playtests
-#[derive(Deserialize)]
-struct WorkspacePlaytestRequest {
-    #[serde(rename = "startLocationId")]
-    pub start_location_id: Option<String>,
-    #[serde(rename = "scenarioId")]
-    pub scenario_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreatePlaytestBody {
-    #[serde(default)]
-    pub session_id: Option<String>,
-    pub scenario_id: String,
-    pub project: storylet_engine::ProjectBundle,
-}
-
-async fn create_playtest(
-    State(s): State<StudioService>,
-    Json(body): Json<CreatePlaytestBody>,
-) -> Response {
-    let session_id = body
-        .session_id
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    match s
-        .create_playtest_session(&session_id, body.project, &body.scenario_id)
-        .await
-    {
-        Ok(data) => (StatusCode::CREATED, Json(data)).into_response(),
-        Err(e) => {
-            let code = if e.contains("already exists") || e.contains("cannot be reused") {
-                StatusCode::CONFLICT
-            } else {
-                StatusCode::UNPROCESSABLE_ENTITY
-            };
-            (code, Json(json!({ "error": e }))).into_response()
-        }
-    }
-}
 #[derive(Debug, Deserialize)]
 pub struct AudioInspectQuery {
     pub path: String,
@@ -802,421 +749,10 @@ async fn inspect_audio_file(Query(q): Query<AudioInspectQuery>) -> impl IntoResp
     }
 }
 
-async fn create_playtest_from_workspace(
-    State(s): State<StudioService>,
-    Json(req): Json<WorkspacePlaytestRequest>,
-) -> Response {
-    match s
-        .create_playtest_from_workspace(
-            req.start_location_id.as_deref(),
-            req.scenario_id.as_deref(),
-        )
-        .await
-    {
-        Ok(data) => (StatusCode::CREATED, Json(data)).into_response(),
-        Err(e) => (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
-async fn list_playtests(State(s): State<StudioService>) -> Response {
-    match s.list_playtest_sessions().await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
-async fn get_playtest_snapshot(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    match s.get_playtest_snapshot(&id).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
-    }
-}
-
-async fn delete_playtest(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    match s.delete_playtest(&id).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum CommandPayload {
-    Wrapped {
-        command: storylet_engine::WorldCommand,
-    },
-    Direct(storylet_engine::WorldCommand),
-}
-
-async fn apply_playtest_command(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-    bytes: axum::body::Bytes,
-) -> Response {
-    let payload: CommandPayload = match serde_json::from_slice(&bytes) {
-        Ok(p) => p,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("Invalid command JSON: {e}") })),
-            )
-                .into_response();
-        }
-    };
-
-    let cmd = match payload {
-        CommandPayload::Wrapped { command } => command,
-        CommandPayload::Direct(command) => command,
-    };
-
-    let cmd_val = match serde_json::to_value(&cmd) {
-        Ok(v) => v,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": e.to_string() })),
-            )
-                .into_response();
-        }
-    };
-
-    match s.apply_playtest_command(&id, &cmd_val).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => {
-            let code = if e.contains("Failed to persist") || e.contains("write failure") {
-                StatusCode::INTERNAL_SERVER_ERROR
-            } else if e.contains("revision conflict") || e.contains("idempotency key") {
-                StatusCode::CONFLICT
-            } else if e.contains("not found") {
-                StatusCode::NOT_FOUND
-            } else {
-                StatusCode::UNPROCESSABLE_ENTITY
-            };
-            (code, Json(json!({ "error": e }))).into_response()
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct ChoiceBody {
-    #[serde(rename = "storyletId")]
-    pub storylet_id: String,
-    #[serde(rename = "choiceId")]
-    pub choice_id: String,
-    #[serde(rename = "expectedRevision")]
-    pub expected_revision: u64,
-    #[serde(rename = "idempotencyKey")]
-    pub idempotency_key: String,
-}
-
-async fn apply_playtest_choice(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-    Json(b): Json<ChoiceBody>,
-) -> Response {
-    match s
-        .apply_playtest_choice(
-            &id,
-            &b.storylet_id,
-            &b.choice_id,
-            b.expected_revision,
-            &b.idempotency_key,
-        )
-        .await
-    {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(error) => {
-            let status = match error {
-                crate::service::ChoiceOperationError::InvalidInput(_) => StatusCode::BAD_REQUEST,
-                crate::service::ChoiceOperationError::SessionNotFound(_)
-                | crate::service::ChoiceOperationError::NotFound(_) => StatusCode::NOT_FOUND,
-                crate::service::ChoiceOperationError::Conflict(_) => StatusCode::CONFLICT,
-                crate::service::ChoiceOperationError::Runtime(_)
-                | crate::service::ChoiceOperationError::Persistence(_) => {
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
-            };
-            (status, Json(json!({ "error": error.to_string() }))).into_response()
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct DirectorQuery {
-    #[serde(rename = "targetTensionSlope", default = "default_slope")]
-    pub target_tension_slope: f64,
-}
-fn default_slope() -> f64 {
-    0.15
-}
-
-async fn evaluate_director(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-    Query(q): Query<DirectorQuery>,
-) -> Response {
-    match s
-        .evaluate_playtest_director(&id, q.target_tension_slope)
-        .await
-    {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
-async fn get_playtest_events(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    match s.get_playtest_events(&id).await {
-        Ok(data) => (StatusCode::OK, Json(json!({ "events": data }))).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
-async fn playtest_stream(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    let initial_snapshot = match s.get_playtest_snapshot(&id).await {
-        Ok(snap) => snap,
-        Err(e) => return (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
-    };
-
-    let initial: Result<Event, std::convert::Infallible> = Ok(Event::default()
-        .event("playtest.snapshot")
-        .data(json!({ "sessionId": id, "snapshot": initial_snapshot }).to_string()));
-
-    let target_id = id.clone();
-    let rx = s.updates.subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(move |item| {
-        if let Ok(change) = item {
-            if change.session_id == target_id {
-                let data = serde_json::to_string(&change.snapshot).unwrap_or_default();
-                let ev: Result<Event, std::convert::Infallible> =
-                    Ok(Event::default().event("playtest.updated").data(data));
-                return Some(ev);
-            }
-        }
-        None
-    });
-
-    let combined = tokio_stream::once(initial).chain(stream);
-    Sse::new(combined)
-        .keep_alive(KeepAlive::default())
-        .into_response()
-}
-
-#[derive(Deserialize)]
-struct ForkBody {
-    #[serde(rename = "branchSessionId")]
-    pub branch_session_id: Option<String>,
-    #[serde(rename = "eventId")]
-    pub event_id: String,
-}
-
-async fn fork_playtest(
-    State(s): State<StudioService>,
-    Path(id): Path<String>,
-    Json(b): Json<ForkBody>,
-) -> Response {
-    match s
-        .fork_playtest(&id, b.branch_session_id.as_deref(), &b.event_id)
-        .await
-    {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
-    }
-}
-
-// HTTP MCP
-async fn export_playtest(State(s): State<StudioService>, Path(id): Path<String>) -> Response {
-    match s.export_playtest_session(&id).await {
-        Ok(state) => (StatusCode::OK, Json(json!(state))).into_response(),
-        Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum RestoreBody {
-    Wrapped {
-        state: storylet_engine::RuntimeSessionState,
-    },
-    Direct(storylet_engine::RuntimeSessionState),
-}
-
-async fn restore_playtest(State(s): State<StudioService>, bytes: axum::body::Bytes) -> Response {
-    let body: RestoreBody = match serde_json::from_slice(&bytes) {
-        Ok(b) => b,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": e.to_string() })),
-            )
-                .into_response();
-        }
-    };
-
-    let state = match body {
-        RestoreBody::Wrapped { state } => state,
-        RestoreBody::Direct(state) => state,
-    };
-
-    match s.restore_playtest_session(state).await {
-        Ok(data) => (StatusCode::CREATED, Json(data)).into_response(),
-        Err(e) => (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": e })),
-        )
-            .into_response(),
-    }
-}
-
 async fn handle_http_mcp(State(s): State<StudioService>, Json(msg): Json<Value>) -> Response {
     if let Some(resp) = crate::mcp::handle_mcp_message(&s, &msg).await {
         (StatusCode::OK, Json(resp)).into_response()
     } else {
         (StatusCode::NO_CONTENT, Json(Value::Null)).into_response()
-    }
-}
-fn chrono_playtest_error_response(error: ChronoPlaytestError) -> Response {
-    let status = match &error {
-        ChronoPlaytestError::InvalidInput(_) => StatusCode::BAD_REQUEST,
-        ChronoPlaytestError::SessionNotFound(_) => StatusCode::NOT_FOUND,
-        ChronoPlaytestError::Conflict(_) | ChronoPlaytestError::RevisionConflict(_) => {
-            StatusCode::CONFLICT
-        }
-        ChronoPlaytestError::Runtime(_) => StatusCode::UNPROCESSABLE_ENTITY,
-        ChronoPlaytestError::Persistence(_) => StatusCode::INTERNAL_SERVER_ERROR,
-    };
-    (status, Json(json!({ "error": error.to_string() }))).into_response()
-}
-
-async fn list_chrono_playtests(State(service): State<StudioService>) -> Response {
-    match service.list_chrono_playtests().await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(error) => chrono_playtest_error_response(error),
-    }
-}
-
-async fn create_chrono_playtest(
-    State(service): State<StudioService>,
-    Json(request): Json<CreateChronoPlaytestRequest>,
-) -> Response {
-    match service.create_chrono_playtest(&request).await {
-        Ok(data) => (StatusCode::CREATED, Json(data)).into_response(),
-        Err(error) => chrono_playtest_error_response(error),
-    }
-}
-
-async fn get_chrono_playtest(
-    State(service): State<StudioService>,
-    Path(id): Path<String>,
-) -> Response {
-    match service.chrono_playtest_snapshot(&id).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(error) => chrono_playtest_error_response(error),
-    }
-}
-
-async fn tick_chrono_playtest(
-    State(service): State<StudioService>,
-    Path(id): Path<String>,
-    Json(request): Json<ChronoPlaytestTickRequest>,
-) -> Response {
-    match service.chrono_playtest_tick(&id, &request).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(error) => chrono_playtest_error_response(error),
-    }
-}
-async fn signal_chrono_playtest(
-    State(service): State<StudioService>,
-    Path(id): Path<String>,
-    Json(request): Json<ChronoPlaytestSignalRequest>,
-) -> Response {
-    match service.chrono_playtest_signal(&id, &request).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(error) => chrono_playtest_error_response(error),
-    }
-}
-
-async fn divert_chrono_playtest(
-    State(service): State<StudioService>,
-    Path(id): Path<String>,
-    Json(request): Json<ChronoPlaytestDivertRequest>,
-) -> Response {
-    match service.chrono_playtest_divert(&id, &request).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(error) => chrono_playtest_error_response(error),
-    }
-}
-
-async fn choose_chrono_playtest(
-    State(service): State<StudioService>,
-    Path(id): Path<String>,
-    Json(request): Json<ChronoPlaytestChooseRequest>,
-) -> Response {
-    match service.chrono_playtest_choose(&id, &request).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(error) => chrono_playtest_error_response(error),
-    }
-}
-
-async fn invoke_chrono_playtest(
-    State(service): State<StudioService>,
-    Path(id): Path<String>,
-    Json(request): Json<ChronoPlaytestInvokeRequest>,
-) -> Response {
-    match service.chrono_playtest_invoke(&id, &request).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(error) => chrono_playtest_error_response(error),
-    }
-}
-
-async fn scrub_chrono_playtest(
-    State(service): State<StudioService>,
-    Path(id): Path<String>,
-    Json(request): Json<ChronoPlaytestScrubRequest>,
-) -> Response {
-    match service.chrono_playtest_scrub(&id, &request).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(error) => chrono_playtest_error_response(error),
-    }
-}
-
-async fn rollback_chrono_playtest(
-    State(service): State<StudioService>,
-    Path(id): Path<String>,
-    Json(request): Json<ChronoPlaytestRollbackRequest>,
-) -> Response {
-    match service.chrono_playtest_rollback_mission(&id, &request).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(error) => chrono_playtest_error_response(error),
-    }
-}
-
-async fn reconcile_chrono_playtest(
-    State(service): State<StudioService>,
-    Path(id): Path<String>,
-    Json(request): Json<ChronoPlaytestReconcileRequest>,
-) -> Response {
-    match service.chrono_playtest_reconcile(&id, &request).await {
-        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
-        Err(error) => chrono_playtest_error_response(error),
     }
 }

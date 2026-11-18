@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const MAX_AUTO_ADVANCE_MS: i64 = 600_000;
+pub const START_EVENT: u32 = 0;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,22 +38,24 @@ pub struct RunContent {
     pub participant_indices: BTreeMap<String, u16>,
     #[serde(default)]
     pub implicit_participant: bool,
-    /// Canon events in story-time order, for `Reveal` nodes and Inspect.
     #[serde(default)]
     pub chronicle: crate::chrono_chronicle::ChronicleTable,
-    /// Scheduled connections between places. Empty = use the `connected` edges
-    /// of the world graph (always open).
     #[serde(default)]
     pub connections: Vec<crate::chrono_space::Connection>,
-    /// The world clock; `None` = timeless.
     #[serde(default)]
     pub clock: Option<crate::chrono_space::Clock>,
 }
-fn storylet_at_location(content: &RunContent, world: &WorldStateTable, participant: PartIx, storylet: u16) -> bool {
+fn storylet_at_location(
+    content: &RunContent,
+    world: &WorldStateTable,
+    participant: PartIx,
+    storylet: u16,
+) -> bool {
     match content.storylet_location_tags.get(&storylet) {
         None => true,
         Some(mask) if mask.is_empty() => true,
-        Some(mask) => world.active_location(participant)
+        Some(mask) => world
+            .active_location(participant)
             .and_then(|location| world.entity_tags.get(location as usize))
             .is_some_and(|tags| tags.intersects(mask)),
     }
@@ -88,10 +91,30 @@ pub enum RunStart {
     rename_all_fields = "camelCase"
 )]
 pub enum RunAction {
-    Choose { node_guid: u32, output_pin: u16 },
-    PlayStorylet { node_guid: u32, storylet: u16 },
-    Topic { node_guid: u32, edge_id: u32 },
-    Move { to: u16 },
+    Choose {
+        node_guid: u32,
+        output_pin: u16,
+    },
+    PlayStorylet {
+        node_guid: u32,
+        storylet: u16,
+    },
+    Topic {
+        node_guid: u32,
+        edge_id: u32,
+    },
+    Move {
+        to: u16,
+    },
+    Transfer {
+        to: PartIx,
+        resource: u16,
+        amount: u16,
+    },
+    Tell {
+        to: PartIx,
+        fact: u16,
+    },
     Wait,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,15 +125,11 @@ pub struct RunStep {
     pub participant: PartIx,
     pub action: RunAction,
     pub label: String,
-    /// What the world did because of this step (for example someone driven back).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
-    /// Storylets rule participants played because of this step.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rule_plays: Vec<RulePlay>,
 }
-/// A storylet a rule participant played on its own; its causal parent is the
-/// step that carries it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RulePlay {
@@ -122,7 +141,6 @@ pub struct RulePlay {
 pub struct StoryletRef {
     pub id: u16,
     pub title: String,
-    /// The authored storylet id, for links back to the editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
 }
@@ -131,7 +149,6 @@ pub struct StoryletRef {
 pub struct ParticipantView {
     pub id: PartIx,
     pub name: String,
-    /// `false` for rule participants, which the UI never offers as a seat.
     #[serde(default = "default_true")]
     pub human: bool,
 }
@@ -143,10 +160,8 @@ fn default_true() -> bool {
 pub struct PlaceView {
     pub id: u16,
     pub name: String,
-    /// Current slot label; absent in a timeless project.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock_label: Option<String>,
-    /// Actions this participant has left in the current slot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions_left: Option<u8>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -187,8 +202,6 @@ pub struct RunView {
     pub place: Option<PlaceView>,
     pub scene: Option<SceneView>,
     pub also_here: Vec<StoryletRef>,
-    /// The pending storylet hub's node: with a listed storylet it forms a
-    /// `PlayStorylet` action.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hub: Option<u32>,
     pub nothing_here: bool,
@@ -218,7 +231,7 @@ pub enum RunError {
     Engine(String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct PendingSelection {
     hub: u32,
     storylet: u16,
@@ -227,7 +240,7 @@ struct PendingSelection {
 
     invocation: u64,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Snapshot {
     world: WorldStateTable,
     instance: FlowGraphInstance,
@@ -236,11 +249,25 @@ struct Snapshot {
     selections: Vec<PendingSelection>,
     stalled: Option<RunError>,
     rule_played: Vec<(PartIx, u16)>,
+    revision: u64,
+    proposals: Vec<(crate::actions::ActionProposal, crate::actions::Authority)>,
+    event_log: Vec<RunEvent>,
+    pending_rule_events: Vec<RuleEventData>,
 }
-#[derive(Clone, Debug)]
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct RuleEventData {
+    participant: PartIx,
+    node_guid: u32,
+    storylet: u16,
+    knowledge: Vec<(PartIx, u16)>,
+    tellings: Vec<(PartIx, u16)>,
+    deltas: Vec<BijectiveDelta>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunKernel {
-    pub world: WorldStateTable,
-    pub instance: FlowGraphInstance,
+    world: WorldStateTable,
+    instance: FlowGraphInstance,
     registry: GameplayTagRegistry,
     passion_registry: PassionRegistry,
     dispatcher: UnifiedDispatcher,
@@ -255,8 +282,178 @@ pub struct RunKernel {
     run_seed: u64,
     stalled: Option<RunError>,
     rule_played: Vec<(PartIx, u16)>,
+    revision: u64,
+    next_event_id: u32,
+    proposals: Vec<(crate::actions::ActionProposal, crate::actions::Authority)>,
+    idempotency: BTreeMap<String, (String, crate::actions::ActionReceipt)>,
+    event_log: Vec<RunEvent>,
+    pending_deltas: Vec<BijectiveDelta>,
+    pending_rule_events: Vec<RuleEventData>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunEvent {
+    pub id: u32,
+    pub step: u32,
+    pub revision: u64,
+    pub actor: PartIx,
+    pub action: RunAction,
+    pub parents: Vec<u32>,
+    pub witnesses: Vec<PartIx>,
+    pub deltas: Vec<BijectiveDelta>,
+}
+
+fn participant_vertex(world: &WorldStateTable, participant: PartIx) -> Option<String> {
+    let entity = *world.participants.entity.get(participant as usize)?;
+    world
+        .vertices
+        .iter()
+        .find(|v| v.entity_index == Some(entity))
+        .map(|v| v.vertex_id.clone())
+}
+
+fn inventory(
+    world: &WorldStateTable,
+    participant: PartIx,
+) -> Option<(String, Vec<crate::chrono_state::AttributeValue>, usize)> {
+    use crate::chrono_state::AttributeValue as A;
+    let owner = participant_vertex(world, participant)?;
+    let vertex = world.vertex(&owner)?;
+    let A::Array(items) = vertex.attributes.get("prop.__inventory_items")? else {
+        return None;
+    };
+    let (A::Int(columns), A::Int(rows)) = (
+        vertex.attributes.get("prop.__inventory_columns")?,
+        vertex.attributes.get("prop.__inventory_rows")?,
+    ) else {
+        return None;
+    };
+    if *columns < 1 || *rows < 1 {
+        return None;
+    }
+    Some((
+        owner,
+        items.clone(),
+        (*columns as usize).saturating_mul(*rows as usize),
+    ))
+}
+
+fn transfer_resource(
+    world: &mut WorldStateTable,
+    from: PartIx,
+    to: PartIx,
+    resource: u16,
+    amount: u16,
+) -> Result<BijectiveDelta, RunError> {
+    use crate::chrono_state::{AttributeValue as A, BijectiveDelta};
+    let here = world.active_location(from);
+    if here.is_none() || here != world.active_location(to) {
+        return Err(RunError::InvalidAction(
+            "transfer requires co-location".into(),
+        ));
+    }
+    if amount == 0 {
+        return Err(RunError::InvalidAction(
+            "transfer amount must be positive".into(),
+        ));
+    }
+    let item = world
+        .vertices
+        .iter()
+        .find(|v| v.entity_index == Some(resource))
+        .ok_or_else(|| RunError::InvalidAction("unknown resource".into()))?;
+    if item.attributes.get("prop.__inventory_item") != Some(&A::Bool(true)) {
+        return Err(RunError::InvalidAction(
+            "resource is not an inventory item".into(),
+        ));
+    }
+    let item_ref = A::EntityRef(item.vertex_id.clone());
+    let (from_owner, mut from_items, _) = inventory(world, from)
+        .ok_or_else(|| RunError::InvalidAction("actor has no inventory".into()))?;
+    let (to_owner, mut to_items, capacity) = inventory(world, to)
+        .ok_or_else(|| RunError::InvalidAction("recipient has no inventory".into()))?;
+    let available = from_items
+        .iter()
+        .filter(|value| **value == item_ref)
+        .count();
+    if available < amount as usize {
+        return Err(RunError::InvalidAction(
+            "insufficient resource holdings".into(),
+        ));
+    }
+    if to_items.len().saturating_add(amount as usize) > capacity {
+        return Err(RunError::InvalidAction(
+            "recipient inventory is full".into(),
+        ));
+    }
+    for _ in 0..amount {
+        let index = from_items
+            .iter()
+            .position(|value| *value == item_ref)
+            .unwrap();
+        from_items.remove(index);
+        to_items.push(item_ref.clone());
+    }
+    let before_from = world
+        .apply_property_command(
+            &from_owner,
+            "prop.__inventory_items",
+            "set",
+            A::Array(from_items),
+        )
+        .map_err(|e| RunError::InvalidAction(e.to_string()))?;
+    let before_to = world
+        .apply_property_command(
+            &to_owner,
+            "prop.__inventory_items",
+            "set",
+            A::Array(to_items),
+        )
+        .map_err(|e| RunError::InvalidAction(e.to_string()))?;
+    Ok(BijectiveDelta {
+        graph_diffs: vec![before_from, before_to],
+        ..Default::default()
+    })
 }
 impl RunKernel {
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+    pub fn world(&self) -> &WorldStateTable {
+        &self.world
+    }
+    pub fn instance(&self) -> &FlowGraphInstance {
+        &self.instance
+    }
+    fn history_lengths(instance: &FlowGraphInstance, lengths: &mut BTreeMap<u64, usize>) {
+        lengths.insert(instance.instance_id, instance.history.commits.len());
+        for node in &instance.nodes {
+            if let Some(child) = node.sub_graph.as_deref() {
+                Self::history_lengths(child, lengths);
+            }
+        }
+    }
+    fn collect_new_deltas(
+        instance: &FlowGraphInstance,
+        old: &BTreeMap<u64, usize>,
+        deltas: &mut Vec<BijectiveDelta>,
+    ) {
+        let start = old.get(&instance.instance_id).copied().unwrap_or(1);
+        deltas.extend(
+            instance
+                .history
+                .commits
+                .iter()
+                .skip(start)
+                .map(|commit| commit.delta.clone()),
+        );
+        for node in &instance.nodes {
+            if let Some(child) = node.sub_graph.as_deref() {
+                Self::collect_new_deltas(child, old, deltas);
+            }
+        }
+    }
     fn reference(content: &RunContent, id: u16) -> StoryletRef {
         StoryletRef {
             id,
@@ -277,6 +474,10 @@ impl RunKernel {
             selections: self.selections.clone(),
             stalled: self.stalled.clone(),
             rule_played: self.rule_played.clone(),
+            revision: self.revision,
+            proposals: self.proposals.clone(),
+            event_log: self.event_log.clone(),
+            pending_rule_events: self.pending_rule_events.clone(),
         }
     }
     fn pending_priority(instance: &FlowGraphInstance, hub: bool) -> Option<u32> {
@@ -466,7 +667,10 @@ impl RunKernel {
         let mut world = content.initial_world.clone();
         world.ensure_participants();
         if let (Some(clock), None) = (&content.clock, &world.clock) {
-            world.clock = Some(crate::chrono_space::ClockState::new(clock, world.participants.len()));
+            world.clock = Some(crate::chrono_space::ClockState::new(
+                clock,
+                world.participants.len(),
+            ));
         }
         let storylet = match start {
             RunStart::Beginning => content.start_storylet,
@@ -511,6 +715,7 @@ impl RunKernel {
                 .resume_from_poi(guid)
                 .map_err(|e| RunError::Engine(e.to_string()))?;
         }
+        let initial_witnesses = (0..world.participants.len() as PartIx).collect();
         let mut run = Self {
             world,
             instance,
@@ -531,6 +736,22 @@ impl RunKernel {
             run_seed: seed,
             stalled: None,
             rule_played: Vec::new(),
+            revision: 0,
+            next_event_id: 1,
+            proposals: Vec::new(),
+            idempotency: BTreeMap::new(),
+            event_log: vec![RunEvent {
+                id: 0,
+                step: 0,
+                revision: 0,
+                actor: 0,
+                action: RunAction::Wait,
+                parents: Vec::new(),
+                witnesses: initial_witnesses,
+                deltas: Vec::new(),
+            }],
+            pending_deltas: Vec::new(),
+            pending_rule_events: Vec::new(),
         };
         let stalled = match run.auto_advance() {
             Ok(()) => None,
@@ -538,33 +759,396 @@ impl RunKernel {
             Err(e) => return Err(e),
         };
         run.stalled = stalled.clone();
+        for row in &mut run.world.knowledge.rows {
+            row.source_event = START_EVENT;
+        }
+        for row in &mut run.world.telling.rows {
+            row.source_event = START_EVENT;
+        }
         let initial = run.snapshot();
         run.snapshots[0].push(initial);
         Ok((run, stalled))
     }
-    /// Preview eligible storylets at a destination without changing the run.
-    /// The caller must still use a legal Move action to travel there.
-    pub fn storylets_at(&self, content: &RunContent, participant: PartIx, location: u16) -> Vec<StoryletRef> {
-        if participant as usize >= self.world.participants.len() || location as usize >= self.world.entity_tags.len() { return Vec::new(); }
-        let Some(guid) = self.pending() else { return Vec::new() };
-        let Some(owner) = Self::owner(&self.instance, guid) else { return Vec::new() };
-        if !owner.asset.node(guid).is_some_and(|def| matches!(def.kind, NodeKind::QbnHub { .. })) { return Vec::new(); }
+    pub fn storylets_at(
+        &self,
+        content: &RunContent,
+        participant: PartIx,
+        location: u16,
+    ) -> Vec<StoryletRef> {
+        if participant as usize >= self.world.participants.len()
+            || location as usize >= self.world.entity_tags.len()
+        {
+            return Vec::new();
+        }
+        let Some(guid) = self.pending() else {
+            return Vec::new();
+        };
+        let Some(owner) = Self::owner(&self.instance, guid) else {
+            return Vec::new();
+        };
+        if !owner
+            .asset
+            .node(guid)
+            .is_some_and(|def| matches!(def.kind, NodeKind::QbnHub { .. }))
+        {
+            return Vec::new();
+        }
         let mut world = self.world.clone();
         world.apply_move(participant, Some(location), &mut BijectiveDelta::default());
-        let ctx = RuntimeContext::with_registries(&mut world, &self.dispatcher, &self.registry, &self.passion_registry);
-        owner.present_deck_for(&ctx, guid, participant).unwrap_or_default().into_iter()
-
+        let ctx = RuntimeContext::with_registries(
+            &mut world,
+            &self.dispatcher,
+            &self.registry,
+            &self.passion_registry,
+        );
+        owner
+            .present_deck_for(&ctx, guid, participant)
+            .unwrap_or_default()
+            .into_iter()
             .filter(|id| storylet_at_location(content, ctx.state, participant, *id))
-            .map(|id| Self::reference(content, id)).collect()
+            .map(|id| Self::reference(content, id))
+            .collect()
     }
-    pub fn view(&self, content: &RunContent, participant: PartIx) -> RunView {
+    pub fn architect_view(&self, content: &RunContent, participant: PartIx) -> RunView {
         self.view_internal(content, participant, true)
     }
-    /// Current interaction without the accumulated timeline, for headless traversal.
-    pub fn exploration_view(&self, content: &RunContent, participant: PartIx) -> RunView {
+    pub fn observe(&self, content: &RunContent, actor: PartIx) -> crate::observation::Observation {
+        let view = self.view_internal(content, actor, false);
+        let available_actions = self.available_actions(content, actor);
+        let scene = self
+            .pending()
+            .and_then(|guid| {
+                let owner = Self::owner(&self.instance, guid)?;
+                (owner.acting_participant == actor)
+                    .then(|| view.scene.clone())
+                    .flatten()
+            })
+            .map(|mut scene| {
+                scene.lines.clear();
+                scene
+            });
+        crate::observation::Observation {
+            actor,
+            place: view.place,
+            co_present: self.world.participants.colocated(actor).collect(),
+            scene,
+            available_actions,
+            knowledge: self.world.knowledge.rows_for(actor).to_vec(),
+            witnessed_events: self
+                .event_log
+                .iter()
+                .filter(|e| e.actor == actor || e.witnesses.contains(&actor))
+                .map(|e| e.id)
+                .collect(),
+        }
+    }
+    fn available_actions(&self, content: &RunContent, actor: PartIx) -> Vec<RunAction> {
+        let mut out = vec![RunAction::Wait];
+        let view = self.view_internal(content, actor, false);
+        if self
+            .pending()
+            .and_then(|guid| Self::owner(&self.instance, guid))
+            .is_some_and(|owner| owner.acting_participant == actor)
+        {
+            if let Some(scene) = view.scene {
+                out.extend(
+                    scene
+                        .choices
+                        .into_iter()
+                        .filter(|c| c.enabled)
+                        .map(|c| c.action),
+                );
+            }
+        }
+        if let Some(hub) = view.hub {
+            out.extend(view.also_here.iter().map(|s| RunAction::PlayStorylet {
+                node_guid: hub,
+                storylet: s.id,
+            }));
+        }
+        if let Some(place) = view.place {
+            out.extend(
+                place
+                    .moves
+                    .into_iter()
+                    .filter(|m| m.enabled)
+                    .map(|m| RunAction::Move { to: m.to }),
+            );
+        }
+        if content.connections.is_empty() {
+            if let Some(location) = self.world.active_location(actor) {
+                let source = self.world.vertices.iter().find(|v| {
+                    v.layers
+                        .contains(&crate::chrono_state::GraphLayer::Location)
+                        && v.entity_index == Some(location)
+                });
+                if let Some(source) = source {
+                    for edge in self.world.edges.iter().filter(|e| {
+                        e.relation_type == "connected" && e.source_id == source.vertex_id
+                    }) {
+                        if let Some(to) = self
+                            .world
+                            .vertices
+                            .iter()
+                            .find(|v| {
+                                v.vertex_id == edge.target_id
+                                    && v.layers
+                                        .contains(&crate::chrono_state::GraphLayer::Location)
+                            })
+                            .and_then(|v| v.entity_index)
+                        {
+                            out.push(RunAction::Move { to });
+                        }
+                    }
+                }
+            }
+        }
+        for other in self.world.participants.colocated(actor) {
+            for row in self.world.knowledge.rows_for(actor) {
+                if self.world.knowledge.knows(other, row.fact).is_none() {
+                    out.push(RunAction::Tell {
+                        to: other,
+                        fact: row.fact,
+                    });
+                }
+            }
+            if let Some((_, items, _)) = inventory(&self.world, actor) {
+                let mut counts = BTreeMap::<u16, u16>::new();
+                for item in items {
+                    if let crate::chrono_state::AttributeValue::EntityRef(id) = item {
+                        if let Some(entity) = self
+                            .world
+                            .vertex(&id)
+                            .and_then(|vertex| vertex.entity_index)
+                        {
+                            let count = counts.entry(entity).or_default();
+                            *count = count.saturating_add(1);
+                        }
+                    }
+                }
+                for (resource, count) in counts {
+                    for amount in 1..=count {
+                        out.push(RunAction::Transfer {
+                            to: other,
+                            resource,
+                            amount,
+                        });
+                    }
+                }
+            }
+        }
+        out
+    }
+    pub fn propose(
+        &mut self,
+        content: &RunContent,
+        authority: crate::actions::Authority,
+        proposal: crate::actions::ActionProposal,
+    ) -> Result<crate::actions::ActionReceipt, crate::actions::ActionRejection> {
+        use crate::chrono_participants::Controller;
+        let reject = |reason: &str| crate::actions::ActionRejection {
+            reason: reason.into(),
+        };
+        let actor = proposal.actor as usize;
+        if actor >= self.world.participants.len() {
+            return Err(reject("unknown actor"));
+        }
+        let controlled = match authority {
+            crate::actions::Authority::Architect => true,
+            crate::actions::Authority::Policy => {
+                self.world.participants.controller[actor] == Controller::Rule
+            }
+            crate::actions::Authority::Human { seat } => {
+                self.world.participants.controller[actor] == Controller::Human { seat }
+            }
+        };
+        if !controlled {
+            return Err(reject("authority does not control actor"));
+        }
+        let body = serde_json::to_string(&(authority, &proposal)).unwrap_or_default();
+        if let Some((old, receipt)) = self.idempotency.get(&proposal.idempotency_key) {
+            return if *old == body {
+                let mut r = receipt.clone();
+                r.duplicate = true;
+                Ok(r)
+            } else {
+                Err(reject("idempotency key reused with different body"))
+            };
+        }
+        if proposal.expected_revision != self.revision {
+            return Err(reject("stale revision"));
+        }
+        if !self
+            .available_actions(content, proposal.actor)
+            .contains(&proposal.action)
+        {
+            return Err(reject("action is not currently available"));
+        }
+        if proposal.idempotency_key.trim().is_empty() {
+            return Err(reject("idempotency key is empty"));
+        }
+        let backup = self.clone();
+        let mut old_history_lengths = BTreeMap::new();
+        Self::history_lengths(&self.instance, &mut old_history_lengths);
+        let step = match self.act_internal(content, proposal.actor, proposal.action.clone()) {
+            Ok((step, _)) => step,
+            Err(error) => {
+                *self = backup;
+                return Err(reject(&format!("{error:?}")));
+            }
+        };
+        self.revision = match self.revision.checked_add(1) {
+            Some(revision) => revision,
+            None => {
+                *self = backup;
+                return Err(reject("revision overflow"));
+            }
+        };
+        let id = self.next_event_id;
+        let Some(next_event_id) = self.next_event_id.checked_add(1) else {
+            *self = backup;
+            return Err(reject("event id overflow"));
+        };
+        self.next_event_id = next_event_id;
+        let mut deltas = Vec::new();
+        Self::collect_new_deltas(&self.instance, &old_history_lengths, &mut deltas);
+        deltas.append(&mut self.pending_deltas);
+        let witnesses = self.world.participants.colocated(proposal.actor).collect();
+        for row in &mut self.world.knowledge.rows {
+            if !backup
+                .world
+                .knowledge
+                .rows
+                .iter()
+                .any(|old| old.holder == row.holder && old.fact == row.fact)
+            {
+                row.source_event = id;
+            }
+        }
+        for row in &mut self.world.telling.rows {
+            if !backup
+                .world
+                .telling
+                .rows
+                .iter()
+                .any(|old| old.holder == row.holder && old.entry == row.entry)
+            {
+                row.source_event = id;
+            }
+        }
+        self.event_log.push(RunEvent {
+            id,
+            step,
+            revision: self.revision,
+            actor: proposal.actor,
+            action: proposal.action.clone(),
+            parents: Vec::new(),
+            witnesses,
+            deltas,
+        });
+        let rule_events = std::mem::take(&mut self.pending_rule_events);
+        for rule in rule_events {
+            let rule_id = self.next_event_id;
+            self.next_event_id = match self.next_event_id.checked_add(1) {
+                Some(next) => next,
+                None => {
+                    *self = backup;
+                    return Err(reject("event id overflow"));
+                }
+            };
+            self.revision = match self.revision.checked_add(1) {
+                Some(next) => next,
+                None => {
+                    *self = backup;
+                    return Err(reject("revision overflow"));
+                }
+            };
+            for row in &mut self.world.knowledge.rows {
+                if rule.knowledge.contains(&(row.holder, row.fact)) {
+                    row.source_event = rule_id;
+                }
+            }
+            for row in &mut self.world.telling.rows {
+                if rule.tellings.contains(&(row.holder, row.entry)) {
+                    row.source_event = rule_id;
+                }
+            }
+            self.event_log.push(RunEvent {
+                id: rule_id,
+                step,
+                revision: self.revision,
+                actor: rule.participant,
+                action: RunAction::PlayStorylet {
+                    node_guid: rule.node_guid,
+                    storylet: rule.storylet,
+                },
+                parents: vec![id],
+                witnesses: self
+                    .world
+                    .participants
+                    .colocated(rule.participant)
+                    .collect(),
+                deltas: rule.deltas,
+            });
+        }
+        let receipt = crate::actions::ActionReceipt {
+            event_id: id,
+            revision: self.revision,
+            step,
+            duplicate: false,
+        };
+        self.idempotency
+            .insert(proposal.idempotency_key.clone(), (body, receipt.clone()));
+        self.proposals.push((proposal, authority));
+        self.snapshots[self.branch][self.current_step as usize] = self.snapshot();
+        Ok(receipt)
+    }
+    pub fn explain(&self, event_id: u32) -> Option<Vec<RunEvent>> {
+        if event_id == START_EVENT {
+            return Some(Vec::new());
+        }
+        let mut pending = vec![event_id];
+        let mut ids = Vec::new();
+        while let Some(id) = pending.pop() {
+            if ids.contains(&id) {
+                continue;
+            }
+            let event = self.event_log.iter().find(|event| event.id == id)?;
+            ids.push(id);
+            pending.extend(event.parents.iter().copied());
+        }
+        Some(
+            self.event_log
+                .iter()
+                .filter(|event| ids.contains(&event.id))
+                .cloned()
+                .collect(),
+        )
+    }
+    pub fn replay(
+        content: &RunContent,
+        start: RunStart,
+        seed: u64,
+        proposals: &[(crate::actions::Authority, crate::actions::ActionProposal)],
+    ) -> Result<Self, crate::actions::ActionRejection> {
+        let mut run =
+            Self::start(content, start, seed).map_err(|e| crate::actions::ActionRejection {
+                reason: format!("{e:?}"),
+            })?;
+        for (authority, p) in proposals {
+            run.propose(content, *authority, p.clone())?;
+        }
+        Ok(run)
+    }
+    pub(crate) fn exploration_view(&self, content: &RunContent, participant: PartIx) -> RunView {
         self.view_internal(content, participant, false)
     }
-    fn view_internal(&self, content: &RunContent, participant: PartIx, include_timeline: bool) -> RunView {
+    fn view_internal(
+        &self,
+        content: &RunContent,
+        participant: PartIx,
+        include_timeline: bool,
+    ) -> RunView {
         let participants = self
             .world
             .participants
@@ -587,9 +1171,11 @@ impl RunKernel {
                 .get(&id)
                 .cloned()
                 .unwrap_or_else(|| id.to_string()),
-            clock_label: content.clock.as_ref().zip(self.world.clock.as_ref()).and_then(
-                |(clock, state)| clock.slot_labels.get(state.slot as usize).cloned(),
-            ),
+            clock_label: content
+                .clock
+                .as_ref()
+                .zip(self.world.clock.as_ref())
+                .and_then(|(clock, state)| clock.slot_labels.get(state.slot as usize).cloned()),
             actions_left: self
                 .world
                 .clock
@@ -694,10 +1280,11 @@ impl RunKernel {
                             );
                             also_here = owner
                                 .present_deck_for(&ctx, guid, participant)
-
                                 .unwrap_or_default()
                                 .into_iter()
-                                .filter(|id| storylet_at_location(content, &self.world, participant, *id))
+                                .filter(|id| {
+                                    storylet_at_location(content, &self.world, participant, *id)
+                                })
                                 .map(|id| Self::reference(content, id))
                                 .collect();
                         }
@@ -727,35 +1314,26 @@ impl RunKernel {
             hub,
             nothing_here,
             ending,
-            steps: if include_timeline { self.branches[self.branch].steps[..self.current_step as usize].to_vec() } else { Vec::new() },
+            steps: if include_timeline {
+                self.branches[self.branch].steps[..self.current_step as usize].to_vec()
+            } else {
+                Vec::new()
+            },
             current_step: self.current_step,
-            branches: if include_timeline { self.branches.clone() } else { Vec::new() },
+            branches: if include_timeline {
+                self.branches.clone()
+            } else {
+                Vec::new()
+            },
         }
-    }
-    pub fn act(
-        &mut self,
-        content: &RunContent,
-        participant: PartIx,
-        action: RunAction,
-    ) -> Result<u32, RunError> {
-        self.act_internal(content, participant, action, false)
-            .map(|(step, _)| step)
-    }
-    pub fn act_preserving_stall(
-        &mut self,
-        content: &RunContent,
-        participant: PartIx,
-        action: RunAction,
-    ) -> Result<(u32, Option<RunError>), RunError> {
-        self.act_internal(content, participant, action, true)
     }
     fn act_internal(
         &mut self,
         content: &RunContent,
         participant: PartIx,
         action: RunAction,
-        preserve_stall: bool,
     ) -> Result<(u32, Option<RunError>), RunError> {
+        self.pending_deltas.clear();
         if participant as usize >= self.world.participants.len() {
             return Err(RunError::InvalidAction("unknown participant".into()));
         }
@@ -767,7 +1345,9 @@ impl RunKernel {
                 .and_then(|state| state.actions_left.get(participant as usize))
                 .is_some_and(|left| *left == 0)
         {
-            return Err(RunError::InvalidAction("no actions left in this slot".into()));
+            return Err(RunError::InvalidAction(
+                "no actions left in this slot".into(),
+            ));
         }
         let backup = self.clone();
         self.instance.acting_participant = participant;
@@ -815,7 +1395,9 @@ impl RunKernel {
                     let available = owner
                         .present_deck(&ctx, node_guid)
                         .map_err(|e| RunError::InvalidAction(e.to_string()))?;
-                    if !available.contains(&storylet) || !storylet_at_location(content, ctx.state, participant, storylet) {
+                    if !available.contains(&storylet)
+                        || !storylet_at_location(content, ctx.state, participant, storylet)
+                    {
                         return Err(RunError::InvalidAction("storylet is not eligible".into()));
                     }
                     let entry = ctx
@@ -881,7 +1463,9 @@ impl RunKernel {
                         .into_iter()
                         .find(|m| m.to == to)
                         .ok_or_else(|| {
-                            RunError::InvalidAction("destination is not a connected location".into())
+                            RunError::InvalidAction(
+                                "destination is not a connected location".into(),
+                            )
                         })?;
                     if !option.enabled {
                         return Err(RunError::InvalidAction(
@@ -890,17 +1474,20 @@ impl RunKernel {
                     }
                     let mut delta = BijectiveDelta::default();
                     ctx.state.apply_move(participant, Some(to), &mut delta);
+                    self.pending_deltas.push(delta);
                 }
                 RunAction::Move { to } => {
                     let current = ctx.state.active_location(participant).ok_or_else(|| {
                         RunError::InvalidAction("participant has no location".into())
                     })?;
                     let source = ctx.state.vertices.iter().find(|v| {
-                        v.layers.contains(&crate::chrono_state::GraphLayer::Location)
+                        v.layers
+                            .contains(&crate::chrono_state::GraphLayer::Location)
                             && v.entity_index == Some(current)
                     });
                     let destination = ctx.state.vertices.iter().find(|v| {
-                        v.layers.contains(&crate::chrono_state::GraphLayer::Location)
+                        v.layers
+                            .contains(&crate::chrono_state::GraphLayer::Location)
                             && v.entity_index == Some(to)
                     });
                     let connected = source.zip(destination).is_some_and(|(a, b)| {
@@ -917,31 +1504,62 @@ impl RunKernel {
                     }
                     let mut delta = BijectiveDelta::default();
                     ctx.state.apply_move(participant, Some(to), &mut delta);
+                    self.pending_deltas.push(delta);
+                }
+                RunAction::Transfer {
+                    to,
+                    resource,
+                    amount,
+                } => {
+                    let delta = transfer_resource(ctx.state, participant, to, resource, amount)?;
+                    self.pending_deltas.push(delta);
+                }
+                RunAction::Tell { to, fact } => {
+                    if ctx.state.active_location(participant).is_none()
+                        || ctx.state.active_location(participant) != ctx.state.active_location(to)
+                    {
+                        return Err(RunError::InvalidAction(
+                            "telling requires co-location".into(),
+                        ));
+                    }
+                    if ctx.state.knowledge.knows(participant, fact).is_none() {
+                        return Err(RunError::InvalidAction(
+                            "teller does not know that fact".into(),
+                        ));
+                    }
+                    let mut delta = BijectiveDelta::default();
+                    ctx.state.apply_learn(
+                        crate::chrono_participants::KnowledgeRow {
+                            holder: to,
+                            fact,
+                            kind: crate::chrono_participants::KnowKind::Told,
+                            source_event: 0,
+                            told_by: Some(participant),
+                        },
+                        &mut delta,
+                    );
+                    self.pending_deltas.push(delta);
                 }
                 RunAction::Wait => {}
             }
             self.auto_advance()?;
             Ok(())
         })();
-        let stalled = match result {
-            Ok(()) => None,
-            Err(e @ RunError::Stalled { .. }) if preserve_stall => Some(e),
+        match result {
+            Ok(()) => {}
             Err(e) => {
                 *self = backup;
                 return Err(e);
             }
-        };
+        }
+        let stalled = None;
         self.stalled = stalled.clone();
-        let (notes, slot_advanced) = self.spend_action(content, participant, &action);
+        let (mut notes, slot_advanced) = self.spend_action(content, participant, &action);
         let is_human = self.world.participants.humans().any(|h| h == participant);
         let rule_plays = if is_human && (content.clock.is_none() || slot_advanced) {
-            match self.rule_pass(content) {
-                Ok(plays) => plays,
-                Err(error) => {
-                    *self = backup;
-                    return Err(error);
-                }
-            }
+            let (plays, failures) = self.rule_pass(content);
+            notes.extend(failures);
+            plays
         } else {
             Vec::new()
         };
@@ -970,15 +1588,21 @@ impl RunKernel {
         let _ = content;
         Ok((self.current_step, stalled))
     }
-    /// Spends the actor's action (all of them for `Wait`) and, once every human
-    /// is out of actions, advances the clock. Returns what the world did as a
-    /// result, as plain-language notes for the step.
-    fn spend_action(&mut self, content: &RunContent, participant: PartIx, action: &RunAction) -> (Vec<String>, bool) {
+    fn spend_action(
+        &mut self,
+        content: &RunContent,
+        participant: PartIx,
+        action: &RunAction,
+    ) -> (Vec<String>, bool) {
         let Some(state) = self.world.clock.as_mut() else {
             return (Vec::new(), false);
         };
         if let Some(left) = state.actions_left.get_mut(participant as usize) {
-            *left = if matches!(action, RunAction::Wait) { 0 } else { left.saturating_sub(1) };
+            *left = if matches!(action, RunAction::Wait) {
+                0
+            } else {
+                left.saturating_sub(1)
+            };
         }
         let all_done = self
             .world
@@ -990,14 +1614,30 @@ impl RunKernel {
         }
         let slot_before = self.world.clock.as_ref().map(|c| c.slot);
         let mut delta = BijectiveDelta::default();
-        let name = |id: u16| content.entity_names.get(&id).cloned().unwrap_or_else(|| id.to_string());
+        let name = |id: u16| {
+            content
+                .entity_names
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| id.to_string())
+        };
         let events = crate::chrono_space::advance_slot(&mut self.world, content, &mut delta);
         let notes = events
             .into_iter()
             .map(|event| {
-                let who = self.world.participants.keys.get(event.participant as usize).cloned().unwrap_or_default();
+                let who = self
+                    .world
+                    .participants
+                    .keys
+                    .get(event.participant as usize)
+                    .cloned()
+                    .unwrap_or_default();
                 match event.to {
-                    Some(to) => format!("{who} is driven from {} back to {}", name(event.from), name(to)),
+                    Some(to) => format!(
+                        "{who} is driven from {} back to {}",
+                        name(event.from),
+                        name(to)
+                    ),
                     None => format!("{who} is stranded at {}", name(event.from)),
                 }
             })
@@ -1006,28 +1646,50 @@ impl RunKernel {
         (notes, advanced)
     }
 
-    /// Each rule participant, in participant order, plays at most one eligible
-    /// storylet that lists it in `played_by`: highest display priority first,
-    /// then lowest storylet index. Rule storylets run off-stage on a scratch
-    /// instance, so they must not need an interaction.
-    fn rule_pass(&mut self, content: &RunContent) -> Result<Vec<RulePlay>, RunError> {
+    fn rule_pass(&mut self, content: &RunContent) -> (Vec<RulePlay>, Vec<String>) {
         let mut plays = Vec::new();
+        let mut failures = Vec::new();
         let participants = self.world.participants.len() as PartIx;
         for p in 0..participants {
-            if !matches!(self.world.participants.controller[p as usize], crate::chrono_participants::Controller::Rule) {
+            if !matches!(
+                self.world.participants.controller[p as usize],
+                crate::chrono_participants::Controller::Rule
+            ) {
                 continue;
             }
-            let Some(storylet) = self.next_rule_storylet(content, p) else { continue };
-            self.play_rule_storylet(content, p, storylet)?;
+            let storylet = match self.next_rule_storylet(content, p) {
+                Ok(Some(storylet)) => storylet,
+                Ok(None) => continue,
+                Err(error) => {
+                    failures.push(format!(
+                        "rule participant {p} eligibility failed: {error:?}"
+                    ));
+                    continue;
+                }
+            };
+            let before_rule = self.world.clone();
+            match self.play_rule_storylet(content, p, storylet) {
+                Ok(event) => self.pending_rule_events.push(event),
+                Err(error) => {
+                    self.world = before_rule;
+                    failures.push(format!(
+                        "rule participant {p} storylet {storylet} failed: {error:?}"
+                    ));
+                    continue;
+                }
+            }
             self.rule_played.push((p, storylet));
-            plays.push(RulePlay { participant: p, storylet: Self::reference(content, storylet) });
+            plays.push(RulePlay {
+                participant: p,
+                storylet: Self::reference(content, storylet),
+            });
             if plays.len() >= participants as usize {
                 break;
             }
         }
-        Ok(plays)
+        (plays, failures)
     }
-    fn next_rule_storylet(&self, content: &RunContent, p: PartIx) -> Option<u16> {
+    fn next_rule_storylet(&self, content: &RunContent, p: PartIx) -> Result<Option<u16>, RunError> {
         let location_tags = self
             .world
             .active_location(p)
@@ -1050,27 +1712,43 @@ impl RunKernel {
             }
             if let Some(graph) = &def.precondition_graph {
                 let mut world = self.world.clone();
-                let ctx = RuntimeContext::with_registries(&mut world, &self.dispatcher, &self.registry, &self.passion_registry);
-                if !FlowGraphInstance::evaluate_precondition_graph_for(graph, &ctx, p).unwrap_or(false) {
+                let ctx = RuntimeContext::with_registries(
+                    &mut world,
+                    &self.dispatcher,
+                    &self.registry,
+                    &self.passion_registry,
+                );
+                if !FlowGraphInstance::evaluate_precondition_graph_for(graph, &ctx, p)
+                    .map_err(|error| RunError::Engine(error.to_string()))?
+                {
                     continue;
                 }
             }
             let better = best.is_none_or(|(priority, id)| {
-                def.display_priority > priority || (def.display_priority == priority && def.storylet_id < id)
+                def.display_priority > priority
+                    || (def.display_priority == priority && def.storylet_id < id)
             });
             if better {
                 best = Some((def.display_priority, def.storylet_id));
             }
         }
-        best.map(|(_, id)| id)
+        Ok(best.map(|(_, id)| id))
     }
-    fn play_rule_storylet(&mut self, content: &RunContent, p: PartIx, storylet: u16) -> Result<(), RunError> {
+    fn play_rule_storylet(
+        &mut self,
+        content: &RunContent,
+        p: PartIx,
+        storylet: u16,
+    ) -> Result<RuleEventData, RunError> {
         let entry = self
             .dispatcher
             .storylet(storylet)
             .ok_or_else(|| RunError::InvalidAction("unknown storylet".into()))?
             .payload_node_guid;
-        let seed = self.run_seed ^ (u64::from(storylet) << 16) ^ (u64::from(p) << 8) ^ self.rule_played.len() as u64;
+        let seed = self.run_seed
+            ^ (u64::from(storylet) << 16)
+            ^ (u64::from(p) << 8)
+            ^ self.rule_played.len() as u64;
         let mut scratch = FlowGraphInstance::new(1, content.root_asset.clone(), seed)
             .map_err(|e| RunError::Engine(e.to_string()))?;
         scratch
@@ -1080,42 +1758,92 @@ impl RunKernel {
         scratch
             .enter_storylet_invocation(entry, 1)
             .map_err(|e| RunError::Engine(e.to_string()))?;
-        let known_before: Vec<(PartIx, u16)> = self.world.knowledge.rows.iter().map(|r| (r.holder, r.fact)).collect();
-        let told_before: Vec<(PartIx, u16)> = self.world.telling.rows.iter().map(|r| (r.holder, r.entry)).collect();
+        let known_before: Vec<(PartIx, u16)> = self
+            .world
+            .knowledge
+            .rows
+            .iter()
+            .map(|row| (row.holder, row.fact))
+            .collect();
+        let told_before: Vec<(PartIx, u16)> = self
+            .world
+            .telling
+            .rows
+            .iter()
+            .map(|row| (row.holder, row.entry))
+            .collect();
         let mut ticks = 0;
         loop {
-            let active = scratch.nodes.iter().any(|n| n.state == NodeExecutionState::ActiveLatent);
+            let active = scratch
+                .nodes
+                .iter()
+                .any(|n| n.state == NodeExecutionState::ActiveLatent);
             if scratch.tokens.is_empty() && !active {
                 break;
             }
-            if ticks >= 10_000 || (scratch.tokens.is_empty() && active && ticks > 0 && Self::pending_in(&scratch).is_some()) {
+            if ticks >= 10_000
+                || (scratch.tokens.is_empty()
+                    && active
+                    && ticks > 0
+                    && Self::pending_in(&scratch).is_some())
+            {
                 return Err(RunError::InvalidAction(format!(
                     "rule storylet {storylet} needs an interaction; rule storylets must not contain choices"
                 )));
             }
-            let mut ctx = RuntimeContext::with_registries(&mut self.world, &self.dispatcher, &self.registry, &self.passion_registry);
-            scratch.tick(&mut ctx, 1000).map_err(|e| RunError::Engine(e.to_string()))?;
+            let mut ctx = RuntimeContext::with_registries(
+                &mut self.world,
+                &self.dispatcher,
+                &self.registry,
+                &self.passion_registry,
+            );
+            scratch
+                .tick(&mut ctx, 1000)
+                .map_err(|e| RunError::Engine(e.to_string()))?;
             ticks += 1;
         }
-        // Rule plays are recorded on the triggering run step. A high-bit
-        // source refers to that step, distinct from graph call-history indices.
-        let source = 0x8000_0000 | (self.current_step + 1);
-        for row in &mut self.world.knowledge.rows {
-            if !known_before.contains(&(row.holder, row.fact)) {
-                row.source_event = source;
-            }
-        }
-        for row in &mut self.world.telling.rows {
-            if !told_before.contains(&(row.holder, row.entry)) {
-                row.source_event = source;
-            }
-        }
-        Ok(())
+        Ok(RuleEventData {
+            participant: p,
+            node_guid: entry,
+            storylet,
+            knowledge: self
+                .world
+                .knowledge
+                .rows
+                .iter()
+                .filter(|row| !known_before.contains(&(row.holder, row.fact)))
+                .map(|row| (row.holder, row.fact))
+                .collect(),
+            tellings: self
+                .world
+                .telling
+                .rows
+                .iter()
+                .filter(|row| !told_before.contains(&(row.holder, row.entry)))
+                .map(|row| (row.holder, row.entry))
+                .collect(),
+            deltas: scratch
+                .history
+                .commits
+                .iter()
+                .skip(1)
+                .map(|commit| commit.delta.clone())
+                .collect(),
+        })
     }
     pub fn stalled(&self) -> Option<RunError> {
         self.stalled.clone()
     }
-    pub fn rewind(&mut self, to_step: u32) -> Result<(), RunError> {
+    pub fn rewind(
+        &mut self,
+        authority: crate::actions::Authority,
+        to_step: u32,
+    ) -> Result<(), RunError> {
+        if authority != crate::actions::Authority::Architect {
+            return Err(RunError::InvalidAction(
+                "rewind requires Architect authority".into(),
+            ));
+        }
         let snap = self.snapshots[self.branch]
             .get(to_step as usize)
             .cloned()
@@ -1129,12 +1857,17 @@ impl RunKernel {
         self.instance
             .checkout(&mut ctx, snap.commit)
             .map_err(|e| RunError::Engine(e.to_string()))?;
+        let idempotency = self.idempotency.clone();
         self.world = snap.world;
         self.instance = snap.instance;
         self.storylet = snap.storylet;
         self.selections = snap.selections;
         self.rule_played = snap.rule_played;
         self.stalled = snap.stalled;
+        self.revision = snap.revision;
+        self.proposals = snap.proposals;
+        self.idempotency = idempotency;
+        self.event_log = snap.event_log;
         self.current_step = to_step;
         self.rewound = true;
         Ok(())
@@ -1175,45 +1908,49 @@ impl RunKernel {
                             &content.registry,
                             &content.passion_registry,
                         );
-                        if !FlowGraphInstance::evaluate_precondition_graph_for(
+                        match FlowGraphInstance::evaluate_precondition_graph_for(
                             graph,
                             &ctx,
                             participant,
-                        )
-                        .unwrap_or(false)
-                        {
-                            reason = graph.nodes.iter().find_map(|node| match node.kind {
-                                NodeKind::Knows {
-                                    holder,
-                                    fact,
-                                    confirmed_only,
-                                } => {
-                                    let holder = match holder {
-                                        crate::chrono_runtime::HolderRef::Acting => participant,
-                                        crate::chrono_runtime::HolderRef::Participant(p) => p,
-                                    };
-                                    let known =
-                                        self.world.knowledge.knows(holder, fact).is_some_and(|r| {
-                                            !confirmed_only || r.kind.is_confirmed()
-                                        });
-                                    if known {
-                                        None
-                                    } else {
-                                        let name = content
-                                            .registry
-                                            .tag(fact)
-                                            .unwrap_or("unknown")
-                                            .strip_prefix("fact.")
-                                            .unwrap_or("unknown")
-                                            .replace(['_', '.'], " ");
-                                        Some(format!("needs fact \"{name}\""))
-                                    }
-                                }
-                                _ => None,
-                            });
-                            if reason.is_none() {
-                                reason = Some("needs another condition".into());
+                        ) {
+                            Err(error) => {
+                                reason = Some(format!("precondition evaluation failed: {error}"))
                             }
+                            Ok(false) => {
+                                reason = graph.nodes.iter().find_map(|node| match node.kind {
+                                    NodeKind::Knows {
+                                        holder,
+                                        fact,
+                                        confirmed_only,
+                                    } => {
+                                        let holder = match holder {
+                                            crate::chrono_runtime::HolderRef::Acting => participant,
+                                            crate::chrono_runtime::HolderRef::Participant(p) => p,
+                                        };
+                                        let known =
+                                            self.world.knowledge.knows(holder, fact).is_some_and(
+                                                |r| !confirmed_only || r.kind.is_confirmed(),
+                                            );
+                                        if known {
+                                            None
+                                        } else {
+                                            let name = content
+                                                .registry
+                                                .tag(fact)
+                                                .unwrap_or("unknown")
+                                                .strip_prefix("fact.")
+                                                .unwrap_or("unknown")
+                                                .replace(['_', '.'], " ");
+                                            Some(format!("needs fact \"{name}\""))
+                                        }
+                                    }
+                                    _ => None,
+                                });
+                                if reason.is_none() {
+                                    reason = Some("needs another condition".into());
+                                }
+                            }
+                            Ok(true) => {}
                         }
                     }
                 }
@@ -1224,23 +1961,6 @@ impl RunKernel {
             })
             .take(limit)
             .collect()
-    }
-    pub fn replay(
-        content: &RunContent,
-        start: RunStart,
-        seed: u64,
-        actions: &[(PartIx, RunAction)],
-    ) -> (Result<Self, RunError>, Option<u32>) {
-        let mut run = match Self::start(content, start, seed) {
-            Ok(v) => v,
-            Err(e) => return (Err(e), Some(0)),
-        };
-        for (i, (p, a)) in actions.iter().enumerate() {
-            if let Err(e) = run.act(content, *p, a.clone()) {
-                return (Err(e), Some((i + 1) as u32));
-            }
-        }
-        (Ok(run), None)
     }
 }
 
@@ -1259,13 +1979,13 @@ pub struct KnowRowView {
     pub kind: crate::chrono_participants::KnowKind,
     pub confirmed: bool,
     pub source_step: Option<u32>,
+    pub source_event: u32,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeView {
-    pub key: String,
-    pub before: String,
-    pub after: String,
+    pub event_id: u32,
+    pub delta: BijectiveDelta,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1285,20 +2005,14 @@ pub struct AdvancedView {
     pub interaction: Option<String>,
 }
 impl RunKernel {
-    /// The run step during which the call-history event `event` happened: the
-    /// first step whose snapshot has recorded more than `event` calls. Step 0
-    /// is the automatic advance at the start.
     pub fn step_of_event(&self, event: u32) -> Option<u32> {
-        if event & 0x8000_0000 != 0 {
-            let step = event & 0x7fff_ffff;
-            return self.branches[self.branch].steps.get(step.checked_sub(1)? as usize)
-                .filter(|entry| !entry.rule_plays.is_empty()).map(|_| step);
+        if event == START_EVENT {
+            return Some(0);
         }
-        (0..=self.current_step).find(|&step| {
-            self.snapshots[self.branch]
-                .get(step as usize)
-                .is_some_and(|snapshot| snapshot.instance.call_history().len() > event as usize)
-        })
+        self.event_log
+            .iter()
+            .find(|row| row.id == event)
+            .map(|row| row.step)
     }
     pub fn inspect(&self, content: &RunContent, participant: PartIx) -> InspectView {
         let knows = self
@@ -1315,6 +2029,7 @@ impl RunKernel {
                 kind: r.kind,
                 confirmed: r.kind.is_confirmed(),
                 source_step: self.step_of_event(r.source_event),
+                source_event: r.source_event,
             })
             .collect();
         let chronicle = content
@@ -1332,26 +2047,17 @@ impl RunKernel {
                 told: self.world.telling.told_number(participant, ix as u16),
             })
             .collect();
-        let mut world_changes = Vec::new();
-        if self.current_step > 0 {
-            if let Some(before) = self.snapshots[self.branch].get(self.current_step as usize - 1) {
-                let a = serde_json::to_value(&before.world).unwrap_or_default();
-                let b = serde_json::to_value(&self.world).unwrap_or_default();
-                if let (Some(a), Some(b)) = (a.as_object(), b.as_object()) {
-                    for (key, after) in b {
-                        if let Some(before) = a.get(key) {
-                            if before != after {
-                                world_changes.push(ChangeView {
-                                    key: key.clone(),
-                                    before: before.to_string(),
-                                    after: after.to_string(),
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let world_changes = self
+            .event_log
+            .iter()
+            .filter(|event| event.step == self.current_step && event.step != 0)
+            .flat_map(|event| {
+                event.deltas.iter().cloned().map(move |delta| ChangeView {
+                    event_id: event.id,
+                    delta,
+                })
+            })
+            .collect();
         let node_guid = self.pending();
         InspectView {
             knows,
@@ -1369,4 +2075,3 @@ impl RunKernel {
         }
     }
 }
-

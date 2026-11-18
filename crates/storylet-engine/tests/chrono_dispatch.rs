@@ -10,7 +10,6 @@ fn tag_registry(names: &[&str]) -> GameplayTagRegistry {
     GameplayTagRegistry::compile(names.iter().map(|name| (*name).to_owned())).unwrap()
 }
 
-
 fn node(topic_id: &str) -> WaypointTopicNode {
     WaypointTopicNode {
         topic_id: topic_id.to_owned(),
@@ -30,8 +29,6 @@ fn edge(edge_id: &str, from: &str, to: &str, base_cost: f64, fallback: bool) -> 
     }
 }
 
-
-// Distinct role bindings, including the adapter-written current-location marker.
 #[test]
 fn role_binding_never_shares_an_actor_and_honours_the_current_marker() {
     let tags = tag_registry(&["location.current", "role.clerk", "role.courier"]);
@@ -58,7 +55,6 @@ fn role_binding_never_shares_an_actor_and_honours_the_current_marker() {
     let def = dispatcher.storylet(5).unwrap();
 
     let mut table = WorldStateTable::new();
-    // Row 1 is the only clerk at the current location; row 2 is a clerk elsewhere.
     for row in [1usize, 2] {
         table.entity_tags[row].set_bit(clerk).unwrap();
     }
@@ -72,7 +68,6 @@ fn role_binding_never_shares_an_actor_and_honours_the_current_marker() {
     assert!(bindings[0].entity_index != bindings[1].entity_index);
     assert!(dispatcher.is_eligible(def, &table));
 
-    // Reserving the only eligible clerk is a typed error, not a shared actor.
     let busy = BTreeSet::from([1usize]);
     assert_eq!(
         dispatcher.bind_roles_excluding(def, &table, &busy),
@@ -82,7 +77,6 @@ fn role_binding_never_shares_an_actor_and_honours_the_current_marker() {
     );
 }
 
-// Turn and millisecond cooldowns stay separate; declaring both is a typed conflict.
 #[test]
 fn cooldown_units_are_kept_separate_and_conflicts_are_typed() {
     let dispatcher = UnifiedDispatcher::new(Vec::new());
@@ -119,7 +113,6 @@ fn cooldown_units_are_kept_separate_and_conflicts_are_typed() {
     assert_eq!(dispatcher.cooldown_unit(&StoryletDef::default()), Ok(None));
 }
 
-// Deterministic deck order, deterministic tie resolution, and completion locks.
 #[test]
 fn qbn_deck_order_and_salience_ties_are_deterministic() {
     let mut low = StoryletDef::default();
@@ -130,26 +123,21 @@ fn qbn_deck_order_and_salience_ties_are_deterministic() {
     high.storylet_id = 2;
     high.display_priority = 5;
 
-    // Salience candidates must declare an arc-phase mask (REQ-BB-05).
     low.required_arc_phases.set_bit(0).unwrap();
     high.required_arc_phases.set_bit(0).unwrap();
 
     let mut dispatcher = UnifiedDispatcher::new(vec![low, high]);
-    dispatcher
-        .resolve(&GameplayTagRegistry::empty())
-        .unwrap();
+    dispatcher.resolve(&GameplayTagRegistry::empty()).unwrap();
 
     let mut table = WorldStateTable::new();
     table.global_tags.set_bit(0).unwrap();
     let completed = BTreeSet::new();
 
-    // Duplicate IDs appear once; the result is priority order, then ID order.
     assert_eq!(
         dispatcher.query_qbn_deck(&[1, 2, 1], &table, &completed),
         vec![2u16, 1]
     );
 
-    // Both candidates score zero, so the tie is resolved from the seed and repeats.
     let first = dispatcher
         .match_most_salient(&[1, 2], &table, &completed, 0x5eed)
         .unwrap();
@@ -163,7 +151,6 @@ fn qbn_deck_order_and_salience_ties_are_deterministic() {
         .collect();
     assert_eq!(picks, BTreeSet::from([1u16, 2]));
 
-    // Locking the non-repeatable storylet removes it from both paths.
     let mut locked = BTreeSet::new();
     locked.insert(1);
     assert_eq!(
@@ -176,7 +163,6 @@ fn qbn_deck_order_and_salience_ties_are_deterministic() {
     );
 }
 
-// Waypoint pathfinding: equal costs break on edge ID, and the same input replays.
 #[test]
 fn waypoint_ties_resolve_by_edge_id_and_replay_identically() {
     let dispatcher = UnifiedDispatcher::new(Vec::new());
@@ -200,7 +186,6 @@ fn waypoint_ties_resolve_by_edge_id_and_replay_identically() {
         Ok(step.clone())
     );
 
-    // One recorded traversal makes the other equal-cost edge cheaper.
     let counts = BTreeMap::from([("a".to_string(), 1u64)]);
     let step = dispatcher
         .compute_next_npc_topic_step(&graph, "start", "goal", &counts)
@@ -208,7 +193,6 @@ fn waypoint_ties_resolve_by_edge_id_and_replay_identically() {
     assert_eq!(step.edge_id, "b");
     assert_eq!(step.cost, 1.0);
 
-    // Exhausted normal routes fall back to the authored default edge.
     let exhausted = WaypointTopicGraph {
         nodes: vec![node("start"), node("goal"), node("hall")],
         edges: vec![edge("f", "start", "hall", 2.0, true)],
@@ -241,4 +225,3 @@ fn waypoint_ties_resolve_by_edge_id_and_replay_identically() {
         })
     );
 }
-

@@ -1,19 +1,15 @@
 #!/usr/bin/env node
 
-// src/cli.js
 import path21 from "node:path";
 
-// src/commands.js
 import fs15 from "node:fs";
 import path20 from "node:path";
 
-// src/files.js
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { Buffer } from "node:buffer";
 
-// src/exit-codes.js
 var EXIT_CODES = Object.freeze({
   ok: 0,
   findings: 1,
@@ -70,7 +66,6 @@ function exitCodeFor(error) {
   return EXIT_CODES.findings;
 }
 
-// src/files.js
 var MAX_READ_BYTES = 5 * 1024 * 1024;
 function readTextFile(filePath) {
   return decodeUtf8(readFileBytes(filePath), filePath);
@@ -706,7 +701,6 @@ function hasGitDirectoryBelow(start, end) {
   return path.relative(start, end).split(path.sep).some((name) => name !== ".." && isGitDirectoryName(name));
 }
 
-// src/findings.js
 function err(code, message, file = null, chapter = null) {
   return { code, message, file: portablePath(file), chapter };
 }
@@ -1061,7 +1055,6 @@ var CHAPTER_CODES = [
   "route-too-fast"
 ];
 
-// src/clues.js
 var LIVE_STATUSES = new Set(["planned", "planted", "paid-off"]);
 function buildClueMatrix(project) {
   const chapters = [...project.chapters].sort((left, right) => left.number - right.number || left.id.localeCompare(right.id, "en"));
@@ -1160,7 +1153,6 @@ function formatClueMatrix(matrix) {
 `;
 }
 
-// src/calendar.js
 var CALENDAR_NAME = /^\s*[^\s\d,][^,]*$/u;
 var KINDS = ["month", "era", "weekdays", "hours-per-day"];
 var ERA_DIRECTIONS = ["forward", "backward"];
@@ -1429,10 +1421,8 @@ function mod(value, divisor) {
   return (value % divisor + divisor) % divisor;
 }
 
-// src/exemptions.js
 import path4 from "node:path";
 
-// src/frontmatter.js
 var FRONTMATTER_PATTERN = /^(?:\uFEFF)?---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 var OPENING_PATTERN = /^(?:\uFEFF)?---[ \t]*\r?\n/;
 function parseFrontmatter(markdown, filePath = "markdown") {
@@ -2171,7 +2161,6 @@ function withoutLeadingFrontmatter(text) {
   return text.slice(match[0].length);
 }
 
-// src/frontmatter-keys.js
 var FRONTMATTER_KEYS = {
   story: ["title", "schema-version", "series", "series-title", "book-number", "follows", "precedes", "genre", "sub-genre", "setting-era", "status", "themes", "pov", "tense", "premise", "counter-premise", "author", "surname", "short-title", "contact", "season-goal", "target-words", "target-characters", "count-unit", "language", "isbn", "publisher", "publication-date", "description", "keywords", "subjects", "copyright", "ifid", "cover-alt", "ai-disclosure", "chapter-label", "writing-mode", "chapter-numerals", "contents-label", "labels", "authors", "editor", "form", "draft-mode", "cover", "deadline", "daily-target-words", "daily-target-characters", "writing-days", "release-every", "release-start", "release-warn-days", "calendar", "revision-passes", "build-style", "cli-defaults", "severity", "queries"],
   character: ["pronunciation", "id", "name", "role", "status", "died-in", "revived-in", "aliases", "relationships", "locations", "tags", "arc", "arc-type", "lie", "truth", "ghost-wound", "voice-words", "voice-avoid", "progressions"],
@@ -2241,7 +2230,6 @@ function typoDistance(a, b) {
   return rows[a.length][b.length];
 }
 
-// src/entities.js
 var NAMED_REFERENCES = `
 AElig:c6 AMP:26 Aacute:c1 Abreve:102 Acirc:c2 Acy:410 Afr:1d504 Agrave:c0 Alpha:391 Amacr:100 And:2a53
 Aogon:104 Aopf:1d538 ApplyFunction:2061 Aring:c5 Ascr:1d49c Assign:2254 Atilde:c3 Auml:c4 Backslash:2216
@@ -2527,7 +2515,6 @@ function characterReference(text, index) {
   return value === undefined ? null : { value, length: match[0].length };
 }
 
-// src/languages/ar.js
 var ar_default = {
   code: "ar",
   name: "Arabic",
@@ -2675,7 +2662,6 @@ var ar_default = {
   }
 };
 
-// src/languages/base.js
 var base_default = {
   code: "und",
   name: "Generic",
@@ -2705,21 +2691,18 @@ var base_default = {
   checks: {}
 };
 
-// src/languages/da.js
 var da_default = {
   code: "da",
   name: "Danish",
   quotes: [["»", "«"], ["›", "‹"], ["„", "“"], ["“", "”"], ["”", "”"], ['"', '"']]
 };
 
-// src/languages/de-ch.js
 var de_ch_default = {
   code: "de-ch",
   name: "Swiss German",
   quotes: [["«", "»"], ["‹", "›"], ["„", "“"], ["‚", "‘"], ["“", "”"], ['"', '"']]
 };
 
-// src/languages/de.js
 var ORDINALS = [
   "erst",
   "zweit",
@@ -3611,7 +3594,6 @@ var de_default = {
   }
 };
 
-// src/languages/en.js
 var en_default = {
   code: "en",
   name: "English",
@@ -4286,7 +4268,6 @@ var en_default = {
   }
 };
 
-// src/languages/es.js
 var ORDINALS2 = [
   "primero",
   "primera",
@@ -5049,7 +5030,6 @@ var es_default = {
   }
 };
 
-// src/languages/fa.js
 var fa_default = {
   code: "fa",
   name: "Persian",
@@ -5195,7 +5175,6 @@ var fa_default = {
   }
 };
 
-// src/languages/fi.js
 var fi_default = {
   code: "fi",
   name: "Finnish",
@@ -5204,7 +5183,6 @@ var fi_default = {
   dashStartsLine: true
 };
 
-// src/languages/fr.js
 var fr_default = {
   code: "fr",
   name: "French",
@@ -6400,7 +6378,6 @@ var fr_default = {
   }
 };
 
-// src/languages/he.js
 var he_default = {
   code: "he",
   name: "Hebrew",
@@ -6548,7 +6525,6 @@ var he_default = {
   }
 };
 
-// src/languages/hi.js
 var hi_default = {
   code: "hi",
   name: "Hindi",
@@ -6695,7 +6671,6 @@ var hi_default = {
   }
 };
 
-// src/languages/it.js
 var it_default = {
   code: "it",
   name: "Italian",
@@ -6841,7 +6816,6 @@ var it_default = {
   }
 };
 
-// src/languages/ja.js
 var ja_default = {
   code: "ja",
   name: "Japanese",
@@ -6998,7 +6972,6 @@ var ja_default = {
   }
 };
 
-// src/languages/ko.js
 var ko_default = {
   code: "ko",
   name: "Korean",
@@ -7146,7 +7119,6 @@ var ko_default = {
   }
 };
 
-// src/languages/nl.js
 var nl_default = {
   code: "nl",
   name: "Dutch",
@@ -7292,7 +7264,6 @@ var nl_default = {
   }
 };
 
-// src/languages/pl.js
 var pl_default = {
   code: "pl",
   name: "Polish",
@@ -7440,7 +7411,6 @@ var pl_default = {
   }
 };
 
-// src/languages/pt-pt.js
 var pt_pt_default = {
   code: "pt-pt",
   name: "European Portuguese",
@@ -7474,7 +7444,6 @@ var pt_pt_default = {
   }
 };
 
-// src/languages/pt.js
 var pt_default = {
   code: "pt",
   name: "Portuguese",
@@ -7620,7 +7589,6 @@ var pt_default = {
   }
 };
 
-// src/languages/ru.js
 var ru_default = {
   code: "ru",
   name: "Russian",
@@ -7768,7 +7736,6 @@ var ru_default = {
   }
 };
 
-// src/languages/sv.js
 var sv_default = {
   code: "sv",
   name: "Swedish",
@@ -7917,7 +7884,6 @@ var sv_default = {
   }
 };
 
-// src/languages/th.js
 var th_default = {
   code: "th",
   name: "Thai",
@@ -7925,7 +7891,6 @@ var th_default = {
   script: "Thai"
 };
 
-// src/languages/tr.js
 var tr_default = {
   code: "tr",
   name: "Turkish",
@@ -8071,7 +8036,6 @@ var tr_default = {
   }
 };
 
-// src/languages/uk.js
 var uk_default = {
   code: "uk",
   name: "Ukrainian",
@@ -8219,7 +8183,6 @@ var uk_default = {
   }
 };
 
-// src/languages/zh.js
 var zh_default = {
   code: "zh",
   name: "Chinese",
@@ -8375,7 +8338,6 @@ var zh_default = {
   }
 };
 
-// src/languages/zh-hant.js
 var labels = {
   chapter: "第{n}章",
   "chapter-heading": "{chapter}　{title}",
@@ -8521,7 +8483,6 @@ var zh_hant_default = [
   { code: "lzh", name: "Classical Chinese" }
 ];
 
-// src/languages/index.js
 var DEFAULT_LANGUAGE = "en";
 var PACKS = new Map([ar_default, da_default, de_default, de_ch_default, en_default, es_default, fa_default, fi_default, fr_default, he_default, hi_default, it_default, ja_default, ko_default, nl_default, pl_default, pt_default, pt_pt_default, ru_default, sv_default, th_default, tr_default, uk_default, zh_default, ...zh_hant_default].map((pack) => [pack.code, pack]));
 var TAG_PATTERN = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/;
@@ -8743,7 +8704,6 @@ function joinNames(names, labels) {
   return names.length === 0 ? "" : names.reduce((joined, name) => fillLabel(joiner, "and", { a: joined, b: name }));
 }
 
-// src/unicode.js
 function nfc(value) {
   return String(value).normalize("NFC");
 }
@@ -8839,7 +8799,6 @@ function displayWidth(text) {
   return width;
 }
 
-// src/languages/locale.js
 var COMPARERS = new Map;
 function compareText(pack = languagePack()) {
   if (!COMPARERS.has(pack.locale)) {
@@ -8887,11 +8846,9 @@ function dropCountForms(labels, key) {
   }
 }
 
-// src/series.js
 import fs2 from "node:fs";
 import path2 from "node:path";
 
-// src/progressions.js
 var PROGRESSION_KINDS = ["character", "location", "faction"];
 var RESERVED_FIELDS = new Set(["progressions", "id", "died-in", "revived-in"]);
 function progressionEntry(item) {
@@ -9030,7 +8987,6 @@ function formatStateChanges(changes, atChapterId) {
 `;
 }
 
-// src/deaths.js
 var STATUS_PROGRESSIONS = new WeakMap;
 function statusProgressions(character) {
   if (!STATUS_PROGRESSIONS.has(character)) {
@@ -9131,7 +9087,6 @@ function revivedBy(lifeline, chapterId, bookChronology) {
   return chronology.numbers.has(chapterId) && lifeline.events.some((event) => event.type === "revival" && !happensAfter(chronology, event.chapter, chapterId));
 }
 
-// src/series.js
 var SERIES_LINK_INVERSES = [["follows", "precedes"], ["precedes", "follows"]];
 var MAX_SERIES_BOOKS = 100;
 var SHARED_CANON = [
@@ -9661,7 +9616,6 @@ function bookFile(book, file) {
   return path2.posix.join(portablePath(book.label), projectPath(book.root, file));
 }
 
-// src/publishing.js
 var MAX_KEYWORDS = 7;
 var BISAC_PATTERN = /^[A-Z]{3}\d{6}$/;
 var SCALAR_FIELDS = ["author", "surname", "short-title", "language", "isbn", "publisher", "publication-date", "description", "copyright", "cover-alt", "ai-disclosure", "chapter-label", "contents-label"];
@@ -9932,7 +9886,6 @@ function tableCell(value) {
   return String(value).replace(/(\\*)\|/g, "$1$1\\|").replace(/\n/g, " ");
 }
 
-// src/typesetting.js
 var WRITING_MODES = new Set(["horizontal", "vertical"]);
 var CASED_SCRIPTS = new Set(["Latn", "Cyrl", "Grek", "Armn", "Copt", "Glag", "Adlm", "Osge", "Dsrt"]);
 var VERTICAL_SCRIPTS = new Set(["Jpan", "Hani", "Hans", "Hant", "Hira", "Kana", "Bopo", "Kore", "Hang"]);
@@ -10062,7 +10015,6 @@ function validateWritingMode(data, errors) {
   }
 }
 
-// src/numerals.js
 var CHAPTER_NUMERALS = new Set(["western", "native"]);
 var DIGIT_ZEROS = {
   arab: 1632,
@@ -10195,7 +10147,6 @@ function validateChapterNumerals(data, errors) {
   }
 }
 
-// src/words.js
 var WORD_CHARS = "\\p{L}\\p{M}\\p{N}\\u200C\\u200D\\u00AD";
 var JOINING_MARKS = "'\\u2019\\u2010\\u2011\\-\\u05BE\\u05F3\\u05F4\\u055A-\\u055C\\u055E\\u055F";
 var WORD_PATTERN = new RegExp(`[\\p{L}\\p{N}][${WORD_CHARS}]*(?:(?:[${JOINING_MARKS}]|_+|(?<=\\p{Script=Hebrew})"(?=\\p{Script=Hebrew})|(?<=\\p{N})[.,:](?=\\p{N}))[\\p{L}\\p{N}][${WORD_CHARS}]*)*`, "gu");
@@ -10323,7 +10274,6 @@ function nextCharacter(text, index) {
   return index + (text.codePointAt(index) > 65535 ? 2 : 1);
 }
 
-// src/markdown.js
 var LATIN_FOLDS = {
   "Æ": "AE",
   "æ": "ae",
@@ -11580,7 +11530,6 @@ function leadingHeadingLength(masked) {
   return match ? match[0].length : 0;
 }
 
-// src/names.js
 import path3 from "node:path";
 var MAJOR_ROLES = new Set(["protagonist", "antagonist", "deuteragonist", "narrator"]);
 var NO_WORDS = new Set;
@@ -11712,7 +11661,6 @@ function formatNames(report) {
 `;
 }
 
-// src/punctuation.js
 var SENTENCE_OPENERS = "¿¡";
 var QUESTION_MARKS = "?？؟";
 var EXCLAMATION_MARKS = "!！";
@@ -11757,7 +11705,6 @@ function anyOf(marks) {
   return marks === "" ? "(?!)" : `[${charClass(marks)}]`;
 }
 
-// src/sentences.js
 var INITIALS = "(?:[A-Za-z]\\.)*[A-Za-z]";
 var CAPITAL_INITIALS = "(?:\\p{Lu}\\.)*\\p{Lu}";
 var INITIAL_RUN = /(?:^|[^\p{L}\p{N}])\p{L}\. ?\p{L}$/u;
@@ -11902,7 +11849,6 @@ function isStammer(before, next, rules) {
   return Boolean(last && first) && last[1].toLowerCase() === first[1].toLowerCase();
 }
 
-// src/plural.js
 function plural(count, singular, pluralForm = `${singular}s`) {
   return `${count} ${count === 1 ? singular : pluralForm}`;
 }
@@ -11925,7 +11871,6 @@ function roundedShares(values) {
   return shares;
 }
 
-// src/voices.js
 var VOICE_CHECKS = [
   { check: "speech-tags", label: "Speech-tag attribution", lists: ["speechVerbs", "speechPronouns"] },
   { check: "contractions", label: "Contraction counts", lists: ["contractionSuffixes", "contractedIs"] },
@@ -12440,7 +12385,6 @@ function formatVoices(report) {
 `;
 }
 
-// src/prose.js
 var PROSE_CHECKS = [
   { check: "filter-words", label: "Filter words", lists: ["filterWords"] },
   { check: "adverbs", label: "Adverbs", lists: ["adverbSuffixes", "adverbExceptions"] },
@@ -12972,7 +12916,6 @@ function times(count) {
   return count === 1 ? "once" : `${count} times`;
 }
 
-// src/options.js
 var OPTIONS = [
   { name: "title", value: "<name>", help: ["Story title for import; title of the new chapter", "for split"] },
   { name: "dir", value: "<path>", help: ["Target directory for init or import"] },
@@ -13257,7 +13200,6 @@ function parseArgs(argv, suggestFrom = OPTIONS.map((option) => option.name)) {
   return { positionals, options };
 }
 
-// src/exemptions.js
 var EXEMPTIONS_FILE = "continuity/exemptions.md";
 var MATCH_KEYS = ["pattern", "code", "file", "chapter"];
 var ENTRY_KEYS = [...MATCH_KEYS, "reason"];
@@ -13404,13 +13346,11 @@ function dismissByExemptions(result, exemptions, { errors: withErrors, dismissab
   return { ...result, ok: withErrors ? errors.length === 0 : result.ok, errors, warnings, dismissed };
 }
 
-// src/scan.js
 import crypto3 from "node:crypto";
 import fs3 from "node:fs";
 import path5 from "node:path";
 import { Buffer as Buffer2 } from "node:buffer";
 
-// src/forms.js
 var STORY_FORMS = new Map([
   ["flash", { min: 1, max: 1500, target: 1000 }],
   ["short-story", { min: 1000, max: 7500, target: 5000 }],
@@ -13450,7 +13390,6 @@ function formRangeWarning(form, count, label, ranges = STORY_FORMS, unit = COUNT
   return "";
 }
 
-// src/twee.js
 import crypto2 from "node:crypto";
 var TWEE_LINK_UNSAFE = /[[\]|\r\n]|->|<-|<$/;
 var UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -13488,10 +13427,8 @@ function tweeSource(story) {
 `;
 }
 
-// src/progress-file.js
 var PROGRESS_FILE = "progress.md";
 
-// src/languages/style.js
 var STYLE_LISTS = {
   "filter-words": { list: "filterWords" },
   "said-bookisms": { list: "saidBookisms" },
@@ -13575,7 +13512,6 @@ function unique2(words) {
   return [...new Set(words)];
 }
 
-// src/scan.js
 var STORY_SCHEMA_VERSION = 2;
 var REQUIRED_PATHS = [
   "story.md",
@@ -15440,7 +15376,6 @@ function relative(project, file) {
   return projectPath(project.root, file);
 }
 
-// src/mentions.js
 var MENTION_KINDS = ["character", "location", "faction", "artifact", "system", "term"];
 var BLANKED = "\x00";
 function mentionNames(project) {
@@ -15806,7 +15741,6 @@ function renamedText(written, from, to, pack, titles) {
   return text;
 }
 
-// src/continuity.js
 var CHEKHOV_CHAPTER_GAP = 3;
 var QUESTION_CHAPTER_GAP = 12;
 function checkContinuity(project) {
@@ -17039,7 +16973,6 @@ function parseClockTime(value, dayLength = DEFAULT_HOURS_PER_DAY) {
   return hours * 60 + minutes;
 }
 
-// src/chronology.js
 function chapterChronology(project) {
   const numbers = new Map(project.chapters.map((chapter) => [chapter.id, chapter.number]));
   const days = new Map;
@@ -17297,7 +17230,6 @@ function deathWindow(character, chronology, options = {}) {
   };
 }
 
-// src/context.js
 var DEFAULT_CONTEXT_BUDGET = 6000;
 var DEFAULT_CONTEXT_SCENES = 5;
 var SPACED_SIXTHS = 8;
@@ -17759,7 +17691,6 @@ function formatContext(context) {
 `;
 }
 
-// src/pacing.js
 var SCENE_OUTCOMES = new Set(["yes", "no", "yes-but", "no-and"]);
 var CHAPTER_HOOKS = new Set(["cliffhanger", "question", "revelation", "reversal", "decision", "emotional", "resolution"]);
 var DRAFTED_STATUSES = new Set(["draft", "revised", "final", "complete"]);
@@ -17909,7 +17840,6 @@ function formatPacing(pacing) {
 `;
 }
 
-// src/grid.js
 var GRID_FORMATS = ["markdown", "csv"];
 var BEAT_ROW = "(beat)";
 var HOOK_ROW = "(hook)";
@@ -18011,7 +17941,6 @@ function csvCell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-// src/list.js
 import path6 from "node:path";
 var LIST_KINDS = [
   { kind: "chapters", singular: "chapter", collection: "chapters", schema: "chapter", title: "title" },
@@ -18330,7 +18259,6 @@ function formatValue(value) {
   return oneLine(Array.isArray(value) ? value.map(text).join(",") : text(value));
 }
 
-// src/build-style.js
 import path7 from "node:path";
 var BUILD_STYLE_PRESETS = ["classic", "modern", "elegant"];
 var HEADING_STYLES = ["centered", "small-caps", "left"];
@@ -18475,7 +18403,6 @@ function settingProblem(key, value) {
   }
 }
 
-// src/html.js
 var TRIM_SIZES = new Map([
   ["5x8", { width: "5in", height: "8in", wordsPerPage: 230, charactersPerPage: 480 }],
   ["5.25x8", { width: "5.25in", height: "8in", wordsPerPage: 250, charactersPerPage: 520 }],
@@ -18868,7 +18795,6 @@ function cssString(value) {
   return String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/</g, "\\3C ").replace(/>/g, "\\3E ").replace(/&/g, "\\26 ").replace(/[\r\n\f]+/g, " ").replace(/[\u0000-\u001f\u007f]/g, (char) => `\\${char.charCodeAt(0).toString(16).toUpperCase()} `);
 }
 
-// src/release-schedule.js
 var RELEASE_SOON_DAYS = 3;
 var MONTHS_PATTERN = /^(\d+)\s+months?$/i;
 var MAX_RELEASE_MONTHS = 999999;
@@ -19028,7 +18954,6 @@ function formatDate(days) {
   return new Date(days * 86400000).toISOString().slice(0, 10);
 }
 
-// src/progress.js
 var PACE_SESSIONS = 7;
 var HISTORY_WEEKS = 4;
 var MAX_HISTORY_WEEKS = 52;
@@ -19323,7 +19248,6 @@ function formatNumber3(value) {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-// src/compare.js
 var MOVED_SHARE = 0.5;
 function compareChapters(previous, current) {
   const pairs = pairChapters(previous, current);
@@ -19536,10 +19460,8 @@ function formatNumber4(value) {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-// src/config.js
 import path9 from "node:path";
 
-// src/pdf.js
 import fs4 from "node:fs";
 import os from "node:os";
 import path8 from "node:path";
@@ -19786,10 +19708,8 @@ function lastLines(text, count = 10) {
 `);
 }
 
-// src/packaging.js
 import { Buffer as Buffer5 } from "node:buffer";
 
-// src/deflate.js
 import { Buffer as Buffer4 } from "node:buffer";
 var WINDOW_SIZE = 32768;
 var WINDOW_MASK = WINDOW_SIZE - 1;
@@ -20146,7 +20066,6 @@ function canonicalCodes(lengths) {
   });
 }
 
-// src/packaging.js
 function epubModifiedTimestamp() {
   const raw = process.env.SOURCE_DATE_EPOCH;
   if (raw !== undefined && raw !== "") {
@@ -21017,7 +20936,6 @@ function xmlEscape(value) {
   return String(value).replace(XML_INVALID_CHARACTERS, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-// src/similarity.js
 var SIMILARITY_DEFAULTS = { minWords: 8 };
 var MIN_SHINGLE = 5;
 var MAX_PLACES = 1000;
@@ -21221,7 +21139,6 @@ function formatSimilarity(report) {
 `;
 }
 
-// src/config.js
 var SEVERITY_LEVELS = ["error", "warning", "off"];
 var TARGETED_COMMANDS = new Set(["knowledge", "add", "rename", "move", "remove", "split", "merge"]);
 var TARGETED_FLAGS = { passes: ["start", "done"], progress: ["date"], next: ["date"] };
@@ -21427,12 +21344,10 @@ function applySeverity(result, overrides = NO_OVERRIDES) {
   return { ...exempted, ok: exempted.ok && !promoted, errors, warnings, dismissed };
 }
 
-// src/import.js
 import { Buffer as Buffer9 } from "node:buffer";
 import fs13 from "node:fs";
 import path18 from "node:path";
 
-// src/lock.js
 import fs5 from "node:fs";
 import os2 from "node:os";
 import path10 from "node:path";
@@ -21652,7 +21567,6 @@ function realPath(target) {
   }
 }
 
-// src/preview.js
 import { Buffer as Buffer6 } from "node:buffer";
 import fs6 from "node:fs";
 import os3 from "node:os";
@@ -22013,15 +21927,12 @@ function realPath2(target) {
   }
 }
 
-// src/snapshots.js
 import fs9 from "node:fs";
 import path15 from "node:path";
 
-// src/mutate.js
 import fs8 from "node:fs";
 import path14 from "node:path";
 
-// src/passes.js
 var PASS_STATUSES = new Set(["pending", "in-progress", "done"]);
 var DEFAULT_PASSES = [
   { pass: "structure", focus: "Order of events, act turns, scenes that do not change anything", checks: ["story timeline", "story pacing", "story diagram arcs"] },
@@ -22143,11 +22054,9 @@ function formatPasses(passes, command = "story passes") {
 `;
 }
 
-// src/validate.js
 import fs7 from "node:fs";
 import path13 from "node:path";
 
-// src/undo.js
 import { Buffer as Buffer7 } from "node:buffer";
 import path12 from "node:path";
 var HEADER_BYTES = 4096;
@@ -22281,7 +22190,6 @@ function commandName(header) {
   return typeof header?.command === "string" ? safeCommandName(header.command) : "a story command";
 }
 
-// src/fountain.js
 var SCENE_SETTINGS = new Map([
   ["interior", "INT."],
   ["exterior", "EXT."],
@@ -22382,7 +22290,6 @@ function sectionText(value) {
   return inline(value).replace(/^#+\s*/, "") || "Untitled";
 }
 
-// src/validate.js
 var RELATIONSHIP_INVERSES = new Map([
   ["parent", ["child"]],
   ["child", ["parent"]],
@@ -24179,7 +24086,6 @@ function requireFields(data, fields, label, errors) {
   }
 }
 
-// src/report.js
 function projectChecks(project, overrides) {
   return {
     validation: applySeverity(validateProjectOf(project), overrides),
@@ -24551,7 +24457,6 @@ function formatCheck(result) {
   return `${status} (${result.errors.length} errors, ${result.warnings.length} warnings)`;
 }
 
-// src/mutate.js
 function newProjectRoot({ title, cwd = process.cwd(), dir }) {
   const text = String(title ?? "").trim();
   const titleId = kebabCase(text, { transliterate: false }) || kebabCase(text);
@@ -27233,7 +27138,6 @@ function writeChanged(filePath, contents, original, changed, root) {
   }
 }
 
-// src/snapshots.js
 var SNAPSHOTS_DIR = ".snapshots";
 var SNAPSHOT_MANIFEST = "snapshot.json";
 var SNAPSHOTS_GITIGNORE = ".gitignore";
@@ -27679,7 +27583,6 @@ function unparsedNote(snapshot) {
   return count === 0 ? "" : `, ${count === 1 ? "1 file that did not parse, not counted" : `${count} files that did not parse, not counted`}`;
 }
 
-// src/stdin.js
 import { Buffer as Buffer8 } from "node:buffer";
 import fs10 from "node:fs";
 import tty from "node:tty";
@@ -27748,13 +27651,11 @@ function pause(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-// src/story.js
 import { execFileSync } from "node:child_process";
 import fs12 from "node:fs";
 import os4 from "node:os";
 import path17 from "node:path";
 
-// src/timeline.js
 function buildTimeline(project) {
   const unit = project.unit?.name === "characters" ? "characters" : "words";
   const chapters = [...project.chapters].sort((left, right) => left.number - right.number || left.id.localeCompare(right.id, "en"));
@@ -28000,7 +27901,6 @@ function formatNumber5(value) {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-// src/diagram.js
 var DIAGRAM_KINDS = ["relationships", "locations", "timeline", "clues", "arcs"];
 var FAMILY_TYPES = new Set([
   "parent",
@@ -28280,11 +28180,9 @@ function timelineText(text) {
   return String(text).replace(/:/g, "∶").replace(/\s+/g, " ").trim().replace(/[#;%<]/g, (char) => `#${char.charCodeAt(0)};`);
 }
 
-// src/build.js
 import fs11 from "node:fs";
 import path16 from "node:path";
 
-// src/chapter-numbers.js
 function printedChapterNumbers(project) {
   const printed = new Map;
   let unnumberedSoFar = 0;
@@ -28295,7 +28193,6 @@ function printedChapterNumbers(project) {
   return printed;
 }
 
-// src/codex.js
 var CODEX_KINDS = [
   { kind: "character", dir: "characters", title: "codex-characters", list: (project) => project.characters },
   { kind: "location", dir: "locations", title: "codex-locations", list: (project) => project.locations },
@@ -29034,7 +28931,6 @@ ${body.filter((part) => part !== "").join(`
 }
 var CODEX_GENERATOR = "story build --format codex";
 
-// src/narration.js
 var NARRATION_WORDS_PER_MINUTE = 155;
 var NARRATION_CHARACTERS_PER_MINUTE = 300;
 function narrationUnit(manuscript) {
@@ -29145,7 +29041,6 @@ function cell3(value) {
   return String(value).replace(/\s+/g, " ").trim().replace(/(\\*)\|/g, "$1$1\\|");
 }
 
-// src/ink.js
 var INK_RESERVED = new Set(["true", "false", "not", "else", "return", "temp", "function"]);
 function inkKnotName(id) {
   const name = id.replace(/-/g, "_");
@@ -29215,7 +29110,6 @@ function inkSource(story) {
 `;
 }
 
-// src/build.js
 var EXPORT_FILE = "dist/manuscript.md";
 var MANUSCRIPT_BUILD_FILE = "dist/manuscript.book.md";
 function exportManuscript(root, options = {}) {
@@ -30057,7 +29951,6 @@ function normalizeBuildFormat(value) {
   }
   throw usageError(`Unsupported build format: ${value === "" ? "(empty)" : value}. Supported formats: ${Object.keys(BUILD_EXTENSIONS).join(", ")}`, "format");
 }
-// src/story.js
 function checkProjectContinuity(root) {
   return checkContinuity(scanProject(root));
 }
@@ -30775,7 +30668,6 @@ function prosePassageReport(root, passage, thresholds, options = {}) {
   };
 }
 
-// src/import.js
 var ROMAN_NUMERAL = "(?!i\\s+\\S)(?=[ivxlc])c{0,3}(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})";
 var PLAIN_LINE_MAX_LENGTH = 80;
 var GENERATED_MARKER = /<!--\s*Generated by story (?:export|build)\.\s*-->/g;
@@ -31591,7 +31483,6 @@ ${prose}
 `;
 }
 
-// src/json.js
 var API_VERSION = "story/v2";
 function wantsJson(parsed) {
   return isTruthy(parsed.options.json);
@@ -31632,15 +31523,12 @@ function resultData(result) {
   return data;
 }
 
-// src/workflows.js
 import fs14 from "node:fs";
 import path19 from "node:path";
 import { fileURLToPath } from "node:url";
 
-// src/version.js
 var VERSION = "0.23.2";
 
-// src/workflows.js
 var ENV_LINE = /^\s*(STORY_VERSION|STORY_REF|STORY_PACKAGE)\s*:\s*["']?([^"'\s#]*)/;
 var VERSION_PATTERN = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 var MAX_LABEL = 64;
@@ -31871,7 +31759,6 @@ function action2(title, detail) {
   return { priority: "P3", title, detail };
 }
 
-// src/commands.js
 var STDIN_LABEL = "stdin";
 var ADD_KIND_OPTIONS = {
   character: ["id", "role", "status", "location", "locations", "arc"],
@@ -33277,7 +33164,6 @@ function findingLine(finding) {
   return FINDING_CODES[finding.code] === "warning" ? `${finding.message} [${finding.code}]` : finding.message;
 }
 
-// src/cli.js
 var COMMANDS_BY_NAME = new Map(COMMANDS.map((command) => [command.name, command]));
 var COMMAND_COLUMN = 21;
 var KIND_COLUMN = 14;
@@ -33545,7 +33431,6 @@ function resolveRoot(cwd, parsed, name) {
   return path21.resolve(cwd, flagPath ?? positionalPath ?? ".");
 }
 
-// bin/story.js
 for (const stream of [process.stdout, process.stderr]) {
   stream.on("error", (error) => handleOutputError(error, process));
 }

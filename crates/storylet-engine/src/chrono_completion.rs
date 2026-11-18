@@ -1,8 +1,3 @@
-//! Per-scope completion bitsets and canonical call-history entries.
-//!
-//! The bitset is derived state. Call history is the canonical replay record;
-//! the runtime rebuilds completion bits by folding the commit path.
-
 use std::error::Error;
 use std::fmt;
 
@@ -51,7 +46,6 @@ impl fmt::Display for CompletionError {
 
 impl Error for CompletionError {}
 
-/// Fixed-size 65,536-bit storylet mask: 1024 words = 8 KiB.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StoryletBitset {
     words: [u64; STORYLET_WORDS],
@@ -183,8 +177,6 @@ impl StoryletBitset {
     }
 }
 
-/// One scope's materialized completion state. Inheritance is opt-in; the
-/// parent is checked without copying its bits.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ScopeCompletion {
     pub scope_index: u16,
@@ -194,8 +186,6 @@ pub struct ScopeCompletion {
 }
 
 impl ScopeCompletion {
-    /// Resolve the complete inherited view once at rebuild. The parent chain is
-    /// bounded by the supplied slice and cycles are a typed error.
     pub fn visible_bits(&self, scopes: &[Self]) -> Result<StoryletBitset, CompletionError> {
         let mut visible = self.bits;
         let mut current = self;
@@ -243,7 +233,6 @@ impl ScopeCompletion {
     }
 }
 
-/// Persisted history uses stable keys, never a dense index as identity.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PersistedCallEntry {
     pub scope_key: String,
@@ -264,8 +253,6 @@ pub struct PersistedCallEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-
 
     #[test]
     fn bitset_set_clear_contains_all_and_roundtrip() {
@@ -305,10 +292,6 @@ mod tests {
         );
     }
 
-
-
-
-
     #[test]
     fn inheritance_is_opt_in_and_does_not_copy_parent_bits() {
         let mut parent = ScopeCompletion {
@@ -331,8 +314,6 @@ mod tests {
         child.inherits = false;
         assert!(!child.visible_contains(4, &[parent, child]).unwrap());
     }
-
-
 
     #[test]
     fn word_count_is_1024() {

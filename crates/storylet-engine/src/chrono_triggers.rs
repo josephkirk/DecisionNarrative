@@ -1,8 +1,3 @@
-//! Indexed trigger events and derived fired state.
-//!
-//! The table is an index over content; the event queue is runtime state. Fired
-//! state is derived from call history, not independent saved state.
-
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::chrono_catalog::StoryletIndex;
@@ -162,7 +157,6 @@ impl TriggerTable {
         self.stable_keys.get(stable_key).copied()
     }
 
-    /// Build the CSR buckets once after load. Sorting is deterministic.
     pub fn build(&mut self) {
         let mut order: Vec<u32> = (0..self.rows.len() as u32).collect();
         order.sort_by_key(|index| {
@@ -277,15 +271,11 @@ pub struct TriggerTickReport {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TriggerCursor {
-    /// Sequence of the event currently being drained, if any.
     pub sequence: Option<u32>,
-    /// Next candidate offset in that event's CSR bucket.
     pub offset: usize,
 }
 
 impl TriggerTable {
-    /// Deterministic event processing. `cursor` must persist across ticks so a
-    /// capped event resumes at the next candidate instead of blocking forever.
     pub fn process_tick(
         &self,
         queue: &mut EventQueue,
@@ -357,8 +347,6 @@ impl TriggerTable {
     }
 }
 
-/// Per-session fired bits, derived from call history. A trigger-caused start
-/// records its subscription index in the call entry.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TriggerFireTable {
     fired: BTreeSet<(u64, u32)>,
@@ -389,7 +377,6 @@ impl TriggerFireTable {
         self.fired.is_empty()
     }
 
-    /// Runtime convenience: rebuild directly from canonical commit entries.
     pub fn rebuild_history(entries: &[CallHistoryEntry], scope: u64) -> Self {
         let mut table = Self::new();
         for entry in entries {
@@ -451,7 +438,14 @@ mod tests {
         queue.push(EventKind::Tag, 1, 0);
         let mut fired = TriggerFireTable::new();
         let mut cursor = TriggerCursor::default();
-        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut cursor, 0, |_, _| true);
+        let report = table.process_tick(
+            &mut queue,
+            &mut fired,
+            &BTreeSet::new(),
+            &mut cursor,
+            0,
+            |_, _| true,
+        );
         assert!(report.capped);
         assert_eq!(queue.len(), 1);
         assert_eq!(report.starts, 0);
@@ -468,10 +462,17 @@ mod tests {
         queue.push(EventKind::Tag, 1, 0);
         let mut fired = TriggerFireTable::new();
         let mut starts = 0;
-        table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut TriggerCursor::default(), 8, |_, _| {
-            starts += 1;
-            true
-        });
+        table.process_tick(
+            &mut queue,
+            &mut fired,
+            &BTreeSet::new(),
+            &mut TriggerCursor::default(),
+            8,
+            |_, _| {
+                starts += 1;
+                true
+            },
+        );
         assert_eq!(starts, 1);
     }
 
@@ -485,10 +486,17 @@ mod tests {
         queue.push(EventKind::Tag, 1, 0);
         let mut fired = TriggerFireTable::new();
         let mut starts = 0;
-        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut TriggerCursor::default(), 1, |_, _| {
-            starts += 1;
-            true
-        });
+        let report = table.process_tick(
+            &mut queue,
+            &mut fired,
+            &BTreeSet::new(),
+            &mut TriggerCursor::default(),
+            1,
+            |_, _| {
+                starts += 1;
+                true
+            },
+        );
         assert_eq!(starts, 1);
         assert!(!report.capped);
         assert!(queue.is_empty());
@@ -505,18 +513,32 @@ mod tests {
         let mut fired = TriggerFireTable::new();
         let mut cursor = TriggerCursor::default();
         let mut first = Vec::new();
-        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut cursor, 1, |_, id| {
-            first.push(id);
-            true
-        });
+        let report = table.process_tick(
+            &mut queue,
+            &mut fired,
+            &BTreeSet::new(),
+            &mut cursor,
+            1,
+            |_, id| {
+                first.push(id);
+                true
+            },
+        );
         assert_eq!(first, vec![5]);
         assert!(report.capped);
         assert_eq!(queue.len(), 1);
         let mut second = Vec::new();
-        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut cursor, 1, |_, id| {
-            second.push(id);
-            true
-        });
+        let report = table.process_tick(
+            &mut queue,
+            &mut fired,
+            &BTreeSet::new(),
+            &mut cursor,
+            1,
+            |_, id| {
+                second.push(id);
+                true
+            },
+        );
         assert_eq!(second, vec![6]);
         assert!(!report.capped);
         assert!(queue.is_empty());
@@ -525,18 +547,29 @@ mod tests {
     #[test]
     fn process_tick_respects_once_scope_active_and_cap() {
         let mut table = TriggerTable::new();
-        table.insert(EventKind::Tag, 1, 5, true, 1, Some(0)).unwrap();
-        table.insert(EventKind::Tag, 1, 6, false, 1, Some(1)).unwrap();
+        table
+            .insert(EventKind::Tag, 1, 5, true, 1, Some(0))
+            .unwrap();
+        table
+            .insert(EventKind::Tag, 1, 6, false, 1, Some(1))
+            .unwrap();
         table.build();
         let mut queue = EventQueue::new();
         queue.push(EventKind::Tag, 1, 0);
         queue.push(EventKind::Tag, 1, 0);
         let mut fired = TriggerFireTable::new();
         let mut starts = Vec::new();
-        let report = table.process_tick(&mut queue, &mut fired, &BTreeSet::new(), &mut TriggerCursor::default(), 8, |scope, id| {
-            starts.push((scope, id));
-            true
-        });
+        let report = table.process_tick(
+            &mut queue,
+            &mut fired,
+            &BTreeSet::new(),
+            &mut TriggerCursor::default(),
+            8,
+            |scope, id| {
+                starts.push((scope, id));
+                true
+            },
+        );
         assert_eq!(starts, vec![(0, 5)]);
         assert!(fired.is_fired(0, 0));
         assert_eq!(report.starts, 1);
@@ -561,5 +594,4 @@ mod tests {
         table.clear_scope(0);
         assert!(table.is_empty());
     }
-
 }

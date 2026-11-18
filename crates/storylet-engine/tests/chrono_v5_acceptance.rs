@@ -6,15 +6,16 @@ use storylet_engine::chrono_dispatch::{
     WaypointTopicGraph, WaypointTopicNode,
 };
 use storylet_engine::chrono_runtime::{
-    rebase_call_history, CallHistoryEntry, EdgeConnection, FlowGraphAsset, FlowGraphInstance,
+    CallHistoryEntry, DEFAULT_OUTPUT_PIN, EdgeConnection, FlowGraphAsset, FlowGraphInstance,
     FlowNodeDef, GraphError, NodeCategory, NodeExecutionState, NodeKind, PinDefinition,
-    RuntimeContext, SignalToken, DEFAULT_OUTPUT_PIN, TOKEN_ACTIVE,
+    RuntimeContext, SignalToken, TOKEN_ACTIVE, rebase_call_history,
 };
 use storylet_engine::chrono_state::{
     AttributeValue, EdgePattern, EdgeTemplate, GameplayTagRegistry, GraphBinding, GraphLayer,
-    GraphMutation, GraphPattern, GraphTransformRule, MicroPassionDef, PassionDirection,
-    PassionMutation, PassionRegistry, PassionState, PassionThresholdRule, RivalPassionLink,
-    MutationOp, PassionBounds, StarNpcDef, TagBitset, VertexPattern, VertexTemplate, WorldStateTable, WorldVertex,
+    GraphMutation, GraphPattern, GraphTransformRule, MicroPassionDef, MutationOp, PassionBounds,
+    PassionDirection, PassionMutation, PassionRegistry, PassionState, PassionThresholdRule,
+    RivalPassionLink, StarNpcDef, TagBitset, VertexPattern, VertexTemplate, WorldStateTable,
+    WorldVertex,
 };
 
 fn tags(names: &[&str]) -> GameplayTagRegistry {
@@ -72,12 +73,7 @@ fn repeatable_storylet(id: u16) -> StoryletDef {
 
 #[test]
 fn test_rollback_identity_500_mutations() {
-    let registry = tags(&[
-        "case.open",
-        "clue.alpha",
-        "clue.beta",
-        "passion.high",
-    ]);
+    let registry = tags(&["case.open", "clue.alpha", "clue.beta", "passion.high"]);
     let mut storylets = Vec::new();
     for (offset, tag_name) in ["clue.alpha", "clue.beta", "clue.alpha", "clue.beta"]
         .into_iter()
@@ -93,43 +89,51 @@ fn test_rollback_identity_500_mutations() {
     let mut dispatcher = UnifiedDispatcher::new(storylets);
     dispatcher.resolve(&registry).unwrap();
     let passions = PassionRegistry::compile(
-        [StarNpcDef {
-            npc_id: 0,
-            trust_inertia: 0.0,
-            micro_passions: vec![
-                MicroPassionDef {
-                    npc_id: 0,
-                    passion_id: 1,
-                    weight: 1.0,
-                    is_hidden: false,
+        [
+            StarNpcDef {
+                npc_id: 0,
+                trust_inertia: 0.0,
+                micro_passions: vec![
+                    MicroPassionDef {
+                        npc_id: 0,
+                        passion_id: 1,
+                        weight: 1.0,
+                        is_hidden: false,
+                    },
+                    MicroPassionDef {
+                        npc_id: 0,
+                        passion_id: 2,
+                        weight: 1.0,
+                        is_hidden: false,
+                    },
+                ],
+                macro_bounds: PassionBounds {
+                    min: -100.0,
+                    max: 100.0,
                 },
-                MicroPassionDef {
-                    npc_id: 0,
-                    passion_id: 2,
-                    weight: 1.0,
-                    is_hidden: false,
-                },
-            ],
-            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
-            zero_sum_links: vec![RivalPassionLink {
-                target_character_id: 1,
-                source_passion_id: 1,
-                target_passion_id: 3,
-                weight: -1.0,
-            }],
-        },
-        StarNpcDef {
-            npc_id: 1,
-            trust_inertia: 0.0,
-            micro_passions: vec![MicroPassionDef {
+                zero_sum_links: vec![RivalPassionLink {
+                    target_character_id: 1,
+                    source_passion_id: 1,
+                    target_passion_id: 3,
+                    weight: -1.0,
+                }],
+            },
+            StarNpcDef {
                 npc_id: 1,
-                passion_id: 3,
-                weight: 1.0,
-                is_hidden: false,
-            }],
-            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
-            zero_sum_links: vec![],
-        }],
+                trust_inertia: 0.0,
+                micro_passions: vec![MicroPassionDef {
+                    npc_id: 1,
+                    passion_id: 3,
+                    weight: 1.0,
+                    is_hidden: false,
+                }],
+                macro_bounds: PassionBounds {
+                    min: -100.0,
+                    max: 100.0,
+                },
+                zero_sum_links: vec![],
+            },
+        ],
         [PassionThresholdRule {
             npc_id: 0,
             threshold_tag_bit: registry.id("passion.high").unwrap(),
@@ -426,8 +430,6 @@ fn test_invoke_equivalence_qbn_chaining() {
         vec![100, 101, 102, 103]
     );
     assert_eq!(state_snapshot(invoke_ctx.state), normal_snapshot);
-    // Wall-clock only in optimized builds; debug builds under parallel test
-    // load are not a meaningful latency measurement.
     if !cfg!(debug_assertions) {
         assert!(elapsed.as_millis() < 50, "invoke took {elapsed:?}");
     }
@@ -454,7 +456,11 @@ fn invoke_equivalence_with_all_fan_in() {
     );
     let mut merge = graph.node(5).cloned().unwrap();
     merge.input_pins = vec![pin("In_0", true), pin("In_1", true)];
-    *graph.nodes.iter_mut().find(|node| node.node_guid == 5).unwrap() = merge;
+    *graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.node_guid == 5)
+        .unwrap() = merge;
     graph.edges = vec![
         edge(1, "Out", 2, "In"),
         edge(1, "Out", 3, "In"),
@@ -468,10 +474,7 @@ fn invoke_equivalence_with_all_fan_in() {
     let mut live_ctx = RuntimeContext::with_registry(&mut live_state, &dispatcher, &registry);
     live.start().unwrap();
     live.tick(&mut live_ctx, 16).unwrap();
-    assert_eq!(
-        live.node(6).unwrap().state,
-        NodeExecutionState::Completed
-    );
+    assert_eq!(live.node(6).unwrap().state, NodeExecutionState::Completed);
     assert_eq!(
         live.call_history()
             .iter()
@@ -484,8 +487,7 @@ fn invoke_equivalence_with_all_fan_in() {
 
     let mut invoke_state = WorldStateTable::new();
     let mut invoke = FlowGraphInstance::new(2, graph, 11).unwrap();
-    let mut invoke_ctx =
-        RuntimeContext::with_registry(&mut invoke_state, &dispatcher, &registry);
+    let mut invoke_ctx = RuntimeContext::with_registry(&mut invoke_state, &dispatcher, &registry);
     invoke
         .invoke_story_to_poi(&mut invoke_ctx, 6, &BTreeMap::new())
         .unwrap();
@@ -541,9 +543,7 @@ fn invoke_declared_route_selects_one_branch() {
     let mut ctx = RuntimeContext::with_registry(&mut state, &dispatcher, &registry);
     let routes = BTreeMap::from([(4u32, "In_1".to_owned())]);
 
-    instance
-        .invoke_story_to_poi(&mut ctx, 6, &routes)
-        .unwrap();
+    instance.invoke_story_to_poi(&mut ctx, 6, &routes).unwrap();
 
     assert_eq!(
         instance
@@ -664,12 +664,14 @@ fn test_waypoint_diversion_and_rollback() {
             0
         );
     }
-    assert!(instance
-        .node(7)
-        .unwrap()
-        .edge_use_counts
-        .values()
-        .all(|count| *count == 0));
+    assert!(
+        instance
+            .node(7)
+            .unwrap()
+            .edge_use_counts
+            .values()
+            .all(|count| *count == 0)
+    );
     assert_eq!(
         instance.next_topic_step(&ctx, 7).unwrap().edge_id,
         "e_people_god"
@@ -718,7 +720,10 @@ fn passion_threshold_events_activate_and_cancel_on_rollback() {
                 weight: 1.0,
                 is_hidden: false,
             }],
-            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
+            macro_bounds: PassionBounds {
+                min: -100.0,
+                max: 100.0,
+            },
             zero_sum_links: vec![],
         }],
         [PassionThresholdRule {
@@ -911,20 +916,13 @@ fn node_costlier_than_a_frame_still_makes_progress() {
 #[test]
 fn logic_all_completes_when_every_input_pin_arrives() {
     let (dispatcher, registry) = runtime();
-    let mut merge = node(
-        2,
-        NodeKind::LogicAll,
-        NodeCategory::LogicGate,
-    );
+    let mut merge = node(2, NodeKind::LogicAll, NodeCategory::LogicGate);
     merge.input_pins = vec![pin("In_0", true), pin("In_1", true)];
     let mut graph = asset(
         vec![node(1, noop_mutation(), NodeCategory::Mutator), merge],
         1,
     );
-    graph.edges = vec![
-        edge(1, "Out", 2, "In_0"),
-        edge(1, "Out", 2, "In_1"),
-    ];
+    graph.edges = vec![edge(1, "Out", 2, "In_0"), edge(1, "Out", 2, "In_1")];
     let mut instance = FlowGraphInstance::new(1, graph, 7).unwrap();
     let mut state = WorldStateTable::new();
     let mut ctx = RuntimeContext::with_registry(&mut state, &dispatcher, &registry);
@@ -950,10 +948,7 @@ fn replay_preserves_fan_in_input_pins() {
         vec![node(1, noop_mutation(), NodeCategory::Mutator), merge],
         1,
     );
-    graph.edges = vec![
-        edge(1, "Out", 2, "In_0"),
-        edge(1, "Out", 2, "In_1"),
-    ];
+    graph.edges = vec![edge(1, "Out", 2, "In_0"), edge(1, "Out", 2, "In_1")];
     let mut instance = FlowGraphInstance::new(1, graph.clone(), 7).unwrap();
     let mut state = WorldStateTable::new();
     let mut ctx = RuntimeContext::with_registry(&mut state, &dispatcher, &registry);
@@ -965,7 +960,9 @@ fn replay_preserves_fan_in_input_pins() {
     let mut restored_state = WorldStateTable::new();
     let mut restored_ctx =
         RuntimeContext::with_registry(&mut restored_state, &dispatcher, &registry);
-    restored.replay_history(&mut restored_ctx, &history).unwrap();
+    restored
+        .replay_history(&mut restored_ctx, &history)
+        .unwrap();
 
     assert_eq!(restored.call_history(), history.as_slice());
     assert_eq!(
@@ -1134,10 +1131,7 @@ fn bridge_path_walks_every_hop_and_orders_pins() {
     graph.edges = vec![edge(1, "Out", 2, "In"), edge(2, "Out", 3, "In")];
 
     let steps = graph.shortest_bridge_path(1, 3).unwrap();
-    assert_eq!(
-        steps,
-        vec![(2, "In".to_owned(), "Out".to_owned())]
-    );
+    assert_eq!(steps, vec![(2, "In".to_owned(), "Out".to_owned())]);
 
     let dispatcher = UnifiedDispatcher::new(Vec::new());
     let saved = vec![
@@ -1158,7 +1152,10 @@ fn bridge_path_walks_every_hop_and_orders_pins() {
     ];
     let rebased = rebase_call_history(&graph, &dispatcher, &saved).unwrap();
     assert_eq!(
-        rebased.iter().map(|entry| entry.node_guid).collect::<Vec<_>>(),
+        rebased
+            .iter()
+            .map(|entry| entry.node_guid)
+            .collect::<Vec<_>>(),
         vec![1, 2, 3]
     );
     assert_eq!(rebased[1].executed_input_pin, "In");
@@ -1168,10 +1165,8 @@ fn bridge_path_walks_every_hop_and_orders_pins() {
 #[test]
 fn select_storylet_rejects_ids_outside_the_pool() {
     let registry = tags(&["case.open"]);
-    let mut dispatcher = UnifiedDispatcher::new(vec![
-        repeatable_storylet(5),
-        repeatable_storylet(6),
-    ]);
+    let mut dispatcher =
+        UnifiedDispatcher::new(vec![repeatable_storylet(5), repeatable_storylet(6)]);
     dispatcher.resolve(&registry).unwrap();
     let mut hub = node(
         1,
@@ -1208,7 +1203,10 @@ fn select_storylet_rejects_ids_outside_the_pool() {
 fn select_storylet_rejects_ineligible_deck_members() {
     let registry = tags(&["case.open", "case.closed"]);
     let mut locked = repeatable_storylet(5);
-    locked.required_tags.set_bit(registry.id("case.closed").unwrap()).unwrap();
+    locked
+        .required_tags
+        .set_bit(registry.id("case.closed").unwrap())
+        .unwrap();
     let mut dispatcher = UnifiedDispatcher::new(vec![locked]);
     dispatcher.resolve(&registry).unwrap();
     let mut hub = node(
@@ -1258,9 +1256,7 @@ fn cancel_keeps_the_mission_scope_for_reconcile_replay() {
     );
     parent.edges = vec![edge(1, "Out", 2, "In")];
     let mut instance = FlowGraphInstance::new(1, parent, 1).unwrap();
-    instance
-        .attach_mission_asset(2, &child, 1)
-        .unwrap();
+    instance.attach_mission_asset(2, &child, 1).unwrap();
     let mut state = WorldStateTable::new();
     let mut ctx = RuntimeContext::with_registry(&mut state, &dispatcher, &registry);
     instance.start().unwrap();
@@ -1290,10 +1286,12 @@ fn cancel_keeps_the_mission_scope_for_reconcile_replay() {
     );
 
     instance.reconcile_history(&mut ctx, &target).unwrap();
-    assert_eq!(instance.node(2).unwrap().state, NodeExecutionState::Completed);
+    assert_eq!(
+        instance.node(2).unwrap().state,
+        NodeExecutionState::Completed
+    );
     assert_eq!(instance.node(2).unwrap().local_call_history.len(), 1);
 
-    // A fresh start must not carry the old mirror into a new timeline.
     instance.reset();
     assert!(instance.node(2).unwrap().local_call_history.is_empty());
 }
@@ -1308,11 +1306,8 @@ fn salience_rejects_candidates_without_an_arc_phase() {
         .set_bit(registry.id("tag.match").unwrap())
         .unwrap();
     gated_def.required_arc_phases.set_bit(phase_bit).unwrap();
-    let mut fallback_dispatcher =
-        UnifiedDispatcher::new(vec![gated_def, repeatable_storylet(2)]);
-    fallback_dispatcher
-        .resolve(&registry)
-        .unwrap();
+    let mut fallback_dispatcher = UnifiedDispatcher::new(vec![gated_def, repeatable_storylet(2)]);
+    fallback_dispatcher.resolve(&registry).unwrap();
     let graph = asset(
         vec![node(
             1,
@@ -1333,7 +1328,6 @@ fn salience_rejects_candidates_without_an_arc_phase() {
     let mut instance = FlowGraphInstance::new(1, graph, 7).unwrap();
     let mut ctx = RuntimeContext::with_registry(&mut state, &fallback_dispatcher, &registry);
 
-    // No arc phase: the gated candidate is rejected before scoring.
     instance.force_complete(&mut ctx, 1, "Out", None).unwrap();
     assert_eq!(instance.node(1).unwrap().chosen_storylet_id, Some(2));
 
@@ -1477,7 +1471,9 @@ fn concurrent_sections_arbitrate_in_one_composer_pass() {
             flags: TOKEN_ACTIVE,
             deferred_until_ms: 0,
         };
-        instance.execute_input(&mut ctx, guid, "In", &token).unwrap();
+        instance
+            .execute_input(&mut ctx, guid, "In", &token)
+            .unwrap();
     }
 
     let applied_before = instance.composer.applied.len();
@@ -1490,21 +1486,30 @@ fn concurrent_sections_arbitrate_in_one_composer_pass() {
     assert_eq!(conflict.rejected.len(), 1);
     assert_eq!(conflict.rejected[0].node_guid, 10);
     assert_eq!(
-        instance.composer.actor_pose.get("actor").map(String::as_str),
+        instance
+            .composer
+            .actor_pose
+            .get("actor")
+            .map(String::as_str),
         Some("pose.11")
     );
 
-    // Reverse the frame in descending GUID order. The winner restores its
-    // prior pose; the loser never wrote one, so reversing it must not change
-    // the pose again.
     instance.process_time_window(11, -10).unwrap();
     assert_eq!(
-        instance.composer.actor_pose.get("actor").map(String::as_str),
+        instance
+            .composer
+            .actor_pose
+            .get("actor")
+            .map(String::as_str),
         Some("pose.prev.11")
     );
     instance.process_time_window(10, -10).unwrap();
     assert_eq!(
-        instance.composer.actor_pose.get("actor").map(String::as_str),
+        instance
+            .composer
+            .actor_pose
+            .get("actor")
+            .map(String::as_str),
         Some("pose.prev.11")
     );
 }
@@ -1540,8 +1545,7 @@ fn composer_records_conflicts_for_one_actor() {
 
     assert_eq!(instance.composer.conflicts.len(), 1);
     assert_eq!(
-        instance.composer.conflicts[0].winner.event_id,
-        2,
+        instance.composer.conflicts[0].winner.event_id, 2,
         "the higher priority event wins"
     );
 }
@@ -1692,15 +1696,13 @@ fn pattern_matching_backtracks_to_a_valid_assignment() {
         entity_index: None,
         attributes: BTreeMap::new(),
     });
-    state
-        .edges
-        .push(storylet_engine::chrono_state::WorldEdge {
-            edge_id: "e.b.a".to_owned(),
-            source_id: "v.b".to_owned(),
-            target_id: "v.a".to_owned(),
-            relation_type: "path".to_owned(),
-            weight: 1.0,
-        });
+    state.edges.push(storylet_engine::chrono_state::WorldEdge {
+        edge_id: "e.b.a".to_owned(),
+        source_id: "v.b".to_owned(),
+        target_id: "v.a".to_owned(),
+        relation_type: "path".to_owned(),
+        weight: 1.0,
+    });
     let pattern = GraphPattern {
         vertices: vec![
             VertexPattern {
@@ -1736,19 +1738,14 @@ fn pattern_matching_backtracks_across_a_chain() {
             attributes: BTreeMap::new(),
         });
     }
-    for (edge_id, source, target) in [
-        ("e.b.c", "v.b", "v.c"),
-        ("e.c.a", "v.c", "v.a"),
-    ] {
-        state
-            .edges
-            .push(storylet_engine::chrono_state::WorldEdge {
-                edge_id: edge_id.to_owned(),
-                source_id: source.to_owned(),
-                target_id: target.to_owned(),
-                relation_type: "path".to_owned(),
-                weight: 1.0,
-            });
+    for (edge_id, source, target) in [("e.b.c", "v.b", "v.c"), ("e.c.a", "v.c", "v.a")] {
+        state.edges.push(storylet_engine::chrono_state::WorldEdge {
+            edge_id: edge_id.to_owned(),
+            source_id: source.to_owned(),
+            target_id: target.to_owned(),
+            relation_type: "path".to_owned(),
+            weight: 1.0,
+        });
     }
     let vertex = || VertexPattern {
         layer: GraphLayer::Location,
@@ -1770,10 +1767,7 @@ fn pattern_matching_backtracks_across_a_chain() {
         matched.vertices,
         vec!["v.b".to_owned(), "v.c".to_owned(), "v.a".to_owned()]
     );
-    assert_eq!(
-        matched.edges,
-        vec!["e.b.c".to_owned(), "e.c.a".to_owned()]
-    );
+    assert_eq!(matched.edges, vec!["e.b.c".to_owned(), "e.c.a".to_owned()]);
 }
 
 #[test]
@@ -1783,7 +1777,10 @@ fn empty_passion_pool_is_rejected() {
             npc_id: 0,
             trust_inertia: 0.0,
             micro_passions: vec![],
-            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
+            macro_bounds: PassionBounds {
+                min: -100.0,
+                max: 100.0,
+            },
             zero_sum_links: vec![],
         }],
         [],
@@ -1800,8 +1797,6 @@ fn macro_passions_clamp_to_the_spec_range() {
     let registry = PassionRegistry::compile(
         [StarNpcDef {
             npc_id: 0,
-            // Micro values clamp at 100; inertia pushes the raw macro to 101,
-            // so only the spec clamp keeps the result at 100.
             trust_inertia: 1.0,
             micro_passions: vec![MicroPassionDef {
                 npc_id: 0,
@@ -1809,7 +1804,10 @@ fn macro_passions_clamp_to_the_spec_range() {
                 weight: 1.0,
                 is_hidden: false,
             }],
-            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
+            macro_bounds: PassionBounds {
+                min: -100.0,
+                max: 100.0,
+            },
             zero_sum_links: vec![],
         }],
         [],
@@ -1849,7 +1847,10 @@ fn threshold_events_follow_the_value_transition() {
                 weight: 1.0,
                 is_hidden: false,
             }],
-            macro_bounds: PassionBounds { min: -100.0, max: 100.0 },
+            macro_bounds: PassionBounds {
+                min: -100.0,
+                max: 100.0,
+            },
             zero_sum_links: vec![],
         }],
         [PassionThresholdRule {
@@ -1882,8 +1883,6 @@ fn threshold_events_follow_the_value_transition() {
     assert!(delta.threshold_events[0].activated);
     assert!(flags.bit(bit));
 
-    // A below-threshold move emits nothing even when an external write left
-    // the tag set.
     let mut quiet = WorldStateTable::new();
     quiet.passions = PassionState::with_capacity(1, 2);
     quiet.passions.active[1] = true;
@@ -2047,11 +2046,7 @@ fn transform_can_replace_a_vertex_in_one_rule() {
     let diff = state.apply_graph_transform(&replace).unwrap();
 
     assert_eq!(
-        state
-            .vertex("v.actor")
-            .unwrap()
-            .attributes
-            .get("room"),
+        state.vertex("v.actor").unwrap().attributes.get("room"),
         Some(&AttributeValue::String("garden".to_owned()))
     );
 

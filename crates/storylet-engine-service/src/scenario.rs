@@ -1,4 +1,3 @@
-//! Deterministic scenario starting condition resolution derived from Story Codex.
 
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -263,7 +262,6 @@ pub fn resolve_actor_population(
     for char in selected_characters {
         active_actor_ids.push(char.id.clone());
 
-        // Check if there is an explicit override in scenario.actor_locations
         if let Some(override_loc) = scenario.actor_locations.get(&char.id) {
             if location_ids.contains(override_loc.as_str()) {
                 result_locations.insert(char.id.clone(), override_loc.clone());
@@ -276,7 +274,6 @@ pub fn resolve_actor_population(
             }
         }
 
-        // Apply policy
         let loc_policy = policy.location_policy.as_ref();
         let mode = loc_policy.map(|p| p.mode.as_str()).unwrap_or("fixed");
 
@@ -362,10 +359,8 @@ pub fn resolve_scenario_start(
         "scenario.actor_population",
     );
 
-    // Preserve authored typed property overrides; defaults are resolved by the runtime entity store.
     let effective_properties = scenario.initial_properties.clone();
 
-    // Actors per location
     let mut actors_per_location: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for loc in locations {
         actors_per_location.insert(loc.id.clone(), Vec::new());

@@ -1,9 +1,35 @@
 use std::{env, net::SocketAddr, path::PathBuf};
 use tokio::net::TcpListener;
 
-use storylet_engine_service::http::build_router;
+use storylet_engine_service::http::build_router_with_origins;
 use storylet_engine_service::mcp::run_stdio_mcp;
 use storylet_engine_service::service::StudioService;
+
+fn extra_origins(args: &[String]) -> Vec<String> {
+    let mut origins: Vec<String> = env::var("STORYLET_ALLOW_ORIGINS")
+        .map(|value| {
+            value
+                .split(',')
+                .map(|origin| origin.trim().to_string())
+                .filter(|origin| !origin.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut rest = args.iter().skip(1);
+    while let Some(arg) = rest.next() {
+        if let Some(origin) = arg.strip_prefix("--allow-origin=") {
+            if !origin.trim().is_empty() {
+                origins.push(origin.trim().to_string());
+            }
+        } else if arg == "--allow-origin"
+            && let Some(origin) = rest.next()
+            && !origin.trim().is_empty()
+        {
+            origins.push(origin.trim().to_string());
+        }
+    }
+    origins
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -11,16 +37,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let fresh_database = args.iter().any(|arg| arg == "--fresh-database");
     let default_db_path = if fresh_database {
-        "data/storylet_studio_v6_clean.db"
+        "data/storylet_studio_v8_clean.db"
     } else {
-        "data/storylet_studio_v6.db"
+        "data/storylet_studio_v8.db"
     };
     let db_path = env::var("STORYLET_STUDIO_DB_PATH")
         .unwrap_or_else(|_| default_db_path.into());
 
     let resource_root = env::var("STORYLET_RESOURCE_ROOT").unwrap_or_else(|_| ".".into());
 
-    // Schema v6 is a clean cutover; earlier databases are rejected without migration.
     if db_path != ":memory:" {
         if let Some(parent) = PathBuf::from(&db_path).parent() {
             if !parent.as_os_str().is_empty() {
@@ -51,7 +76,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let static_dir = Some(PathBuf::from("dist/studio")).filter(|p| p.exists());
 
-    let app = build_router(service, static_dir);
+    let mut origins = extra_origins(&args);
+    origins.push(format!("http://{address}"));
+    if address.ip().is_loopback() {
+        origins.push(format!("http://localhost:{}", address.port()));
+    }
+    let app = build_router_with_origins(service, static_dir, &origins);
     let listener = TcpListener::bind(address).await?;
     eprintln!("storylet-engine-service listening on http://{address}");
     axum::serve(listener, app)

@@ -1,6 +1,5 @@
-//! Deterministic run persistence and shared HTTP/MCP operations.
 use crate::{
-    chrono_playtest::compile_run_content,
+    run_content::compile_run_content,
     service::{StudioInner, StudioService, chrono_now_ms},
 };
 use axum::{
@@ -12,13 +11,13 @@ use axum::{
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use storylet_engine::run::{RunAction, RunContent, RunError, RunKernel, RunStart};
+use storylet_engine::{actions::{ActionProposal, Authority, DecisionProvenance}, chrono_participants::Controller, run::{RunAction, RunContent, RunError, RunKernel, RunStart}};
 
 #[derive(Clone)]
 pub(crate) struct CachedRun {
     content: RunContent,
     kernel: RunKernel,
-    revision: u64,
+    action_log: Vec<RunOp>,
     stalled: Option<RunError>,
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -32,10 +31,10 @@ struct StartConfig {
     participant_config: Option<storylet_engine::chrono_explore::ParticipantConfig>,
     content: RunContent,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum RunOp {
-    Act { participant: u16, action: RunAction },
+    Act { authority: Authority, proposal: ActionProposal },
     Rewind { to_step: u32 },
 }
 #[derive(Clone)]
@@ -45,9 +44,6 @@ struct Row {
     seed: u64,
     start: StartConfig,
     actions: Vec<RunOp>,
-    revision: u64,
-    last_key: String,
-    last_result: String,
     created_at: i64,
     updated_at: i64,
 }
@@ -100,20 +96,17 @@ impl IntoResponse for RunApiError {
 fn kernel_error(e: RunError) -> RunApiError {
     RunApiError::invalid(format!("{e:?}"))
 }
-fn encode<T: Serialize>(v: &T) -> Result<String, RunApiError> {
+fn encode<T: Serialize + ?Sized>(v: &T) -> Result<String, RunApiError> {
     serde_json::to_string(v).map_err(RunApiError::internal)
 }
 fn load(inner: &StudioInner, id: &str) -> Result<Row, RunApiError> {
-    let row:Option<(String,i64,i64,String,String,i64,String,String,i64,i64)>=inner.store.conn.query_row("SELECT id, project_revision,seed,start_json,actions_json,revision,last_key,last_result,created_at,updated_at FROM runs WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?))).optional().map_err(RunApiError::internal)?;
+    let row:Option<(String,i64,i64,String,String,i64,i64)>=inner.store.conn.query_row("SELECT id, project_revision,seed,start_json,actions_json,created_at,updated_at FROM runs WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?))).optional().map_err(RunApiError::internal)?;
     let (
         id,
         project_revision,
         seed,
         start,
         actions,
-        revision,
-        last_key,
-        last_result,
         created_at,
         updated_at,
     ) = row.ok_or_else(RunApiError::missing)?;
@@ -123,15 +116,12 @@ fn load(inner: &StudioInner, id: &str) -> Result<Row, RunApiError> {
         seed: seed as u64,
         start: serde_json::from_str(&start).map_err(RunApiError::internal)?,
         actions: serde_json::from_str(&actions).map_err(RunApiError::internal)?,
-        revision: revision as u64,
-        last_key,
-        last_result,
         created_at,
         updated_at,
     })
 }
 fn save(inner: &StudioInner, row: &Row) -> Result<(), RunApiError> {
-    inner.store.conn.execute("INSERT INTO runs(id,project_revision,seed,start_json,actions_json,revision,last_key,last_result,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(id) DO UPDATE SET project_revision=excluded.project_revision,start_json=excluded.start_json,actions_json=excluded.actions_json,revision=excluded.revision,last_key=excluded.last_key,last_result=excluded.last_result,updated_at=excluded.updated_at",params![row.id,row.project_revision as i64,row.seed as i64,encode(&row.start)?,encode(&row.actions)?,row.revision as i64,row.last_key,row.last_result,row.created_at,row.updated_at]).map_err(RunApiError::internal)?;
+    inner.store.conn.execute("INSERT INTO runs(id,project_revision,seed,start_json,actions_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(id) DO UPDATE SET project_revision=excluded.project_revision,start_json=excluded.start_json,actions_json=excluded.actions_json,updated_at=excluded.updated_at",params![row.id,row.project_revision as i64,row.seed as i64,encode(&row.start)?,encode(&row.actions)?,row.created_at,row.updated_at]).map_err(RunApiError::internal)?;
     Ok(())
 }
 fn prior(
@@ -184,10 +174,7 @@ fn check_precondition(
         )
         .optional()
     } else {
-        tx.query_row("SELECT revision FROM runs WHERE id=?1", [scope], |r| {
-            r.get(0)
-        })
-        .optional()
+        return Err(RunApiError::internal("run operations must validate against the kernel"));
     }
     .map_err(RunApiError::internal)?;
     match actual {
@@ -207,6 +194,7 @@ fn save_atomic(
     key: &str,
     request: &str,
     result: &Value,
+    expected_actions: Option<&[RunOp]>,
 ) -> Result<Option<Value>, RunApiError> {
     let tx = rusqlite::Transaction::new_unchecked(
         &inner.store.conn,
@@ -228,13 +216,8 @@ fn save_atomic(
         return Err(RunApiError::conflict("stale revision"));
     }
     if scope != "__start__" {
-        let stored: Option<i64> = tx
-            .query_row("SELECT revision FROM runs WHERE id=?1", [scope], |r| {
-                r.get(0)
-            })
-            .optional()
-            .map_err(RunApiError::internal)?;
-        if stored != Some(row.revision as i64 - 1) {
+        let stored: Option<String> = tx.query_row("SELECT actions_json FROM runs WHERE id=?1", [scope], |r| r.get(0)).optional().map_err(RunApiError::internal)?;
+        if stored.as_deref() != expected_actions.map(encode).transpose()?.as_deref() {
             return Err(RunApiError::conflict("stale revision"));
         }
     }
@@ -247,12 +230,40 @@ fn save_atomic(
     tx.commit().map_err(RunApiError::internal)?;
     Ok(None)
 }
+fn save_kernel_action(inner: &StudioInner, row: &Row, expected_actions: &[RunOp]) -> Result<(), RunApiError> {
+    let tx = rusqlite::Transaction::new_unchecked(&inner.store.conn, rusqlite::TransactionBehavior::Immediate).map_err(RunApiError::internal)?;
+    let project_revision: u64 = tx.query_row("SELECT revision FROM project_metadata WHERE singleton=1", [], |r| r.get::<_, i64>(0)).map_err(RunApiError::internal)? as u64;
+    if project_revision != row.project_revision { return Err(RunApiError::conflict("stale revision")); }
+    let stored: Option<String> = tx.query_row("SELECT actions_json FROM runs WHERE id=?1", [&row.id], |r| r.get(0)).optional().map_err(RunApiError::internal)?;
+    let expected = encode(expected_actions)?;
+    if stored.as_deref() != Some(expected.as_str()) { return Err(RunApiError::conflict("stale revision")); }
+    save(inner, row)?;
+    tx.commit().map_err(RunApiError::internal)?;
+    Ok(())
+}
 fn current_revision(inner: &StudioInner) -> Result<u64, RunApiError> {
     Ok(inner
         .store
         .get_project_metadata()
         .map_err(RunApiError::internal)?
         .revision)
+}
+fn human_authority(kernel: &RunKernel, actor: u16) -> Result<Authority, RunApiError> {
+    match kernel.world().participants.controller.get(actor as usize) {
+        Some(Controller::Human { seat }) => Ok(Authority::Human { seat: *seat }),
+        Some(Controller::Rule) => Err(RunApiError::invalid("rule participants cannot be controlled by callers")),
+        None => Err(RunApiError::invalid("unknown participant")),
+    }
+}
+fn proposal(actor: u16, action: RunAction, expected_revision: u64, key: String, provenance: Option<DecisionProvenance>) -> ActionProposal {
+    ActionProposal { schema_version: 1, actor, action, expected_revision, idempotency_key: key, provenance }
+}
+fn rejection(e: storylet_engine::actions::ActionRejection) -> RunApiError {
+    if e.reason.contains("stale revision") || e.reason.contains("idempotency key reused") {
+        RunApiError::conflict(&e.reason)
+    } else {
+        RunApiError::invalid(e.reason)
+    }
 }
 fn rebuild(_inner: &StudioInner, row: &Row) -> Result<CachedRun, RunApiError> {
     let content = row.start.content.clone();
@@ -261,17 +272,11 @@ fn rebuild(_inner: &StudioInner, row: &Row) -> Result<CachedRun, RunApiError> {
             .map_err(kernel_error)?;
     for op in &row.actions {
         match op {
-            RunOp::Act {
-                participant,
-                action,
-            } => {
-                stalled = kernel
-                    .act_preserving_stall(&content, *participant, action.clone())
-                    .map_err(kernel_error)?
-                    .1;
+            RunOp::Act { authority, proposal } => {
+                kernel.propose(&content, *authority, proposal.clone()).map_err(|e| RunApiError::invalid(e.reason))?;
             }
             RunOp::Rewind { to_step } => {
-                kernel.rewind(*to_step).map_err(kernel_error)?;
+                kernel.rewind(Authority::Architect, *to_step).map_err(kernel_error)?;
                 stalled = kernel.stalled();
             }
         }
@@ -279,13 +284,13 @@ fn rebuild(_inner: &StudioInner, row: &Row) -> Result<CachedRun, RunApiError> {
     Ok(CachedRun {
         kernel,
         content,
-        revision: row.revision,
+        action_log: row.actions.clone(),
         stalled,
     })
 }
 fn cached(inner: &mut StudioInner, row: &Row) -> Result<CachedRun, RunApiError> {
     if let Some(c) = inner.runs.get(&row.id) {
-        if c.revision == row.revision {
+        if c.action_log == row.actions {
             return Ok(c.clone());
         }
     }
@@ -294,7 +299,7 @@ fn cached(inner: &mut StudioInner, row: &Row) -> Result<CachedRun, RunApiError> 
     Ok(c)
 }
 fn envelope(row: &Row, c: &CachedRun, participant: u16, current: u64) -> Value {
-    let mut value = json!({"id":row.id,"revision":row.revision,"stale":row.project_revision != current,"contentRevision":row.project_revision,"view":c.kernel.view(&c.content,participant)});
+    let mut value = json!({"id":row.id,"revision":c.kernel.revision(),"stale":row.project_revision != current,"contentRevision":row.project_revision,"view":c.kernel.architect_view(&c.content,participant)});
     if let Some(RunError::Stalled {
         storylet,
         node_guid,
@@ -305,7 +310,7 @@ fn envelope(row: &Row, c: &CachedRun, participant: u16, current: u64) -> Value {
     value
 }
 fn validate_participant(c: &CachedRun, participant: u16) -> Result<(), RunApiError> {
-    if participant as usize >= c.kernel.world.participants.len() {
+    if participant as usize >= c.kernel.world().participants.len() {
         Err(RunApiError::invalid("unknown participant"))
     } else {
         Ok(())
@@ -322,7 +327,6 @@ fn require_key(key: &str) -> Result<(), RunApiError> {
 #[serde(rename_all = "camelCase")]
 pub struct StartRequest {
     start: RunStart,
-    /// Start at this storylet (by authored id); overrides `start`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     storylet_id: Option<String>,
     scenario_id: Option<String>,
@@ -342,6 +346,8 @@ pub struct ActRequest {
     action: RunAction,
     expected_revision: u64,
     idempotency_key: String,
+    #[serde(default)]
+    provenance: Option<DecisionProvenance>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -402,9 +408,11 @@ impl StudioService {
                 .map_err(kernel_error)?;
         let mut recorded = Vec::with_capacity(req.actions.len());
         for (participant, action) in &req.actions {
-            let (_, next_stalled) = kernel.act_preserving_stall(&content, *participant, action.clone()).map_err(kernel_error)?;
-            stalled = next_stalled;
-            recorded.push(RunOp::Act { participant: *participant, action: action.clone() });
+            let authority = human_authority(&kernel, *participant)?;
+            let p = proposal(*participant, action.clone(), kernel.revision(), format!("start-{}", recorded.len()), None);
+            kernel.propose(&content, authority, p.clone()).map_err(rejection)?;
+            stalled = kernel.stalled();
+            recorded.push(RunOp::Act { authority, proposal: p });
         }        let now = chrono_now_ms();
         let row = Row {
             id: uuid::Uuid::new_v4().to_string(),
@@ -418,16 +426,13 @@ impl StudioService {
                 content: content.clone(),
             },
             actions: recorded,
-            revision: 0,
-            last_key: String::new(),
-            last_result: String::new(),
             created_at: now,
             updated_at: now,
         };
         let c = CachedRun {
             content,
             kernel,
-            revision: row.revision,
+            action_log: row.actions.clone(),
             stalled,
         };
         let result = envelope(&row, &c, 0, current_revision(&inner)?);
@@ -438,6 +443,7 @@ impl StudioService {
             &req.idempotency_key,
             &request,
             &result,
+            None,
         )? {
             return Ok(existing);
         }
@@ -463,7 +469,7 @@ impl StudioService {
         for id in ids {
             let row = load(&inner, &id)?;
             let c = cached(&mut inner, &row)?;
-            let v = c.kernel.view(&c.content, 0);
+            let v = c.kernel.architect_view(&c.content, 0);
             out.push(json!({"id":id,"title":v.scene.as_ref().map(|s|s.storylet.title.clone()).unwrap_or_else(||"Run".into()),"steps":v.current_step,"ending":v.ending,"stale":row.project_revision!=rev,"updatedAt":row.updated_at}));
         }
         Ok(json!(out))
@@ -475,70 +481,53 @@ impl StudioService {
         validate_participant(&c, participant)?;
         Ok(envelope(&row, &c, participant, current_revision(&inner)?))
     }
+    pub async fn run_observe(&self, id: &str, participant: u16) -> Result<Value, RunApiError> {
+        let mut inner = self.inner.lock().await;
+        let row = load(&inner, id)?;
+        let c = cached(&mut inner, &row)?;
+        validate_participant(&c, participant)?;
+        Ok(json!(c.kernel.observe(&c.content, participant)))
+    }
+    pub async fn run_explain(&self, id: &str, event: u32) -> Result<Value, RunApiError> {
+        let mut inner = self.inner.lock().await;
+        let row = load(&inner, id)?;
+        let c = cached(&mut inner, &row)?;
+        c.kernel.explain(event).map(|events| json!(events)).ok_or_else(RunApiError::missing)
+    }
     pub async fn run_act(&self, id: &str, req: ActRequest) -> Result<Value, RunApiError> {
         require_key(&req.idempotency_key)?;
-        let request = encode(&json!({"operation":"act","body":req}))?;
         let mut inner = self.inner.lock().await;
-        if let Some(v) = check_precondition(
-            &inner,
-            id,
-            &req.idempotency_key,
-            &request,
-            req.expected_revision,
-        )? {
-            return Ok(v);
-        }
-        let mut row = match load(&inner, id) {
-            Ok(row) => row,
-            Err(e) => {
-                if let Some(v) = check_precondition(
-                    &inner,
-                    id,
-                    &req.idempotency_key,
-                    &request,
-                    req.expected_revision,
-                )? {
-                    return Ok(v);
-                }
-                return Err(e);
-            }
-        };
-        if row.revision != req.expected_revision {
-            if let Some(v) = check_precondition(
-                &inner,
-                id,
-                &req.idempotency_key,
-                &request,
-                req.expected_revision,
-            )? {
-                return Ok(v);
-            }
-            return Err(RunApiError::conflict("stale revision"));
-        }
+        let mut row = load(&inner, id)?;
         if row.project_revision != current_revision(&inner)? {
             return Err(RunApiError::conflict("run is stale; reload required"));
         }
         let mut c = cached(&mut inner, &row)?;
-        c.stalled = c
-            .kernel
-            .act_preserving_stall(&c.content, req.participant, req.action.clone())
-            .map_err(kernel_error)?
-            .1;
-        row.actions.push(RunOp::Act {
-            participant: req.participant,
-            action: req.action,
-        });
-        row.revision += 1;
-        row.updated_at = chrono_now_ms();
-        row.last_key = req.idempotency_key.clone();
-        let result = envelope(&row, &c, req.participant, current_revision(&inner)?);
-        row.last_result = encode(&result)?;
-        if let Some(existing) =
-            save_atomic(&inner, &row, id, &req.idempotency_key, &request, &result)?
-        {
-            return Ok(existing);
+        let authority = human_authority(&c.kernel, req.participant)?;
+        let p = proposal(req.participant, req.action, req.expected_revision, req.idempotency_key, req.provenance);
+        let receipt = c.kernel.propose(&c.content, authority, p.clone()).map_err(rejection)?;
+        if receipt.duplicate {
+            let mut result = envelope(&row, &c, req.participant, current_revision(&inner)?);
+            result["receipt"] = json!(receipt);
+            return Ok(result);
         }
-        c.revision = row.revision;
+        let previous_actions = row.actions.clone();
+        c.stalled = c.kernel.stalled();
+        row.actions.push(RunOp::Act { authority, proposal: p.clone() });
+        row.updated_at = chrono_now_ms();
+        c.action_log = row.actions.clone();
+        let result = envelope(&row, &c, req.participant, current_revision(&inner)?);
+        let mut result = result;
+        result["receipt"] = json!(receipt);
+        if let Err(error) = save_kernel_action(&inner, &row, &previous_actions) {
+            if error.status != StatusCode::CONFLICT { return Err(error); }
+            let latest = load(&inner, id)?;
+            let mut latest_run = rebuild(&inner, &latest)?;
+            let duplicate = latest_run.kernel.propose(&latest_run.content, authority, p.clone()).map_err(rejection)?;
+            if !duplicate.duplicate { return Err(RunApiError::conflict("stale revision")); }
+            let mut duplicate_result = envelope(&latest, &latest_run, req.participant, current_revision(&inner)?);
+            duplicate_result["receipt"] = json!(duplicate);
+            return Ok(duplicate_result);
+        }
         inner.runs.insert(row.id.clone(), c);
         Ok(result)
     }
@@ -546,62 +535,29 @@ impl StudioService {
         require_key(&req.idempotency_key)?;
         let request = encode(&json!({"operation":"rewind","body":req}))?;
         let mut inner = self.inner.lock().await;
-        if let Some(v) = check_precondition(
-            &inner,
-            id,
-            &req.idempotency_key,
-            &request,
-            req.expected_revision,
-        )? {
+        if let Some(v) = prior(&inner, id, &req.idempotency_key, &request)? {
             return Ok(v);
         }
-        let mut row = match load(&inner, id) {
-            Ok(row) => row,
-            Err(e) => {
-                if let Some(v) = check_precondition(
-                    &inner,
-                    id,
-                    &req.idempotency_key,
-                    &request,
-                    req.expected_revision,
-                )? {
-                    return Ok(v);
-                }
-                return Err(e);
-            }
-        };
-        if row.revision != req.expected_revision {
-            if let Some(v) = check_precondition(
-                &inner,
-                id,
-                &req.idempotency_key,
-                &request,
-                req.expected_revision,
-            )? {
-                return Ok(v);
-            }
-            return Err(RunApiError::conflict("stale revision"));
-        }
+        let mut row = load(&inner, id)?;
+        let mut c = cached(&mut inner, &row)?;
+        if c.kernel.revision() != req.expected_revision { return Err(RunApiError::conflict("stale revision")); }
         if row.project_revision != current_revision(&inner)? {
             return Err(RunApiError::conflict("run is stale; reload required"));
         }
-        let mut c = cached(&mut inner, &row)?;
-        c.kernel.rewind(req.to_step).map_err(kernel_error)?;
+        let previous_actions = row.actions.clone();
+        c.kernel.rewind(Authority::Architect, req.to_step).map_err(kernel_error)?;
         c.stalled = c.kernel.stalled();
         row.actions.push(RunOp::Rewind {
             to_step: req.to_step,
         });
-        row.revision += 1;
         row.updated_at = chrono_now_ms();
-        row.last_key = req.idempotency_key.clone();
+        c.action_log = row.actions.clone();
         let result = envelope(&row, &c, 0, current_revision(&inner)?);
-        row.last_result = encode(&result)?;
         if let Some(existing) =
-            save_atomic(&inner, &row, id, &req.idempotency_key, &request, &result)?
+            save_atomic(&inner, &row, id, &req.idempotency_key, &request, &result, Some(&previous_actions))?
         {
             return Ok(existing);
         }
-        c.revision = row.revision;
         inner.runs.insert(row.id.clone(), c);
         Ok(result)
     }
@@ -623,42 +579,13 @@ impl StudioService {
         require_key(&req.idempotency_key)?;
         let request = encode(&json!({"operation":"reload","body":req}))?;
         let mut inner = self.inner.lock().await;
-        if let Some(v) = check_precondition(
-            &inner,
-            id,
-            &req.idempotency_key,
-            &request,
-            req.expected_revision,
-        )? {
+        if let Some(v) = prior(&inner, id, &req.idempotency_key, &request)? {
             return Ok(v);
         }
-        let mut row = match load(&inner, id) {
-            Ok(row) => row,
-            Err(e) => {
-                if let Some(v) = check_precondition(
-                    &inner,
-                    id,
-                    &req.idempotency_key,
-                    &request,
-                    req.expected_revision,
-                )? {
-                    return Ok(v);
-                }
-                return Err(e);
-            }
-        };
-        if row.revision != req.expected_revision {
-            if let Some(v) = check_precondition(
-                &inner,
-                id,
-                &req.idempotency_key,
-                &request,
-                req.expected_revision,
-            )? {
-                return Ok(v);
-            }
-            return Err(RunApiError::conflict("stale revision"));
-        }
+        let mut row = load(&inner, id)?;
+        let c0 = cached(&mut inner, &row)?;
+        if c0.kernel.revision() != req.expected_revision { return Err(RunApiError::conflict("stale revision")); }
+        let previous_actions = row.actions.clone();
         let (content, _) =
             compile_run_content(&inner.store, row.start.scenario_id.as_deref(), None, row.start.storylet_id.as_deref())
                 .map_err(RunApiError::invalid)?;
@@ -695,15 +622,10 @@ impl StudioService {
         let mut diverged = None;
         for op in &row.actions {
             let result = match op {
-                RunOp::Act {
-                    participant,
-                    action,
-                } => kernel
-                    .act_preserving_stall(&content, *participant, action.clone())
-                    .map(|(_, s)| {
-                        stalled = s;
-                    }),
-                RunOp::Rewind { to_step } => kernel.rewind(*to_step).map(|_| {
+                RunOp::Act { authority, proposal } => kernel.propose(&content, *authority, proposal.clone()).map(|_| {
+                    stalled = kernel.stalled();
+                }).map_err(|_| RunError::InvalidAction("replay proposal rejected".into())),
+                RunOp::Rewind { to_step } => kernel.rewind(Authority::Architect, *to_step).map(|_| {
                     stalled = kernel.stalled();
                 }),
             };
@@ -719,25 +641,21 @@ impl StudioService {
         row.actions.truncate(kept);
         row.project_revision = content.content_revision;
         row.start.content = content.clone();
-        row.revision += 1;
         row.updated_at = chrono_now_ms();
-        row.last_key = req.idempotency_key.clone();
-        let mut c = CachedRun {
+        let c = CachedRun {
             content,
             kernel,
-            revision: row.revision,
+            action_log: row.actions.clone(),
             stalled,
         };
         let mut result = envelope(&row, &c, 0, current_revision(&inner)?);
         result["replayed"] = json!(replayed);
         result["divergedAt"] = json!(diverged);
-        row.last_result = encode(&result)?;
         if let Some(existing) =
-            save_atomic(&inner, &row, id, &req.idempotency_key, &request, &result)?
+            save_atomic(&inner, &row, id, &req.idempotency_key, &request, &result, Some(&previous_actions))?
         {
             return Ok(existing);
         }
-        c.revision = row.revision;
         inner.runs.insert(row.id.clone(), c);
         Ok(result)
     }
@@ -746,6 +664,10 @@ impl StudioService {
         let request = encode(&json!({"operation":"delete","body":req}))?;
         let mut inner = self.inner.lock().await;
         let result = json!({"ok":true});
+        if let Some(value) = prior(&inner, id, &req.idempotency_key, &request)? { return Ok(value); }
+        let row = load(&inner, id)?;
+        let c = cached(&mut inner, &row)?;
+        if c.kernel.revision() != req.expected_revision { return Err(RunApiError::conflict("stale revision")); }
         let tx = rusqlite::Transaction::new_unchecked(
             &inner.store.conn,
             rusqlite::TransactionBehavior::Immediate,
@@ -755,12 +677,9 @@ impl StudioService {
             tx.commit().map_err(RunApiError::internal)?;
             return Ok(v);
         }
-        let n = tx
-            .execute(
-                "DELETE FROM runs WHERE id=?1 AND revision=?2",
-                params![id, req.expected_revision as i64],
-            )
-            .map_err(RunApiError::internal)?;
+        let stored: Option<String> = tx.query_row("SELECT actions_json FROM runs WHERE id=?1", [id], |r| r.get(0)).optional().map_err(RunApiError::internal)?;
+        if stored.as_deref() != Some(&encode(&row.actions)?) { return Err(RunApiError::conflict("stale revision")); }
+        let n = tx.execute("DELETE FROM runs WHERE id=?1", [id]).map_err(RunApiError::internal)?;
         if n != 1 {
             return Err(RunApiError::conflict("stale revision"));
         }
@@ -809,6 +728,14 @@ pub async fn view(
         Ok(v) => Json(v).into_response(),
         Err(e) => e.into_response(),
     }
+}
+#[derive(Default, Deserialize)]
+pub struct EventQuery { event: Option<u32> }
+pub async fn observe(State(s): State<StudioService>, Path(id): Path<String>, Query(q): Query<ParticipantQuery>) -> Response {
+    match q.participant { Some(participant) => match s.run_observe(&id, participant).await { Ok(v) => Json(v).into_response(), Err(e) => e.into_response() }, None => RunApiError::invalid("participant is required").into_response() }
+}
+pub async fn explain(State(s): State<StudioService>, Path(id): Path<String>, Query(q): Query<EventQuery>) -> Response {
+    match q.event { Some(event) => match s.run_explain(&id, event).await { Ok(v) => Json(v).into_response(), Err(e) => e.into_response() }, None => RunApiError::invalid("event is required").into_response() }
 }
 pub async fn why_not(
     State(s): State<StudioService>,

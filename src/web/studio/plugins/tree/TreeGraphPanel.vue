@@ -4,17 +4,16 @@ import ColorWheelPicker from "../../components/ColorWheelPicker.vue";
 import TreeImageLayer from "./TreeImageLayer.vue";
 import TreeListView from "./TreeListView.vue";
 import { StudioApi } from "../../api.ts";
-import type { EntityTemplateRecord } from "../../contracts.ts";
 import { studioState } from "../../state.ts";
 import { thumbnailUrl } from "../../thumbnails.ts";
 import { refreshWorkspace } from "../../view-models/workspace.ts";
-import type { AnyEntity } from "../runtime.ts";
+import type { EntityRecord } from "../../contracts.ts";
 import { TREE_EXAMPLES } from "./examples.ts";
 import { TREE_GRAPH_KEY, TREE_ITEM_KEY, TREE_SHAPES, layoutTree, setTreeGraph, treeErrors, treeGraphOf, treeRoots, treeTrait, type TreeCanvasImage, type TreeDirection, type TreeEdge, type TreeGraph, type TreePoint, type TreePositions, type TreeShape } from "./model.ts";
 import { countLabel } from "../../countLabel.ts";
 
-const props = defineProps<{ entity: AnyEntity; readonly?: boolean }>();
-const emit = defineEmits<{ (event: "patch", patch: Partial<AnyEntity>): void; (event: "save"): void }>();
+const props = defineProps<{ entity: EntityRecord; readonly?: boolean }>();
+const emit = defineEmits<{ (event: "patch", patch: Partial<EntityRecord>): void; (event: "save"): void }>();
 const wireOptions = [
   { id: "solid", label: "Normal wire" },
   { id: "dash", label: "Dashed wire" },
@@ -69,12 +68,12 @@ const showThumbnails = ref(true);
 try {
   showGrid.value = localStorage.getItem("studio.tree.showGrid") !== "false";
   showThumbnails.value = localStorage.getItem("studio.tree.showThumbnails") !== "false";
-} catch { /* Preferences remain available for this session. */ }
+} catch { }
 watch([showGrid, showThumbnails], ([grid, thumbnails]) => {
   try {
     localStorage.setItem("studio.tree.showGrid", String(grid));
     localStorage.setItem("studio.tree.showThumbnails", String(thumbnails));
-  } catch { /* Storage may be unavailable. */ }
+  } catch { }
 });
 function dismissMenu(event: Event) {
   if (event instanceof KeyboardEvent && event.key !== "Escape") return;
@@ -115,7 +114,7 @@ const customCanvasCss = computed(() => {
     return "";
   }
 });
-const entities = computed(() => [...studioState.entities, ...studioState.entityTemplates] as AnyEntity[]);
+const entities = computed(() => studioState.entities);
 const byId = computed(() => new Map(entities.value.map((entity) => [entity.id, entity])));
 const eligible = computed(() => entities.value.filter((entity) => !!treeTrait(entity, studioState.traitTemplates, TREE_ITEM_KEY)));
 const eligibleIds = computed(() => new Set(eligible.value.map((entity) => entity.id)));
@@ -304,7 +303,6 @@ function openContext(event: MouseEvent, node?: string, edge?: number) {
   const anchor = event.currentTarget instanceof Element ? event.currentTarget.getBoundingClientRect() : rect;
   const rawX = (event.clientX || anchor.left + anchor.width / 2) - rect.left;
   const rawY = (event.clientY || anchor.bottom) - rect.top;
-  // Position at the anchor; the contextMenu watcher clamps with the menu's measured size.
   const x = Math.max(0, rawX);
   const y = Math.max(0, rawY);
   menuSearch.value = "";
@@ -475,7 +473,6 @@ function beginLink(id: string, event: PointerEvent) {
   const distance = zone.classList.contains("zone-top") ? bounds.bottom - event.clientY
     : zone.classList.contains("zone-bottom") ? event.clientY - bounds.top
     : zone.classList.contains("zone-left") ? bounds.right - event.clientX : event.clientX - bounds.left;
-  // Keep a narrow connection-start area at the node edge when a wire overlaps the zone.
   if (hit && distance > 5 * zoomFactor.value) { wireDown(Number(hit.dataset.index), event); return; }
   if (!hit) source.value = id;
   linkDrag.value = { from: id, pointer: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, moved: false };
@@ -654,13 +651,13 @@ async function createExample(id: string) {
   const selected = TREE_EXAMPLES.find((entry) => entry.id === id);
   const marker = studioState.traitTemplates.find((entry) => entry.key === TREE_ITEM_KEY);
   if (!selected || !marker || !graph.value || props.readonly || creatingExample.value) return;
-  if (!window.confirm(`Create ${selected.items.length} TreeItem entity templates and replace this graph with ${selected.name}? Save the entity to keep the graph.`)) return;
+  if (!window.confirm(`Create ${selected.items.length} TreeItem entities and replace this graph with ${selected.name}? Save the entity to keep the graph.`)) return;
   creatingExample.value = true;
   const created: string[] = [];
   const ids = new Map<string, string>();
   try {
     for (const entry of selected.items) {
-      const result = await StudioApi.saveContent<EntityTemplateRecord>("entity_templates", {
+      const result = await StudioApi.saveContent<EntityRecord>("entities", {
         id: crypto.randomUUID(), name: entry.name,
         traits: [{ id: crypto.randomUUID(), template_id: marker.id, values: {} }],
       });
@@ -668,14 +665,14 @@ async function createExample(id: string) {
       ids.set(entry.key, result.id);
     }
     if (!mounted) throw new Error("The editor was closed.");
-    await refreshWorkspace(["entity_templates"]);
+    await refreshWorkspace(["entities"]);
     if (!mounted) throw new Error("The editor was closed.");
     patch({ nodes: selected.items.map((entry) => ids.get(entry.key)!), edges: selected.edges.map((edge) => ({ from: ids.get(edge.from)!, to: ids.get(edge.to)! })), direction: selected.direction, positions: {} });
     source.value = ""; menu.value = null;
     status.value = `Created ${created.length} TreeItem entities. Save this entity to keep the example graph.`;
   } catch (error) {
-    const cleanup = await Promise.allSettled(created.map((id) => StudioApi.deleteContent("entity_templates", id)));
-    await refreshWorkspace(["entity_templates"]).catch(() => {});
+    const cleanup = await Promise.allSettled(created.map((id) => StudioApi.deleteContent("entities", id)));
+    await refreshWorkspace(["entities"]).catch(() => {});
     const remaining = cleanup.filter((result) => result.status === "rejected").length;
     notice.value = `Could not create example: ${error instanceof Error ? error.message : String(error)}.${remaining ? ` ${remaining} created entities could not be removed.` : ""}`;
   } finally { creatingExample.value = false; }

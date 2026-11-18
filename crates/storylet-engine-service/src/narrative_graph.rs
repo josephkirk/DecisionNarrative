@@ -1,5 +1,3 @@
-//! Non-linear Narrative Node Graph model for Storylet content authoring.
-//! Reference: https://github.com/shrimbly/node-banana and NarrativeFlow.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,7 +9,7 @@ use crate::contracts::StoryletRecord;
 pub struct NodePort {
     pub id: String,
     pub name: String,
-    pub port_type: String, // "input" | "output"
+    pub port_type: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -36,9 +34,9 @@ pub enum DialogueItem {
     },
     IdleAction {
         id: String,
-        action_type: String, // "lookat" | "emote"
+        action_type: String,
         actor_role: String,
-        target: String, // "player" or role name
+        target: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         emote: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -87,7 +85,7 @@ pub enum NarrativeNodeData {
         #[serde(default = "default_property_type")]
         value_type: String,
     },
-    ApplyCommand {
+    SetEntityProperty {
         property_key: String,
         #[serde(default = "default_property_operation")]
         operation: String,
@@ -108,7 +106,6 @@ pub enum NarrativeNodeData {
     SalienceSelector {
         #[serde(default)]
         candidate_pool_ids: Vec<String>,
-        /// Storylet used when every candidate is gated (spec §11.3).
         #[serde(default)]
         fallback_storylet_id: String,
     },
@@ -159,7 +156,6 @@ pub enum NarrativeNodeData {
     },
     Learn { fact_tag: String, kind: storylet_engine::chrono_participants::KnowKind, visibility: storylet_engine::chrono_runtime::Visibility },
     Knows { holder: String, fact_tag: String, #[serde(default)] confirmed_only: bool },
-    /// Tells the acting participant a canon chronicle event.
     Reveal { event_id: String, kind: storylet_engine::chrono_participants::KnowKind, visibility: storylet_engine::chrono_runtime::Visibility },
     GoToLocation {
         location_id: String,
@@ -197,7 +193,6 @@ pub enum NarrativeNodeData {
         is_terminal: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         jump_to_storylet: Option<String>,
-        /// Candidate eligibility result; omitted means valid.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         precondition_result: Option<bool>,
     },
@@ -242,10 +237,6 @@ pub struct ChoiceOption {
 
 
 
-// ChronoFlow v5 authoring model. Field names mirror `storylet_engine::chrono_state`
-// so the graph adapter can compile these records into runtime rules. `GraphBinding`
-// and `AttributeValue` use struct variants because internally tagged enums cannot
-// round-trip newtype variants through JSON.
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -399,8 +390,6 @@ pub struct NarrativeNode {
     pub y: i32,
     pub width: i32,
     pub height: i32,
-    /// Authoring metadata for core nodes lowered from a studio plugin node.
-    /// The engine ignores it; the studio uses it to raise the plugin node back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<Value>,
     #[serde(flatten)]
@@ -461,7 +450,7 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::HasEntityTag { .. } => "Has Entity Tag",
         NarrativeNodeData::GetEntity { .. } => "Get Entity",
         NarrativeNodeData::GetEntityProperty { .. } => "Get Entity Property",
-        NarrativeNodeData::ApplyCommand { .. } => "Apply Command",
+        NarrativeNodeData::SetEntityProperty { .. } => "Apply Command",
         NarrativeNodeData::InventoryAdd {} => "Add Item",
         NarrativeNodeData::InventoryRemove {} => "Remove Item",
         NarrativeNodeData::InventoryHas {} => "Has Item",
@@ -676,7 +665,7 @@ impl NarrativeGraph {
                     };
                     let target_type = match &target.data {
                         NarrativeNodeData::GetEntityProperty { .. } => Some(("entity", "entity_ref")),
-                        NarrativeNodeData::ApplyCommand { .. } => match edge.to_port.as_str() {
+                        NarrativeNodeData::SetEntityProperty { .. } => match edge.to_port.as_str() {
                             "entity" => Some(("entity", "entity_ref")),
                             _ => None,
                         },
@@ -760,7 +749,7 @@ impl NarrativeGraph {
                         &node.data,
                         NarrativeNodeData::Condition {}
                             | NarrativeNodeData::GetEntityProperty { .. }
-                            | NarrativeNodeData::ApplyCommand { .. }
+                            | NarrativeNodeData::SetEntityProperty { .. }
                             | NarrativeNodeData::And {}
                             | NarrativeNodeData::Or {}
                             | NarrativeNodeData::Compare { .. }
@@ -790,7 +779,7 @@ impl NarrativeGraph {
                     &node.data,
                     NarrativeNodeData::Condition {}
                         | NarrativeNodeData::GetEntityProperty { .. }
-                        | NarrativeNodeData::ApplyCommand { .. }
+                        | NarrativeNodeData::SetEntityProperty { .. }
                         | NarrativeNodeData::And {}
                         | NarrativeNodeData::Or {}
                         | NarrativeNodeData::Compare { .. }
@@ -1007,7 +996,7 @@ impl NarrativeGraph {
                         issues.push(format!("Get Entity Property node {} must not have outgoing Flow edges.", node.title));
                     }
                 }
-                NarrativeNodeData::ApplyCommand { property_key, operation, value_type, value } => {
+                NarrativeNodeData::SetEntityProperty { property_key, operation, value_type, value } => {
                     if property_key.trim().is_empty() {
                         issues.push(format!("Apply Command node {} must specify a property key.", node.title));
                     }
@@ -1279,8 +1268,6 @@ impl NarrativeGraph {
         }
     }
 
-    /// Validate a graph used solely for candidate eligibility. Such graphs may
-    /// never contain nodes that can mutate or pause runtime state.
     pub fn validate_precondition(&self) -> Result<(), Vec<String>> {
         let mut issues = Vec::new();
         if self.nodes.len() > 128 || self.edges.len() > 256 {
@@ -1311,12 +1298,10 @@ impl NarrativeGraph {
         if issues.is_empty() { Ok(()) } else { Err(issues) }
     }
 
-    /// Build a default narrative graph from storylet content and choices
     pub fn from_storylet(st: &StoryletRecord) -> Self {
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
 
-        // 1. Start node
         nodes.push(NarrativeNode { plugin: None,
             id: "node_start".into(),
             title: "Start".into(),
@@ -1329,7 +1314,6 @@ impl NarrativeGraph {
             },
         });
 
-        // 2. Dialog node with opening prose
         let prose = st
             .content
             .scene_opening
@@ -1412,9 +1396,6 @@ impl NarrativeGraph {
         }
     }
 
-    /// A storylet is a dedicated ending only when it has at least one End and
-    /// every End is terminal. A graph with a jump exit remains in the normal
-    /// path; taking a terminal branch can still end that branch at runtime.
     pub fn ending_from_graph(&self) -> bool {
         let mut has_end = false;
         for node in &self.nodes {
@@ -1433,14 +1414,12 @@ impl NarrativeGraph {
         has_end
     }
 
-    /// Compile this node graph back into storylet prose.
     pub fn compile_to_storylet_content(&self, st: &mut StoryletRecord) {
         let mut prose_parts = Vec::new();
 
         for node in &self.nodes {
             match &node.data {
                 NarrativeNodeData::Dialog { text, sections, .. } => {
-                    // If structured sections exist, compile dialogue lines
                     if !sections.is_empty() {
                         for sec in sections {
                             for item in &sec.items {

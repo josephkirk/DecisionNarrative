@@ -88,7 +88,6 @@ export function isValidPropertyValue(type: PropertyType, isArray: boolean, value
   return scalarMatches(type, value);
 }
 
-/** Keep the current value when it still fits the new shape, otherwise default it. */
 export function retypeValue(type: PropertyType, isArray: boolean, value: PropertyValue): PropertyValue {
   return isValidPropertyValue(type, isArray, value) ? value : defaultPropertyValue(type, isArray);
 }
@@ -118,7 +117,6 @@ export function uniquePropertyKey(existing: string[], base = "NewVar"): string {
   return `${base}_${index}`;
 }
 
-/** First authoring problem in a property list, or null when the list can be saved. */
 export function propertyListProblem(
   rows: Array<{ key: string; name: string }>,
 ): string | null {

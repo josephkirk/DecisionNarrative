@@ -1,7 +1,3 @@
-//! Lossless compilation of authored Studio storylets into the dense ChronoFlow dispatcher.
-//!
-//! The adapter keeps existing project records as the authoring boundary. Runtime IDs are
-//! assigned in stable storylet-ID order and bounded by the engine's fixed completion mask.
 
 use std::collections::{BTreeMap, BTreeSet};
 use serde_json::Value;
@@ -17,7 +13,7 @@ use storylet_engine::chrono_state::{
 };
 
 use crate::contracts::{
-    CharacterRecord, ChronoStoryletSettings, EntityRecord, EntityProperty, EntityTemplateRecord,
+    CharacterRecord, ChronoStoryletSettings, EntityRecord, EntityProperty,
     LocationRecord, PropertyType,
     ScenarioRecord, StoryletRecord, WorldObjectLayer, WorldObjectRecord,
 };
@@ -99,7 +95,7 @@ pub fn compile_chrono_dispatch_with_world(
     let entity_indices = runtime_entity_indices(locations, characters, world_objects)?;
     let (passion_registry,passion_indices)=compile_passion_registry(characters,&entity_indices,&registry)?;
     let mut defs=Vec::with_capacity(ordered.len());
-    for(i,s)in ordered.iter().enumerate(){let set=s.chrono.as_ref();let mut d=StoryletDef{storylet_id:i as u16,is_ending:s.ending,is_fallback:s.is_fallback,window:s.window.clone(),display_priority:set.map_or(0,|x|x.display_priority),urgency_tag:set.map_or("Standard".into(),|x|x.urgency_color_tag.clone()),cluster_type:map_cluster_type(&s.cluster_type)?,payload_node_guid:i as u32,is_repeatable:s.repeatability!="once_ever"&&set.map_or(true,|x|x.is_repeatable),cooldown_ms:set.map_or(0,|x|i64::try_from(x.cooldown_ms).unwrap_or(i64::MAX)),cooldown_turns:if s.repeatability=="cooldown"{s.cooldown_turns as u64}else{0},required_roles:s.parameters.iter().filter_map(|p|crate::projection::parse_role_query(&p.query).map(|r|RoleRequirement{role_tag:r,location_tag:(p.location_policy.trim()!="any").then(||"location.current".into()),..Default::default()})).collect(),..StoryletDef::default()};if let Some(set)=set{add_tags(&registry,&mut d.required_tags,&set.required_tags,&s.id,"required_tags")?;add_any_tags(&registry,&mut d.required_any_tags,&set.required_any_tags,&s.id,"required_any_tags")?;add_any_tags(&registry,&mut d.forbidden_tags,&set.forbidden_tags,&s.id,"forbidden_tags")?;add_any_tags(&registry,&mut d.required_arc_phases,&set.required_arc_phases,&s.id,"required_arc_phases")?;for tag in &set.salience_bonus_tags{let id=registry.id(tag).ok_or_else(||format!("unknown salience tag {tag}"))?;registry.add_hierarchical(&mut d.salience_bonus_tags,id).map_err(|e|e.to_string())?;}}defs.push(d);}
+    for(i,s)in ordered.iter().enumerate(){let set=s.chrono.as_ref();let mut d=StoryletDef{storylet_id:i as u16,is_ending:s.ending,is_fallback:s.is_fallback,window:s.window.clone(),display_priority:set.map_or(0,|x|x.display_priority),urgency_tag:set.map_or("Standard".into(),|x|x.urgency_color_tag.clone()),cluster_type:map_cluster_type(&s.cluster_type)?,payload_node_guid:i as u32,is_repeatable:s.repeatability!="once_ever"&&set.map_or(true,|x|x.is_repeatable),cooldown_ms:set.map_or(0,|x|i64::try_from(x.cooldown_ms).unwrap_or(i64::MAX)),cooldown_turns:if s.repeatability=="cooldown"{s.cooldown_turns as u64}else{0},required_roles:s.parameters.iter().filter_map(|p|crate::entities::parse_role_query(&p.query).map(|r|RoleRequirement{role_tag:r,location_tag:(p.location_policy.trim()!="any").then(||"location.current".into()),..Default::default()})).collect(),..StoryletDef::default()};if let Some(set)=set{add_tags(&registry,&mut d.required_tags,&set.required_tags,&s.id,"required_tags")?;add_any_tags(&registry,&mut d.required_any_tags,&set.required_any_tags,&s.id,"required_any_tags")?;add_any_tags(&registry,&mut d.forbidden_tags,&set.forbidden_tags,&s.id,"forbidden_tags")?;add_any_tags(&registry,&mut d.required_arc_phases,&set.required_arc_phases,&s.id,"required_arc_phases")?;for tag in &set.salience_bonus_tags{let id=registry.id(tag).ok_or_else(||format!("unknown salience tag {tag}"))?;registry.add_hierarchical(&mut d.salience_bonus_tags,id).map_err(|e|e.to_string())?;}}defs.push(d);}
     let mut dispatcher=UnifiedDispatcher::new(defs);dispatcher.resolve(&registry).map_err(|e|e.to_string())?;
     let storylet_titles = ordered.iter().enumerate().map(|(i, s)| (i as u16, s.title.clone())).collect();
     let mut storylet_location_tags = BTreeMap::new();
@@ -458,16 +454,14 @@ fn map_cluster_type(value: &str) -> Result<StoryletClusterType, String> {
 #[derive(Clone, Debug)]
 pub struct ChronoWorldSeed {
     pub state: WorldStateTable,
-    /// Stable dense row for each location, character, item, or fact entity.
     pub entity_indices: BTreeMap<String, u16>,
 }
 
-/// Build the fixed-capacity world rows from the current project and resolved start.
 pub fn initialize_chrono_world(
     compiled: &CompiledChronoDispatch,
     storylets: &[StoryletRecord],
     world: &EntityRecord,
-    entities: &[EntityTemplateRecord],
+    entities: &[EntityRecord],
     locations: &[LocationRecord],
     characters: &[CharacterRecord],
     world_objects: &[WorldObjectRecord],
@@ -517,8 +511,6 @@ pub fn initialize_chrono_world(
     }
 
 
-    // Seed the dramatic arc phase so arc-gated content is reachable without an
-    // unrelated mutation writing the tag.
     if let Some(phase) = scenario
         .map(|scenario| scenario.current_arc_phase.trim())
         .filter(|phase| !phase.is_empty())
@@ -539,7 +531,7 @@ pub fn initialize_chrono_world(
         }
     }
 
-    let runtime_entities: BTreeMap<&str, &EntityTemplateRecord> = entities
+    let runtime_entities: BTreeMap<&str, &EntityRecord> = entities
         .iter()
         .map(|entity| (entity.id.as_str(), entity))
         .collect();
@@ -1032,7 +1024,7 @@ mod world_object_vertex_tests {
             "id": "world", "name": "World", "tags": [],
             "properties": [{ "id": "mood", "key": "mood", "name": "Mood", "type": "float", "value": 3 }]
         })).expect("valid World fixture");
-        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             {
                 "id": "square", "name": "Square", "tags": [], "traits": [{"template_id":"system.location"}],
                 "properties": [{ "id": "visited", "key": "visited", "name": "Visited", "type": "bool", "value": false }]
@@ -1190,7 +1182,7 @@ mod participant_seed_tests {
     #[test]
     fn overlapping_capabilities_share_one_runtime_entity_row() {
         let world: EntityRecord = serde_json::from_value(json!({"id":"world","name":"World"})).unwrap();
-        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([{
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([{
             "id":"dual","name":"Dual","traits":[
                 {"template_id":"system.character"},{"template_id":"system.location"}]
         }])).unwrap();
@@ -1212,7 +1204,7 @@ mod participant_seed_tests {
     #[test]
     fn participant_trait_compiles_rows_in_seat_order() {
         let world: EntityRecord = serde_json::from_value(json!({"id":"world","name":"World",})).unwrap();
-        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
+        let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             {"id":"square","name":"Square","traits":[{"template_id":"system.location"}],},
             {"id":"player","name":"A","traits":[{"template_id":"system.character"},{"template_id":"system.participant","values":{"controller":"human","seat":1,"start_location":"square"}}]},
             {"id":"b","name":"B","traits":[{"template_id":"system.character"},{"template_id":"system.participant","values":{"controller":"human","seat":0}}]}
@@ -1227,9 +1219,6 @@ mod participant_seed_tests {
     }
 }
 
-/// Compiles canon events with a story time into the chronicle, sorted by
-/// `(story_time, id)`. Fact tags must be registered; a location must be a
-/// known entity.
 pub fn compile_chronicle(
     events: &[crate::contracts::EventRecord],
     registry: &storylet_engine::chrono_state::GameplayTagRegistry,
@@ -1295,11 +1284,9 @@ mod chronicle_compile_tests {
     }
 }
 
-/// Compiles scheduled connections and the clock from entity traits.
-/// `connected_zones` become always-open connections.
 pub fn compile_space(
     world: &crate::contracts::EntityRecord,
-    entities: &[EntityTemplateRecord],
+    entities: &[EntityRecord],
     locations: &[crate::contracts::LocationRecord],
     entity_indices: &BTreeMap<String, u16>,
     registry: &storylet_engine::chrono_state::GameplayTagRegistry,
@@ -1383,7 +1370,7 @@ mod space_compile_tests {
 
     fn compile(entities: Value, world_traits: Value) -> Result<(Vec<storylet_engine::chrono_space::Connection>, Option<storylet_engine::chrono_space::Clock>), String> {
         let world: EntityRecord = serde_json::from_value(json!({"id": "world", "name": "World", "traits": world_traits})).unwrap();
-        let entities: Vec<EntityTemplateRecord> = serde_json::from_value(entities).unwrap();
+        let entities: Vec<EntityRecord> = serde_json::from_value(entities).unwrap();
         let templates = crate::store::Store::open_in_memory().unwrap().list_trait_templates().unwrap();
         let records = crate::entities::runtime_records_with_world(&world, &entities, &templates);
         let indices: BTreeMap<String, u16> = records.locations.iter().enumerate().map(|(i, l)| (l.id.clone(), i as u16)).collect();
@@ -1425,7 +1412,6 @@ mod space_compile_tests {
         assert!(clock.is_none());
         assert_eq!(connections.len(), 1);
         let c = &connections[0];
-        // Entity indices are alphabetical: harbor = 0, lighthouse = 1.
         assert_eq!((c.from, c.to, c.open_slots, c.requires_fact, c.on_close), (1, 0, None, None, None));
     }
 
@@ -1444,8 +1430,6 @@ mod space_compile_tests {
     }
 }
 
-/// Resolves each storylet's authored `played_by` entity ids to participant
-/// indices. Must run after `participant_indices` is known.
 pub fn bind_played_by(compiled: &mut storylet_engine::run::RunContent, storylets: &[crate::contracts::StoryletRecord]) -> Result<(), String> {
     for storylet in storylets.iter().filter(|s| !s.played_by.is_empty()) {
         let Some(index) = compiled.storylet_index(&storylet.id) else { continue };

@@ -1,31 +1,25 @@
-// Pure helpers over a RunView. No Vue, no fetch: everything here is unit-testable.
-import type { ChangeView, ChronicleRowView, KnowKind, KnowRowView, MoveBlock, NearMiss, ParticipantView, RunAction, RunStep, RunView, StoryletRef } from "./contracts.ts";
+import type { ChangeView, ChronicleRowView, KnowKind, KnowRowView, MoveBlock, NearMiss, ParticipantView, RunAction, RunEventView, RunStep, RunView, StoryletRef } from "./contracts.ts";
 
-/** "1".."9" -> the nth choice's action. Disabled choices and any other key give null. */
 export function choiceForKey(view: RunView, key: string): RunAction | null {
   if (!/^[1-9]$/.test(key)) return null;
   const choice = view.scene?.choices[Number(key) - 1];
   return choice && choice.enabled ? choice.action : null;
 }
 
-/** After "G": the nth (1-based) enabled move out of the current place. */
 export function moveForKey(view: RunView, n: number): RunAction | null {
   const moves = (view.place?.moves ?? []).filter((m) => m.enabled);
   const move = moves[n - 1];
   return move ? { kind: "move", to: move.to } : null;
 }
 
-/** The clock row appears only for projects that define a clock. */
 export function hasClock(view: RunView): boolean {
   return !!view.place?.clockLabel;
 }
 
-/** Seats: participants a person plays. Rule participants act on their own. */
 export function humanParticipants(view: RunView): ParticipantView[] {
   return view.participants.filter((p) => p.human);
 }
 
-/** Tabs appear only when more than one human participant exists. */
 export function showParticipantTabs(view: RunView): boolean {
   return humanParticipants(view).length > 1;
 }
@@ -34,25 +28,41 @@ export function nearMissText(m: NearMiss): string {
   return `${m.storylet.title} — ${m.reason}`;
 }
 
-/** Story-time order; `told` is set only on rows the run has revealed. */
 export function chronicleRows(rows: ChronicleRowView[]): Array<{ label: string; told: number | null; place: string }> {
   return [...rows]
     .sort((a, b) => a.storyTime - b.storyTime)
     .map((r) => ({ label: r.label, told: r.told, place: r.place ?? "" }));
 }
 
-/** Plain-language step text; the engine's own label is a debug string and is never shown. */
-export function stepText(step: RunStep): string {
-  switch (step.action.kind) {
-    case "choose": return `Chose option ${step.action.outputPin + 1}`;
+export function actionText(action: RunAction): string {
+  switch (action.kind) {
+    case "choose": return `Chose option ${action.outputPin + 1}`;
     case "play_storylet": return "Started a storylet";
     case "topic": return "Asked about a topic";
     case "move": return "Moved";
     case "wait": return "Waited";
+    case "transfer": return `Gave ${action.amount} item${action.amount === 1 ? "" : "s"}`;
+    case "tell": return "Shared a fact";
   }
 }
 
-/** The branch the run is on now: that of the last applied step (the main branch before any step). */
+export function stepText(step: RunStep): string {
+  return actionText(step.action);
+}
+
+export interface CausalRow { id: number; text: string; cause: boolean }
+
+export function causalRows(events: RunEventView[], participants: ParticipantView[], target: number): CausalRow[] {
+  const name = (id: number) => participants.find((p) => p.id === id)?.name ?? `Participant ${id + 1}`;
+  return [...events]
+    .sort((a, b) => a.id - b.id)
+    .map((event) => ({
+      id: event.id,
+      text: `Step ${event.step} · ${name(event.actor)} · ${actionText(event.action)}`,
+      cause: event.id !== target,
+    }));
+}
+
 export function activeBranchId(view: RunView): number {
   const last = view.steps[view.steps.length - 1];
   return last ? last.branch : (view.branches[0]?.id ?? 0);
@@ -60,7 +70,6 @@ export function activeBranchId(view: RunView): number {
 
 export interface TimelineDot { index: number; state: "done" | "current" | "ghost"; step: RunStep | null }
 
-/** Dot 0 is the start; applied steps are done, the last applied is current, later steps of this branch are ghosts. */
 export function timelineDots(view: RunView): TimelineDot[] {
   const branch = view.branches.find((b) => b.id === activeBranchId(view));
   const all = branch?.steps ?? view.steps;
@@ -75,7 +84,6 @@ export function timelineDots(view: RunView): TimelineDot[] {
   return dots;
 }
 
-/** Editor link for a storylet; null when the authored key is unknown. */
 export function editLink(ref: StoryletRef): string | null {
   return ref.key ? `/storylets/${encodeURIComponent(ref.key)}/edit` : null;
 }
@@ -92,23 +100,27 @@ export function knowKindLabel(kind: KnowKind): string {
   return KIND_LABELS[kind];
 }
 
-/** Rumour and testimony may be wrong; the panel says so in words. */
 export function knowRowStatus(row: KnowRowView): string | null {
   return row.confirmed ? null : "not confirmed";
 }
 
 export function changeText(change: ChangeView): string {
-  return `${change.key}: ${change.before} → ${change.after}`;
+  const delta = change.delta;
+  const pieces = [
+    Array.isArray(delta.graphDiffs) && delta.graphDiffs.length ? `${delta.graphDiffs.length} world graph change${delta.graphDiffs.length === 1 ? "" : "s"}` : "",
+    Array.isArray(delta.participantMoves) && delta.participantMoves.length ? `${delta.participantMoves.length} participant move${delta.participantMoves.length === 1 ? "" : "s"}` : "",
+    Array.isArray(delta.knowledgeAdded) && delta.knowledgeAdded.length ? `${delta.knowledgeAdded.length} knowledge change${delta.knowledgeAdded.length === 1 ? "" : "s"}` : "",
+    Array.isArray(delta.tellingsAdded) && delta.tellingsAdded.length ? `${delta.tellingsAdded.length} information transfer${delta.tellingsAdded.length === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  return pieces.join(" · ") || "World state updated";
 }
 
 const CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";
-/** ①②③ for the first twenty tellings, "(n)" after that, empty when untold. */
 export function toldMark(n: number | null): string {
   if (n === null) return "";
   return n >= 1 && n <= 20 ? CIRCLED[n - 1] : `(${n})`;
 }
 
-/** Why a move is unavailable, in plain words. */
 export function moveBlockText(block: MoveBlock): string {
   if (block.kind === "closed_until") return `Closed until ${block.slotLabel}`;
   return `Needs: ${block.fact.replace(/^fact\./, "").replace(/[_.]/g, " ")}`;
@@ -120,7 +132,6 @@ export function actionsLeftText(left: number | undefined): string {
   return `${left} ${left === 1 ? "action" : "actions"} left`;
 }
 
-/** What the world did because of a step: occupancy notes, then rule-participant plays. */
 export function noteLines(step: RunStep, participants: ParticipantView[]): string[] {
   const names = new Map(participants.map((p) => [p.id, p.name]));
   return [
@@ -129,14 +140,12 @@ export function noteLines(step: RunStep, participants: ParticipantView[]): strin
   ];
 }
 
-/** Storylets listed under "Also here", as playable actions; empty unless a hub is pending. */
 export function alsoHereActions(view: RunView): Array<{ storylet: StoryletRef; action: RunAction }> {
   const hub = view.hub;
   if (hub === undefined) return [];
   return view.alsoHere.map((storylet) => ({ storylet, action: { kind: "play_storylet", nodeGuid: hub, storylet: storylet.id } }));
 }
 
-/** Normalize ending counts within the endings that were reached. */
 export function endingBars(endings: Array<[number, number]>): Array<{ id: number; count: number; percent: number }> {
   const total = endings.reduce((sum, [, count]) => sum + count, 0);
   return endings.map(([id, count]) => ({ id, count, percent: total ? count * 100 / total : 0 }));

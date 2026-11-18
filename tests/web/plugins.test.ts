@@ -86,7 +86,7 @@ test("canvas history records revisions, restores them and caps length", () => {
   doc = pushRevision({ ...doc, shapes: [] }, "Clear");
   const restored = restoreRevision(doc, 0);
   expect(restored.shapes.length).toBe(3);
-  expect(restored.revisions.length).toBe(2); // restore adds no history
+  expect(restored.revisions.length).toBe(2);
   expect(restored.revisions.at(-1)!.label).toBe("Clear");
   let many = emptyCanvas();
   for (let i = 0; i < 60; i++) many = pushRevision(many, `r${i}`);
@@ -100,7 +100,6 @@ test("canvas history records revisions, restores them and caps length", () => {
   expect(parseCanvas("not json").shapes).toEqual([]);
 });
 
-/** The version a Modify Canvas node saved: key deleted, gate opened, a new ghost marker, wall moved. */
 function unlockVersion(doc: CanvasDoc) {
   const shapes = doc.shapes.filter((shape) => shape.id !== "s_key").map((shape) =>
     shape.id === "s_gate" ? { ...shape, icon: "door-open" } : shape.id === "s_wall" ? { ...shape, x: 50 } : shape);
@@ -120,7 +119,6 @@ test("a Modify Canvas node owns exactly one version in the canvas history", () =
   doc = upsertNodeVersion(doc, { id: "cv_unlock", label: "Modify Canvas · Unlock", source: SOURCE, snapshot: snapshotOf(doc) });
   expect(doc.revisions.filter((r) => r.id === "cv_unlock").length).toBe(1);
   expect(doc.revisions.at(-1)!.id).toBe("cv_unlock");
-  // Edit history is capped but node versions are never trimmed.
   for (let i = 0; i < 60; i++) doc = pushRevision(doc, `r${i}`);
   expect(nodeVersion(doc, "cv_unlock")).toBeDefined();
   expect(doc.revisions.filter((r) => !r.source).length).toBe(40);
@@ -132,7 +130,6 @@ test("version changes are gameplay diffs against the entity canvas", () => {
   expect(changes.map((c) => [c.key, c.value])).toEqual([
     ["map_s_gate_icon", "door-open"], ["map_s_key_present", false], ["map_s_ghost_present", true],
   ]);
-  // Shapes that exist only in a version are declared on the entity, absent at start.
   const props = syncCanvasProperties([], doc);
   expect(props.find((p) => p.key === "map_s_ghost_present")!.value).toBe(false);
   expect(props.find((p) => p.key === CANVAS_VERSION_KEY)!.value).toBe("");
@@ -167,7 +164,7 @@ test("Modify Canvas lowers to valid core Apply Command nodes and raises back", (
   expect(validatePluginNodes(graph, entities)).toEqual([]);
   const lowered = lowerPluginGraph(graph, entities);
   expect(lowered.nodes.some((n) => n.type === "plugin")).toBe(false);
-  const commands = lowered.nodes.filter((n) => n.type === "apply_command");
+  const commands = lowered.nodes.filter((n) => n.type === "set_entity_property");
   expect(commands.map((n) => [n.property_key, n.value_type, n.value])).toEqual([
     [CANVAS_VERSION_KEY, "string", "cv_unlock"],
     ["map_s_gate_icon", "string", "door-open"], ["map_s_key_present", "bool", false], ["map_s_ghost_present", "bool", true],
@@ -175,7 +172,6 @@ test("Modify Canvas lowers to valid core Apply Command nodes and raises back", (
   expect(lowered.nodes.find((n) => n.type === "get_entity")!.entity_path).toBe("loc_crypt");
   expect(lowered.edges.filter((edge) => edge.kind === "data" && edge.from_node === "entity").map((edge) => edge.to_node).sort()).toEqual(commands.map((node) => node.id).sort());
   expect(validateNarrativeGraph(lowered)).toEqual([]);
-  // Survives a JSON round trip through storage, as the service returns it.
   const raised = raisePluginGraph(JSON.parse(JSON.stringify(lowered)));
   expect(raised.nodes.map((n) => n.id).sort()).toEqual(["end", "entity", "mc", "start"]);
   expect(raised.nodes.find((n) => n.id === "mc")!.plugin_config).toEqual(graph.nodes[1]!.plugin_config);
@@ -265,7 +261,6 @@ test("canvas entity and storylet references become typed reference properties on
   expect(props.find((p) => p.key === refKey(doc.shapes[1]!))!.name).toBe("Canvas reference");
   expect(props.find((p) => p.key === refKey(doc.shapes[1]!))).toMatchObject({ type: "storylet", value: "crypt_tale" });
   expect(props.find((p) => p.key === refKey(doc.shapes[2]!))).toBeUndefined();
-  // Removing the shape drops its reference property.
   const after = syncCanvasProperties(props, { ...doc, shapes: [doc.shapes[1]!] });
   expect(after.find((p) => p.key === refKey(doc.shapes[0]!))).toBeUndefined();
 });
@@ -288,14 +283,11 @@ test("temp history: node edits are staged until the storylet is saved", () => {
   const SRC = { storylet_id: "unlock", storylet_title: "Unlock", node_id: "mc" };
   const base = mapDoc();
   const v1 = unlockVersion(base);
-  // New version: uncommitted until saved; discarding removes it.
   let doc = stageNodeVersion(base, { id: "cv_1", label: "MC", source: SRC, snapshot: v1 });
   expect(versionTempState(doc.revisions[0]!)).toBe("new, storylet not saved");
   expect(discardStoryletVersions(doc, "unlock").revisions.length).toBe(0);
-  // Saving the storylet commits it.
   doc = commitStoryletVersions(doc, "unlock", new Set(["mc"]));
   expect(versionTempState(doc.revisions[0]!)).toBe("");
-  // Editing again keeps the committed snapshot and stages a draft.
   doc = stageNodeVersion(doc, { id: "cv_1", label: "MC", source: SRC, snapshot: base });
   expect(doc.revisions.length).toBe(1);
   expect(versionTempState(doc.revisions[0]!)).toBe("edited, storylet not saved");
@@ -303,16 +295,13 @@ test("temp history: node edits are staged until the storylet is saved", () => {
   const discarded = discardStoryletVersions(doc, "unlock");
   expect(discarded.revisions[0]!.draft).toBeUndefined();
   expect(discarded.revisions[0]!.snapshot.shapes.some((s) => s.id === "s_ghost")).toBe(true);
-  // Removal is pending until saved; discarding restores the version.
   doc = stageNodeVersionRemoval(discarded, "cv_1");
   expect(versionTempState(doc.revisions[0]!)).toBe("removal pending");
   expect(discardStoryletVersions(doc, "unlock").revisions[0]!.pending_delete).toBeUndefined();
   expect(commitStoryletVersions(doc, "unlock", new Set(["mc"])).revisions.length).toBe(0);
-  // Saved without the node: its version goes; other storylets' versions stay.
   const other = stageNodeVersion(discarded, { id: "cv_2", label: "Other", source: { ...SRC, storylet_id: "other", node_id: "x" }, snapshot: base });
   const committed = commitStoryletVersions(commitStoryletVersions(other, "other", new Set(["x"])), "unlock", new Set());
   expect(committed.revisions.map((r) => r.id)).toEqual(["cv_2"]);
-  // A first save of a new storylet claims versions staged without an id.
   const fresh = stageNodeVersion(base, { id: "cv_3", label: "New", source: { ...SRC, storylet_id: "" }, snapshot: v1 });
   expect(commitStoryletVersions(fresh, "stl_new", new Set(["mc"])).revisions[0]!.source!.storylet_id).toBe("stl_new");
   expect(hasTempVersions(fresh, "")).toBe(true);

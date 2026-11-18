@@ -60,7 +60,6 @@ test("timeless_project_hides_clock", () => {
 test("showParticipantTabs is true only for more than one human", () => {
   expect(showParticipantTabs(view())).toBe(false);
   expect(showParticipantTabs(view({ participants: [{ id: 0, name: "A", human: true }, { id: 1, name: "B", human: true }] }))).toBe(true);
-  // Rule participants are not seats.
   expect(showParticipantTabs(view({ participants: [{ id: 0, name: "A", human: true }, { id: 1, name: "Rosa", human: false }] }))).toBe(false);
 });
 
@@ -120,7 +119,7 @@ test("stepCountText pluralises", () => {
   expect(stepCountText(12)).toBe("12 steps");
 });
 
-import { knowKindLabel, knowRowStatus, changeText, toldMark } from "../../src/web/studio/runModel.ts";
+import { actionText, causalRows, knowKindLabel, knowRowStatus, changeText, toldMark } from "../../src/web/studio/runModel.ts";
 
 test("knowKindLabel names every knowledge kind in plain words", () => {
   expect(knowKindLabel("rumor")).toBe("rumour");
@@ -133,8 +132,8 @@ test("knowRowStatus labels unconfirmed rows in words, not colour alone", () => {
   expect(knowRowStatus({ fact: "fact.x", kind: "evidence", confirmed: true, sourceStep: null })).toBeNull();
 });
 
-test("changeText shows before to after", () => {
-  expect(changeText({ key: "mood", before: "1", after: "2" })).toBe("mood: 1 → 2");
+test("changeText summarizes kernel event deltas", () => {
+  expect(changeText({ eventId: 3, delta: { participantMoves: [[0, 1, 2]] } })).toBe("1 participant move");
 });
 
 test("toldMark uses circled numbers up to 20 and falls back to the number", () => {
@@ -197,4 +196,17 @@ test("coverage severity reports invariant failures", async () => {
   const { invariantSeverity } = await import("../../src/web/studio/runModel.ts");
   expect(invariantSeverity({ violations: [] })).toBe("pass");
   expect(invariantSeverity({ violations: [{}] })).toBe("fail");
+});
+
+test("causal rows read as steps by named participants with the explained event last", () => {
+  const participants = [{ id: 0, name: "Ada", human: true }, { id: 1, name: "Bram", human: false }];
+  const rows = causalRows([
+    { id: 4, step: 2, actor: 1, action: { kind: "play_storylet", nodeGuid: 3, storylet: 7 }, parents: [3], deltas: [] },
+    { id: 3, step: 2, actor: 0, action: { kind: "transfer", to: 1, resource: 5, amount: 2 }, parents: [], deltas: [] },
+  ], participants, 4);
+  expect(rows).toEqual([
+    { id: 3, text: "Step 2 · Ada · Gave 2 items", cause: true },
+    { id: 4, text: "Step 2 · Bram · Started a storylet", cause: false },
+  ]);
+  expect(actionText({ kind: "tell", to: 1, fact: 2 })).toBe("Shared a fact");
 });

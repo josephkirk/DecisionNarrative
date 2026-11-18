@@ -26,10 +26,12 @@ const {
   openRow,
   createNewProject,
   deleteItem,
+  toggleTemplate,
   activeDragRoot,
 } = useProjectTree();
 
 const menuKey = ref<string | null>(null);
+let menuOrigin: HTMLElement | null = null;
 const dropKey = ref<string | null>(null);
 
 interface ContextMenuState {
@@ -43,6 +45,10 @@ function canAcceptDrop(row: TreeRow): boolean {
   if (row.kind !== "folder" && row.kind !== "root") return false;
   if (!activeDragRoot.value || !row.root) return false;
   return row.root === activeDragRoot.value;
+}
+
+function isEntityRow(row: TreeRow): boolean {
+  return row.kind === "item" && row.root === "entities" && row.id !== "world";
 }
 
 function rowIcon(row: TreeRow): string {
@@ -68,6 +74,7 @@ function openContextMenu(event: MouseEvent, row: TreeRow | null) {
   event.preventDefault();
   event.stopPropagation();
   menuKey.value = null;
+  menuOrigin = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   const menuWidth = 200;
   const menuHeight = 260;
   const x = Math.min(event.clientX, Math.max(10, window.innerWidth - menuWidth));
@@ -100,7 +107,6 @@ function rowDragPayload(event: DragEvent, row: TreeRow) {
       id: row.id,
     }),
   );
-  // Copy lets panes take the row as "open here" or a split; move keeps folder drops working.
   if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
 }
 
@@ -113,17 +119,21 @@ function folderRecord(row: TreeRow) {
   return studioState.folders.find((folder) => folder.id === row.id);
 }
 
+function hasTemplateParent(row: TreeRow): boolean {
+  return !!studioState.entities.find((entity) => entity.id === row.id)?.template_id;
+}
+
 function menuDefinition(row: TreeRow): ContentRootDefinition | undefined {
   return roots.find((definition) => definition.root === row.root);
 }
 
-/** Rows near the bottom of the tree open their menu upward so it never runs off-screen. */
 const menuUp = ref(false);
 const MENU_ROOM = 200;
 
 function toggleMenu(row: TreeRow, event?: Event) {
   menuKey.value = menuKey.value === row.key ? null : row.key;
   contextMenu.value = null;
+  if (event?.currentTarget instanceof HTMLElement) menuOrigin = event.currentTarget;
   const anchor = event?.currentTarget instanceof Element ? event.currentTarget.getBoundingClientRect() : null;
   menuUp.value = !!anchor && anchor.bottom + MENU_ROOM > window.innerHeight;
 }
@@ -134,7 +144,7 @@ function runMenu(row: TreeRow, action: "folder" | "item" | "rename" | "delete") 
   if (!definition) return;
   const folderId = row.kind === "folder" ? row.id ?? null : null;
   if (action === "folder") void createFolder(definition.root, folderId);
-  else if (action === "item") void createItem(definition, folderId);
+  else if (action === "item") void createItem(definition, folderId, menuOrigin);
   else if (action === "rename") {
     const folder = folderRecord(row);
     if (folder) void renameFolder(folder);
@@ -146,6 +156,7 @@ function runMenu(row: TreeRow, action: "folder" | "item" | "rename" | "delete") 
 
 function contextAction(action: string) {
   const row = contextMenu.value?.row;
+  const origin = menuOrigin;
   closeContextMenu();
 
   if (action === "new-project") {
@@ -192,6 +203,10 @@ function contextAction(action: string) {
     void deleteItem(row);
     return;
   }
+  if (action === "toggle-template") {
+    void toggleTemplate(row);
+    return;
+  }
 
   const definition = menuDefinition(row);
   if (!definition) return;
@@ -200,7 +215,7 @@ function contextAction(action: string) {
   if (action === "folder") {
     void createFolder(definition.root, folderId);
   } else if (action === "item") {
-    void createItem(definition, folderId);
+    void createItem(definition, folderId, origin);
   } else if (action === "rename") {
     const folder = folderRecord(row);
     if (folder) void renameFolder(folder);
@@ -290,6 +305,7 @@ onBeforeUnmount(() => {
         <span v-else class="project-tree__glyph" :class="`is-${row.kind}`"><StudioIcon :name="rowIcon(row)" /></span>
 
         <span class="project-tree__label" :title="row.detail ? `${row.label} — ${row.detail}` : row.label">{{ row.label }}</span>
+        <span v-if="row.isTemplate" class="project-tree__template-badge" title="Template" aria-label="Template"><StudioIcon name="template" /></span>
 
         <button
           v-if="row.kind === 'folder' || (row.kind === 'root' && menuDefinition(row)?.newLabel)"
@@ -318,7 +334,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Floating Context Menu -->
     <div
       v-if="contextMenu"
       class="project-tree__context-menu"
@@ -326,7 +341,6 @@ onBeforeUnmount(() => {
       :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       @click.stop
     >
-      <!-- Row: Project or empty background -->
       <template v-if="!contextMenu.row || contextMenu.row.kind === 'project'">
         <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('new-project')"><StudioIcon name="file" /> New project…</button>
         <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('refresh')"><StudioIcon name="refresh" /> Refresh workspace</button>
@@ -337,7 +351,6 @@ onBeforeUnmount(() => {
         <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('codex')"><StudioIcon name="scroll" /> Rules & events</button>
       </template>
 
-      <!-- Row: Root -->
       <template v-else-if="contextMenu.row.kind === 'root'">
         <template v-if="menuDefinition(contextMenu.row)?.newLabel">
           <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('item')"><StudioIcon name="plus" /> {{ menuDefinition(contextMenu.row)?.newLabel ?? "New item" }}</button>
@@ -348,7 +361,6 @@ onBeforeUnmount(() => {
         <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('toggle-expand')"><StudioIcon name="chevron" /> {{ contextMenu.row.expanded ? 'Collapse' : 'Expand' }}</button>
       </template>
 
-      <!-- Row: Folder -->
       <template v-else-if="contextMenu.row.kind === 'folder'">
         <template v-if="menuDefinition(contextMenu.row)?.newLabel">
           <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('item')"><StudioIcon name="plus" /> {{ menuDefinition(contextMenu.row)?.newLabel ?? "New item" }}</button>
@@ -362,10 +374,22 @@ onBeforeUnmount(() => {
         <button type="button" role="menuitem" class="project-tree__context-menu-item project-tree__context-menu-item--danger" @click="contextAction('delete-folder')"><StudioIcon name="trash" /> Delete folder</button>
       </template>
 
-      <!-- Row: Item -->
       <template v-else-if="contextMenu.row.kind === 'item'">
         <button type="button" role="menuitem" class="project-tree__context-menu-item" @click="contextAction('open')"><StudioIcon name="open" /> Open</button>
         <button type="button" role="menuitem" class="project-tree__context-menu-item" :disabled="!canSplit()" @click="contextAction('split')"><StudioIcon name="split-right" /> Open in split view</button>
+        <template v-if="isEntityRow(contextMenu.row)">
+          <div class="project-tree__context-menu-divider" role="separator"></div>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            class="project-tree__context-menu-item"
+            aria-label="Use as template"
+            :aria-checked="contextMenu.row.isTemplate === true"
+            :disabled="hasTemplateParent(contextMenu.row)"
+            :title="hasTemplateParent(contextMenu.row) ? 'Created from a template; templates cannot be based on another template' : undefined"
+            @click="contextAction('toggle-template')"
+          ><StudioIcon name="template" /> Use as template <StudioIcon v-if="contextMenu.row.isTemplate" class="project-tree__context-menu-check" name="check" /></button>
+        </template>
         <template v-if="contextMenu.row.root !== 'entities' || contextMenu.row.id !== 'world'">
           <div class="project-tree__context-menu-divider" role="separator"></div>
           <button type="button" role="menuitem" class="project-tree__context-menu-item project-tree__context-menu-item--danger" @click="contextAction('delete-item')"><StudioIcon name="trash" /> Delete</button>

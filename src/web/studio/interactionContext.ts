@@ -48,7 +48,7 @@ const viewNames: Record<string, string> = {
   "new-storylet": "New Storylet",
   "edit-storylet": "Storylet Editor",
   browse: "Project Browser",
-  "entity-template": "Entity Template Editor",
+  entity: "Entity Editor",
   "trait-template": "Trait Editor",
   asset: "Asset Editor",
   codex: "Rules & Events",
@@ -65,7 +65,7 @@ function first(value: unknown): string | undefined {
 function routeEntity(route: InteractionRoute): InteractionEntity | undefined {
   const id = first(route.params.id);
   if (route.name === "edit-storylet" && id) return { type: "storylet", id };
-  if (route.name === "entity-template" && id) return { type: "entity_template", id };
+  if (route.name === "entity" && id) return { type: "entity", id };
   if (route.name === "trait-template" && id) return { type: "trait_template", id };
   if (route.name === "asset" && id) return { type: "asset", id };
   if (route.name === "browse") {
@@ -84,7 +84,6 @@ function routeEntity(route: InteractionRoute): InteractionEntity | undefined {
   return undefined;
 }
 
-/** Resolves route, project, and runtime identity into a local, model-free view of current user context. */
 export function buildInteractionContext(input: {
   route: InteractionRoute;
   project: ProjectMetadata | null;

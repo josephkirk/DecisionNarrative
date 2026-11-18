@@ -11,7 +11,6 @@ export function canvasOf(entity: { properties: Array<{ key: string; value?: unkn
   return raw ? parseCanvas(raw) : null;
 }
 
-/** The editable canvas must be identifiable from a directly connected Get Entity node. */
 export function canvasInputEntityId(graph: NarrativeGraph, nodeId: string): string {
   const edges = graph.edges.filter((edge) => edge.kind === "data" && edge.to_node === nodeId && edge.to_port === "entity");
   if (edges.length !== 1 || edges[0]!.from_port !== "output") return "";
@@ -19,11 +18,6 @@ export function canvasInputEntityId(graph: NarrativeGraph, nodeId: string): stri
   return source?.type === "get_entity" ? source.entity_path?.trim() ?? "" : "";
 }
 
-/**
- * Modify Canvas: the node owns one version of an entity's canvas. Lowered to
- * Apply Command nodes: one switching the entity's active canvas version, then
- * one per gameplay state the version changes (presence, marker icon).
- */
 export const modifyCanvasNode: Omit<NodeTypeContribution<ModifyCanvasConfig>, "inspector"> = {
   type: MODIFY_CANVAS,
   label: "Modify Canvas",
@@ -56,7 +50,7 @@ export const modifyCanvasNode: Omit<NodeTypeContribution<ModifyCanvasConfig>, "i
     ];
     commands.forEach((command, index) => {
       const id = lower.id(`op${index}`);
-      nodes.push({ id, type: "apply_command", title: command.title, x: 0, y: 0, width: 220, height: 120, property_key: command.key, operation: "set", value_type: command.type, value: command.value });
+      nodes.push({ id, type: "set_entity_property", title: command.title, x: 0, y: 0, width: 220, height: 120, property_key: command.key, operation: "set", value_type: command.type, value: command.value });
       if (index > 0) {
         const previous = lower.id(`op${index - 1}`);
         edges.push({ id: `${previous}__next`, kind: "flow", from_node: previous, from_port: "output", to_node: id, to_port: "input" });

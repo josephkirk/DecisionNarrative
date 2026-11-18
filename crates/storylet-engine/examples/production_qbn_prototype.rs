@@ -1,17 +1,3 @@
-//! Prototype: all-bindings production matching for QBN / salience decks.
-//!
-//! `WorldStateTable::match_graph_pattern` returns only the FIRST match of a
-//! pattern inside `PATTERN_SEARCH_BUDGET`, which is enough for graph
-//! transformations but not enough for QBN: a storylet deck needs every
-//! binding, because each binding is a distinct option ("trade the poison with
-//! the wizard", "trade the poison with the guard").
-//!
-//! This example enumerates all bindings over the real `WorldStateTable` types
-//! and measures the cost, so the design document can state numbers instead of
-//! guesses.
-//!
-//! Run: `cargo run --release --manifest-path crates/storylet-engine/Cargo.toml --example production_qbn_prototype`
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::hint::black_box;
 use std::time::Instant;
@@ -21,20 +7,14 @@ use storylet_engine::chrono_state::{
     WorldVertex,
 };
 
-/// A production (paper §3.2): a left-hand side pattern that, when it matches,
-/// contributes a storylet to the deck.
 struct ProductionDef {
     key: &'static str,
     lhs: GraphPattern,
-    /// Production this one specializes. When the child matches, the parent is
-    /// suppressed for that context (paper §4.4 generic vs. detailed).
     generic_parent: Option<&'static str>,
     specificity: i32,
     storylet: &'static str,
 }
 
-/// One concrete binding of a production's left-hand side to world vertices and
-/// edges. `Ord` so bindings can be deduplicated and tie-broken deterministically.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Binding {
     vertices: Vec<String>,
@@ -49,7 +29,6 @@ struct MatchRun {
     truncated: bool,
 }
 
-/// One row of the deck: a storylet available under one binding.
 struct OptionRow {
     storylet: &'static str,
     production: &'static str,
@@ -67,8 +46,6 @@ struct Resolution {
 fn id(prefix: &str, index: usize) -> String {
     format!("{prefix}.{index:05}")
 }
-
-// ---------------------------------------------------------------- world build
 
 fn build_world(locations: usize, characters: usize, items: usize) -> WorldStateTable {
     let mut graph = WorldStateTable::new();
@@ -97,7 +74,6 @@ fn build_world(locations: usize, characters: usize, items: usize) -> WorldStateT
             attributes: BTreeMap::new(),
         });
     }
-    // Vertex lookup uses `partition_point`, so the table must stay sorted.
     graph.vertices.sort_by(|a, b| a.vertex_id.cmp(&b.vertex_id));
 
     for i in 0..characters {
@@ -131,8 +107,6 @@ fn build_world(locations: usize, characters: usize, items: usize) -> WorldStateT
     graph
 }
 
-// ------------------------------------------------------------ pattern builders
-
 fn vp(layer: GraphLayer) -> VertexPattern {
     VertexPattern {
         layer,
@@ -158,7 +132,6 @@ fn edge(relation: &str, source: usize, target: usize) -> EdgePattern {
     }
 }
 
-/// `?character owns ?item`
 fn pattern_char_item_owns() -> GraphPattern {
     GraphPattern {
         vertices: vec![vp(GraphLayer::Character), vp(GraphLayer::Item)],
@@ -166,7 +139,6 @@ fn pattern_char_item_owns() -> GraphPattern {
     }
 }
 
-/// `char.A owns item.B` for literal ids.
 fn pattern_specific_owns(character: &str, item: &str) -> GraphPattern {
     GraphPattern {
         vertices: vec![
@@ -177,7 +149,6 @@ fn pattern_specific_owns(character: &str, item: &str) -> GraphPattern {
     }
 }
 
-/// `?character owns ?item` and `?character located_at ?location`
 fn pattern_char_item_location() -> GraphPattern {
     GraphPattern {
         vertices: vec![
@@ -188,8 +159,6 @@ fn pattern_char_item_location() -> GraphPattern {
         edges: vec![edge("owns", 0, 1), edge("located_at", 0, 2)],
     }
 }
-
-// ------------------------------------------------------- all-bindings matching
 
 struct Matcher<'a> {
     graph: &'a WorldStateTable,
@@ -232,7 +201,6 @@ impl<'a> Matcher<'a> {
                         return false;
                     }
                 }
-                // An edge-pattern endpoint cannot match a vertex endpoint here.
                 GraphBinding::EdgePattern(_) => return false,
             }
         }
@@ -254,7 +222,6 @@ impl<'a> Matcher<'a> {
         true
     }
 
-    /// Returns `true` when the caller must unwind (cap reached).
     fn match_vertices(&mut self, index: usize) -> bool {
         if index == self.pattern.vertices.len() {
             self.vertex_assignments += 1;
@@ -277,7 +244,6 @@ impl<'a> Matcher<'a> {
         false
     }
 
-    /// Returns `true` when the caller must unwind (cap reached).
     fn match_edges(&mut self, index: usize) -> bool {
         if index == self.pattern.edges.len() {
             self.bindings.push(Binding {
@@ -355,8 +321,6 @@ fn match_all(graph: &WorldStateTable, pattern: &GraphPattern, cap: usize) -> Mat
     }
 }
 
-// --------------------------------------------------------------- deck resolve
-
 fn resolve(productions: &[ProductionDef], graph: &WorldStateTable) -> Resolution {
     let mut resolution = Resolution::default();
     let mut matched_per_production: Vec<(&'static str, MatchRun)> = Vec::new();
@@ -397,8 +361,6 @@ fn resolve(productions: &[ProductionDef], graph: &WorldStateTable) -> Resolution
     resolution
 }
 
-// ------------------------------------------------------------------ measurement
-
 fn measure(
     label: &str,
     graph: &WorldStateTable,
@@ -424,7 +386,6 @@ fn measure(
 }
 
 fn main() {
-    // ---------------------------------------------------------- 1. precedence
     let world = build_world(40, 160, 100);
     println!(
         "vertices={} edges={}",
@@ -475,7 +436,6 @@ fn main() {
         vec!["char.00042".to_string(), "item.00042".to_string()]
     );
 
-    // ------------------------------------------------------- 2. generic fallback
     let fallback = vec![
         ProductionDef {
             key: "talk.any",
@@ -509,7 +469,6 @@ fn main() {
     assert!(fallback_resolution.suppressed_generic.is_empty());
     assert_eq!(fallback_resolution.options.len(), 160);
 
-    // ---------------------------------------------------------- 3. deck growth
     let single = vec![ProductionDef {
         key: "talk.single",
         lhs: GraphPattern {
@@ -552,7 +511,6 @@ fn main() {
     assert_eq!(generic_options, 160);
     assert_eq!(doubled_options, 320);
 
-    // -------------------------------------------------------------- 4. salience
     let salient_deck = vec![ProductionDef {
         key: "talk.any",
         lhs: GraphPattern {
@@ -581,15 +539,12 @@ fn main() {
         picked.production,
         picked.binding.vertices
     );
-    // Pin the tie-break itself: reversing the comparator still yields 160
-    // options, so the deck size alone proves nothing.
     assert_eq!(picked.storylet, "talk.any");
     assert_eq!(picked.production, "talk.any");
     assert_eq!(picked.score, 2.0);
     assert_eq!(picked.binding.vertices, vec!["char.00000".to_string()]);
     assert!(picked.binding.edges.is_empty());
 
-    // ------------------------------------------------------------------ 5. cost
     measure(
         "match_all char+item owns",
         &world,
@@ -605,7 +560,6 @@ fn main() {
     assert_eq!(compound.bindings.len(), 160);
     assert!(!compound.truncated);
 
-    // -------------------------------------------------------------- 6. baseline
     let pattern = pattern_char_item_owns();
     let iterations = 20;
     let _warm = world.match_graph_pattern(&pattern).expect("warm-up match");

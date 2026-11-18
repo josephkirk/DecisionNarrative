@@ -4,14 +4,14 @@
 
 DecisionNarrative is a local authoring and playtest platform for setting-neutral, nonlinear storylet games. Designers create project-owned entities and storylets; the Rust engine owns deterministic eligibility, world state, choices, effects, and replay. The studio does not use Strata, LLM generation endpoints, image-generation providers, embeddings, or a learned ranker.
 
-External MCP agents remain supported. The Vue studio publishes the active view, project, focused entity/selection, and playtest revision as a local interaction-context snapshot. Agents read `workspace.context` and operate through the existing `narrative_platform` MCP operations without UI automation. This is a context bridge, not an in-app AI provider or a content-generation API.
+External MCP agents remain supported. The Vue studio publishes the active view, project, and focused entity/selection as a local interaction-context snapshot. Agents read `workspace.context` and operate through the existing `narrative_platform` MCP operations without UI automation. This is a context bridge, not an in-app AI provider or a content-generation API.
 
 ## Architecture map
 
-- `crates/storylet-engine/`: host-independent deterministic project and playtest runtime, plus native C ABI.
-- `crates/storylet-engine-service/`: local HTTP/MCP service and SQLite project/session persistence.
-- `src/web/studio/`: Vue authoring UI, interaction-context provider, storylet graph editor, tag manager, Codex, scenarios, playtest, and project interchange.
-- `src/web/studio/interactionContext.ts`: typed model-free snapshot of route, project revision, focused entity/selection, and active playtest context.
+- `crates/storylet-engine/`: host-independent deterministic Chrono run kernel (`run.rs` over the `chrono_*` modules), plus a native C ABI over the run kernel.
+- `crates/storylet-engine-service/`: local HTTP/MCP service and SQLite project/run persistence.
+- `src/web/studio/`: Vue authoring UI, interaction-context provider, storylet graph editor, tag manager, Codex, scenarios, Play runs, and project interchange.
+- `src/web/studio/interactionContext.ts`: typed model-free snapshot of route, project revision, and focused entity/selection.
 - `docs/design/chrono-decision-engine.md`: runtime architecture, dense contracts, implementation status, and limitations.
 - `docs/design/storylet-studio.md`: current product boundaries and MCP context contract.
 - `docs/guides/storylet-authoring.md`: manual authoring and review workflow.
@@ -45,7 +45,7 @@ cargo test --manifest-path crates/storylet-engine/Cargo.toml
 cargo test --manifest-path crates/storylet-engine-service/Cargo.toml
 ```
 
-`bun run play` uses `data/storylet_studio_v6.db` and shares it with the default MCP server. `bun run play:fresh` opens the separate `data/storylet_studio_v6_clean.db` workspace. Earlier schema versions are rejected without migration; use temporary or in-memory databases for isolated checks.
+`bun run play` uses `data/storylet_studio_v8.db` and shares it with the default MCP server. `bun run play:fresh` opens the separate `data/storylet_studio_v8_clean.db` workspace. Earlier schema versions are rejected without migration; use temporary or in-memory databases for isolated checks.
 
 ## Workspace safety
 

@@ -16,15 +16,17 @@ import { thumbnailUrl } from "../thumbnails.ts";
 import ReferencePicker from "../components/ReferencePicker.vue";
 import { groupTraitProperties } from "../traitPropertyGroups.ts";
 const route = useRoute(); const router = useRouter(); const entityId = typeof route.params.id === "string" ? route.params.id : "";
-const editor = useEntityEditor(entityId); const { draft, dirty, loading, saving, activeTab, references, referencesLoading, isWorld, isEntityRoute, loadReferences, patch, addTrait, removeTrait, setTraitValue, traitPropertyDisplayValue, save, remove } = editor;
+const editor = useEntityEditor(entityId); const { draft, dirty, loading, saving, activeTab, references, referencesLoading, isWorld, loadReferences, patch, addTrait, removeTrait, setTraitValue, traitPropertyDisplayValue, save, remove } = editor;
 const intrinsic = computed(() => isWorld.value);
 const pluginPanels = computed(() => draft.value ? entityPanelsFor(draft.value) : []);
 const activePanel = computed(() => pluginPanels.value.find((panel) => activeTab.value === `plugin:${panel.id}`));
-const templateId = computed(() => (draft.value && "template_id" in draft.value ? draft.value.template_id : null));
+const templateId = computed(() => draft.value?.template_id ?? null);
+const isTemplate = computed(() => draft.value?.is_template === true);
 const parentTemplate = computed(() => {
   const tid = templateId.value;
-  return tid ? studioState.entityTemplates.find((t) => t.id === tid) : undefined;
+  return tid ? studioState.entities.find((t) => t.id === tid) : undefined;
 });
+const templateOptions = computed(() => studioState.entities.filter((entity) => entity.is_template && entity.id !== draft.value?.id));
 const pendingTraitId = ref("");
 const traitPickerOpen = ref(false);
 const traitPickerAnchor = ref<HTMLElement | null>(null);
@@ -43,10 +45,8 @@ function updateProperties(rows: Array<EntityProperty | PropertyDefinition>) { pa
 function updateTags(value: string | string[]) { patch({ tags: Array.isArray(value) ? value : value ? [value] : [] }); }
 function addSelectedTrait() { const template = studioState.traitTemplates.find((t) => t.id === pendingTraitId.value); if (!template) return; if (addTrait(template)) pendingTraitId.value = ""; }
 async function onDelete() {
-  const targetLabel = isEntityRoute ? "entity" : "entity template";
-  if (draft.value?.id === "world" || !window.confirm(`Delete this ${targetLabel}?`)) return;
-  const targetRoot = isEntityRoute ? "entities" : "entity_templates";
-  if (await remove()) await router.push(`/browse/${targetRoot}`);
+  if (draft.value?.id === "world" || !window.confirm("Delete this entity?")) return;
+  if (await remove()) await router.push("/browse/entities");
 }
 
 function onTemplateChange(newTemplateId: string) {
@@ -55,7 +55,7 @@ function onTemplateChange(newTemplateId: string) {
     patch({ template_id: null });
     return;
   }
-  const template = studioState.entityTemplates.find((t) => t.id === newTemplateId);
+  const template = studioState.entities.find((t) => t.id === newTemplateId && t.is_template);
   if (!template) return;
 
   const hasExistingData = (draft.value.properties && draft.value.properties.length > 0) || (draft.value.traits && draft.value.traits.length > 0);
@@ -114,7 +114,6 @@ const confirmDiscard = () => !dirty.value || window.confirm("Discard unsaved cha
 onBeforeRouteLeave(confirmDiscard);
 onBeforeRouteUpdate(confirmDiscard);
 
-/** Mouse wheels scroll the tab strip sideways when plugin tabs overflow a narrow pane. */
 function scrollTabs(event: WheelEvent) {
   const strip = event.currentTarget as HTMLElement;
   if (strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
@@ -124,7 +123,6 @@ function scrollTabs(event: WheelEvent) {
 </script>
 <template>
   <div v-if="!loading && draft" class="entity-page-surface scroll-fade-mask">
-    <!-- Top Header Card matching Image #2 -->
     <header class="entity-hero-card">
       <div class="entity-hero-left">
         <ThumbnailPicker
@@ -152,14 +150,15 @@ function scrollTabs(event: WheelEvent) {
           <div class="entity-subtitle-row">
             <span v-if="appliedTraitLabels.length" class="entity-type-label">{{ appliedTraitLabels.join(" · ") }}</span>
             <span v-else class="entity-standalone-text">No traits</span>
-            <span v-if="parentTemplate || templateId || (!intrinsic && isEntityRoute)" class="entity-bullet-sep" aria-hidden="true">•</span>
-            <span v-if="parentTemplate" class="entity-parent-link">
-              Template: <router-link :to="`/entity-templates/${parentTemplate.id}`">{{ parentTemplate.name }}</router-link>
+            <span v-if="isTemplate || templateId || !intrinsic" class="entity-bullet-sep" aria-hidden="true">•</span>
+            <span v-if="isTemplate" class="template-pill" aria-label="Template" title="Other entities can be created from this entity">Template</span>
+            <span v-else-if="parentTemplate" class="entity-parent-link">
+              From <router-link :to="`/entities/${encodeURIComponent(parentTemplate.id)}`">{{ parentTemplate.name }}</router-link>
             </span>
             <span v-else-if="templateId" class="entity-parent-link">
-              Template: {{ templateId }}
+              From {{ templateId }}
             </span>
-            <span v-else-if="!intrinsic && isEntityRoute" class="entity-standalone-text">Standalone Entity</span>
+            <span v-else-if="!intrinsic" class="entity-standalone-text">Standalone Entity</span>
             <span v-if="dirty" class="entity-unsaved-pill">Unsaved</span>
           </div>
         </div>
@@ -178,7 +177,6 @@ function scrollTabs(event: WheelEvent) {
       </div>
     </header>
 
-    <!-- Tab Navigation matching Image #2 -->
     <nav class="entity-tabs" aria-label="Entity sections" @wheel="scrollTabs">
       <button :class="['entity-tab', activeTab === 'properties' && 'is-active']" @click="activeTab = 'properties'">
         <svg aria-hidden="true" class="tab-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -201,13 +199,10 @@ function scrollTabs(event: WheelEvent) {
       </button>
     </nav>
 
-    <!-- Properties Content Stack -->
     <section v-if="activeTab === 'properties'" class="entity-content-stack">
-      <!-- Archetype template card (when not intrinsic) -->
-      <!-- Archetype template card (when not intrinsic) -->
-      <div v-if="isEntityRoute && !intrinsic" class="content-block archetype-block">
+      <div v-if="!intrinsic" class="content-block archetype-block">
         <div class="content-block-head">
-          <span class="block-title">Archetype template</span>
+          <span class="block-title">Template</span>
           <button
             v-if="templateId"
             type="button"
@@ -218,16 +213,21 @@ function scrollTabs(event: WheelEvent) {
             Re-apply defaults
           </button>
         </div>
-        <div class="archetype-control-row">
+        <label class="archetype-control-row">
+          <input type="checkbox" :checked="isTemplate" :disabled="!!templateId" aria-label="Use as template" @change="patch({ is_template: ($event.target as HTMLInputElement).checked })" />
+          <span>Use as template</span>
+          <span class="archetype-hint">{{ templateId ? 'An entity created from a template cannot be a template itself.' : 'Other entities can be created from this entity.' }}</span>
+        </label>
+        <div v-if="!isTemplate" class="archetype-control-row">
           <select
-            aria-label="Entity template"
+            aria-label="Based on template"
             class="form-select archetype-select"
             :value="templateId ?? ''"
             @change="onTemplateChange(($event.target as HTMLSelectElement).value)"
           >
             <option value="">(None - Standalone Entity)</option>
             <option
-              v-for="template in studioState.entityTemplates"
+              v-for="template in templateOptions"
               :key="template.id"
               :value="template.id"
             >
@@ -235,12 +235,11 @@ function scrollTabs(event: WheelEvent) {
             </option>
           </select>
           <span class="archetype-hint">
-            {{ parentTemplate ? `Subclassing archetype '${parentTemplate.name}'. Copies properties and trait schemas.` : 'Choose an Entity Template to seed traits and properties.' }}
+            {{ parentTemplate ? `Subclassing archetype '${parentTemplate.name}'. Copies properties and trait schemas.` : 'Choose a template entity to seed traits and properties.' }}
           </span>
         </div>
       </div>
 
-      <!-- 1. Description -->
       <div class="content-block lore-block">
         <div class="content-block-head">
           <span class="block-title">Description</span>
@@ -256,7 +255,6 @@ function scrollTabs(event: WheelEvent) {
         ></textarea>
       </div>
 
-      <!-- 2. Gameplay Tags -->
       <div class="content-block tags-block">
         <div class="content-block-head">
           <span class="block-title">Gameplay tags</span>
@@ -273,7 +271,6 @@ function scrollTabs(event: WheelEvent) {
         <span v-else class="intrinsic-tags-text" :class="{ 'is-empty': !draft.tags.length }">{{ draft.tags.length ? draft.tags.join(', ') : 'No gameplay tags' }}</span>
       </div>
 
-      <!-- 3. Typed Properties -->
       <div class="content-block properties-block">
         <div class="content-block-head">
           <span class="block-title">Typed properties</span>
@@ -386,7 +383,6 @@ function scrollTabs(event: WheelEvent) {
   min-width: 220px;
 }
 
-/* Traits tab */
 .editor-column { display: flex; flex-direction: column; gap: 12px; min-width: 0; container-type: inline-size; }
 .trait-add { display: flex; gap: 8px; margin: 0; }
 .trait-add select { flex: 1; min-width: 0; }

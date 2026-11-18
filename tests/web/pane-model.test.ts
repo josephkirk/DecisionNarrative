@@ -40,11 +40,9 @@ test("closing a pane gives its space to the sibling; the main and last pane stay
 });
 
 test("moving a pane docks it beside the target, keeps ids and paths, and leaves split ids unique", () => {
-  // main | (b / c)
   const layout = splitPane(splitPane(singlePane(), MAIN_PANE, "right", "/b", "b"), "b", "bottom", "/c", "c");
   const moved = movePane(layout, "c", MAIN_PANE, "top");
   expect(moved).toMatchObject({ kind: "split", direction: "row", children: [{ kind: "split", direction: "column", children: [{ id: "c", path: "/c" }, { id: MAIN_PANE }] }, { id: "b", path: "/b" }] });
-  // The main pane can move too.
   const back = movePane(moved, MAIN_PANE, "b", "right");
   expect(panes(back).map((pane) => pane.id)).toEqual(["c", "b", MAIN_PANE]);
   const ids: string[] = [];

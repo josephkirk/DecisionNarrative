@@ -25,7 +25,7 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    await refreshWorkspace(["entities", "entity_templates", "storylets", "trait_templates", "gameplay_tags"]);
+    await refreshWorkspace(["entities", "storylets", "trait_templates", "gameplay_tags"]);
   } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to load tag references."; }
   finally { loading.value = false; }
 }
@@ -34,7 +34,6 @@ onMounted(load);
 const allTags = computed(() => buildTagIndex({
   gameplayTags: studioState.gameplayTags,
   entities: studioState.entities,
-  entityTemplates: studioState.entityTemplates,
   storylets: studioState.storylets,
   traitTemplates: studioState.traitTemplates,
 }));
@@ -102,7 +101,6 @@ function openReference(reference: { entityType: string; entityId: string; nodeId
   if (reference.entityType === "entity") router.push(`/entities/${encodeURIComponent(reference.entityId)}`);
   else if (reference.entityType === "storylet") router.push({ path: `/storylets/${encodeURIComponent(reference.entityId)}/edit`, query: reference.nodeId ? { node: reference.nodeId } : {} });
   else if (reference.entityType === "trait_template") router.push(`/trait-templates/${encodeURIComponent(reference.entityId)}`);
-  else router.push(`/entity-templates/${encodeURIComponent(reference.entityId)}`);
 }
 </script>
 
@@ -138,7 +136,6 @@ function openReference(reference: { entityType: string; entityId: string; nodeId
       <button v-if="activeKind === 'gameplay' && !query" type="button" class="btn btn-primary" @click="createTag()"><StudioIcon name="plus" /> Add a root tag</button>
     </EmptyState>
 
-    <!-- HIERARCHICAL TREE VIEW FOR GAMEPLAY TAGS -->
     <div v-else-if="activeKind === 'gameplay' && tagViewMode === 'tree'" class="tag-tree-container" role="tree" aria-label="Gameplay tag hierarchy">
       <div class="tag-tree">
         <TagTreeNode
@@ -157,7 +154,6 @@ function openReference(reference: { entityType: string; entityId: string; nodeId
         />
       </div>
     </div>
-    <!-- STANDARD LIST VIEW -->
     <section v-else class="tag-manager__list" :aria-label="TAG_KINDS.find((kind) => kind.id === activeKind)?.label">
       <article v-for="tag in visibleTags" :key="`${tag.kind}:${tag.name.toLocaleLowerCase()}`" class="tag-manager__tag">
         <header class="tag-manager__tag-header">
@@ -199,7 +195,6 @@ function openReference(reference: { entityType: string; entityId: string; nodeId
 .tag-manager__tag li div { display: flex; flex-direction: column; }
 .tag-manager__tag li small { color: var(--text-muted); font-size: 11px; }
 
-/* Hierarchical Tree */
 .tag-tree-container { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; }
 .tag-tree { display: flex; flex-direction: column; gap: 4px; }
 .tag-tree-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; cursor: pointer; user-select: none; }

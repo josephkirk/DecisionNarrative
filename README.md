@@ -26,17 +26,17 @@ For example, a **Lockable** trait adds an *Is locked* property to a door or ches
 
 Combine traits rather than forcing everything into one category. A character can also be a merchant or an inventory owner; each trait adds another part of what that entity means in your world.
 
-An **entity template** is a reusable starting point for similar entities. A *Dungeon Door* template can include the **Lockable** trait with *Is locked* set to true. Create an *Entrance Door* and a *Boss Door* from it, then give each door its own values.
+Any entity can be marked as a **template**: a reusable starting point for similar entities. A *Dungeon Door* template can include the **Lockable** trait with *Is locked* set to true. Create an *Entrance Door* and a *Boss Door* from it, then give each door its own values.
 
 ## Try it: create dungeon doors
 
 1. In the project tree, open the menu on **Traits** and choose **New Trait**. Name it *Lockable* with the key `lockable`. Under **Typed Properties**, add *Is locked* (`is_locked`, boolean), set it to true, and click **Save**.
-2. Open the menu on **Entity Templates** and choose **New Entity Template**. Name it *Dungeon Door*. In its **Traits** tab, select *Lockable* from **Choose trait…**, click **Add**, and **Save**.
-3. Open the menu on **Entities** and choose **New Entity**. Name it *Entrance Door* and choose *Dungeon Door* as its **Archetype template**.
+2. Open the menu on **Entities** and choose **New Entity**. Name it *Dungeon Door* and right-click it in the project tree and choose **Use as template**. In its **Traits** tab, select *Lockable* from **Choose trait…**, click **Add**, and **Save**.
+3. Open the menu on **Entities** and choose **New Entity**. Name it *Entrance Door* and choose *Dungeon Door* in the **Choose template** list; the new entity copies the template's description, thumbnail, tags, properties, and traits.
 4. In its **Traits** tab, set *Is locked* to false and click **Save**. This door starts unlocked.
 5. Create a *Boss Door* from the same template and leave *Is locked* true. Both doors share a design, but only one starts locked.
 
-You can also add traits directly to an entity without using an entity template. Use templates for shared starting points, traits for reusable details, and entities for the individual things in your world.
+You can also add traits directly to an entity without using a template. Use templates for shared starting points, traits for reusable details, and entities for the individual things in your world.
 
 To give an editable trait its own picture, open the trait, click its image in the header, choose an image, and save. Click an existing picture to replace or remove it. Built-in system traits remain read-only.
 

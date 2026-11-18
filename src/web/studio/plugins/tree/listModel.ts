@@ -23,7 +23,6 @@ export function treeListRows(
   const edges = graph.edges ?? [];
   const nodeSet = new Set(nodes);
 
-  // Index valid outgoing edges in original graph.edges order
   const outgoing = new Map<string, TreeEdge[]>();
   for (const node of nodes) {
     outgoing.set(node, []);
@@ -37,7 +36,6 @@ export function treeListRows(
     }
   }
 
-  // Root nodes preserve graph.nodes order
   const roots = nodes.filter((node) => !targets.has(node));
 
   const seen = new Set<string>();
@@ -120,21 +118,18 @@ export function treeListRows(
     }
   }
 
-  // 1. Traverse all true roots in graph.nodes order
   for (const root of roots) {
     if (!seen.has(root)) {
       traverseCanonicalNode(root);
     }
   }
 
-  // 2. Traverse any unseen nodes in rootless components in graph.nodes order
   for (const node of nodes) {
     if (!seen.has(node)) {
       traverseCanonicalNode(node);
     }
   }
 
-  // 3. Filter collapsed canonical rows without incorrectly promoting descendants to roots
   const result: TreeListRow[] = [];
   let hideUntilDepth: number | null = null;
 

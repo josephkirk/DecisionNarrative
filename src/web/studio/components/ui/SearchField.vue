@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import StudioIcon from "../StudioIcon.vue";
 
-/** Search input with a leading magnifier. Root attributes (class, style) land on the wrapper. */
 const model = defineModel<string>({ required: true });
 defineProps<{ label: string; placeholder?: string; inputId?: string }>();
 </script>

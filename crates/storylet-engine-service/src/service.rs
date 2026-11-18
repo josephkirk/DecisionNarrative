@@ -1,43 +1,9 @@
-//! Application service coordinator for Storylet Studio.
 
-use rusqlite::{OptionalExtension, TransactionBehavior};
-use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{Mutex, broadcast};
-
-use crate::chrono_playtest::ChronoPlaytestSession;
-use storylet_engine::{
-    EngineError, ProjectBundle as EngineProjectBundle, RuntimeError, RuntimeSessionState,
-    StoryletRuntime, WorldCommand, WorldEvent,
-};
-
-#[derive(Debug)]
-pub enum ChoiceOperationError {
-    InvalidInput(String),
-    SessionNotFound(String),
-    NotFound(String),
-    Conflict(String),
-    Runtime(String),
-    Persistence(String),
-}
-
-impl std::fmt::Display for ChoiceOperationError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidInput(message)
-            | Self::Conflict(message)
-            | Self::Runtime(message)
-            | Self::Persistence(message) => formatter.write_str(message),
-            Self::SessionNotFound(session_id) => {
-                write!(formatter, "session '{session_id}' was not found")
-            }
-            Self::NotFound(message) => formatter.write_str(message),
-        }
-    }
-}
+use tokio::sync::Mutex;
 
 #[derive(Debug)]
 pub enum ContentDeleteError {
@@ -56,46 +22,33 @@ impl std::fmt::Display for ContentDeleteError {
 use crate::chrono_adapter::compile_chrono_dispatch_for_storylet_validation;
 use crate::contracts::{
     AssetRecord, AuthoringOptions, CharacterRecord, ContentReference, EntityRecord,
-    EntityTemplateRecord, FolderRecord, GameplayTagRecord, LibraryPageResult, LibraryQuery,
+    FolderRecord, GameplayTagRecord, LibraryPageResult, LibraryQuery,
     ProjectBundle, ProjectBundleContent, ProjectMetadata, ScenarioRecord, StoryletRecord,
     TraitTemplateRecord, CONTENT_KINDS, FOLDER_ROOTS, PROJECT_BUNDLE_SCHEMA_VERSION,
 };
 use crate::entities::{self, WorkspaceIndex};
 use crate::narrative_graph::NarrativeGraph;
-use crate::projection::project_workspace;
 use crate::references::{self, ReferenceContext};
 use crate::scenario::resolve_scenario_start;
 use crate::store::Store;
 
-fn persisted_runtime(store: &Store, templates: &[TraitTemplateRecord], entity_templates: &[EntityTemplateRecord]) -> Result<entities::RuntimeRecords, String> {
+fn persisted_runtime(store: &Store, templates: &[TraitTemplateRecord], entities: &[EntityRecord]) -> Result<entities::RuntimeRecords, String> {
     let world = store.list_entities().map_err(|e| e.to_string())?
         .into_iter().find(|entity| entity.id == entities::WORLD_ENTITY_ID)
         .ok_or_else(|| "Intrinsic World entity is missing from persisted entities".to_string())?;
-    Ok(entities::runtime_records_with_world(&world, entity_templates, templates))
+    Ok(entities::runtime_records_with_world(&world, entities, templates))
 }
 
 #[derive(Clone)]
 pub struct StudioService {
     pub(crate) inner: Arc<Mutex<StudioInner>>,
-    pub updates: broadcast::Sender<SessionChange>,
     pub resource_root: PathBuf,
     pub(crate) coverage_running: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub(crate) struct StudioInner {
     pub(crate) store: Store,
-    runtime: StoryletRuntime,
-    /// Live ChronoFlow v5 playtest sessions (REQ-CH-02). The persisted rows are
-    /// the source of truth; these are the runtime instances rebuilt from them.
-    pub(crate) chrono_sessions: BTreeMap<String, ChronoPlaytestSession>,
     pub(crate) runs: BTreeMap<String, crate::runs::CachedRun>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct SessionChange {
-    pub session_id: String,
-    pub revision: u64,
-    pub snapshot: Value,
 }
 
 fn validate_and_normalize_bundle(bundle: &mut ProjectBundle) -> Vec<String> {
@@ -164,34 +117,18 @@ impl StudioService {
 
     fn build(store: Store, resource_root: impl Into<PathBuf>) -> Result<Self, String> {
         let coverage_running = shared_coverage_guard(&store);
-        let mut runtime = StoryletRuntime::default();
-        let saved_sessions = store.list_runtime_sessions().map_err(|e| e.to_string())?;
-        for state in saved_sessions {
-            let session_id = state.session_id.clone();
-            validate_event_history(&store.conn, &state)
-                .map_err(|error| format!("saved session '{session_id}' event history is invalid: {error}"))?;
-            runtime
-                .restore_session(state)
-                .map_err(|error| format!("saved session '{session_id}' cannot be restored: {error}"))?;
-        }
-
-        let (updates, _) = broadcast::channel(256);
         let res_root = resource_root.into();
 
         Ok(Self {
             inner: Arc::new(Mutex::new(StudioInner {
                 store,
-                runtime,
-                chrono_sessions: BTreeMap::new(),
                 runs: BTreeMap::new(),
             })),
-            updates,
             resource_root: res_root,
             coverage_running,
         })
     }
 
-    // --- Project Settings & Bundles ---
 
     pub async fn get_project_metadata(&self) -> Result<ProjectMetadata, String> {
         let inner = self.inner.lock().await;
@@ -220,39 +157,6 @@ impl StudioService {
         Ok(meta)
     }
 
-    pub async fn export_playtest_session(
-        &self,
-        session_id: &str,
-    ) -> Result<RuntimeSessionState, String> {
-        let inner = self.inner.lock().await;
-        inner
-            .runtime
-            .export_session(session_id)
-            .map_err(|e| e.to_string())
-    }
-
-    pub async fn restore_playtest_session(
-        &self,
-        state: RuntimeSessionState,
-    ) -> Result<Value, String> {
-        let mut inner = self.inner.lock().await;
-        let session_id = state.session_id.clone();
-        let snapshot = inner
-            .runtime
-            .restore_session(state)
-            .map_err(|e| e.to_string())?;
-        persist_session_to_store(&mut inner, &session_id)?;
-
-        let snap_val = serde_json::to_value(&snapshot).map_err(|e| e.to_string())?;
-        let _ = self.updates.send(SessionChange {
-            session_id: session_id.clone(),
-            revision: snapshot.world.revision,
-            snapshot: json!({ "sessionId": session_id, "snapshot": snapshot }),
-        });
-
-        Ok(json!({ "snapshot": snap_val }))
-    }
-
     pub async fn export_project_bundle(&self) -> Result<ProjectBundle, String> {
         let inner = self.inner.lock().await;
         let project = inner
@@ -260,9 +164,7 @@ impl StudioService {
             .get_project_metadata()
             .map_err(|e| e.to_string())?;
 
-        let entities = inner.store.list_content_json("entities").map_err(|e| e.to_string())?
-            .into_iter().filter_map(|s| serde_json::from_str::<EntityRecord>(&s).ok()).collect();
-        let entity_templates = inner.store.list_entity_templates().map_err(|e| e.to_string())?;
+        let entities = inner.store.list_entities().map_err(|e| e.to_string())?;
         let gameplay_tags = inner.store.list_gameplay_tags().map_err(|e| e.to_string())?;
         let folders = inner.store.list_folders().map_err(|e| e.to_string())?;
         let trait_templates = inner
@@ -279,7 +181,6 @@ impl StudioService {
             project,
             content: ProjectBundleContent {
                 entities,
-                entity_templates,
                 gameplay_tags,
                 folders,
                 trait_templates,
@@ -307,29 +208,6 @@ impl StudioService {
             issues.push(format!("Unsupported format '{}'", bundle.format));
         }
         issues.extend(entities::validate_bundle_content(&bundle.content));
-
-        let Some(world) = bundle.content.entities.iter().find(|entity| entity.id == "world") else {
-            issues.sort();
-            issues.dedup();
-            return Ok(issues);
-        };
-        let runtime = entities::runtime_records_with_world(
-            world,
-            &bundle.content.entity_templates,
-            &bundle.content.trait_templates,
-        );
-        let res = project_workspace(
-            &bundle.project.id,
-            &bundle.project.name,
-            bundle.project.revision,
-            &runtime.locations,
-            &runtime.characters,
-            &bundle.content.storylets,
-            &bundle.content.events,
-            bundle.content.scenarios.first(),
-        );
-
-        issues.extend(res.issues);
         issues.sort();
         issues.dedup();
         Ok(issues)
@@ -351,7 +229,6 @@ impl StudioService {
             .map_err(|e| e.to_string())
     }
 
-    // --- Content CRUD ---
 
     pub async fn list_content(&self, entity: &str) -> Result<Value, String> {
         ensure_content_kind(entity)?;
@@ -415,24 +292,12 @@ impl StudioService {
             "entities" => {
                 let stored: Option<EntityRecord> =
                     load_stored_record(&inner.store, "entities", stored_id)?;
-                let prepared = entities::prepare_entity_record(payload, stored.as_ref(), &index)?;
+                let prepared = entities::prepare_entity(payload, stored.as_ref(), &index)?;
                 if prepared.id == entities::WORLD_ENTITY_ID && index.templates.iter().any(|template|
                     template.key == crate::tree_graph::TREE_GRAPH_KEY && prepared.traits.iter().any(|instance| instance.template_id == template.id))
                 {
                     return Err("The intrinsic World cannot have a TreeGraph trait".into());
                 }
-                if crate::tree_graph::requires_validation(&index, stored.as_ref().map_or(&[], |record| record.traits.as_slice()), &prepared.traits) {
-                    let issues = crate::tree_graph::validate_tree_graphs(&index, Some((&prepared.id, &prepared.name, &prepared.traits)), None);
-                    if !issues.is_empty() { return Err(issues.join("; ")); }
-                    let storylets = inner.store.list_storylets().map_err(|error| error.to_string())?;
-                    crate::tree_pointer::validate_owner_references(&prepared.id, Some(&prepared.traits), &index.templates, &storylets)?;
-                }
-                serde_json::to_value(prepared).map_err(|e| e.to_string())?
-            }
-            "entity_templates" => {
-                let stored: Option<EntityTemplateRecord> =
-                    load_stored_record(&inner.store, "entity_templates", stored_id)?;
-                let prepared = entities::prepare_entity(payload, stored.as_ref(), &index)?;
                 if crate::tree_graph::requires_validation(&index, stored.as_ref().map_or(&[], |record| record.traits.as_slice()), &prepared.traits) {
                     let issues = crate::tree_graph::validate_tree_graphs(&index, Some((&prepared.id, &prepared.name, &prepared.traits)), None);
                     if !issues.is_empty() { return Err(issues.join("; ")); }
@@ -454,10 +319,9 @@ impl StudioService {
                     let schema_changed = previous.key != prepared.key
                         || (previous.key == "tree_graph"
                             && previous.properties.iter().any(|property| !prepared.properties.contains(property)));
-                    if is_tree_trait && schema_changed && (
-                        index.entities.iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == previous.id))
-                        || index.entity_templates.iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == previous.id))
-                    ) {
+                    if is_tree_trait && schema_changed
+                        && index.entities.iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == previous.id))
+                    {
                         return Err("TreeGraph and TreeItem trait keys and active graph schemas cannot be changed while in use".into());
                     }
                 }
@@ -470,9 +334,6 @@ impl StudioService {
                     for record in inner.store.list_entities().map_err(|error| error.to_string())? {
                         entities::validate_unique_traits(&record.traits, &templates, &format!("entity '{}'", record.name))?;
                     }
-                    for record in inner.store.list_entity_templates().map_err(|error| error.to_string())? {
-                        entities::validate_unique_traits(&record.traits, &templates, &format!("entity template '{}'", record.name))?;
-                    }
                 }
                 if prepared.key == crate::tree_graph::TREE_ITEM_KEY {
                     let mut templates = inner.store.list_trait_templates().map_err(|error| error.to_string())?;
@@ -480,9 +341,6 @@ impl StudioService {
                     templates.push(prepared.clone());
                     for record in inner.store.list_entities().map_err(|error| error.to_string())? {
                         crate::tree_graph::validate_tree_item_traits(&record.traits, &templates, &format!("entity '{}'", record.name))?;
-                    }
-                    for record in inner.store.list_entity_templates().map_err(|error| error.to_string())? {
-                        crate::tree_graph::validate_tree_item_traits(&record.traits, &templates, &format!("entity template '{}'", record.name))?;
                     }
                 }
                 serde_json::to_value(prepared).map_err(|e| e.to_string())?
@@ -567,20 +425,20 @@ impl StudioService {
             )
         };
 
-        if entity == "entity_templates" {
-            let mut templates = inner
+        if entity == "entities" {
+            let mut all_entities = inner
                 .store
-                .list_entity_templates()
+                .list_entities()
                 .map_err(|error| error.to_string())?;
-            let candidate: EntityTemplateRecord = serde_json::from_value(final_payload.clone())
-                .map_err(|error| format!("Entity template validation failed: {error}"))?;
-            templates.retain(|item| item.id != candidate.id);
-            templates.push(candidate);
+            let candidate: EntityRecord = serde_json::from_value(final_payload.clone())
+                .map_err(|error| format!("Entity validation failed: {error}"))?;
+            all_entities.retain(|item| item.id != candidate.id);
+            all_entities.push(candidate);
             let trait_templates = inner
                 .store
                 .list_trait_templates()
                 .map_err(|error| error.to_string())?;
-                let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)?;
+            let runtime = persisted_runtime(&inner.store, &trait_templates, &all_entities)?;
             for character in &runtime.characters {
                 validate_character(character, &runtime.characters, |storylet_id| {
                     Ok(inner
@@ -610,16 +468,16 @@ impl StudioService {
                 | crate::narrative_graph::NarrativeNodeData::InventoryRemove {}
                 | crate::narrative_graph::NarrativeNodeData::InventoryHas {}))
             {
-                let mut runtime_entities = index.entity_templates.clone();
-                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.entities, &index.templates)
+                let mut runtime_entities = entities::runtime_entities(&index.entities);
+                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.templates)
                     .map_err(|error| format!("Inventory validation failed: {error}"))?;
                 crate::inventory::validate_inventory_graph(&graph, &runtime_entities)
                     .map_err(|error| format!("Inventory validation failed: {error}"))?;
             }
             if crate::tree_pointer::uses_pointer(&graph) || storylet.precondition_graph.as_ref().is_some_and(crate::tree_pointer::uses_pointer) {
-                let mut runtime_entities = index.entity_templates.clone();
-                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.entities, &index.templates)?;
-                crate::tree_pointer::project_tree_entities(&mut runtime_entities, &index.entities, &index.templates)?;
+                let mut runtime_entities = entities::runtime_entities(&index.entities);
+                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.templates)?;
+                crate::tree_pointer::project_tree_entities(&mut runtime_entities, &index.templates)?;
                 crate::tree_pointer::validate_pointer_graph(&graph, &runtime_entities, &index.templates)
                     .map_err(|error| format!("Tree position validation failed: {error}"))?;
                 if let Some(precondition) = &storylet.precondition_graph {
@@ -644,15 +502,15 @@ impl StudioService {
                     .map(Value::String)
                     .unwrap_or(Value::Null),
             );
-            let templates = inner
+            let entities = inner
                 .store
-                .list_entity_templates()
+                .list_entities()
                 .map_err(|error| error.to_string())?;
             let trait_templates = inner
                 .store
                 .list_trait_templates()
                 .map_err(|error| error.to_string())?;
-            let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)?;
+            let runtime = persisted_runtime(&inner.store, &trait_templates, &entities)?;
             compile_chrono_dispatch_for_storylet_validation(
                 &[storylet],
                 &runtime.locations,
@@ -681,12 +539,11 @@ impl StudioService {
             ));
         }
         let inner = self.inner.lock().await;
-        if matches!(entity, "entities" | "entity_templates") {
+        if entity == "entities" {
             let index = build_workspace_index(&inner.store).map_err(ContentDeleteError::Persistence)?;
             let issues = crate::tree_graph::validate_tree_graphs(&index, None, Some(id));
             if !issues.is_empty() { return Err(ContentDeleteError::Conflict(issues.join("; "))); }
-            let exists = if entity == "entities" { index.entities.iter().any(|record| record.id == id) }
-                else { index.entity_templates.iter().any(|record| record.id == id) };
+            let exists = index.entities.iter().any(|record| record.id == id);
             if exists {
                 let storylets = inner.store.list_storylets().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
                 crate::tree_pointer::validate_owner_references(id, None, &index.templates, &storylets)
@@ -694,15 +551,15 @@ impl StudioService {
             }
         }
         if entity == "storylets" {
-            let templates = inner
+            let entities = inner
                 .store
-                .list_entity_templates()
+                .list_entities()
                 .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
             let trait_templates = inner
                 .store
                 .list_trait_templates()
                 .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
-            let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)
+            let runtime = persisted_runtime(&inner.store, &trait_templates, &entities)
                 .map_err(ContentDeleteError::Persistence)?;
             if let Some(character) = runtime.characters.iter().find(|character| {
                 character
@@ -743,7 +600,7 @@ impl StudioService {
         }
         if matches!(
             entity,
-            "entity_templates" | "gameplay_tags" | "assets" | "trait_templates"
+            "entities" | "gameplay_tags" | "assets" | "trait_templates"
         ) {
             if inner
                 .store
@@ -763,12 +620,10 @@ impl StudioService {
                     ));
                 }
                 if template.as_ref().is_some_and(|template| matches!(template.key.as_str(), "tree_graph" | "tree_item"))
-                    && (inner.store.list_entities().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
+                    && inner.store.list_entities().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
                         .iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == id))
-                        || inner.store.list_entity_templates().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
-                        .iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == id)))
                 {
-                    return Err(ContentDeleteError::Conflict("Cannot delete a tree trait used by an entity or entity template".into()));
+                    return Err(ContentDeleteError::Conflict("Cannot delete a tree trait used by an entity".into()));
                 }
             }
             if entity == "gameplay_tags" {
@@ -849,7 +704,6 @@ impl StudioService {
             .map_err(|error| ContentDeleteError::Persistence(error.to_string()))
     }
 
-    /// Move an item (or a folder) into a different folder of the same root.
     pub async fn move_content_item(
         &self,
         kind: &str,
@@ -908,7 +762,6 @@ impl StudioService {
         Ok(value)
     }
 
-    /// Where an entity template, gameplay tag, asset, or trait is used.
     pub async fn content_references(
         &self,
         kind: &str,
@@ -916,7 +769,7 @@ impl StudioService {
     ) -> Result<Vec<ContentReference>, String> {
         if !matches!(
             kind,
-            "entity_templates" | "gameplay_tags" | "assets" | "trait_templates" | "storylets"
+            "entities" | "gameplay_tags" | "assets" | "trait_templates" | "storylets"
         ) {
             return Err("Unsupported reference kind".into());
         }
@@ -954,15 +807,15 @@ impl StudioService {
             .map_err(|e| format!("Invalid scenario format: {e}"))?;
 
         let inner = self.inner.lock().await;
-        let templates = inner
+        let all_entities = inner
             .store
-            .list_entity_templates()
+            .list_entities()
             .map_err(|e| e.to_string())?;
         let trait_templates = inner
             .store
             .list_trait_templates()
             .map_err(|e| e.to_string())?;
-        let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)?;
+        let runtime = persisted_runtime(&inner.store, &trait_templates, &all_entities)?;
         let resolved =
             resolve_scenario_start(&scenario, &runtime.locations, &runtime.characters);
         serde_json::to_value(&resolved).map_err(|e| e.to_string())
@@ -987,7 +840,6 @@ impl StudioService {
         }
     }
 
-    // --- Studio Interaction Context ---
 
     pub async fn save_interaction_context(&self, context: &Value) -> Result<(), String> {
         let inner = self.inner.lock().await;
@@ -1055,361 +907,6 @@ impl StudioService {
             })),
         }
     }
-
-    // --- Playtests & Runtime Engine Integration ---
-
-    pub async fn create_playtest_session(
-        &self,
-        session_id: &str,
-        project: EngineProjectBundle,
-        scenario_id: &str,
-    ) -> Result<Value, String> {
-        let mut inner = self.inner.lock().await;
-        ensure_session_id_has_no_archive(&inner.store.conn, session_id)?;
-
-        let snapshot = inner
-            .runtime
-            .create_session(session_id.to_string(), project, scenario_id)
-            .map_err(|e| e.to_string())?;
-
-        persist_session_to_store(&mut inner, session_id)?;
-
-        let snap_val = serde_json::to_value(&snapshot).map_err(|e| e.to_string())?;
-        let change = SessionChange {
-            session_id: session_id.to_string(),
-            revision: snapshot.world.revision,
-            snapshot: json!({ "sessionId": session_id, "snapshot": snapshot }),
-        };
-        let _ = self.updates.send(change);
-
-        Ok(json!({ "sessionId": session_id, "snapshot": snap_val }))
-    }
-
-    pub async fn create_playtest_from_workspace(
-        &self,
-        start_location_override: Option<&str>,
-        scenario_id: Option<&str>,
-    ) -> Result<Value, String> {
-        let mut inner = self.inner.lock().await;
-
-        let meta = inner
-            .store
-            .get_project_metadata()
-            .map_err(|e| e.to_string())?;
-        let templates = inner
-            .store
-            .list_entity_templates()
-            .map_err(|e| e.to_string())?;
-        let trait_templates = inner
-            .store
-            .list_trait_templates()
-            .map_err(|e| e.to_string())?;
-        let projection_issues = entities::generic_playtest_projection_issues(&templates);
-        if !projection_issues.is_empty() {
-            return Err(format!(
-                "Workspace cannot be represented by generic playtests: {}",
-                projection_issues.join("; ")
-            ));
-        }
-        let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)?;
-        let storylets = inner.store.list_storylets().map_err(|e| e.to_string())?;
-        let events = inner.store.list_events().map_err(|e| e.to_string())?;
-
-        let mut scenario_rec: Option<ScenarioRecord> = None;
-        if let Some(s_id) = scenario_id {
-            if let Some(json_s) = inner
-                .store
-                .get_content_json("scenarios", s_id)
-                .map_err(|e| e.to_string())?
-            {
-                scenario_rec = serde_json::from_str(&json_s).ok();
-            }
-        }
-
-        if let Some(loc_id) = start_location_override {
-            if let Some(scen) = &mut scenario_rec {
-                scen.start_location_policy.mode = "fixed".into();
-                scen.start_location_policy.location_id = Some(loc_id.to_string());
-            }
-        }
-
-        let proj = project_workspace(
-            &meta.id,
-            &meta.name,
-            meta.revision,
-            &runtime.locations,
-            &runtime.characters,
-            &storylets,
-            &events,
-            scenario_rec.as_ref(),
-        );
-
-        if !proj.issues.is_empty() {
-            return Err(format!(
-                "Workspace has issues before starting playtest: {}",
-                proj.issues.join("; ")
-            ));
-        }
-
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let snapshot = inner
-            .runtime
-            .create_session(session_id.clone(), proj.bundle, &proj.scenario_id)
-            .map_err(|e| e.to_string())?;
-
-        // Persist session to Store
-        persist_session_to_store(&mut inner, &session_id)?;
-
-        let snap_val = serde_json::to_value(&snapshot).map_err(|e| e.to_string())?;
-        let change = SessionChange {
-            session_id: session_id.clone(),
-            revision: snapshot.world.revision,
-            snapshot: json!({ "sessionId": session_id, "snapshot": snapshot }),
-        };
-        let _ = self.updates.send(change);
-
-        Ok(json!({ "sessionId": session_id, "snapshot": snap_val }))
-    }
-
-    pub async fn list_playtest_sessions(&self) -> Result<Value, String> {
-        let inner = self.inner.lock().await;
-        let mut stmt = inner.store.conn.prepare(
-            "SELECT session_id, project_id, revision, turn, state_json FROM runtime_sessions ORDER BY updated_at DESC",
-        ).map_err(|e| e.to_string())?;
-
-        let rows = stmt
-            .query_map([], |row| {
-                let enc: String = row.get(4)?;
-                let state: Option<RuntimeSessionState> = serde_json::from_str(&enc).ok();
-                let curr_loc = state
-                    .as_ref()
-                    .and_then(|s| s.world.current_location.clone());
-                let ev_count = state.as_ref().map(|s| s.world.events.len()).unwrap_or(0);
-
-                let scen_id = state
-                    .as_ref()
-                    .map(|s| s.scenario_id.clone())
-                    .unwrap_or_default();
-                Ok(json!({
-                    "session_id": row.get::<_, String>(0)?,
-                    "project_id": row.get::<_, String>(1)?,
-                    "scenario_id": scen_id,
-                    "revision": row.get::<_, String>(2)?.parse::<u64>().unwrap_or(0),
-                    "turn": row.get::<_, String>(3)?.parse::<u64>().unwrap_or(0),
-                    "current_location": curr_loc,
-                    "event_count": ev_count,
-                }))
-            })
-            .map_err(|e| e.to_string())?;
-
-        let items: Vec<Value> = rows.filter_map(|r| r.ok()).collect();
-        Ok(Value::Array(items))
-    }
-
-    pub async fn get_playtest_snapshot(&self, session_id: &str) -> Result<Value, String> {
-        let inner = self.inner.lock().await;
-        let snap = inner
-            .runtime
-            .snapshot(session_id)
-            .map_err(|e| e.to_string())?;
-        serde_json::to_value(snap).map_err(|e| e.to_string())
-    }
-
-    pub async fn evaluate_playtest_director(
-        &self,
-        session_id: &str,
-        slope: f64,
-    ) -> Result<Value, String> {
-        let inner = self.inner.lock().await;
-        let eval = inner
-            .runtime
-            .evaluate(session_id, slope)
-            .map_err(|e| e.to_string())?;
-        serde_json::to_value(eval).map_err(|e| e.to_string())
-    }
-
-    pub async fn apply_playtest_command(
-        &self,
-        session_id: &str,
-        cmd_val: &Value,
-    ) -> Result<Value, String> {
-        let cmd: WorldCommand = serde_json::from_value(cmd_val.clone())
-            .map_err(|e| format!("Invalid command JSON: {e}"))?;
-
-        let mut inner = self.inner.lock().await;
-        let prior_export = inner
-            .runtime
-            .export_session(session_id)
-            .map_err(|e| e.to_string())?;
-
-        let res = match inner.runtime.submit_command(session_id, cmd) {
-            Ok(r) => r,
-            Err(e) => return Err(e.to_string()),
-        };
-
-        if let Err(err) = persist_session_to_store(&mut inner, session_id) {
-            let _ = inner.runtime.delete_session(session_id);
-            let _ = inner.runtime.restore_session(prior_export);
-            return Err(format!("Failed to persist command: {err}"));
-        }
-
-        if !res.player.duplicate {
-            let snap = inner
-                .runtime
-                .snapshot(session_id)
-                .map_err(|e| e.to_string())?;
-            let _ = self.updates.send(SessionChange {
-                session_id: session_id.to_string(),
-                revision: snap.world.revision,
-                snapshot: json!({ "sessionId": session_id, "snapshot": snap }),
-            });
-        }
-
-        serde_json::to_value(res).map_err(|e| e.to_string())
-    }
-
-    pub async fn apply_playtest_choice(
-        &self,
-        session_id: &str,
-        storylet_id: &str,
-        choice_id: &str,
-        expected_revision: u64,
-        idempotency_key: &str,
-    ) -> Result<Value, ChoiceOperationError> {
-        if storylet_id.trim().is_empty() {
-            return Err(ChoiceOperationError::InvalidInput(
-                "storyletId must not be empty".into(),
-            ));
-        }
-        if choice_id.trim().is_empty() {
-            return Err(ChoiceOperationError::InvalidInput(
-                "choiceId must not be empty".into(),
-            ));
-        }
-        if idempotency_key.trim().is_empty() {
-            return Err(ChoiceOperationError::InvalidInput(
-                "idempotencyKey must not be empty".into(),
-            ));
-        }
-        let mut inner = self.inner.lock().await;
-        let prior_export =
-            inner
-                .runtime
-                .export_session(session_id)
-                .map_err(|error| match error {
-                    RuntimeError::SessionNotFound { session_id } => {
-                        ChoiceOperationError::SessionNotFound(session_id)
-                    }
-                    other => ChoiceOperationError::Runtime(other.to_string()),
-                })?;
-
-        let res = inner
-            .runtime
-            .execute_choice(
-                session_id,
-                storylet_id,
-                choice_id,
-                idempotency_key,
-                expected_revision,
-            )
-            .map_err(|error| match error {
-                RuntimeError::SessionNotFound { session_id } => {
-                    ChoiceOperationError::SessionNotFound(session_id)
-                }
-                RuntimeError::Engine(
-                    EngineError::RevisionConflict { .. } | EngineError::IdempotencyKeyReuse,
-                ) => ChoiceOperationError::Conflict(error.to_string()),
-                RuntimeError::Engine(EngineError::ChoiceNotFound) => {
-                    ChoiceOperationError::NotFound(error.to_string())
-                }
-                RuntimeError::Engine(
-                    EngineError::StoryletNotEligible { .. }
-                    | EngineError::ChoiceRequirementFailed { .. }
-                    | EngineError::InstanceNotActive
-                    | EngineError::SessionEnded
-                    | EngineError::PersistentSceneCannotContinue,
-                ) => ChoiceOperationError::Conflict(error.to_string()),
-                other => ChoiceOperationError::Runtime(other.to_string()),
-            })?;
-
-        if let Err(err) = persist_session_to_store(&mut inner, session_id) {
-            let _ = inner.runtime.delete_session(session_id);
-            let _ = inner.runtime.restore_session(prior_export);
-            return Err(ChoiceOperationError::Persistence(format!(
-                "Failed to persist choice: {err}"
-            )));
-        }
-
-        let snap = inner
-            .runtime
-            .snapshot(session_id)
-            .map_err(|error| ChoiceOperationError::Runtime(error.to_string()))?;
-        let _ = self.updates.send(SessionChange {
-            session_id: session_id.to_string(),
-            revision: snap.world.revision,
-            snapshot: json!({ "sessionId": session_id, "snapshot": snap }),
-        });
-
-        serde_json::to_value(res).map_err(|error| ChoiceOperationError::Runtime(error.to_string()))
-    }
-
-    pub async fn fork_playtest(
-        &self,
-        source_session_id: &str,
-        branch_session_id: Option<&str>,
-        event_id: &str,
-    ) -> Result<Value, String> {
-        let branch_id = branch_session_id
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-        let mut inner = self.inner.lock().await;
-        let snap = inner
-            .runtime
-            .fork_session(source_session_id, branch_id.clone(), event_id)
-            .map_err(|e| e.to_string())?;
-        persist_session_to_store(&mut inner, &branch_id)?;
-
-        let _ = self.updates.send(SessionChange {
-            session_id: branch_id.clone(),
-            revision: snap.world.revision,
-            snapshot: json!({ "sessionId": branch_id, "snapshot": snap }),
-        });
-
-        Ok(json!({ "sessionId": branch_id, "snapshot": snap }))
-    }
-
-    pub async fn get_playtest_events(&self, session_id: &str) -> Result<Value, String> {
-        let inner = self.inner.lock().await;
-        let mut stmt = inner
-            .store
-            .conn
-            .prepare("SELECT event_json FROM runtime_events WHERE session_id = ?1 ORDER BY rowid")
-            .map_err(|e| e.to_string())?;
-
-        let rows = stmt
-            .query_map([session_id], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?;
-        let events: Vec<Value> = rows
-            .filter_map(|r| r.ok())
-            .filter_map(|s| serde_json::from_str(&s).ok())
-            .collect();
-        Ok(Value::Array(events))
-    }
-
-    pub async fn delete_playtest(&self, session_id: &str) -> Result<bool, String> {
-        let mut inner = self.inner.lock().await;
-        inner.runtime.delete_session(session_id);
-        inner
-            .store
-            .conn
-            .execute(
-                "DELETE FROM runtime_sessions WHERE session_id = ?1",
-                [session_id],
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(true)
-    }
 }
 
 fn ensure_content_kind(entity: &str) -> Result<(), String> {
@@ -1422,7 +919,7 @@ fn ensure_content_kind(entity: &str) -> Result<(), String> {
 
 fn kind_label(kind: &str) -> &'static str {
     match kind {
-        "entity_templates" => "entity template",
+        "entities" => "entity",
         "gameplay_tags" => "gameplay tag",
         "assets" => "asset",
         "trait_templates" => "trait",
@@ -1433,9 +930,6 @@ fn kind_label(kind: &str) -> &'static str {
 fn build_workspace_index(store: &Store) -> Result<WorkspaceIndex, String> {
     Ok(WorkspaceIndex {
         entities: store.list_entities().map_err(|error| error.to_string())?,
-        entity_templates: store
-            .list_entity_templates()
-            .map_err(|error| error.to_string())?,
         gameplay_tags: store
             .list_gameplay_tags()
             .map_err(|error| error.to_string())?,
@@ -1526,7 +1020,7 @@ fn gameplay_tag_references_for_store(
     target: &GameplayTagRecord,
 ) -> Result<Vec<ContentReference>, String> {
     let entities = store
-        .list_entity_templates()
+        .list_entities()
         .map_err(|error| error.to_string())?;
     let templates = store
         .list_trait_templates()
@@ -1561,7 +1055,7 @@ fn validate_storylet_gameplay_tags(
         }
     }
     for parameter in &storylet.parameters {
-        let Some(role) = crate::projection::parse_role_query(&parameter.query) else {
+        let Some(role) = entities::parse_role_query(&parameter.query) else {
             return Err(format!(
                 "Storylet validation failed: parameter '{}' must use a canonical role query",
                 parameter.param_name
@@ -1675,16 +1169,16 @@ fn collect_references(
 ) -> Result<Vec<ContentReference>, String> {
     if !matches!(
         kind,
-        "entity_templates" | "gameplay_tags" | "assets" | "trait_templates" | "storylets"
+        "entities" | "gameplay_tags" | "assets" | "trait_templates" | "storylets"
     ) {
         return Err(
-            "References are available for entity templates, gameplay tags, assets, traits, and storylets"
+            "References are available for entities, gameplay tags, assets, traits, and storylets"
                 .to_string(),
         );
     }
     let entities = inner
         .store
-        .list_entity_templates()
+        .list_entities()
         .map_err(|error| error.to_string())?;
     let gameplay_tags = inner
         .store
@@ -1715,11 +1209,11 @@ fn collect_references(
         gameplay_tags: &gameplay_tags,
     };
     match kind {
-        "entity_templates" => {
+        "entities" => {
             let target = entities
                 .iter()
                 .find(|entity| entity.id == id)
-                .ok_or_else(|| format!("entity_templates item '{id}' not found"))?;
+                .ok_or_else(|| format!("entities item '{id}' not found"))?;
             Ok(references::entity_references(target, &context))
         }
         "gameplay_tags" => {
@@ -1814,123 +1308,10 @@ fn validate_character(
     Ok(())
 }
 
-fn persist_session_to_store(inner: &mut StudioInner, session_id: &str) -> Result<(), String> {
-    let saved = inner
-        .runtime
-        .export_session(session_id)
-        .map_err(|e| e.to_string())?;
-    let state_json = serde_json::to_string(&saved).map_err(|e| e.to_string())?;
-
-    let tx = inner
-        .store
-        .conn
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|e| e.to_string())?;
-
-    let now = chrono_now_ms().to_string();
-    tx.execute(
-        "INSERT INTO runtime_sessions (session_id, project_id, revision, turn, state_json, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(session_id) DO UPDATE SET
-             revision = excluded.revision,
-             turn = excluded.turn,
-             state_json = excluded.state_json,
-             updated_at = excluded.updated_at",
-        rusqlite::params![saved.session_id, saved.project_id, saved.world.revision.to_string(), saved.world.turn.to_string(), state_json, now],
-    ).map_err(|e| e.to_string())?;
-
-    {
-        let mut insert_ev = tx.prepare(
-            "INSERT INTO runtime_events (session_id, event_id, revision, event_json) VALUES (?1, ?2, ?3, ?4)"
-        ).map_err(|e| e.to_string())?;
-
-        for ev in &saved.world.events {
-            let ev_json = serde_json::to_string(ev).map_err(|e| e.to_string())?;
-            let existing: Option<String> = tx
-                .query_row(
-                    "SELECT event_json FROM runtime_events WHERE session_id = ?1 AND event_id = ?2",
-                    rusqlite::params![saved.session_id, ev.id],
-                    |r| r.get(0),
-                )
-                .optional()
-                .map_err(|e| e.to_string())?;
-
-            match existing {
-                Some(prev_json) if prev_json != ev_json => {
-                    return Err(format!(
-                        "event '{}' conflicts with archived session history",
-                        ev.id
-                    ));
-                }
-                Some(_) => continue,
-                None => {
-                    insert_ev
-                        .execute(rusqlite::params![
-                            saved.session_id,
-                            ev.id,
-                            ev.revision.to_string(),
-                            ev_json
-                        ])
-                        .map_err(|e| e.to_string())?;
-                }
-            }
-        }
-    }
-
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 pub(crate) fn chrono_now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
-}
-
-
-fn validate_event_history(
-    conn: &rusqlite::Connection,
-    state: &RuntimeSessionState,
-) -> Result<(), String> {
-    let mut stmt = conn
-        .prepare("SELECT event_json FROM runtime_events WHERE session_id = ?1 ORDER BY rowid")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([&state.session_id], |row| row.get::<_, String>(0))
-        .map_err(|e| e.to_string())?;
-
-    let mut events = Vec::new();
-    for row in rows {
-        let enc = row.map_err(|e| e.to_string())?;
-        events.push(serde_json::from_str::<WorldEvent>(&enc).map_err(|e| e.to_string())?);
-    }
-    if events != state.world.events {
-        return Err(format!(
-            "saved session '{}' event journal does not match its snapshot",
-            state.session_id
-        ));
-    }
-    Ok(())
-}
-
-fn ensure_session_id_has_no_archive(
-    conn: &rusqlite::Connection,
-    session_id: &str,
-) -> Result<(), String> {
-    let count: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM runtime_events WHERE session_id = ?1",
-            [session_id],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
-
-    if count > 0 {
-        return Err(format!(
-            "session '{session_id}' has archived event history and cannot be reused"
-        ));
-    }
-    Ok(())
 }

@@ -1,12 +1,10 @@
-//! Inventory trait projection and graph input validation for deterministic playtests.
 use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
 
-use crate::contracts::{EntityProperty, EntityRecord, EntityTemplateRecord, PropertyType, TraitTemplateRecord};
+use crate::contracts::{EntityProperty, EntityRecord, PropertyType, TraitTemplateRecord};
 use crate::narrative_graph::{NarrativeEdgeKind, NarrativeGraph, NarrativeNodeData};
 
-/// Stable trait keys whose runtime schema (`ITEMS`/`ITEM` projections) is owned by this module.
 pub const INVENTORY_OWNER_KEY: &str = "inventory_owner";
 pub const ITEM_KEY: &str = "item";
 
@@ -19,26 +17,13 @@ fn runtime_property(key: &str, property_type: PropertyType, is_array: bool, valu
     EntityProperty { id: key.into(), key: key.into(), name: key.into(), property_type, is_array, multiline: false, value }
 }
 
-/// Project authored trait values into runtime-only typed properties. No project
-/// entity is written: replay reconstructs the same projection from the revision.
 pub fn project_inventory_entities(
-    entities: &mut Vec<EntityTemplateRecord>,
-    instances: &[EntityRecord],
+    entities: &mut [EntityRecord],
     templates: &[TraitTemplateRecord],
 ) -> Result<(), String> {
     let owner_id = templates.iter().find(|t| t.key == INVENTORY_OWNER_KEY).map(|t| t.id.as_str());
     let item_id = templates.iter().find(|t| t.key == ITEM_KEY).map(|t| t.id.as_str());
     let has_trait = |traits: &[crate::contracts::TraitInstance], id: Option<&str>| id.is_some_and(|id| traits.iter().any(|t| t.template_id == id));
-    // The engine normally projects templates. Include concrete inventory entities
-    // too so an explicit Get Entity input can refer to either authoring kind.
-    for entity in instances.iter().filter(|entity| entity.id != "world" && (has_trait(&entity.traits, owner_id) || has_trait(&entity.traits, item_id))) {
-        if entities.iter().any(|other| other.id == entity.id) { return Err(format!("inventory entity '{}' has a duplicate ID", entity.id)); }
-        entities.push(EntityTemplateRecord {
-            id: entity.id.clone(), object_id: entity.object_id.clone().unwrap_or_default(), game_id: entity.game_id.clone().unwrap_or_default(), game_id_auto: false,
-            name: entity.name.clone(), description: entity.description.clone(), tags: entity.tags.clone(),
-            thumbnail: entity.thumbnail.clone(), folder_id: entity.folder_id.clone(), properties: entity.properties.clone(), traits: entity.traits.clone(), created_at: entity.created_at,
-        });
-    }
     let item_ids: BTreeSet<String> = entities.iter().filter(|entity| has_trait(&entity.traits, item_id)).map(|entity| entity.id.clone()).collect();
     for entity in entities.iter_mut() {
         let owner = owner_id.and_then(|id| entity.traits.iter().find(|instance| instance.template_id == id));
@@ -68,8 +53,7 @@ pub fn project_inventory_entities(
     Ok(())
 }
 
-/// Check the actual graph inputs and traits again on the service boundary.
-pub fn validate_inventory_graph(graph: &NarrativeGraph, entities: &[EntityTemplateRecord]) -> Result<(), String> {
+pub fn validate_inventory_graph(graph: &NarrativeGraph, entities: &[EntityRecord]) -> Result<(), String> {
     for node in &graph.nodes {
         if !matches!(node.data, NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {}) { continue; }
         for (port, required, label) in [("entity", ITEMS, "InventoryOwner"), ("item", ITEM, "Item")] {
@@ -99,12 +83,12 @@ mod tests {
             { "id": "owner-trait", "key": "inventory_owner", "name": "InventoryOwner", "properties": [] },
             { "id": "item-trait", "key": "item", "name": "Item", "properties": [] }
         ])).unwrap();
-        let original: Vec<EntityTemplateRecord> = serde_json::from_value(json!([
+        let original: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "bag", "name": "Bag", "traits": [{ "id": "bag-trait", "template_id": "owner-trait", "values": { "rows": 1, "columns": 1, "items": ["key"] } }] },
             { "id": "key", "name": "Key", "traits": [{ "id": "key-trait", "template_id": "item-trait", "values": {} }] }
         ])).unwrap();
         let mut projected = original.clone();
-        project_inventory_entities(&mut projected, &[], &templates).unwrap();
+        project_inventory_entities(&mut projected, &templates).unwrap();
         assert_eq!(projected[0].properties.iter().find(|p| p.key == ITEMS).unwrap().value, json!(["key"]));
         assert_eq!(projected[1].properties.iter().find(|p| p.key == ITEM).unwrap().value, json!(true));
         let graph: NarrativeGraph = serde_json::from_value(json!({
@@ -128,10 +112,10 @@ mod tests {
         assert!(original[0].properties.is_empty(), "projection must not mutate persisted records");
         let mut invalid = original.clone();
         invalid[0].traits[0].values.insert("items".into(), json!(["key", "key"]));
-        assert!(project_inventory_entities(&mut invalid, &[], &templates).unwrap_err().contains("capacity"));
+        assert!(project_inventory_entities(&mut invalid, &templates).unwrap_err().contains("capacity"));
         let mut invalid = original;
         invalid[1].traits.clear();
-        assert!(project_inventory_entities(&mut invalid, &[], &templates).unwrap_err().contains("Item trait"));
+        assert!(project_inventory_entities(&mut invalid, &templates).unwrap_err().contains("Item trait"));
     }
 
     #[test]

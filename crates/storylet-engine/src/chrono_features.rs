@@ -1,8 +1,3 @@
-//! Derived feature indexes.
-//!
-//! These are dense projections of authoritative state. Rebuild is the source of
-//! truth for verification; incremental updates are an optimization.
-
 use crate::chrono_runtime::CallHistoryEntry;
 use crate::chrono_state::{AttributeValue, TagBitset, WorldStateTable};
 
@@ -207,8 +202,6 @@ impl std::fmt::Display for FeatureError {
 impl std::error::Error for FeatureError {}
 
 impl FeatureIndex {
-    /// Derive the index from authoritative world state plus the resolved
-    /// call-history path for one scope. Unknown relation types are ignored.
     pub fn rebuild_from_state(
         state: &WorldStateTable,
         history: &[CallHistoryEntry],
@@ -219,13 +212,22 @@ impl FeatureIndex {
             if !edge.relation_type.eq_ignore_ascii_case("owns") {
                 continue;
             }
-            let Some(owner_vertex) = state.vertices.iter().find(|v| v.vertex_id == edge.source_id) else {
+            let Some(owner_vertex) = state
+                .vertices
+                .iter()
+                .find(|v| v.vertex_id == edge.source_id)
+            else {
                 continue;
             };
-            let Some(item_vertex) = state.vertices.iter().find(|v| v.vertex_id == edge.target_id) else {
+            let Some(item_vertex) = state
+                .vertices
+                .iter()
+                .find(|v| v.vertex_id == edge.target_id)
+            else {
                 continue;
             };
-            let (Some(owner), Some(item)) = (owner_vertex.entity_index, item_vertex.entity_index) else {
+            let (Some(owner), Some(item)) = (owner_vertex.entity_index, item_vertex.entity_index)
+            else {
                 continue;
             };
             let quantity = match item_vertex.attributes.get("quantity") {
@@ -255,8 +257,6 @@ impl FeatureIndex {
         Ok(index)
     }
 
-    /// Record an authored actor-trait binding. Trait identity is not inferred
-    /// from passion storage; the project must supply the stable binding.
     pub fn record_actor_trait(
         &mut self,
         actor: u16,
@@ -270,8 +270,6 @@ impl FeatureIndex {
         }
     }
 
-    /// Record an authored choice key. Choice identity must be supplied by the
-    /// recording site; output-pin ordinals are not stable choice keys.
     pub fn record_choice(&mut self, choice_key: u64) -> Result<(), FeatureError> {
         self.choices.record(choice_key);
         Ok(())
@@ -383,4 +381,3 @@ mod tests {
         assert_eq!(rebuilt, incremental);
     }
 }
-

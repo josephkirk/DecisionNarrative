@@ -1,8 +1,3 @@
-//! Tag-based gas-station stress benchmark.
-//!
-//! This intentionally exercises the current boolean world-state contract: tags
-//! are the eligibility and progression state; numeric metric gates are not used.
-
 use std::time::Instant;
 use storylet_engine::chrono_state::{GameplayTagRegistry, TagBitset};
 
@@ -28,6 +23,9 @@ fn main() {
             total = total.wrapping_add(state.words().iter().copied().sum::<u64>());
         }
     }
-    println!("gas_station trials={TRIALS} actors={ACTORS} turns={TURNS} checksum={total} elapsed={:?}", started.elapsed());
+    println!(
+        "gas_station trials={TRIALS} actors={ACTORS} turns={TURNS} checksum={total} elapsed={:?}",
+        started.elapsed()
+    );
     let _ = registry;
 }

@@ -1,4 +1,3 @@
-//! Stable compilation of authored narrative graphs into the v5 token runtime.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -22,7 +21,7 @@ use storylet_engine::chrono_state::{
 };
 
 use crate::chrono_adapter::CompiledChronoDispatch;
-use crate::contracts::{EntityTemplateRecord, PropertyType, StoryletRecord};
+use crate::contracts::{EntityRecord, PropertyType, StoryletRecord};
 use crate::narrative_graph::{
     AttributeAssignment as AuthoredAttributeAssignment, AttributeOp as AuthoredAttributeOp,
     AttributePredicate as AuthoredAttributePredicate, AttributeValue as AuthoredAttributeValue,
@@ -40,8 +39,6 @@ pub struct CompiledNarrativeGraphs {
     pub mission_assets: BTreeMap<String, FlowGraphAsset>,
 }
 
-/// Compile every storylet graph into one immutable project topology. The start
-/// node of each storylet remains a stable entry point for QBN and End jumps.
 pub fn compile_narrative_graphs(
     project_id: &str,
     storylets: &[StoryletRecord],
@@ -247,9 +244,6 @@ fn compile_storylet_asset(
     })?;
     Ok(asset)
 }
-/// Compile an authored pure precondition graph into the runtime asset used by
-/// candidate evaluation. It intentionally reuses the normal node/edge compiler
-/// so graph errors stay explicit and precondition graphs remain the sole eligibility contract.
 pub fn compile_precondition_graph(
     storylet: &StoryletRecord,
     graph: &NarrativeGraph,
@@ -286,7 +280,6 @@ pub fn compile_precondition_graph(
     )
     .map_err(|error| format!("storylet {} precondition graph compile failed: {error}", storylet.id))
 }
-/// Attach compiled authored precondition assets after world/entity indices exist.
 pub fn bind_precondition_graphs(
     compiled: &mut CompiledChronoDispatch,
     storylets: &[StoryletRecord],
@@ -306,7 +299,6 @@ pub fn bind_precondition_graphs(
 }
 
 
-/// Binds QBN/Teleport dispatch results to the stable Start GUIDs compiled above.
 pub fn bind_storylet_start_nodes(
     compiled: &mut CompiledChronoDispatch,
     graphs: &CompiledNarrativeGraphs,
@@ -333,8 +325,6 @@ pub fn resolve_entity_tag(
     tag: &str,
     _entity_game_ids: Option<&BTreeMap<String, String>>,
 ) -> String {
-    // Gameplay tags are catalog-canonical names. Entity identity selects the
-    // graph target; it must never become part of the tag namespace.
     tag.trim().to_owned()
 }
 
@@ -368,8 +358,8 @@ fn compile_node_kind(
             (NodeKind::GetEntity { entity_id }, NodeCategory::LogicGate)
         }
         NarrativeNodeData::GetEntityProperty { property_key, value_type, .. } => (NodeKind::GetEntityProperty { property_key: property_key.clone(), value_type: value_type.clone() }, NodeCategory::LogicGate),
-        NarrativeNodeData::ApplyCommand { property_key, operation, value_type, value } => (
-            NodeKind::ApplyCommand {
+        NarrativeNodeData::SetEntityProperty { property_key, operation, value_type, value } => (
+            NodeKind::SetEntityProperty {
                 property_key: property_key.clone(),
                 operation: match operation.as_str() {
                     "add" => PropertyOperation::Add,
@@ -451,15 +441,14 @@ fn compile_node_kind(
     };
     Ok(mapped)
 }
-/// Validate authored property nodes against the entity selected by their data input.
-pub fn validate_entity_property_graph(graph: &NarrativeGraph, entities: &[EntityTemplateRecord]) -> Result<(), String> {
+pub fn validate_entity_property_graph(graph: &NarrativeGraph, entities: &[EntityRecord]) -> Result<(), String> {
     let node_by_id: BTreeMap<&str, &NarrativeNode> =
         graph.nodes.iter().map(|node| (node.id.as_str(), node)).collect();
     for node in &graph.nodes {
         let (key, value_type, operation, command_value) = match &node.data {
             NarrativeNodeData::GetEntityProperty { property_key, value_type } =>
                 (property_key.as_str(), value_type.as_str(), None, None),
-            NarrativeNodeData::ApplyCommand { property_key, operation, value_type, value } =>
+            NarrativeNodeData::SetEntityProperty { property_key, operation, value_type, value } =>
                 (property_key.as_str(), value_type.as_str(), Some(operation.as_str()), Some(value)),
             _ => continue,
         };
@@ -468,7 +457,7 @@ pub fn validate_entity_property_graph(graph: &NarrativeGraph, entities: &[Entity
                 && edge.to_node == node.id && edge.to_port == "entity")
             .and_then(|edge| node_by_id.get(edge.from_node.as_str()).copied())
             .ok_or_else(|| format!("node {} has no resolvable entity data source", node.id))?;
-        let candidates: Vec<&EntityTemplateRecord> = match &source.data {
+        let candidates: Vec<&EntityRecord> = match &source.data {
             NarrativeNodeData::GetEntity { entity_path } => {
                 let target = entity_path.trim();
                 let found = entities.iter().find(|entity| entity.id == target);
@@ -490,7 +479,7 @@ pub fn validate_entity_property_graph(graph: &NarrativeGraph, entities: &[Entity
         };
         if let Some(value) = command_value {
             convert_typed_value(value_type, value)
-                .map_err(|error| format!("node {} has invalid ApplyCommand value: {}", node.id, error))?;
+                .map_err(|error| format!("node {} has invalid SetEntityProperty value: {}", node.id, error))?;
         }
         for entity in candidates {
             let property = entity.properties.iter().find(|property| property.key == key)
@@ -676,7 +665,7 @@ fn convert_attribute_assignment(
 fn compile_data_input_pins(node: &NarrativeNode) -> Vec<DataPinDefinition> {
     match &node.data {
         NarrativeNodeData::GetEntityProperty { .. } => vec![DataPinDefinition { pin_name: "entity".into(), value_type: "entity_ref".into(), is_input: true }],
-        NarrativeNodeData::ApplyCommand { .. } => vec![
+        NarrativeNodeData::SetEntityProperty { .. } => vec![
             DataPinDefinition { pin_name: "entity".into(), value_type: "entity_ref".into(), is_input: true },
         ],
         NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {} => vec![
@@ -862,7 +851,7 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::Choice { .. } => "Choice",
         NarrativeNodeData::GetEntity { .. } => "GetEntity",
         NarrativeNodeData::GetEntityProperty { .. } => "GetEntityProperty",
-        NarrativeNodeData::ApplyCommand { .. } => "ApplyCommand",
+        NarrativeNodeData::SetEntityProperty { .. } => "SetEntityProperty",
         NarrativeNodeData::InventoryAdd {} => "InventoryAdd",
         NarrativeNodeData::InventoryRemove {} => "InventoryRemove",
         NarrativeNodeData::InventoryHas {} => "InventoryHas",
@@ -912,7 +901,7 @@ mod tests {
     use storylet_engine::chrono_runtime::{FlowGraphInstance, NodeKind, RuntimeContext};
     use storylet_engine::chrono_state::{AttributeValue, GraphLayer, WorldStateTable, WorldVertex};
 
-    fn entity(key: &str, property_type: &str) -> crate::contracts::EntityTemplateRecord {
+    fn entity(key: &str, property_type: &str) -> crate::contracts::EntityRecord {
         serde_json::from_value(json!({
             "id": "world", "name": "World", "properties": [{ "key": key, "name": key, "type": property_type, "value": null }]
         })).expect("entity fixture")
@@ -958,11 +947,11 @@ mod tests {
         assert!(validate_entity_property_graph(&property_graph(direct.clone(), get()), &[entity("mood", "string")]).is_ok());
         assert!(validate_entity_property_graph(&property_graph(direct.clone(), NarrativeNodeData::GetEntityProperty { property_key: "missing".into(), value_type: "string".into() }), &[entity("mood", "string")]).is_err());
         assert!(validate_entity_property_graph(&property_graph(direct.clone(), NarrativeNodeData::GetEntityProperty { property_key: "mood".into(), value_type: "int".into() }), &[entity("mood", "string")]).is_err());
-        let array_entity: crate::contracts::EntityTemplateRecord = serde_json::from_value(json!({
+        let array_entity: crate::contracts::EntityRecord = serde_json::from_value(json!({
             "id": "world", "name": "World", "properties": [{ "key": "mood", "name": "Mood", "type": "string", "is_array": true, "value": [] }]
         })).expect("array entity fixture");
         assert!(validate_entity_property_graph(&property_graph(direct.clone(), get()), &[array_entity]).is_err());
-        let world: crate::contracts::EntityTemplateRecord = serde_json::from_value(json!({
+        let world: crate::contracts::EntityRecord = serde_json::from_value(json!({
             "id": "world", "name": "World", "properties": [
                 { "key": "ref", "name": "ref", "type": "entity", "value": null },
                 { "key": "mood", "name": "Mood", "type": "string", "value": null }
@@ -978,9 +967,9 @@ mod tests {
         assert!(validate_entity_property_graph(&dynamic_property_graph(get_mood.clone()), &[world.clone(), complete("string")]).is_ok());
         assert!(validate_entity_property_graph(&dynamic_property_graph(get_mood.clone()), &[world.clone(), entity("ref", "entity")]).is_err());
         assert!(validate_entity_property_graph(&dynamic_property_graph(get_mood), &[world.clone(), complete("string"), complete("int")]).is_err());
-        let command = NarrativeNodeData::ApplyCommand { property_key: "mood".into(), operation: "explode".into(), value_type: "string".into(), value: json!("x") };
+        let command = NarrativeNodeData::SetEntityProperty { property_key: "mood".into(), operation: "explode".into(), value_type: "string".into(), value: json!("x") };
         assert!(validate_entity_property_graph(&property_graph(direct, command), &[entity("mood", "string")]).is_err());
-        let int_command = |value| NarrativeNodeData::ApplyCommand {
+        let int_command = |value| NarrativeNodeData::SetEntityProperty {
             property_key: "count".into(), operation: "set".into(), value_type: "int".into(), value,
         };
         assert!(validate_entity_property_graph(
@@ -1039,7 +1028,7 @@ mod tests {
         assert_eq!(super::node_type_name(&waypoint.data), "WaypointConversation");
         assert_eq!(super::node_type_name(&NarrativeNodeData::GetEntity { entity_path: "world".into() }), "GetEntity");
         assert_eq!(super::node_type_name(&NarrativeNodeData::GetEntityProperty { property_key: "awake".into(), value_type: "bool".into() }), "GetEntityProperty");
-        assert_eq!(super::node_type_name(&NarrativeNodeData::ApplyCommand { property_key: "awake".into(), operation: "toggle".into(), value_type: "bool".into(), value: json!(false) }), "ApplyCommand");
+        assert_eq!(super::node_type_name(&NarrativeNodeData::SetEntityProperty { property_key: "awake".into(), operation: "toggle".into(), value_type: "bool".into(), value: json!(false) }), "SetEntityProperty");
         assert_eq!(compile_output_pins(&waypoint).iter().map(|pin| pin.pin_name.as_str()).collect::<Vec<_>>(), vec!["leave"]);
     }
 
@@ -1233,7 +1222,7 @@ mod tests {
     }
 
     #[test]
-    fn authored_apply_command_mutates_typed_entity_property() {
+    fn authored_set_entity_property_mutates_typed_entity_property() {
         let storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
             "id": "mutation",
             "title": "Mutation",
@@ -1245,7 +1234,7 @@ mod tests {
                     { "id": "start", "type": "start", "title": "Start", "text": "Begin mutation test", "x": 0, "y": 0, "width": 100, "height": 80 },
                     { "id": "world", "type": "get_entity", "title": "World", "entity_path": "world", "x": 100, "y": 100, "width": 140, "height": 80 },
                     { "id": "owner", "type": "get_entity_property", "title": "Owner", "property_key": "owner", "value_type": "entity", "x": 220, "y": 100, "width": 160, "height": 80 },
-                    { "id": "command", "type": "apply_command", "title": "Add Score", "property_key": "score", "operation": "add", "value_type": "int", "value": 4, "x": 420, "y": 0, "width": 160, "height": 100 },
+                    { "id": "command", "type": "set_entity_property", "title": "Add Score", "property_key": "score", "operation": "add", "value_type": "int", "value": 4, "x": 420, "y": 0, "width": 160, "height": 100 },
                     { "id": "end", "type": "end", "title": "End", "is_terminal": true, "x": 620, "y": 0, "width": 120, "height": 80 }
                 ],
                 "edges": [
@@ -1289,7 +1278,6 @@ mod tests {
     }
     #[test]
     fn lowered_modify_canvas_plugin_node_opens_gate_and_removes_key() {
-        // Shape the studio produces when it lowers a Modify Canvas plugin node.
         let storylet: StoryletRecord = serde_json::from_value(serde_json::json!({
             "id": "unlock", "title": "Unlock", "content": { "text_template": "The gate." }, "effects": {}, "created_at": 1,
             "graph": {
@@ -1297,10 +1285,10 @@ mod tests {
                     { "id": "start", "type": "start", "title": "Start", "text": "Go", "x": 0, "y": 0, "width": 100, "height": 80 },
                     { "id": "mc__entity", "type": "get_entity", "title": "Canvas Entity", "entity_path": "world", "x": 0, "y": 0, "width": 100, "height": 80,
                       "plugin": { "group": "mc" } },
-                    { "id": "mc__op0", "type": "apply_command", "title": "Remove key", "property_key": "map_s_key_present", "operation": "set", "value_type": "bool", "value": false,
+                    { "id": "mc__op0", "type": "set_entity_property", "title": "Remove key", "property_key": "map_s_key_present", "operation": "set", "value_type": "bool", "value": false,
                       "x": 0, "y": 0, "width": 100, "height": 80,
                       "plugin": { "group": "mc", "exit": "mc__op1", "source": { "id": "mc", "type": "plugin", "plugin_type": "canvas.modify" } } },
-                    { "id": "mc__op1", "type": "apply_command", "title": "Open gate", "property_key": "map_s_gate_open", "operation": "set", "value_type": "bool", "value": true,
+                    { "id": "mc__op1", "type": "set_entity_property", "title": "Open gate", "property_key": "map_s_gate_open", "operation": "set", "value_type": "bool", "value": true,
                       "x": 0, "y": 0, "width": 100, "height": 80, "plugin": { "group": "mc" } },
                     { "id": "end", "type": "end", "title": "End", "is_terminal": true, "x": 0, "y": 0, "width": 100, "height": 80 }
                 ],

@@ -1,5 +1,5 @@
 import type { TraitInstance, TraitTemplateRecord } from "../../contracts.ts";
-import type { AnyEntity } from "../runtime.ts";
+import type { EntityRecord } from "../../contracts.ts";
 
 export type TreeDirection = "right" | "left" | "down" | "up" | "radial";
 export type TreeShape = "card" | "rounded" | "ellipse" | "diamond";
@@ -140,7 +140,7 @@ export function treeItemTemplate(): TraitTemplateRecord {
   };
 }
 
-export function treeTrait(entity: AnyEntity, templates: TraitTemplateRecord[], key: string = TREE_GRAPH_KEY): TraitInstance | undefined {
+export function treeTrait(entity: EntityRecord, templates: TraitTemplateRecord[], key: string = TREE_GRAPH_KEY): TraitInstance | undefined {
   const template = templates.find((candidate) => candidate.key === key);
   return template ? entity.traits?.find((instance) => instance.template_id === template.id) : undefined;
 }
@@ -514,7 +514,7 @@ export function treeGraphOf(instance: TraitInstance): TreeGraph {
   return { nodes, edges, direction, positions, ...(shapes ? { shapes } : {}), ...(appearance ? { appearance } : {}) };
 }
 
-export function setTreeGraph(entity: AnyEntity, instance: TraitInstance, graph: TreeGraph): Partial<AnyEntity> {
+export function setTreeGraph(entity: EntityRecord, instance: TraitInstance, graph: TreeGraph): Partial<EntityRecord> {
   const encodedEdges = graph.edges.map((edge) => {
     if (typeof edge.relationship === "string" && edge.relationship.trim() !== "") {
       return JSON.stringify([edge.from, edge.to, edge.relationship]);
@@ -767,7 +767,6 @@ export function layoutTree(graph: TreeGraph): TreeLayout {
   };
   for (const root of roots) visit(root, 0);
   drain();
-  // A component containing only cycles has no indegree-zero root.
   for (const node of graph.nodes) {
     if (!depth.has(node)) {
       visit(node, 0);
@@ -775,7 +774,6 @@ export function layoutTree(graph: TreeGraph): TreeLayout {
     }
   }
 
-  // Find max level
   let maxLevel = 0;
   for (const d of depth.values()) {
     if (d > maxLevel) maxLevel = d;
@@ -799,7 +797,6 @@ export function layoutTree(graph: TreeGraph): TreeLayout {
   const positions: Record<string, { x: number; y: number }> = Object.create(null);
 
   if (graph.direction === "radial") {
-    // Keep rings separated even when a crowded inner level needs a large radius.
     const ringStep = 180 + Math.max(0, maxNodeHeight - CARD_HEIGHT, maxNodeWidth - CARD_WIDTH);
     const itemArc = 200 + Math.max(0, maxNodeWidth - CARD_WIDTH, maxNodeHeight - CARD_HEIGHT);
     const ringRadii: number[] = [];

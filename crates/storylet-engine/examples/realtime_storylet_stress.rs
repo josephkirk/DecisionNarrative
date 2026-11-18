@@ -1,9 +1,3 @@
-//! Realtime storylet stress test: nested branching graphs, concurrent/reentrant
-//! storylets, item show/hide/give/take, and reusable combination endings.
-//!
-//! Run:
-//!   cargo run --release --manifest-path crates/storylet-engine/Cargo.toml --example realtime_storylet_stress
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
@@ -1014,7 +1008,12 @@ fn main() {
         .count();
     println!(
         "  bases {:?} | worlds {:?} | combinations {} | reused bases {} | reused worlds {} | completed {:?}",
-        all_bases, all_worlds, all_endings.len(), reused_bases, reused_worlds, all_completed
+        all_bases,
+        all_worlds,
+        all_endings.len(),
+        reused_bases,
+        reused_worlds,
+        all_completed
     );
     println!(
         "  trials {} | elapsed {:?} | deterministic {}",

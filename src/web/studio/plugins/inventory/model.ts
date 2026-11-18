@@ -1,5 +1,5 @@
 import type { TraitInstance, TraitTemplateRecord } from "../../contracts.ts";
-import type { AnyEntity } from "../runtime.ts";
+import type { EntityRecord } from "../../contracts.ts";
 
 export const INVENTORY_OWNER_KEY = "inventory_owner";
 export const ITEM_KEY = "item";
@@ -29,7 +29,7 @@ export function itemTemplate(): TraitTemplateRecord {
   return { id: ITEM_KEY, key: ITEM_KEY, name: "Item", description: "Allows this entity to be placed in inventories.", unique: true, allow_multiple: false, properties: [] };
 }
 
-export function traitInstance(entity: AnyEntity, templates: TraitTemplateRecord[], key: string): TraitInstance | undefined {
+export function traitInstance(entity: EntityRecord, templates: TraitTemplateRecord[], key: string): TraitInstance | undefined {
   const template = templates.find((candidate) => candidate.key === key);
   return template && entity.traits.find((instance) => instance.template_id === template.id);
 }
@@ -52,7 +52,7 @@ export function inventoryErrors(inventory: Inventory): string[] {
   return errors;
 }
 
-export function setInventory(entity: AnyEntity, instance: TraitInstance, inventory: Inventory): Partial<AnyEntity> {
+export function setInventory(entity: EntityRecord, instance: TraitInstance, inventory: Inventory): Partial<EntityRecord> {
   return { traits: entity.traits.map((trait) => trait.id === instance.id
     ? { ...trait, values: { ...trait.values, columns: inventory.columns, rows: inventory.rows, items: inventory.items } }
     : trait) };

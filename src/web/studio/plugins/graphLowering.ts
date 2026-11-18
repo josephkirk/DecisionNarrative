@@ -1,15 +1,9 @@
-/**
- * Plugin nodes live only in the authoring graph. Before a storylet is saved
- * each one is lowered into the core nodes the engine executes; the authored
- * node rides along as metadata on the fragment's entry node so loading the
- * storylet raises it back for editing.
- */
 import type { NarrativeEdge, NarrativeGraph, NarrativeNode } from "../narrativeGraphTypes.ts";
-import { nodeTypeContribution, type AnyEntity, type LowerContext } from "./runtime.ts";
+import type { EntityRecord } from "../contracts.ts";
+import { nodeTypeContribution, type LowerContext } from "./runtime.ts";
 
 export interface PluginNodeMeta {
   group: string;
-  /** Present only on the fragment's entry node. */
   source?: NarrativeNode;
   exit?: string;
   inputs?: NarrativeEdge[];
@@ -17,7 +11,7 @@ export interface PluginNodeMeta {
 
 export function isPluginNode(node: NarrativeNode): boolean { return node.type === "plugin"; }
 
-function lowerContext(node: NarrativeNode, graph: NarrativeGraph, entities: AnyEntity[]): LowerContext {
+function lowerContext(node: NarrativeNode, graph: NarrativeGraph, entities: EntityRecord[]): LowerContext {
   return {
     id: (suffix) => `${node.id}__${suffix}`,
     entity: (id) => entities.find((entity) => entity.id === id),
@@ -26,7 +20,7 @@ function lowerContext(node: NarrativeNode, graph: NarrativeGraph, entities: AnyE
   };
 }
 
-export function validatePluginNodes(graph: NarrativeGraph, entities: AnyEntity[]): string[] {
+export function validatePluginNodes(graph: NarrativeGraph, entities: EntityRecord[]): string[] {
   const issues: string[] = [];
   for (const node of graph.nodes.filter(isPluginNode)) {
     const contribution = nodeTypeContribution(node.plugin_type);
@@ -36,7 +30,7 @@ export function validatePluginNodes(graph: NarrativeGraph, entities: AnyEntity[]
   return issues;
 }
 
-export function lowerPluginGraph(graph: NarrativeGraph, entities: AnyEntity[]): NarrativeGraph {
+export function lowerPluginGraph(graph: NarrativeGraph, entities: EntityRecord[]): NarrativeGraph {
   const plugins = graph.nodes.filter(isPluginNode);
   if (!plugins.length) return graph;
   const nodes: NarrativeNode[] = graph.nodes.filter((node) => !isPluginNode(node));
@@ -98,8 +92,6 @@ export function raisePluginGraph(graph: NarrativeGraph): NarrativeGraph {
     edges.push(next);
   }
   for (const meta of groups.values()) edges.push(...(meta.inputs ?? []));
-  // Older canvas fragments owned an implicit Get Entity. Raise it as an
-  // explicit graph input so existing authored versions remain editable.
   for (const [group, meta] of groups) {
     if (meta.inputs || meta.source?.plugin_type !== "canvas.modify") continue;
     const source = graph.nodes.find((node) => groupOf.get(node.id) === group && node.type === "get_entity" &&

@@ -24,7 +24,6 @@ test("every preset keeps body, secondary and hint text readable on its cards", (
     const card = preset.vars["--bg-card"]!;
     expect(contrast(preset.vars["--text-main"]!, card), `${preset.id} main text`).toBeGreaterThanOrEqual(7);
     expect(contrast(preset.vars["--text-muted"]!, card), `${preset.id} muted text`).toBeGreaterThanOrEqual(4.5);
-    // Hints and metadata use the dim tone at 11–12px, so it must clear AA too (with margin for hover fills).
     expect(contrast(preset.vars["--text-dim"]!, card), `${preset.id} dim text`).toBeGreaterThanOrEqual(5);
   }
 });

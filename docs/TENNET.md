@@ -559,19 +559,16 @@ Run fixed scenario suites against scripted, utility-based, memoryless-model, and
 
 DecisionNarrative already includes:
 
-- A host-independent Rust storylet runtime.
-- Transactional commands and world revisions.
-- Deterministic storylet eligibility and selection.
-- NPC behavior rules.
-- Causal events, session export, restore, and forks.
-- Designer-approved generative authoring.
-- An optional semantic ranking layer.
-- A native C ABI for embedding.
-- A local web studio with Director and Butterfly inspection.
+- A host-independent, deterministic Chrono run kernel (`crates/storylet-engine/src/run.rs` over the `chrono_*` modules): participants and knowledge with provenance, a canon chronicle, a time-varying map with a world clock, dense storylet dispatch and selection, and exact replay from recorded actions.
+- Run persistence with revision and idempotency guards: the service stores only start, seed, and actions, rebuilds runs by deterministic replay, and serves them over `/api/v4/runs` with matching `run.*` MCP operations.
+- A bot explorer (`chrono_explore`) that checks authored content without playing it, served as a coverage report over HTTP and MCP (`workspace.coverage`).
+- A native C ABI over the run kernel, plus a compiled-content endpoint for native hosts.
+- Validated authoring data: entities and traits, storylet graphs with preconditions, scenarios, project bundle interchange, and an explicit approval workflow.
+- A local web studio with a Play view (read, choose, rewind, reload, inspect, why-not) and a coverage report.
 
 These should remain the foundation rather than be rewritten.
 
-The project's existing decision that model ranking cannot bypass Rust hard eligibility should be extended to all autonomous action execution.
+The existing rule that every committed effect flows through the deterministic kernel with revision and idempotency guards should be extended to all autonomous action execution.
 
 ## 10.2 Architecture Boundary
 
@@ -605,15 +602,14 @@ The layers communicate through explicit, versioned data contracts.
 
 | Existing or proposed path | Direction |
 |---|---|
-| `crates/storylet-engine/src/lib.rs` | Preserve world authority; evolve typed state and event contracts |
-| `crates/storylet-engine/src/simulation.rs` | Preserve scripted NPC rules; introduce a separate validated autonomous-action path |
+| `crates/storylet-engine/src/run.rs` | Preserve the Chrono run kernel; keep replay exact |
+| `crates/storylet-engine/src/chrono_*.rs` | Preserve the dense world tables (participants, knowledge, chronicle, space, clock) and the dispatch/selection contracts |
 | `crates/storylet-engine/src/actions.rs` | New: action definitions, permission checks, and trusted effect resolution |
 | `crates/storylet-engine/src/observation.rs` | New: actor-specific world observations and evidence |
 | `crates/storylet-engine/src/social.rs` | New: structured beliefs, relationships, obligations, and information propagation |
 | `crates/agent-cognition/` | New: model-independent planning and memory orchestration |
 | `crates/emergence-gym/` | New: experiments, comparisons, metrics, and evaluation |
-| `src/web/` | Extend existing Architect, Director, Butterfly, and simulation UX |
-| `model/` | Preserve ranking research; add evaluated cognition policies separately |
+| `src/web/` | Extend the studio Play view, coverage report, and authoring UX |
 | `examples/` | Add small canonical world scenarios and integration examples |
 
 New paths are architectural proposals. Implementation should preserve project compatibility where feasible and version any breaking changes.

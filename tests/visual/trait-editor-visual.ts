@@ -1,5 +1,3 @@
-// Visual test: trait property editors are driven by property `editor` metadata, not trait/property names.
-// Run: STORYLET_SERVICE_BIN=<bin> node tests/visual/trait-editor-visual.ts
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import os from "node:os";
@@ -43,7 +41,7 @@ function check(name: string, ok: boolean, detail = "") {
 
 let browser;
 try {
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { /* starting */ } await sleep(200); }
+  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { } await sleep(200); }
   await api("POST", "/api/v3/content/gameplay_tags", { id: "guard", name: "guard" });
   await api("POST", "/api/v3/content/gameplay_tags", { id: "thief", name: "thief" });
   const traits = await api("GET", "/api/v3/content/trait_templates");
@@ -51,7 +49,6 @@ try {
   const character = byKey("character"), settings = byKey("character_settings"), location = byKey("location");
   check("seeded character_settings carries editor metadata",
     settings.properties[0].editor?.selection_only === true && settings.properties[1].editor?.entity_trait_key === "location");
-  // Custom trait with arbitrary key/property names uses the same metadata; a look-alike without metadata gets none.
   await api("POST", "/api/v3/content/trait_templates", { id: "faction_rules", key: "faction_rules", name: "Faction Rules", properties: [
     { id: "p1", key: "standing", name: "Standing", type: "string", default: "", editor: { option_source: "gameplay_tags", selection_only: true } },
     { id: "p2", key: "base", name: "Base", type: "entity", default: null, editor: { entity_trait_key: "location" } },
@@ -61,9 +58,9 @@ try {
     { id: "q1", key: "role", name: "Role", type: "string", default: "" },
     { id: "q2", key: "home_location", name: "Home Location", type: "entity", default: null },
   ] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "harbor", name: "Harbor", traits: [{ id: "l1", template_id: location.id, values: {} }] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "crate", name: "Crate", traits: [] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "hero", name: "Hero", traits: [
+  await api("POST", "/api/v3/content/entities", { id: "harbor", name: "Harbor", traits: [{ id: "l1", template_id: location.id, values: {} }] });
+  await api("POST", "/api/v3/content/entities", { id: "crate", name: "Crate", traits: [] });
+  await api("POST", "/api/v3/content/entities", { id: "hero", name: "Hero", traits: [
     { id: "c1", template_id: character.id, values: {} },
     { id: "s1", template_id: settings.id, values: {} },
     { id: "f1", template_id: "faction_rules", values: {} },
@@ -76,7 +73,7 @@ try {
   page.on("console", (m) => { if (m.type() === "error" && !m.text().startsWith("Failed to load resource")) errors.push(m.text()); });
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("dialog", (d) => void d.accept());
-  await page.goto(`${base}/#/entity-templates/hero`);
+  await page.goto(`${base}/#/entities/hero`);
   const tab = page.locator(".entity-tab", { hasText: "Traits" });
   await tab.waitFor(); await tab.click();
   const card = (name: string) => page.locator(".trait-card", { has: page.locator(".trait-name", { hasText: new RegExp(`^${name}$`) }) });
@@ -98,21 +95,19 @@ try {
   const lookHome = (await options(card("Lookalike"), "Home Location")).map((t) => t.trim());
   check("look-alike entity property is unfiltered", lookHome.includes("Harbor") && lookHome.includes("Crate"), lookHome.join(","));
 
-  // Interaction: choose a role and a location, save, reload, values persist.
   await roleSelect.selectOption("thief");
   await card("Character Settings").locator(".trait-row", { hasText: "Home Location" }).locator("select").first().selectOption("harbor");
   await page.locator(".entity-unsaved-pill").waitFor();
   await page.screenshot({ path: path.join(outDir, "trait-editor-unsaved.png") });
   await page.getByRole("button", { name: /^Save/ }).first().click();
   await page.locator(".entity-unsaved-pill").waitFor({ state: "detached" });
-  const saved = await api("GET", "/api/v3/content/entity_templates/hero");
+  const saved = await api("GET", "/api/v3/content/entities/hero");
   const vals = saved.traits.find((t: { id: string }) => t.id === "s1").values;
   check("selection persisted to backend", vals.role === "thief" && vals.home_location === "harbor", JSON.stringify(vals));
   await page.reload(); await tab.waitFor(); await tab.click(); await card("Character Settings").waitFor();
   check("selection restored after reload", (await roleSelect.inputValue()) === "thief");
   await page.screenshot({ path: path.join(outDir, "trait-editor-saved.png") });
 
-  // Numeric bounds from property metadata clamp typed, stepped and keyboard values in the editor.
   const score = card("Faction Rules").locator(".trait-row", { hasText: "Score" });
   const scoreInput = score.locator(".num-stepper__input");
   await scoreInput.fill("99");
@@ -129,11 +124,10 @@ try {
   await page.screenshot({ path: path.join(outDir, "trait-editor-bounds.png") });
   await page.getByRole("button", { name: /^Save/ }).first().click();
   await page.locator(".entity-unsaved-pill").waitFor({ state: "detached" });
-  const bounded = await api("GET", "/api/v3/content/entity_templates/hero");
+  const bounded = await api("GET", "/api/v3/content/entities/hero");
   check("clamped value saves successfully", bounded.traits.find((t: { id: string }) => t.id === "f1").values.score === 10);
 
-  // Fresh-project inventory plugin: owns its two traits; bounded grid size clamps in the shared editor.
-  await page.goto(`${base}/#/entity-templates/crate`);
+  await page.goto(`${base}/#/entities/crate`);
   let inv: { id: string } | undefined, item: { id: string; unique?: boolean } | undefined;
   for (let i = 0; i < 50 && !(inv && item); i++) {
     const all = await api("GET", "/api/v3/content/trait_templates");
@@ -141,8 +135,8 @@ try {
     if (!(inv && item)) await sleep(200);
   }
   check("inventory plugin provisions fresh traits (Item unique)", !!inv && !!item && item.unique === true);
-  await api("POST", "/api/v3/content/entity_templates", { id: "bag", name: "Bag", traits: [{ id: "b1", template_id: inv.id, values: {} }] });
-  await page.goto(`${base}/#/entity-templates/bag`);
+  await api("POST", "/api/v3/content/entities", { id: "bag", name: "Bag", traits: [{ id: "b1", template_id: inv.id, values: {} }] });
+  await page.goto(`${base}/#/entities/bag`);
   await page.reload();
   await tab.waitFor(); await tab.click();
   const columns = card("InventoryOwner").locator(".trait-row", { hasText: "Columns" }).locator(".num-stepper__input");
@@ -151,10 +145,9 @@ try {
   await columns.fill("0");
   check("inventory columns clamp to declared min", (await columns.inputValue()) === "1", await columns.inputValue());
   await page.screenshot({ path: path.join(outDir, "trait-editor-inventory.png") });
-  await page.goto(`${base}/#/entity-templates/hero`);
+  await page.goto(`${base}/#/entities/hero`);
 
-  // Backend rejects an out-of-range bounded value.
-  const bad = await fetch(`${base}/api/v3/content/entity_templates`, { method: "POST", headers: { "Content-Type": "application/json" },
+  const bad = await fetch(`${base}/api/v3/content/entities`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...saved, traits: saved.traits.map((t: { id: string }) => t.id === "f1" ? { ...t, values: { score: 11 } } : t) }) });
   check("out-of-range bounded value is rejected", bad.status >= 400, String(bad.status));
   check("no unexpected console errors", errors.length === 0, errors.join(" | "));

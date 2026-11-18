@@ -196,3 +196,17 @@ test("G then a digit moves through the nth enabled connection", async () => {
   await play.onKey({ key: "1", ctrlKey: false });
   expect(api.calls.filter((c) => c === "act").length).toBe(1);
 });
+
+test("explain keeps the chain for its event and treats event 0 as a starting condition", async () => {
+  const chain = [{ id: 3, step: 1, actor: 0, action: { kind: "wait" } as RunAction, parents: [], deltas: [] }];
+  const api = fakeApi({ explain: async (_id, event) => { api.calls.push(`explain:${event}`); return chain; } });
+  const play = usePlay(api);
+  await play.open("r1");
+  await play.explain(3);
+  expect(play.state.causal).toEqual({ target: 3, events: chain });
+  await play.explain(0);
+  expect(play.state.causal).toEqual({ target: 0, events: [] });
+  expect(api.calls.filter((c) => c.startsWith("explain"))).toEqual(["explain:3"]);
+  await play.setInspectTab("world");
+  expect(play.state.causal).toBeNull();
+});
