@@ -1,6 +1,6 @@
 //! Deterministic run persistence and shared HTTP/MCP operations.
 use crate::{
-    chrono_playtest::compile_run_content,
+    run_content::compile_run_content,
     service::{StudioInner, StudioService, chrono_now_ms},
 };
 use axum::{

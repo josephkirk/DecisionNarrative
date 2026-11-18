@@ -78,46 +78,61 @@ async fn request(app: &Router, method: &str, path: &str, body: Option<Value>) ->
 }
 
 #[tokio::test]
-async fn health_and_chrono_playtests_are_v3_surfaces() {
+async fn health_reports_ok() {
     let app = test_app();
     let (status, body) = request(&app, "GET", "/health", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ok");
-
-    let (status, _) = request(&app, "GET", "/api/v3/chrono/playtests", None).await;
-    assert!(status.is_success() || status == StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]
 async fn legacy_and_unversioned_api_routes_are_not_registered() {
     let app = test_app();
-    for path in [
+    let v3 = "/api/v3";
+    let mut paths: Vec<String> = [
         "/api/health",
         "/api/storylets",
         "/api/events",
         "/api/npc-behaviors",
         "/api/v1/playtests",
         "/api/v2/playtests",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    for suffix in [
+        "",
+        "/from-workspace",
+        "/restore",
+        "/session-1",
+        "/session-1/commands",
+        "/session-1/choices",
+        "/session-1/director",
+        "/session-1/events",
+        "/session-1/stream",
+        "/session-1/fork",
+        "/session-1/export",
     ] {
+        paths.push(format!("{v3}/playtests{suffix}"));
+    }
+    for suffix in [
+        "",
+        "/session-1",
+        "/session-1/tick",
+        "/session-1/signal",
+        "/session-1/choose",
+        "/session-1/divert",
+        "/session-1/invoke",
+        "/session-1/rollback",
+        "/session-1/scrub",
+        "/session-1/reconcile",
+    ] {
+        paths.push(format!("{v3}/chrono/playtests{suffix}"));
+    }
+    for path in &paths {
         let (status, _) = request(&app, "GET", path, None).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "legacy route remained: {path}");
     }
-}
-
-#[tokio::test]
-async fn v3_storylet_playtest_routes_remain_available() {
-    let app = test_app();
-    let (status, list) = request(&app, "GET", "/api/v3/playtests", None).await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(list.is_array());
-
-    let (status, missing_snapshot) = request(&app, "GET", "/api/v3/playtests/missing", None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    assert!(missing_snapshot["error"].as_str().is_some_and(|message| message.contains("not found")));
-
-    let (status, events) = request(&app, "GET", "/api/v3/playtests/missing/events", None).await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(events["events"].is_array());
 }
 
 #[tokio::test]

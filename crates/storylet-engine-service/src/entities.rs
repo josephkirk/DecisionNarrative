@@ -189,13 +189,18 @@ pub fn value_shape_matches(property_type: PropertyType, is_array: bool, value: &
     scalar_shape_matches(property_type, value)
 }
 
-/// Generic playtests have no entity-scoped custom-property representation.
-pub fn generic_playtest_projection_issues(entities: &[EntityTemplateRecord]) -> Vec<String> {
-    entities.iter().filter(|entity| !entity.properties.is_empty())
-        .map(|entity| format!("entity '{}': generic playtests cannot represent typed custom properties; use Chrono playtests", entity.id))
-        .collect()
+pub fn parse_role_query(query: &str) -> Option<String> {
+    let trimmed = query.trim();
+    let re = regex::Regex::new(r#"^role\s*==\s*(?:'([^']*)'|"([^"]*)")$"#).ok()?;
+    let caps = re.captures(trimmed)?;
+    Some(
+        caps.get(1)
+            .or_else(|| caps.get(2))?
+            .as_str()
+            .trim()
+            .to_string(),
+    )
 }
-
 
 pub fn default_value(property_type: PropertyType, is_array: bool) -> Value {
     if is_array {
@@ -1552,6 +1557,17 @@ mod tests {
         assert_eq!(projected.world_objects.iter().find(|row| row.id == "key").unwrap().layer, WorldObjectLayer::Item);
     }
     #[test]
+    fn accepts_only_the_canonical_role_predicate() {
+        assert_eq!(
+            parse_role_query(r#"role == "character.witness""#),
+            Some("character.witness".to_string())
+        );
+        assert_eq!(parse_role_query("character.role == 'Guide'"), None);
+        assert_eq!(parse_role_query("character_role == 'Guard'"), None);
+        assert_eq!(parse_role_query("role matches 'Guard'"), None);
+    }
+
+    #[test]
     fn bundle_rejects_malformed_gameplay_tag_paths() {
         let mut content = ProjectBundleContent::default();
         content.gameplay_tags = [".quest", "quest.", "quest..secret", "quest.secret"]
@@ -1563,26 +1579,6 @@ mod tests {
         assert_eq!(tag_issues.len(), 3);
         assert!(tag_issues.iter().all(|issue| !issue.contains("'quest.secret'")));
     }
-    #[test]
-    fn generic_projection_reports_unrepresentable_entity_properties() {
-        let entity: EntityTemplateRecord = serde_json::from_value(json!({
-            "id": "guard",
-            "name": "Guard",
-                        "properties": [{
-                "id": "trust",
-                "key": "trust",
-                "name": "Trust",
-                "type": "int",
-                "value": 3
-            }]
-        })).unwrap();
-        assert_eq!(
-            generic_playtest_projection_issues(std::slice::from_ref(&entity)),
-            vec!["entity 'guard': generic playtests cannot represent typed custom properties; use Chrono playtests"]
-        );
-        assert!(generic_playtest_projection_issues(&[]).is_empty());
-    }
-
     #[test]
     fn trait_template_thumbnail_normalization_and_validation() {
         let index = WorkspaceIndex::default();
