@@ -175,7 +175,7 @@ enum   KnowKind       { Evidence, Witnessed, Told, Rumor, Recollection, Testimon
 struct TellingRow     { holder: PartIx, entry: ChronicleIx, at_event: EventIx }
 ```
 
-- **Commands carry the participant ID.** The existing `WorldCommand.actor_id` already does this. `MovePlayer` becomes `Move { participant }`.
+- **Commands carry the participant ID.** The existing command actor field already does this. `MovePlayer` becomes `Move { participant }`.
 - **Simultaneous actions** are validated as transactions. Conflicting write sets, for example two players confronting the same NPC, are resolved by an authored policy. The policies `RejectLater`, `PriorityWins` and `Serialize` are already specified. A scene with a shared actor becomes a **joint scene** with all co-located participants rather than a race.
 - **Knowledge transfer is an in-world act.** It can be "compare notes", a letter, an overheard line, or gossip. It always creates an event, and each knowledge row it creates points back to that event.
 - **Observation APIs are participant-scoped,** as TENNET FR-02 requires. A client, or an LLM adapter acting for an NPC, receives only that participant's knowledge and surroundings.

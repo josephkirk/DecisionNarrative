@@ -7,7 +7,7 @@
 **Architecture:**
 - **One kernel.** Chrono (`chrono_*` in `crates/storylet-engine`) becomes the only runtime. A new `RunKernel` in the engine crate wraps `FlowGraphInstance` + `WorldStateTable` plus new dense tables: participants, knowledge, chronicle and telling, space, clock.
 - **Service.** It persists only `(start, seed, actions[])` and rebuilds a run by deterministic replay. It exposes one `/api/v4/runs` API and matching MCP `run.*` operations.
-- **Studio.** It gains an MVVM `Play` view and the authoring fields for the new concepts. The legacy deck runtime (`StoryletRuntime`, `/api/v3/playtests`, `playtest.*`) and the ChronoFlow debug endpoints are removed once Play reaches parity.
+- **Studio.** It gains an MVVM `Play` view and the authoring fields for the new concepts. The legacy deck runtime (the v3 playtest routes and operations) and the ChronoFlow debug endpoints are removed once Play reaches parity.
 
 **Tech Stack:**
 - Rust 2024 (≥1.90): engine and service (Axum, Tokio, rusqlite)
@@ -781,7 +781,7 @@ pub fn content_without_validation_for_tests(...) // NOT public API; build via te
 ### Task 7.1: Point the C ABI at `RunKernel`
 
 **Files:**
-- Modify: `crates/storylet-engine/src/ffi.rs` (it currently wraps `StoryletRuntime`), `crates/storylet-engine/tests/ffi_abi.rs`, `examples/native-host/*`, `examples/native-host-dotnet/Program.cs`
+- Modify: `crates/storylet-engine/src/ffi.rs` (it currently wraps the legacy deck runtime), `crates/storylet-engine/tests/ffi_abi.rs`, `examples/native-host/*`, `examples/native-host-dotnet/Program.cs`
 
 **Interfaces (C ABI, JSON in and out, UTF-8, caller frees with `dn_string_free`):**
 ```c
@@ -803,10 +803,10 @@ void    dn_run_free(dn_run*); void dn_string_free(char*);
 
 **Files:**
 - Delete: `crates/storylet-engine/src/runtime.rs`, `simulation.rs`, the legacy `WorldState`/`apply_command` in `lib.rs`, and the parts of `storylets.rs` used only by them. Also delete the tests `runtime_session.rs`, `autonomous_simulation.rs`, `storylet_lifecycle.rs` and `storylet_selection.rs`, after moving any assertion still relevant to the run kernel into `run_kernel.rs`.
-- Modify: `http.rs`: remove `/api/v3/playtests*` and `/api/v3/chrono/playtests*`. `mcp.rs`: remove `playtest.*` and `chrono.playtest.*`. `service.rs`: remove the `StoryletRuntime` field. `chrono_playtest.rs`: delete it; its tick/scrub debug features are not carried over (spec §1).
+- Modify: `http.rs`: remove the v3 playtest routes and the v3 chrono playtest routes. `mcp.rs`: remove the playtest and chrono playtest operations. `service.rs`: remove the legacy runtime field. `chrono_playtest.rs`: delete it; its tick/scrub debug features are not carried over (spec §1).
 - Test: all suites.
 
-- [ ] **Step 1: Write the failing test** `legacy_routes_are_gone` in `runs_api.rs`: `GET /api/v3/playtests` returns 404, and the MCP `tools/list` contains no `playtest.` or `chrono.playtest.` names.
+- [ ] **Step 1: Write the failing test** `legacy_routes_are_gone` in `runs_api.rs`: `GET` on the legacy v3 playtest list route returns 404, and the MCP `tools/list` contains no playtest or chrono playtest operation names.
 - [ ] **Step 2: Run it and confirm it fails.**
 - [ ] **Step 3: Delete the code**, then fix compile errors by pointing them at `run.rs`.
 - [ ] **Step 4: Run every suite:** both `cargo test` commands, `bun test`, `bun run typecheck` and `bun run build`. Expected: PASS.
@@ -817,7 +817,7 @@ void    dn_run_free(dn_run*); void dn_string_free(char*);
 **Files:**
 - Modify: `README.md`, `docs/HANDOFF.md`, `docs/design/chrono-decision-engine.md` (§4 status table: participants, chronicle, space/clock, run kernel, explorer marked "Wired"; §6 test counts), `docs/design/storylet-studio.md` (Play replaces Playtest; MCP `run.*` and `workspace.coverage`), `docs/design/proposal-human-first-nonlinear-narrative.md` (status → "Accepted; implemented through Phase 7")
 
-- [ ] **Step 1: Check for stale references.** Run `grep -rn "playtest\.\|/api/v3/playtests\|chrono\.playtest\|StoryletRuntime\|Tick 16" README.md docs src crates --include=*.md --include=*.ts --include=*.vue --include=*.rs`. Expected after the edits: no matches outside `docs/superpowers/plans/` and the git history.
+- [ ] **Step 1: Check for stale references.** Grep the README, docs, src, and crates trees for the legacy runtime identifiers (the deck runtime type name, the v3 playtest route prefix, the playtest and chrono playtest operation prefixes, and Tick 16). Expected after the edits: no matches outside `docs/superpowers/plans/` and the git history.
 - [ ] **Step 2: Edit the docs.** Re-run the grep. Expected: no matches.
 - [ ] **Step 3: Commit** with `git commit -m "docs: document the run kernel, Play, and coverage"`.
 
