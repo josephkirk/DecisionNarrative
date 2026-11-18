@@ -14,7 +14,7 @@ export interface PlayState {
   inspectOpen: boolean;
   inspectTab: "knows" | "world" | "story";
   inspect: InspectView | null;
-  causal: RunEventView[] | null;
+  causal: { target: number; events: RunEventView[] } | null;
   whyOpen: boolean;
   nearMisses: NearMiss[];
   busy: boolean;
@@ -49,6 +49,7 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
   async function refreshPanels(): Promise<void> {
     if (!state.runId) return;
     if (state.whyOpen) state.nearMisses = (await api.whyNot(state.runId, state.activeParticipant)).nearMisses;
+    state.causal = null;
     if (state.inspectOpen) state.inspect = await api.inspect(state.runId, state.activeParticipant);
   }
 
@@ -137,6 +138,7 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
 
   async function setInspectTab(tab: PlayState["inspectTab"]): Promise<void> {
     state.inspectTab = tab;
+    state.causal = null;
     if (!state.runId) return;
     try {
       state.inspect = await api.inspect(state.runId, state.activeParticipant);
@@ -147,8 +149,12 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
 
   async function explain(event: number): Promise<void> {
     if (!state.runId) return;
+    if (event === 0) {
+      state.causal = { target: 0, events: [] };
+      return;
+    }
     try {
-      state.causal = await api.explain(state.runId, event);
+      state.causal = { target: event, events: await api.explain(state.runId, event) };
     } catch (e) {
       state.error = message(e);
     }

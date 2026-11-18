@@ -42,9 +42,11 @@ async fn reject_disallowed_origins(
     if (state_changing || request.uri().path() == "/mcp")
         && *request.method() != Method::OPTIONS
         && let Some(origin) = request.headers().get(header::ORIGIN)
-        && let Ok(origin) = origin.to_str()
-        && !allowed.contains(origin)
     {
+        let origin = String::from_utf8_lossy(origin.as_bytes()).into_owned();
+        if allowed.contains(&origin) {
+            return next.run(request).await;
+        }
         return (
             StatusCode::FORBIDDEN,
             Json(json!({ "error": format!("Origin '{origin}' is not allowed") })),

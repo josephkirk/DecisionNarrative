@@ -76,7 +76,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let static_dir = Some(PathBuf::from("dist/studio")).filter(|p| p.exists());
 
-    let app = build_router_with_origins(service, static_dir, &extra_origins(&args));
+    let mut origins = extra_origins(&args);
+    origins.push(format!("http://{address}"));
+    if address.ip().is_loopback() {
+        origins.push(format!("http://localhost:{}", address.port()));
+    }
+    let app = build_router_with_origins(service, static_dir, &origins);
     let listener = TcpListener::bind(address).await?;
     eprintln!("storylet-engine-service listening on http://{address}");
     axum::serve(listener, app)

@@ -260,3 +260,21 @@ async fn mcp_tool_schema_advertises_no_playtest_operations() {
     .unwrap();
     assert_eq!(response["result"]["isError"], true);
 }
+
+#[tokio::test]
+async fn origin_header_that_is_not_text_is_refused_and_changes_nothing() {
+    let app = test_app();
+    let request = Request::builder()
+        .method("PATCH")
+        .uri("/api/v3/project")
+        .header("content-type", "application/json")
+        .header(
+            "origin",
+            axum::http::HeaderValue::from_bytes(b"https://evil.example/\xff").unwrap(),
+        )
+        .body(Body::from(json!({"name": "Hacked"}).to_string()))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(project_name(&app).await, "Workspace");
+}

@@ -275,7 +275,9 @@ export type RunAction =
   | { kind: "play_storylet"; nodeGuid: number; storylet: number }
   | { kind: "topic"; nodeGuid: number; edgeId: number }
   | { kind: "move"; to: number }
-  | { kind: "wait" };
+  | { kind: "wait" }
+  | { kind: "transfer"; to: number; resource: number; amount: number }
+  | { kind: "tell"; to: number; fact: number };
 
 export type RunStart = { kind: "beginning" } | { kind: "storylet"; storylet: number };
 

@@ -1,4 +1,4 @@
-import type { ChangeView, ChronicleRowView, KnowKind, KnowRowView, MoveBlock, NearMiss, ParticipantView, RunAction, RunStep, RunView, StoryletRef } from "./contracts.ts";
+import type { ChangeView, ChronicleRowView, KnowKind, KnowRowView, MoveBlock, NearMiss, ParticipantView, RunAction, RunEventView, RunStep, RunView, StoryletRef } from "./contracts.ts";
 
 export function choiceForKey(view: RunView, key: string): RunAction | null {
   if (!/^[1-9]$/.test(key)) return null;
@@ -34,14 +34,33 @@ export function chronicleRows(rows: ChronicleRowView[]): Array<{ label: string; 
     .map((r) => ({ label: r.label, told: r.told, place: r.place ?? "" }));
 }
 
-export function stepText(step: RunStep): string {
-  switch (step.action.kind) {
-    case "choose": return `Chose option ${step.action.outputPin + 1}`;
+export function actionText(action: RunAction): string {
+  switch (action.kind) {
+    case "choose": return `Chose option ${action.outputPin + 1}`;
     case "play_storylet": return "Started a storylet";
     case "topic": return "Asked about a topic";
     case "move": return "Moved";
     case "wait": return "Waited";
+    case "transfer": return `Gave ${action.amount} item${action.amount === 1 ? "" : "s"}`;
+    case "tell": return "Shared a fact";
   }
+}
+
+export function stepText(step: RunStep): string {
+  return actionText(step.action);
+}
+
+export interface CausalRow { id: number; text: string; cause: boolean }
+
+export function causalRows(events: RunEventView[], participants: ParticipantView[], target: number): CausalRow[] {
+  const name = (id: number) => participants.find((p) => p.id === id)?.name ?? `Participant ${id + 1}`;
+  return [...events]
+    .sort((a, b) => a.id - b.id)
+    .map((event) => ({
+      id: event.id,
+      text: `Step ${event.step} · ${name(event.actor)} · ${actionText(event.action)}`,
+      cause: event.id !== target,
+    }));
 }
 
 export function activeBranchId(view: RunView): number {

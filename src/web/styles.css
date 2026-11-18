@@ -2469,6 +2469,9 @@ a { color: var(--accent-hover); }
 .play-chronicle li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
 .play-chronicle li.is-untold { color: var(--text-dim); border-left: 2px solid var(--border-muted); padding-left: 8px; }
 .play-chronicle li.is-told { border-left: 2px solid #a855f7; padding-left: 8px; }
+.play-causal { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+.play-causal li.is-cause { color: var(--text-dim); border-left: 2px solid var(--border-muted); padding-left: 8px; }
+.play-causal li.is-effect { border-left: 2px solid var(--accent-hover); padding-left: 8px; }
 .play-told { min-width: 1.2em; color: #a855f7; }
 .play-dot.is-highlight::after { outline: 2px solid var(--tertiary); outline-offset: 3px; }
 .play-inspect-toggle { align-self: flex-start; }

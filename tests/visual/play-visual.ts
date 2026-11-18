@@ -199,6 +199,11 @@ try {
   await shot(page, "11-inspect-knows");
   check("knows tab lists the fact with its kind badge in words", await page.locator(".play-kind").first().textContent() === "testimony");
   check("testimony is labelled not confirmed", await page.getByText("not confirmed").first().isVisible());
+  await page.getByRole("button", { name: "Why does this participant know fact.clue?" }).click();
+  await page.getByRole("heading", { name: "Why this happened" }).waitFor();
+  await shot(page, "11b-inspect-why");
+  const causal = await page.locator(".play-causal li, .play-causal .play-muted").allTextContents();
+  check("Why? on a known fact opens a readable cause panel", causal.length > 0 && causal.every((t) => !/^Event \d/.test(t)), JSON.stringify(causal));
   await page.getByRole("tab", { name: "Story so far" }).click();
   await page.locator(".play-chronicle").waitFor();
   await shot(page, "12-inspect-story");

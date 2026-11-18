@@ -130,6 +130,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         :inspect="state.inspect"
         :tab="state.inspectTab"
         :causal="state.causal"
+        :participants="state.envelope.view.participants"
         @tab="play.setInspectTab"
         @focus-step="highlightStep = $event"
         @explain="play.explain"
