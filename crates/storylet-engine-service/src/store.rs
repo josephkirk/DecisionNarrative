@@ -87,7 +87,7 @@ impl Store {
                  is_stale INTEGER NOT NULL DEFAULT 0);
              CREATE TABLE IF NOT EXISTS store_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS run_idempotency (run_id TEXT NOT NULL, key TEXT NOT NULL, request TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(run_id,key));
-             CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, project_revision INTEGER NOT NULL, seed INTEGER NOT NULL, start_json TEXT NOT NULL, actions_json TEXT NOT NULL, revision INTEGER NOT NULL, last_key TEXT NOT NULL, last_result TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);")?;
+             CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, project_revision INTEGER NOT NULL, seed INTEGER NOT NULL, start_json TEXT NOT NULL, actions_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);")?;
         self.conn.execute(
             "INSERT OR IGNORE INTO store_metadata (key, value) VALUES ('schema_version', '8')", [])?;
         let exists: bool = self.conn.query_row(

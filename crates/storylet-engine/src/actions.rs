@@ -29,6 +29,7 @@ pub enum Authority {
     Architect,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ActionReceipt {
     pub event_id: u32,
     pub revision: u64,

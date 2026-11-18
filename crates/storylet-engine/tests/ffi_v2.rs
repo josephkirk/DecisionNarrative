@@ -29,7 +29,7 @@ fn abi_v2_starts_proposes_observes_and_explains() {
     let input = CString::new(serde_json::to_string(&serde_json::json!({"authority":Authority::Human { seat:0 },"proposal":proposal})).unwrap()).unwrap();
     let receipt = unsafe { take_string(ffi::dn_run_propose(run, input.as_ptr())) };
     assert_eq!(receipt["ok"], true);
-    let chain = unsafe { take_string(ffi::dn_run_explain(run, receipt["result"]["event_id"].as_u64().unwrap() as u32)) };
+    let chain = unsafe { take_string(ffi::dn_run_explain(run, receipt["result"]["eventId"].as_u64().unwrap() as u32)) };
     assert!(chain["event"].as_array().is_some_and(|events| !events.is_empty()));
     unsafe { ffi::dn_run_free(run) };
 }

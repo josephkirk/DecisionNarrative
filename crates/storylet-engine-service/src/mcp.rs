@@ -156,6 +156,16 @@ fn get_tool_definitions() -> Vec<Value> {
                 "id": { "type": "string" },
                 "start": { "type": "object" },
                 "action": { "type": "object" },
+                "provenance": {
+                    "type": "object",
+                    "properties": {
+                        "policyId": { "type": "string" },
+                        "policyVersion": { "type": "string" },
+                        "modelId": { "type": "string" },
+                        "contextHash": { "type": "string" },
+                        "decisionSeq": { "type": "integer", "minimum": 0 }
+                    }
+                },
                 "participant": { "type": "integer", "minimum": 0 },
                 "toStep": { "type": "integer", "minimum": 0 },
                 "event": { "type": "integer", "minimum": 0 },

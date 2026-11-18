@@ -116,9 +116,11 @@ async fn start_and_act_round_trip_and_restart() {
     let (status, acted) = req(&app, "POST", &endpoint, Some(body.clone())).await;
     assert_eq!(status, StatusCode::OK, "{acted}");
     assert_eq!(acted["view"]["currentStep"], 1);
-    let (_, duplicate) = req(&app, "POST", &endpoint, Some(body)).await;
-    assert_eq!(acted, duplicate);
-    let (status,conflict)=req(&app,"POST",&endpoint,Some(json!({"participant":0,"action":{"kind":"wait"},"expectedRevision":0,"idempotencyKey":"two"}))).await;
+    assert_eq!(acted["receipt"]["revision"], 1);
+    let (_, duplicate) = req(&app, "POST", &endpoint, Some(body.clone())).await;
+    assert_eq!(duplicate["receipt"]["duplicate"], true);
+    assert_eq!(acted["view"], duplicate["view"]);
+    let (status,conflict)=req(&app,"POST",&endpoint,Some(json!({"participant":0,"action":{"kind":"wait"},"expectedRevision":0,"idempotencyKey":"one"}))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
     let uri = format!("/api/v4/runs/{id}");
     let (_, before) = req(&app, "GET", &uri, None).await;
@@ -127,6 +129,10 @@ async fn start_and_act_round_trip_and_restart() {
     let (status, after) = req(&app, "GET", &uri, None).await;
     assert_eq!(status, StatusCode::OK, "{after}");
     assert_eq!(before, after);
+    let (status, retried) = req(&app, "POST", &endpoint, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{retried}");
+    assert_eq!(retried["receipt"]["duplicate"], true);
+    assert_eq!(after["view"], retried["view"]);
 }
 
 #[tokio::test]
@@ -211,7 +217,7 @@ async fn rewound_branch_and_old_keys_survive_restart() {
     )
     .await;
     assert_eq!(rewound["view"]["currentStep"], 0, "{rewound}");
-    let (_,branched)=req(&app,"POST",&format!("/api/v4/runs/{id}/act"),Some(json!({"participant":0,"action":start["view"]["scene"]["choices"][1]["action"],"expectedRevision":2,"idempotencyKey":"b"}))).await;
+    let (_,branched)=req(&app,"POST",&format!("/api/v4/runs/{id}/act"),Some(json!({"participant":0,"action":start["view"]["scene"]["choices"][1]["action"],"expectedRevision":rewound["revision"],"idempotencyKey":"b"}))).await;
     assert_eq!(
         branched["view"]["branches"].as_array().unwrap().len(),
         2,
@@ -220,9 +226,11 @@ async fn rewound_branch_and_old_keys_survive_restart() {
     drop(app);
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
     let (_, replayed) = req(&app, "GET", &format!("/api/v4/runs/{id}"), None).await;
-    assert_eq!(replayed, branched);
+    assert_eq!(replayed["view"], branched["view"]);
+    assert_eq!(replayed["revision"], branched["revision"]);
     let (_, duplicate) = req(&app, "POST", &format!("/api/v4/runs/{id}/act"), Some(body)).await;
-    assert_eq!(duplicate, first);
+    assert_eq!(duplicate["receipt"]["duplicate"], true);
+    assert_eq!(duplicate["receipt"]["eventId"], first["receipt"]["eventId"]);
     let (_, same_start) = req(&app, "POST", "/api/v4/runs", Some(start_body)).await;
     assert_eq!(same_start, start);
 }
@@ -247,7 +255,8 @@ async fn independent_service_instances_detect_stale_revisions() {
     let (status,conflict)=req(&other,"POST",&format!("{uri}/act"),Some(json!({"participant":0,"action":{"kind":"wait"},"expectedRevision":0,"idempotencyKey":"b"}))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
     let (_, view) = req(&other, "GET", &uri, None).await;
-    assert_eq!(view, acted);
+    assert_eq!(view["view"], acted["view"]);
+    assert_eq!(view["revision"], acted["revision"]);
 }
 #[tokio::test]
 async fn stalled_start_returns_view_and_survives_restart() {
@@ -381,6 +390,7 @@ async fn observe_and_explain_endpoints_return_kernel_evidence() {
     drop(store);
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
     let (_, start) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"expectedRevision":revision,"idempotencyKey":"s"}))).await;
+    assert_eq!(start["view"]["participants"].as_array().unwrap().len(), 2, "{start}");
     let id = start["id"].as_str().unwrap();
     let (_, first) = req(&app, "GET", &format!("/api/v4/runs/{id}/observe?participant=0"), None).await;
     let (_, second) = req(&app, "GET", &format!("/api/v4/runs/{id}/observe?participant=1"), None).await;
@@ -391,6 +401,60 @@ async fn observe_and_explain_endpoints_return_kernel_evidence() {
     let (_, chain) = req(&app, "GET", &format!("/api/v4/runs/{id}/explain?event=1"), None).await;
     assert_eq!(chain[0]["id"], 1);
     assert_eq!(chain[0]["step"], acted["view"]["currentStep"]);
+}
+
+#[tokio::test]
+async fn supplied_provenance_is_preserved_without_fabricated_human_metadata() {
+    let (path, _) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (_, start) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"expectedRevision":3,"idempotencyKey":"s"}))).await;
+    let id = start["id"].as_str().unwrap();
+    let provenance = json!({"policyId":"policy.alpha","policyVersion":"3","modelId":"local-model","contextHash":"abc123","decisionSeq":9});
+    let (_, acted) = req(&app, "POST", &format!("/api/v4/runs/{id}/act"), Some(json!({"participant":0,"action":start["view"]["scene"]["choices"][0]["action"],"expectedRevision":0,"idempotencyKey":"p","provenance":provenance}))).await;
+    assert_eq!(acted["receipt"]["duplicate"], false);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let actions_json: String = conn.query_row("SELECT actions_json FROM runs WHERE id=?1", [id], |row| row.get(0)).unwrap();
+    let actions: Value = serde_json::from_str(&actions_json).unwrap();
+    assert_eq!(actions[0]["proposal"]["provenance"], provenance);
+}
+
+#[tokio::test]
+async fn explain_rule_play_parents_over_http_and_mcp() {
+    let (path, story) = fixture();
+    let store = storylet_engine_service::store::Store::open(&path).unwrap();
+    for (id, controller, seat) in [("mara", "human", 0), ("rosa", "rule", 0)] {
+        let value = json!({"id":id,"name":id,"traits":[{"id":"character","template_id":"system.character","values":{}},{"template_id":"system.participant","values":{"controller":controller,"seat":seat,"start_location":"harbor"}},{"template_id":"system.character_settings","values":{"home_location":"harbor","current_location":"harbor"}}]});
+        store.save_content("entities", id, &value.to_string(), 1, None).unwrap();
+    }
+    let mut gossip = story.clone();
+    gossip["id"] = json!("gossip");
+    gossip["title"] = json!("Gossip");
+    gossip["played_by"] = json!(["rosa"]);
+    gossip["graph"]["nodes"] = json!([
+        {"id":"start","title":"Start","type":"start","text":"Start","x":0,"y":0,"width":100,"height":80},
+        {"id":"end","title":"End","type":"end","is_terminal":true,"x":100,"y":0,"width":100,"height":80}
+    ]);
+    gossip["graph"]["edges"] = json!([
+        {"id":"finish","from_node":"start","from_port":"output","to_node":"end","to_port":"input"}
+    ]);
+    store.save_content("storylets", "gossip", &gossip.to_string(), 1, None).unwrap();
+    let revision = store.get_project_metadata().unwrap().revision;
+    drop(store);
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (_, start) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"storyletId":"story","expectedRevision":revision,"idempotencyKey":"s"}))).await;
+    let id = start["id"].as_str().unwrap();
+    let (_, acted) = req(&app, "POST", &format!("/api/v4/runs/{id}/act"), Some(json!({"participant":0,"action":start["view"]["scene"]["choices"][0]["action"],"expectedRevision":0,"idempotencyKey":"a"}))).await;
+    assert_eq!(acted["view"]["currentStep"], 1, "{acted}");
+    assert_eq!(acted["view"]["steps"][0]["rulePlays"].as_array().map(Vec::len), Some(1), "{acted}");
+    let rule_event = acted["receipt"]["eventId"].as_u64().unwrap() as u32 + 1;
+    let (_, http_chain) = req(&app, "GET", &format!("/api/v4/runs/{id}/explain?event={rule_event}"), None).await;
+    let http_rule = http_chain.as_array().unwrap().iter().find(|event| event["id"] == rule_event).unwrap();
+    assert_eq!(http_rule["parents"], json!([acted["receipt"]["eventId"]]));
+    let service = StudioService::open(&path, ".").unwrap();
+    let response = storylet_engine_service::mcp::handle_mcp_message(&service, &json!({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"narrative_platform","arguments":{"operation":"run.explain","id":id,"event":rule_event}}})).await.unwrap();
+    let mcp_chain: Value = serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let mcp_rule = mcp_chain.as_array().unwrap().iter().find(|event| event["id"] == rule_event).unwrap();
+    assert_eq!(mcp_rule["parents"], json!([acted["receipt"]["eventId"]]));
 }
 #[tokio::test]
 async fn action_that_stalls_is_recorded_and_replayed() {
@@ -491,7 +555,8 @@ fn concurrent_identical_start_and_act_return_identical_results() {
     let [one, two] = race(app1, app2, format!("/api/v4/runs/{id}/act"), body);
     assert_eq!(one.0, StatusCode::OK, "{:?}", one.1);
     assert_eq!(two.0, StatusCode::OK, "{:?}", two.1);
-    assert_eq!(one.1, two.1);
+    assert_eq!(one.1["view"], two.1["view"]);
+    assert_ne!(one.1["receipt"]["duplicate"], two.1["receipt"]["duplicate"]);
 }
 #[test]
 fn concurrent_content_edit_never_mislabels_compiled_revision() {

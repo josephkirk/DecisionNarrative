@@ -250,7 +250,6 @@ struct Snapshot {
     rule_played: Vec<(PartIx, u16)>,
     revision: u64,
     proposals: Vec<(crate::actions::ActionProposal, crate::actions::Authority)>,
-    idempotency: BTreeMap<String, (String, crate::actions::ActionReceipt)>,
     event_log: Vec<RunEvent>,
     pending_rule_events: Vec<RuleEventData>,
 }
@@ -476,7 +475,6 @@ impl RunKernel {
             rule_played: self.rule_played.clone(),
             revision: self.revision,
             proposals: self.proposals.clone(),
-            idempotency: self.idempotency.clone(),
             event_log: self.event_log.clone(),
             pending_rule_events: self.pending_rule_events.clone(),
         }
@@ -1849,6 +1847,7 @@ impl RunKernel {
         self.instance
             .checkout(&mut ctx, snap.commit)
             .map_err(|e| RunError::Engine(e.to_string()))?;
+        let idempotency = self.idempotency.clone();
         self.world = snap.world;
         self.instance = snap.instance;
         self.storylet = snap.storylet;
@@ -1857,7 +1856,7 @@ impl RunKernel {
         self.stalled = snap.stalled;
         self.revision = snap.revision;
         self.proposals = snap.proposals;
-        self.idempotency = snap.idempotency;
+        self.idempotency = idempotency;
         self.event_log = snap.event_log;
         self.current_step = to_step;
         self.rewound = true;

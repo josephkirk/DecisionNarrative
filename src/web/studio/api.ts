@@ -2,6 +2,7 @@ import type {
   AuthoringOptions,
   ContentReference,
   CoverageReport,
+  DecisionProvenance,
   InspectView,
   RunEventView,
   LibraryPageResult,
@@ -49,7 +50,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export interface RunsApi {
   start(input: RunStartInput): Promise<RunEnvelope>;
   view(id: string, participant: number): Promise<RunEnvelope>;
-  act(id: string, participant: number, action: RunAction, expectedRevision: number, idempotencyKey: string): Promise<RunEnvelope>;
+  act(id: string, participant: number, action: RunAction, expectedRevision: number, idempotencyKey: string, provenance?: DecisionProvenance): Promise<RunEnvelope>;
   rewind(id: string, toStep: number, expectedRevision: number, idempotencyKey: string): Promise<RunEnvelope>;
   whyNot(id: string, participant: number): Promise<{ nearMisses: NearMiss[] }>;
   inspect(id: string, participant: number): Promise<InspectView>;
@@ -74,8 +75,8 @@ const runs: RunsApi & {
   coverage: (runs, seed) => post<CoverageReport>("/api/v4/coverage", { runs, seed }),
   list: () => request<RunSummary[]>("/api/v4/runs"),
   view: (id, participant) => request<RunEnvelope>(`${runPath(id)}?participant=${participant}`),
-  act: (id, participant, action, expectedRevision, idempotencyKey) =>
-    post<RunEnvelope>(`${runPath(id)}/act`, { participant, action, expectedRevision, idempotencyKey }),
+  act: (id, participant, action, expectedRevision, idempotencyKey, provenance) =>
+    post<RunEnvelope>(`${runPath(id)}/act`, { participant, action, expectedRevision, idempotencyKey, provenance }),
   rewind: (id, toStep, expectedRevision, idempotencyKey) =>
     post<RunEnvelope>(`${runPath(id)}/rewind`, { toStep, expectedRevision, idempotencyKey }),
   whyNot: (id, participant) => request<{ nearMisses: NearMiss[] }>(`${runPath(id)}/why-not?participant=${participant}`),
