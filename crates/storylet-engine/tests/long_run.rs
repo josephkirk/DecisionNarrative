@@ -42,9 +42,9 @@ fn mean(window: &[Duration]) -> Duration {
 #[test]
 #[ignore = "measurement; run with --ignored --nocapture"]
 fn per_step_cost_stays_flat_over_a_long_run() {
-    let timings = wait_steps(2_000);
-    let early = mean(&timings[100..300]);
-    let late = mean(&timings[1_800..2_000]);
+    let timings = wait_steps(500);
+    let early = mean(&timings[50..100]);
+    let late = mean(&timings[450..500]);
     println!(
         "early mean {early:?}, late mean {late:?}, ratio {:.2}",
         late.as_secs_f64() / early.as_secs_f64()

@@ -146,3 +146,35 @@ fn late_commit_failure_rolls_back_internal_mutation() {
     );
     unchanged(&run, &before);
 }
+
+#[test]
+fn branch_failure_after_rewind_preserves_kernel() {
+    let (content, mut run) = support::actions::start();
+    support::actions::submit(&mut run, &content, 0, RunAction::Wait, "first").unwrap();
+    run.rewind(Authority::Architect, 0).unwrap();
+    let mut serialized = serde_json::to_value(run).unwrap();
+    serialized["revision"] = serde_json::Value::from(u64::MAX);
+    let mut run: storylet_engine::RunKernel = serde_json::from_value(serialized).unwrap();
+    let before = serde_json::to_vec(&run).unwrap();
+    let proposal = support::actions::proposal(&run, 0, RunAction::Wait, "overflow-branch");
+    assert!(
+        run.propose(&content, Authority::Human { seat: 0 }, proposal)
+            .is_err()
+    );
+    unchanged(&run, &before);
+}
+
+#[test]
+fn repeated_branch_rewind_restores_log_prefix() {
+    let (mut content, mut run) = support::actions::start();
+    content.clock = None;
+    support::actions::submit(&mut run, &content, 0, RunAction::Wait, "first").unwrap();
+    run.rewind(Authority::Architect, 0).unwrap();
+    support::actions::submit(&mut run, &content, 0, RunAction::Wait, "branch-first").unwrap();
+    let expected = serde_json::to_value(&run).unwrap();
+    support::actions::submit(&mut run, &content, 0, RunAction::Wait, "branch-second").unwrap();
+    run.rewind(Authority::Architect, 1).unwrap();
+    let actual = serde_json::to_value(&run).unwrap();
+    assert_eq!(actual["proposals"], expected["proposals"]);
+    assert_eq!(actual["event_log"], expected["event_log"]);
+}

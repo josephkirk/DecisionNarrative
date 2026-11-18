@@ -250,8 +250,8 @@ struct Snapshot {
     stalled: Option<RunError>,
     rule_played: Vec<(PartIx, u16)>,
     revision: u64,
-    proposals: Vec<(crate::actions::ActionProposal, crate::actions::Authority)>,
-    event_log: Vec<RunEvent>,
+    proposals: usize,
+    event_log: usize,
     pending_rule_events: Vec<RuleEventData>,
 }
 
@@ -263,6 +263,28 @@ struct RuleEventData {
     knowledge: Vec<(PartIx, u16)>,
     tellings: Vec<(PartIx, u16)>,
     deltas: Vec<BijectiveDelta>,
+}
+struct Checkpoint {
+    world: WorldStateTable,
+    instance: FlowGraphInstance,
+    storylet: u16,
+    selections: Vec<PendingSelection>,
+    next_invocation: u64,
+    stalled: Option<RunError>,
+    rule_played: Vec<(PartIx, u16)>,
+    revision: u64,
+    next_event_id: u32,
+    pending_deltas: Vec<BijectiveDelta>,
+    pending_rule_events: Vec<RuleEventData>,
+    branch: usize,
+    current_step: u32,
+    rewound: bool,
+    branches_len: usize,
+    steps_len: usize,
+    snapshots_len: usize,
+    branch_snapshots_len: usize,
+    proposals_len: usize,
+    event_log_len: usize,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunKernel {
@@ -465,6 +487,52 @@ impl RunKernel {
             key: content.storylet_key(id).map(str::to_string),
         }
     }
+    fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            world: self.world.clone(),
+            instance: self.instance.clone(),
+            storylet: self.storylet,
+            selections: self.selections.clone(),
+            next_invocation: self.next_invocation,
+            stalled: self.stalled.clone(),
+            rule_played: self.rule_played.clone(),
+            revision: self.revision,
+            next_event_id: self.next_event_id,
+            pending_deltas: self.pending_deltas.clone(),
+            pending_rule_events: self.pending_rule_events.clone(),
+            branch: self.branch,
+            current_step: self.current_step,
+            rewound: self.rewound,
+            branches_len: self.branches.len(),
+            steps_len: self.branches[self.branch].steps.len(),
+            snapshots_len: self.snapshots.len(),
+            branch_snapshots_len: self.snapshots[self.branch].len(),
+            proposals_len: self.proposals.len(),
+            event_log_len: self.event_log.len(),
+        }
+    }
+    fn rollback(&mut self, c: Checkpoint) {
+        self.world = c.world;
+        self.instance = c.instance;
+        self.storylet = c.storylet;
+        self.selections = c.selections;
+        self.next_invocation = c.next_invocation;
+        self.stalled = c.stalled;
+        self.rule_played = c.rule_played;
+        self.revision = c.revision;
+        self.next_event_id = c.next_event_id;
+        self.pending_deltas = c.pending_deltas;
+        self.pending_rule_events = c.pending_rule_events;
+        self.branch = c.branch;
+        self.current_step = c.current_step;
+        self.rewound = c.rewound;
+        self.branches.truncate(c.branches_len);
+        self.branches[c.branch].steps.truncate(c.steps_len);
+        self.snapshots.truncate(c.snapshots_len);
+        self.snapshots[c.branch].truncate(c.branch_snapshots_len);
+        self.proposals.truncate(c.proposals_len);
+        self.event_log.truncate(c.event_log_len);
+    }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
             world: self.world.clone(),
@@ -475,8 +543,8 @@ impl RunKernel {
             stalled: self.stalled.clone(),
             rule_played: self.rule_played.clone(),
             revision: self.revision,
-            proposals: self.proposals.clone(),
-            event_log: self.event_log.clone(),
+            proposals: self.proposals.len(),
+            event_log: self.event_log.len(),
             pending_rule_events: self.pending_rule_events.clone(),
         }
     }
@@ -984,26 +1052,26 @@ impl RunKernel {
         if proposal.idempotency_key.trim().is_empty() {
             return Err(reject("idempotency key is empty"));
         }
-        let backup = self.clone();
+        let backup = self.checkpoint();
         let mut old_history_lengths = BTreeMap::new();
         Self::history_lengths(&self.instance, &mut old_history_lengths);
         let step = match self.act_internal(content, proposal.actor, proposal.action.clone()) {
             Ok((step, _)) => step,
             Err(error) => {
-                *self = backup;
+                self.rollback(backup);
                 return Err(reject(&format!("{error:?}")));
             }
         };
         self.revision = match self.revision.checked_add(1) {
             Some(revision) => revision,
             None => {
-                *self = backup;
+                self.rollback(backup);
                 return Err(reject("revision overflow"));
             }
         };
         let id = self.next_event_id;
         let Some(next_event_id) = self.next_event_id.checked_add(1) else {
-            *self = backup;
+            self.rollback(backup);
             return Err(reject("event id overflow"));
         };
         self.next_event_id = next_event_id;
@@ -1049,14 +1117,14 @@ impl RunKernel {
             self.next_event_id = match self.next_event_id.checked_add(1) {
                 Some(next) => next,
                 None => {
-                    *self = backup;
+                    self.rollback(backup);
                     return Err(reject("event id overflow"));
                 }
             };
             self.revision = match self.revision.checked_add(1) {
                 Some(next) => next,
                 None => {
-                    *self = backup;
+                    self.rollback(backup);
                     return Err(reject("revision overflow"));
                 }
             };
@@ -1343,7 +1411,7 @@ impl RunKernel {
                 "no actions left in this slot".into(),
             ));
         }
-        let backup = self.clone();
+        let backup = self.checkpoint();
         self.instance.acting_participant = participant;
         let pending = self.pending();
         let result = (|| {
@@ -1542,7 +1610,7 @@ impl RunKernel {
         match result {
             Ok(()) => {}
             Err(e) => {
-                *self = backup;
+                self.rollback(backup);
                 return Err(e);
             }
         }
@@ -1839,6 +1907,9 @@ impl RunKernel {
                 "rewind requires Architect authority".into(),
             ));
         }
+        if to_step > self.current_step {
+            return Err(RunError::InvalidAction("unknown step".into()));
+        }
         let snap = self.snapshots[self.branch]
             .get(to_step as usize)
             .cloned()
@@ -1860,9 +1931,9 @@ impl RunKernel {
         self.rule_played = snap.rule_played;
         self.stalled = snap.stalled;
         self.revision = snap.revision;
-        self.proposals = snap.proposals;
+        self.proposals.truncate(snap.proposals);
         self.idempotency = idempotency;
-        self.event_log = snap.event_log;
+        self.event_log.truncate(snap.event_log);
         self.current_step = to_step;
         self.rewound = true;
         Ok(())
