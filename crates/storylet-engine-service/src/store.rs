@@ -62,7 +62,6 @@ impl Store {
                 "content_records",
                 "interaction_context",
                 "store_metadata",
-                "run_idempotency",
                 "runs",
             ] {
                 let present: bool = self.conn.query_row(
@@ -73,6 +72,38 @@ impl Store {
                 if !present {
                     return Err(rusqlite::Error::InvalidQuery);
                 }
+            }
+            let columns = self
+                .conn
+                .prepare("PRAGMA table_info(runs)")?
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(1)?, row.get::<_, bool>(3)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            let has_column = |name: &str| {
+                columns
+                    .iter()
+                    .any(|(column, required)| column == name && *required)
+            };
+            let legacy_table: bool = self.conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='run_idempotency')",
+                [], |row| row.get(0),
+            )?;
+            let unique_start_key: bool = self.conn.query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM pragma_index_list('runs') AS i
+                    WHERE i.[unique]=1 AND (SELECT count(*) FROM pragma_index_info(i.name))=1
+                    AND EXISTS(SELECT 1 FROM pragma_index_info(i.name) WHERE name='start_key')
+                )",
+                [],
+                |row| row.get(0),
+            )?;
+            if !has_column("start_key")
+                || !has_column("start_request")
+                || legacy_table
+                || !unique_start_key
+            {
+                return Err(rusqlite::Error::InvalidQuery);
             }
             let has_legacy_records: bool = self.conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM content_records WHERE
@@ -106,8 +137,7 @@ impl Store {
                  captured_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
                  is_stale INTEGER NOT NULL DEFAULT 0);
              CREATE TABLE IF NOT EXISTS store_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS run_idempotency (run_id TEXT NOT NULL, key TEXT NOT NULL, request TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(run_id,key));
-             CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, project_revision INTEGER NOT NULL, seed INTEGER NOT NULL, start_json TEXT NOT NULL, actions_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);")?;
+             CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, start_key TEXT NOT NULL UNIQUE, start_request TEXT NOT NULL, project_revision INTEGER NOT NULL, seed INTEGER NOT NULL, start_json TEXT NOT NULL, actions_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);")?;
         self.conn.execute(
             "INSERT OR IGNORE INTO store_metadata (key, value) VALUES ('schema_version', '8')",
             [],

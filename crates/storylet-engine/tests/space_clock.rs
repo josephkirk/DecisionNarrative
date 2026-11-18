@@ -369,8 +369,15 @@ fn clock_state_survives_rewind() {
     let content = content();
     let mut run = started(&content);
     test_act(&mut run, &content, 0, choose_left()).unwrap();
-    run.rewind(storylet_engine::Authority::Architect, 0)
-        .unwrap();
+    run.rewind(
+        storylet_engine::Authority::Architect,
+        storylet_engine::RewindRequest {
+            to_step: 0,
+            expected_revision: run.revision(),
+            idempotency_key: format!("rewind-{}", run.revision()),
+        },
+    )
+    .unwrap();
     assert_eq!(
         run.architect_view(&content, 0).place.unwrap().actions_left,
         Some(2)
@@ -555,8 +562,15 @@ fn rule_play_is_undone_by_rewind() {
     let fact_a = registry_fact(&content, "fact.a");
     let mut run = started(&content);
     test_act(&mut run, &content, 0, RunAction::Wait).unwrap();
-    run.rewind(storylet_engine::Authority::Architect, 0)
-        .unwrap();
+    run.rewind(
+        storylet_engine::Authority::Architect,
+        storylet_engine::RewindRequest {
+            to_step: 0,
+            expected_revision: run.revision(),
+            idempotency_key: format!("rewind-{}", run.revision()),
+        },
+    )
+    .unwrap();
     assert!(run.world().knowledge.knows(ROSA, fact_a).is_none());
     test_act(&mut run, &content, 0, RunAction::Wait).unwrap();
     assert!(

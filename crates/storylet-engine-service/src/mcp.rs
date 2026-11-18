@@ -134,7 +134,7 @@ pub async fn handle_mcp_message(service: &StudioService, msg: &Value) -> Option<
 fn get_tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "narrative_platform",
-            "description": "Operate the local DecisionNarrative platform. run.view and run.inspect return the Architect's global run view; use run.observe for an actor-specific observation and run.explain for an event's causal chain.",
+            "description": "Operate the local DecisionNarrative platform. run.view and run.inspect return the Architect's global run view; use run.observe for an actor-specific observation and run.explain for an event's causal chain. run.start, run.act and run.rewind require idempotencyKey; run.reload and run.delete require expectedRevision and are idempotent by state. Action and rewind responses include a receipt.",
         "inputSchema": {
             "type": "object",
             "required": ["operation"],

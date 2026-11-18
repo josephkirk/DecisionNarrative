@@ -42,9 +42,13 @@ fn mean(window: &[Duration]) -> Duration {
 #[test]
 #[ignore = "measurement; run with --ignored --nocapture"]
 fn per_step_cost_stays_flat_over_a_long_run() {
-    let timings = wait_steps(500);
+    let steps = std::env::var("STORYLET_LONG_RUN_STEPS")
+        .map(|value| value.parse::<usize>().unwrap())
+        .unwrap_or(2000);
+    assert!(steps >= 100);
+    let timings = wait_steps(steps);
     let early = mean(&timings[50..100]);
-    let late = mean(&timings[450..500]);
+    let late = mean(&timings[steps - 50..steps]);
     println!(
         "early mean {early:?}, late mean {late:?}, ratio {:.2}",
         late.as_secs_f64() / early.as_secs_f64()

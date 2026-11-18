@@ -106,13 +106,13 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
   async function reload(): Promise<void> {
     const id = state.runId;
     if (!id) return;
-    const total = state.envelope?.view.currentStep ?? 0;
-    const key = crypto.randomUUID();
     await guarded(async () => {
-      const result = await api.reload(id, currentRevision(), key);
-      state.reloadNote = result.divergedAt === null
-        ? `Replayed ${result.replayed} of ${total} steps; no divergence`
-        : `Replayed ${result.replayed} of ${total} steps; diverged at step ${result.divergedAt}`;
+      const result = await api.reload(id, currentRevision());
+      state.reloadNote = !("replayed" in result)
+        ? "Run is already current"
+        : result.divergedAt === null
+          ? `Replayed ${result.replayed} steps; no divergence`
+          : `Replayed ${result.replayed} steps; diverged at step ${result.divergedAt}`;
       await adopt(result);
     });
   }

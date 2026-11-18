@@ -89,6 +89,22 @@ pub(crate) fn compile_run_content(
         .conn
         .unchecked_transaction()
         .map_err(|e| e.to_string())?;
+    let result = compile_run_content_in_transaction(
+        store,
+        scenario_id,
+        expected_revision,
+        start_storylet_id,
+    )?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+pub(crate) fn compile_run_content_in_transaction(
+    store: &Store,
+    scenario_id: Option<&str>,
+    expected_revision: Option<u64>,
+    start_storylet_id: Option<&str>,
+) -> Result<(RunContent, u64), String> {
     let meta = store.get_project_metadata().map_err(|e| e.to_string())?;
     if expected_revision.is_some_and(|expected| expected != meta.revision) {
         return Err("stale revision".into());
@@ -233,7 +249,6 @@ pub(crate) fn compile_run_content(
     compiled.content_revision = meta.revision;
     compiled.root_asset = graphs.asset;
     compiled.mission_assets = graphs.mission_assets;
-    tx.commit().map_err(|e| e.to_string())?;
     Ok((compiled, resolved.seed))
 }
 

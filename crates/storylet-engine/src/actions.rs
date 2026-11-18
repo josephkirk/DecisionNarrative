@@ -40,3 +40,25 @@ pub struct ActionReceipt {
 pub struct ActionRejection {
     pub reason: String,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RewindRequest {
+    pub to_step: u32,
+    pub expected_revision: u64,
+    pub idempotency_key: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RunOperation {
+    #[serde(rename = "act")]
+    Action {
+        authority: Authority,
+        proposal: ActionProposal,
+    },
+    Rewind {
+        authority: Authority,
+        request: RewindRequest,
+    },
+}

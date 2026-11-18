@@ -244,15 +244,19 @@ struct PendingSelection {
 struct Snapshot {
     world: WorldStateTable,
     instance: FlowGraphInstance,
-    commit: usize,
     storylet: u16,
     selections: Vec<PendingSelection>,
     stalled: Option<RunError>,
     rule_played: Vec<(PartIx, u16)>,
-    revision: u64,
     proposals: usize,
     event_log: usize,
     pending_rule_events: Vec<RuleEventData>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct RewindLogs {
+    proposals: Vec<(crate::actions::ActionProposal, crate::actions::Authority)>,
+    event_log: Vec<RunEvent>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -308,6 +312,8 @@ pub struct RunKernel {
     next_event_id: u32,
     proposals: Vec<(crate::actions::ActionProposal, crate::actions::Authority)>,
     idempotency: BTreeMap<String, (String, crate::actions::ActionReceipt)>,
+    operations: Vec<crate::actions::RunOperation>,
+    rewind_logs: Option<RewindLogs>,
     event_log: Vec<RunEvent>,
     pending_deltas: Vec<BijectiveDelta>,
     pending_rule_events: Vec<RuleEventData>,
@@ -537,12 +543,10 @@ impl RunKernel {
         Snapshot {
             world: self.world.clone(),
             instance: self.instance.clone(),
-            commit: self.instance.history.head,
             storylet: self.storylet,
             selections: self.selections.clone(),
             stalled: self.stalled.clone(),
             rule_played: self.rule_played.clone(),
-            revision: self.revision,
             proposals: self.proposals.len(),
             event_log: self.event_log.len(),
             pending_rule_events: self.pending_rule_events.clone(),
@@ -805,6 +809,8 @@ impl RunKernel {
             next_event_id: 1,
             proposals: Vec::new(),
             idempotency: BTreeMap::new(),
+            operations: Vec::new(),
+            rewind_logs: None,
             event_log: vec![RunEvent {
                 id: 0,
                 step: 0,
@@ -1030,7 +1036,11 @@ impl RunKernel {
         if !controlled {
             return Err(reject("authority does not control actor"));
         }
-        let body = serde_json::to_string(&(authority, &proposal)).unwrap_or_default();
+        let operation = crate::actions::RunOperation::Action {
+            authority,
+            proposal: proposal.clone(),
+        };
+        let body = serde_json::to_string(&operation).unwrap_or_default();
         if let Some((old, receipt)) = self.idempotency.get(&proposal.idempotency_key) {
             return if *old == body {
                 let mut r = receipt.clone();
@@ -1165,6 +1175,8 @@ impl RunKernel {
         self.idempotency
             .insert(proposal.idempotency_key.clone(), (body, receipt.clone()));
         self.proposals.push((proposal, authority));
+        self.operations.push(operation);
+        self.rewind_logs = None;
         self.snapshots[self.branch][self.current_step as usize] = self.snapshot();
         Ok(receipt)
     }
@@ -1897,46 +1909,90 @@ impl RunKernel {
     pub fn stalled(&self) -> Option<RunError> {
         self.stalled.clone()
     }
+    pub fn apply_operation(
+        &mut self,
+        content: &RunContent,
+        operation: crate::actions::RunOperation,
+    ) -> Result<crate::actions::ActionReceipt, crate::actions::ActionRejection> {
+        match operation {
+            crate::actions::RunOperation::Action {
+                authority,
+                proposal,
+            } => self.propose(content, authority, proposal),
+            crate::actions::RunOperation::Rewind { authority, request } => {
+                self.rewind(authority, request)
+            }
+        }
+    }
+    pub fn operations(&self) -> &[crate::actions::RunOperation] {
+        &self.operations
+    }
     pub fn rewind(
         &mut self,
         authority: crate::actions::Authority,
-        to_step: u32,
-    ) -> Result<(), RunError> {
-        if authority != crate::actions::Authority::Architect {
-            return Err(RunError::InvalidAction(
-                "rewind requires Architect authority".into(),
-            ));
+        request: crate::actions::RewindRequest,
+    ) -> Result<crate::actions::ActionReceipt, crate::actions::ActionRejection> {
+        use crate::actions::{ActionReceipt, ActionRejection, Authority, RunOperation};
+        let reject = |reason: &str| ActionRejection {
+            reason: reason.into(),
+        };
+        if authority != Authority::Architect {
+            return Err(reject("rewind requires Architect authority"));
         }
-        if to_step > self.current_step {
-            return Err(RunError::InvalidAction("unknown step".into()));
+        let operation = RunOperation::Rewind {
+            authority,
+            request: request.clone(),
+        };
+        let body = serde_json::to_string(&operation).unwrap_or_default();
+        if let Some((old, receipt)) = self.idempotency.get(&request.idempotency_key) {
+            return if *old == body {
+                let mut receipt = receipt.clone();
+                receipt.duplicate = true;
+                Ok(receipt)
+            } else {
+                Err(reject("idempotency key reused with different body"))
+            };
         }
+        if request.idempotency_key.trim().is_empty() {
+            return Err(reject("idempotency key is empty"));
+        }
+        if request.expected_revision != self.revision {
+            return Err(reject("stale revision"));
+        }
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| reject("revision overflow"))?;
         let snap = self.snapshots[self.branch]
-            .get(to_step as usize)
+            .get(request.to_step as usize)
             .cloned()
-            .ok_or_else(|| RunError::InvalidAction("unknown step".into()))?;
-        let mut ctx = RuntimeContext::with_registries(
-            &mut self.world,
-            &self.dispatcher,
-            &self.registry,
-            &self.passion_registry,
-        );
-        self.instance
-            .checkout(&mut ctx, snap.commit)
-            .map_err(|e| RunError::Engine(e.to_string()))?;
-        let idempotency = self.idempotency.clone();
+            .ok_or_else(|| reject("unknown step"))?;
         self.world = snap.world;
         self.instance = snap.instance;
         self.storylet = snap.storylet;
         self.selections = snap.selections;
         self.rule_played = snap.rule_played;
         self.stalled = snap.stalled;
-        self.revision = snap.revision;
-        self.proposals.truncate(snap.proposals);
-        self.idempotency = idempotency;
-        self.event_log.truncate(snap.event_log);
-        self.current_step = to_step;
+        self.pending_rule_events = snap.pending_rule_events;
+        self.revision = revision;
+        let logs = self.rewind_logs.get_or_insert_with(|| RewindLogs {
+            proposals: self.proposals.clone(),
+            event_log: self.event_log.clone(),
+        });
+        self.proposals = logs.proposals[..snap.proposals].to_vec();
+        self.event_log = logs.event_log[..snap.event_log].to_vec();
+        self.current_step = request.to_step;
         self.rewound = true;
-        Ok(())
+        let receipt = ActionReceipt {
+            event_id: self.event_log.last().map_or(START_EVENT, |event| event.id),
+            revision,
+            step: request.to_step,
+            duplicate: false,
+        };
+        self.idempotency
+            .insert(request.idempotency_key, (body, receipt.clone()));
+        self.operations.push(operation);
+        Ok(receipt)
     }
     pub fn why_not(
         &self,

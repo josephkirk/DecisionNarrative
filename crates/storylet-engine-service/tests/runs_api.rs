@@ -136,6 +136,59 @@ async fn start_and_act_round_trip_and_restart() {
 }
 
 #[tokio::test]
+async fn reload_in_another_service_refreshes_cached_scene() {
+    let (path, mut story) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let other = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, start) = req(
+        &app,
+        "POST",
+        "/api/v4/runs",
+        Some(json!({"start":{"kind":"beginning"},"expectedRevision":3,"idempotencyKey":"start"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{start}");
+    let uri = format!("/api/v4/runs/{}", start["id"].as_str().unwrap());
+    let (status, cached) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{cached}");
+    assert_eq!(cached["view"]["scene"]["storylet"]["title"], "Story");
+    assert_eq!(cached["contentRevision"], 3);
+    assert_eq!(cached["revision"], 0);
+
+    story["title"] = json!("Edited Story");
+    let store = storylet_engine_service::store::Store::open(&path).unwrap();
+    store
+        .save_content("storylets", "story", &story.to_string(), 2, None)
+        .unwrap();
+    let content_revision = store.get_project_metadata().unwrap().revision;
+    drop(store);
+    let (status, reloaded) = req(
+        &other,
+        "POST",
+        &format!("{uri}/reload"),
+        Some(json!({"expectedRevision":0})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reloaded}");
+    assert_eq!(
+        reloaded["view"]["scene"]["storylet"]["title"],
+        "Edited Story"
+    );
+    assert_eq!(reloaded["contentRevision"], content_revision);
+    assert_eq!(reloaded["revision"], cached["revision"]);
+
+    let (status, current) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    assert_eq!(
+        current["view"]["scene"]["storylet"]["title"],
+        "Edited Story"
+    );
+    assert_eq!(current["contentRevision"], content_revision);
+    assert_eq!(current["revision"], cached["revision"]);
+    assert_eq!(current["stale"], false);
+}
+
+#[tokio::test]
 async fn reload_reports_divergence_after_choice_removed() {
     let (path, mut story) = fixture();
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
@@ -177,19 +230,39 @@ async fn reload_reports_divergence_after_choice_removed() {
         &app,
         "POST",
         &format!("{uri}/reload"),
-        Some(json!({"expectedRevision":1,"idempotencyKey":"reload"})),
+        Some(json!({"expectedRevision":1})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{reload}");
     assert_eq!(reload["divergedAt"], 1);
     assert_eq!(reload["replayed"], 0);
     assert_eq!(reload["stale"], false);
+    let (status, current) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    let (status, repeated) = req(
+        &app,
+        "POST",
+        &format!("{uri}/reload"),
+        Some(json!({"expectedRevision":1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated, current);
     drop(app);
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
     let (status, restarted) = req(&app, "GET", &uri, None).await;
     assert_eq!(status, StatusCode::OK, "{restarted}");
     assert_eq!(restarted["view"], reload["view"]);
     assert_eq!(restarted["contentRevision"], reload["contentRevision"]);
+    let (status, repeated) = req(
+        &app,
+        "POST",
+        &format!("{uri}/reload"),
+        Some(json!({"expectedRevision":1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated, restarted);
 }
 
 #[tokio::test]
@@ -209,14 +282,30 @@ async fn rewound_branch_and_old_keys_survive_restart() {
     )
     .await;
     assert_eq!(first["view"]["currentStep"], 1);
-    let (_, rewound) = req(
-        &app,
-        "POST",
-        &format!("/api/v4/runs/{id}/rewind"),
-        Some(json!({"toStep":0,"expectedRevision":1,"idempotencyKey":"r"})),
-    )
-    .await;
+    let rewind = format!("/api/v4/runs/{id}/rewind");
+    let rewind_body = json!({"toStep":0,"expectedRevision":1,"idempotencyKey":"r"});
+    let (status, rewound) = req(&app, "POST", &rewind, Some(rewind_body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{rewound}");
     assert_eq!(rewound["view"]["currentStep"], 0, "{rewound}");
+    assert_eq!(rewound["revision"], 2);
+    assert_eq!(rewound["receipt"]["revision"], 2);
+    assert_eq!(rewound["receipt"]["step"], 0);
+    assert_eq!(rewound["receipt"]["duplicate"], false);
+    assert!(rewound["receipt"]["eventId"].as_u64().is_some());
+    let uri = format!("/api/v4/runs/{id}");
+    let (status, before_rejections) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{before_rejections}");
+    for rejected in [
+        json!({"toStep":1,"expectedRevision":1,"idempotencyKey":"r"}),
+        json!({"toStep":0,"expectedRevision":1,"idempotencyKey":"stale"}),
+        json!({"toStep":0,"expectedRevision":2,"idempotencyKey":"a"}),
+    ] {
+        let (status, result) = req(&app, "POST", &rewind, Some(rejected)).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{result}");
+        let (status, after_rejection) = req(&app, "GET", &uri, None).await;
+        assert_eq!(status, StatusCode::OK, "{after_rejection}");
+        assert_eq!(after_rejection, before_rejections);
+    }
     let (_,branched)=req(&app,"POST",&format!("/api/v4/runs/{id}/act"),Some(json!({"participant":0,"action":start["view"]["scene"]["choices"][1]["action"],"expectedRevision":rewound["revision"],"idempotencyKey":"b"}))).await;
     assert_eq!(
         branched["view"]["branches"].as_array().unwrap().len(),
@@ -228,11 +317,57 @@ async fn rewound_branch_and_old_keys_survive_restart() {
     let (_, replayed) = req(&app, "GET", &format!("/api/v4/runs/{id}"), None).await;
     assert_eq!(replayed["view"], branched["view"]);
     assert_eq!(replayed["revision"], branched["revision"]);
+    assert_eq!(replayed["revision"], 3);
+    let (status, retry) = req(&app, "POST", &rewind, Some(rewind_body)).await;
+    assert_eq!(status, StatusCode::OK, "{retry}");
+    assert_eq!(retry["receipt"]["duplicate"], true);
+    assert_eq!(retry["receipt"]["eventId"], rewound["receipt"]["eventId"]);
+    assert_eq!(retry["receipt"]["revision"], rewound["receipt"]["revision"]);
+    assert_eq!(retry["receipt"]["step"], rewound["receipt"]["step"]);
+    assert_eq!(retry["view"], replayed["view"]);
+    assert_eq!(retry["revision"], replayed["revision"]);
+    let (_, current) = req(&app, "GET", &format!("/api/v4/runs/{id}"), None).await;
+    assert_eq!(current, replayed);
     let (_, duplicate) = req(&app, "POST", &format!("/api/v4/runs/{id}/act"), Some(body)).await;
     assert_eq!(duplicate["receipt"]["duplicate"], true);
     assert_eq!(duplicate["receipt"]["eventId"], first["receipt"]["eventId"]);
-    let (_, same_start) = req(&app, "POST", "/api/v4/runs", Some(start_body)).await;
-    assert_eq!(same_start, start);
+    let mut different_start = start_body.clone();
+    different_start["seed"] = json!(88);
+    let (status, result) = req(&app, "POST", "/api/v4/runs", Some(different_start)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{result}");
+    let (status, after_conflict) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{after_conflict}");
+    assert_eq!(after_conflict, replayed);
+    let (status, same_start) = req(&app, "POST", "/api/v4/runs", Some(start_body)).await;
+    assert_eq!(status, StatusCode::OK, "{same_start}");
+    assert_eq!(same_start, replayed);
+}
+
+#[tokio::test]
+async fn deleting_a_missing_run_repeats_the_original_success() {
+    let (path, _) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (_, start) = req(
+        &app,
+        "POST",
+        "/api/v4/runs",
+        Some(json!({"start":{"kind":"beginning"},"expectedRevision":3,"idempotencyKey":"s"})),
+    )
+    .await;
+    let uri = format!("/api/v4/runs/{}", start["id"].as_str().unwrap());
+    let (status, result) = req(&app, "DELETE", &uri, Some(json!({"expectedRevision":1}))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{result}");
+    let (status, unchanged) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{unchanged}");
+    assert_eq!(unchanged, start);
+    let (status, deleted) = req(&app, "DELETE", &uri, Some(json!({"expectedRevision":0}))).await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+    drop(app);
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, repeated) = req(&app, "DELETE", &uri, Some(json!({"expectedRevision":1}))).await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated, deleted);
+    assert_eq!(req(&app, "GET", &uri, None).await.0, StatusCode::NOT_FOUND);
 }
 #[tokio::test]
 async fn independent_service_instances_detect_stale_revisions() {
@@ -285,18 +420,22 @@ async fn stalled_start_returns_view_and_survives_restart() {
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
     let (_, after) = req(&app, "GET", &format!("/api/v4/runs/{id}"), None).await;
     assert_eq!(after, start);
-    let (_, rewound) = req(
+    let (status, rewound) = req(
         &app,
         "POST",
         &format!("/api/v4/runs/{id}/rewind"),
         Some(json!({"toStep":0,"expectedRevision":0,"idempotencyKey":"r"})),
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "{rewound}");
+    assert_eq!(rewound["revision"], 1);
     assert_eq!(rewound["stalled"], start["stalled"]);
     drop(app);
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
     let (_, after) = req(&app, "GET", &format!("/api/v4/runs/{id}"), None).await;
-    assert_eq!(after, rewound);
+    assert_eq!(after["view"], rewound["view"]);
+    assert_eq!(after["revision"], rewound["revision"]);
+    assert_eq!(after["stalled"], rewound["stalled"]);
 }
 #[tokio::test]
 async fn mcp_operations_share_http_state_and_idempotency() {
@@ -944,7 +1083,7 @@ async fn replay_participant_configuration_survives_reload() {
         &app,
         "POST",
         &format!("/api/v4/runs/{id}/reload"),
-        Some(json!({"expectedRevision":0,"idempotencyKey":"reload"})),
+        Some(json!({"expectedRevision":0})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{reloaded}");
