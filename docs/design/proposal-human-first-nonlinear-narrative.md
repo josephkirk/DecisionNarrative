@@ -48,7 +48,7 @@ The Rust tests pass on this branch: about 127 engine tests and 41 service tests.
 | Rule-authored NPC actions: priority-ordered, bounded, at most one action per actor per pass, atomic batch | `simulation.rs:9-80` | NPC agency on the world clock. |
 | Storylets with location tags, roles, repeatability and cluster type (Emily Short's cluster types) | `storylets.rs:97-137` | Content attached to places, with pacing metadata. |
 | Chrono flow graphs: tokens, time budgets, QBN hub, salience, waypoint conversations | `chrono_runtime.rs` (5.8k lines) | Scene-level non-linearity. |
-| Timeline scene sections with scrubbing over `[t0,t1)` | `chrono_runtime.rs`, `chrono_playtest.rs:2218` | Intra-scene time. Already reversible. |
+| Timeline scene sections with scrubbing over `[t0,t1)` | `chrono_runtime.rs` | Intra-scene time. Already reversible. |
 | Persistent history as a DAG, `checkout`, `reconcile_history`, `invoke_story_to_poi` | `chrono_runtime.rs:4710,4751,4813` | Forks, counterfactuals and jump-to-point-of-interest: the hardest part of "time" is already present. |
 | Write-set conflict detection | `chrono_transactions.rs` | The primitive needed when several participants act at once. **Contract only.** |
 | Trigger table with a CSR cursor `process_tick` | `chrono_triggers.rs` | World-clock events. **Contract only; not used by the live scheduler.** |
@@ -175,7 +175,7 @@ enum   KnowKind       { Evidence, Witnessed, Told, Rumor, Recollection, Testimon
 struct TellingRow     { holder: PartIx, entry: ChronicleIx, at_event: EventIx }
 ```
 
-- **Commands carry the participant ID.** The existing `WorldCommand.actor_id` already does this. `MovePlayer` becomes `Move { participant }`.
+- **Commands carry the participant ID.** The existing command actor field already does this. `MovePlayer` becomes `Move { participant }`.
 - **Simultaneous actions** are validated as transactions. Conflicting write sets, for example two players confronting the same NPC, are resolved by an authored policy. The policies `RejectLater`, `PriorityWins` and `Serialize` are already specified. A scene with a shared actor becomes a **joint scene** with all co-located participants rather than a race.
 - **Knowledge transfer is an in-world act.** It can be "compare notes", a letter, an overheard line, or gossip. It always creates an event, and each knowledge row it creates points back to that event.
 - **Observation APIs are participant-scoped,** as TENNET FR-02 requires. A client, or an LLM adapter acting for an NPC, receives only that participant's knowledge and surroundings.
