@@ -244,15 +244,19 @@ struct PendingSelection {
 struct Snapshot {
     world: WorldStateTable,
     instance: FlowGraphInstance,
-    commit: usize,
     storylet: u16,
     selections: Vec<PendingSelection>,
     stalled: Option<RunError>,
     rule_played: Vec<(PartIx, u16)>,
-    revision: u64,
+    proposals: usize,
+    event_log: usize,
+    pending_rule_events: Vec<RuleEventData>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct RewindLogs {
     proposals: Vec<(crate::actions::ActionProposal, crate::actions::Authority)>,
     event_log: Vec<RunEvent>,
-    pending_rule_events: Vec<RuleEventData>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -263,6 +267,28 @@ struct RuleEventData {
     knowledge: Vec<(PartIx, u16)>,
     tellings: Vec<(PartIx, u16)>,
     deltas: Vec<BijectiveDelta>,
+}
+struct Checkpoint {
+    world: WorldStateTable,
+    instance: FlowGraphInstance,
+    storylet: u16,
+    selections: Vec<PendingSelection>,
+    next_invocation: u64,
+    stalled: Option<RunError>,
+    rule_played: Vec<(PartIx, u16)>,
+    revision: u64,
+    next_event_id: u32,
+    pending_deltas: Vec<BijectiveDelta>,
+    pending_rule_events: Vec<RuleEventData>,
+    branch: usize,
+    current_step: u32,
+    rewound: bool,
+    branches_len: usize,
+    steps_len: usize,
+    snapshots_len: usize,
+    branch_snapshots_len: usize,
+    proposals_len: usize,
+    event_log_len: usize,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunKernel {
@@ -286,6 +312,8 @@ pub struct RunKernel {
     next_event_id: u32,
     proposals: Vec<(crate::actions::ActionProposal, crate::actions::Authority)>,
     idempotency: BTreeMap<String, (String, crate::actions::ActionReceipt)>,
+    operations: Vec<crate::actions::RunOperation>,
+    rewind_logs: Option<RewindLogs>,
     event_log: Vec<RunEvent>,
     pending_deltas: Vec<BijectiveDelta>,
     pending_rule_events: Vec<RuleEventData>,
@@ -465,27 +493,71 @@ impl RunKernel {
             key: content.storylet_key(id).map(str::to_string),
         }
     }
+    fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            world: self.world.clone(),
+            instance: self.instance.clone(),
+            storylet: self.storylet,
+            selections: self.selections.clone(),
+            next_invocation: self.next_invocation,
+            stalled: self.stalled.clone(),
+            rule_played: self.rule_played.clone(),
+            revision: self.revision,
+            next_event_id: self.next_event_id,
+            pending_deltas: self.pending_deltas.clone(),
+            pending_rule_events: self.pending_rule_events.clone(),
+            branch: self.branch,
+            current_step: self.current_step,
+            rewound: self.rewound,
+            branches_len: self.branches.len(),
+            steps_len: self.branches[self.branch].steps.len(),
+            snapshots_len: self.snapshots.len(),
+            branch_snapshots_len: self.snapshots[self.branch].len(),
+            proposals_len: self.proposals.len(),
+            event_log_len: self.event_log.len(),
+        }
+    }
+    fn rollback(&mut self, c: Checkpoint) {
+        self.world = c.world;
+        self.instance = c.instance;
+        self.storylet = c.storylet;
+        self.selections = c.selections;
+        self.next_invocation = c.next_invocation;
+        self.stalled = c.stalled;
+        self.rule_played = c.rule_played;
+        self.revision = c.revision;
+        self.next_event_id = c.next_event_id;
+        self.pending_deltas = c.pending_deltas;
+        self.pending_rule_events = c.pending_rule_events;
+        self.branch = c.branch;
+        self.current_step = c.current_step;
+        self.rewound = c.rewound;
+        self.branches.truncate(c.branches_len);
+        self.branches[c.branch].steps.truncate(c.steps_len);
+        self.snapshots.truncate(c.snapshots_len);
+        self.snapshots[c.branch].truncate(c.branch_snapshots_len);
+        self.proposals.truncate(c.proposals_len);
+        self.event_log.truncate(c.event_log_len);
+    }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
             world: self.world.clone(),
             instance: self.instance.clone(),
-            commit: self.instance.history.head,
             storylet: self.storylet,
             selections: self.selections.clone(),
             stalled: self.stalled.clone(),
             rule_played: self.rule_played.clone(),
-            revision: self.revision,
-            proposals: self.proposals.clone(),
-            event_log: self.event_log.clone(),
+            proposals: self.proposals.len(),
+            event_log: self.event_log.len(),
             pending_rule_events: self.pending_rule_events.clone(),
         }
     }
     fn pending_priority(instance: &FlowGraphInstance, hub: bool) -> Option<u32> {
         for node in &instance.nodes {
-            if let Some(child) = node.sub_graph.as_deref() {
-                if let Some(guid) = Self::pending_priority(child, hub) {
-                    return Some(guid);
-                }
+            if let Some(child) = node.sub_graph.as_deref()
+                && let Some(guid) = Self::pending_priority(child, hub)
+            {
+                return Some(guid);
             }
         }
         instance.nodes.iter().find_map(|node| {
@@ -584,28 +656,25 @@ impl RunKernel {
     fn auto_advance(&mut self) -> Result<(), RunError> {
         let start = self.instance.clock_ms;
         loop {
-            if !Self::has_queued_tokens(&self.instance) {
-                if let Some(selection) = self.selections.last().cloned() {
-                    if self.pending() == Some(selection.hub) && !self.scene_busy(&selection) {
-                        let mut ctx = RuntimeContext::with_registries(
-                            &mut self.world,
-                            &self.dispatcher,
-                            &self.registry,
-                            &self.passion_registry,
-                        );
-                        let owner =
-                            Self::instance_by_id_mut(&mut self.instance, selection.hub_instance_id)
-                                .ok_or_else(|| {
-                                    RunError::Engine("selection hub disappeared".into())
-                                })?;
-                        owner.acting_participant = selection.participant;
-                        owner
-                            .complete_reserved_storylet(&mut ctx, selection.hub, selection.storylet)
-                            .map_err(|e| RunError::Engine(e.to_string()))?;
-                        self.selections.pop();
-                        continue;
-                    }
-                }
+            if !Self::has_queued_tokens(&self.instance)
+                && let Some(selection) = self.selections.last().cloned()
+                && self.pending() == Some(selection.hub)
+                && !self.scene_busy(&selection)
+            {
+                let mut ctx = RuntimeContext::with_registries(
+                    &mut self.world,
+                    &self.dispatcher,
+                    &self.registry,
+                    &self.passion_registry,
+                );
+                let owner = Self::instance_by_id_mut(&mut self.instance, selection.hub_instance_id)
+                    .ok_or_else(|| RunError::Engine("selection hub disappeared".into()))?;
+                owner.acting_participant = selection.participant;
+                owner
+                    .complete_reserved_storylet(&mut ctx, selection.hub, selection.storylet)
+                    .map_err(|e| RunError::Engine(e.to_string()))?;
+                self.selections.pop();
+                continue;
             }
             let waiting_on_scene = self.selections.last().is_some_and(|selection| {
                 self.scene_busy(selection) && self.pending() == Some(selection.hub)
@@ -740,6 +809,8 @@ impl RunKernel {
             next_event_id: 1,
             proposals: Vec::new(),
             idempotency: BTreeMap::new(),
+            operations: Vec::new(),
+            rewind_logs: None,
             event_log: vec![RunEvent {
                 id: 0,
                 step: 0,
@@ -849,16 +920,15 @@ impl RunKernel {
             .pending()
             .and_then(|guid| Self::owner(&self.instance, guid))
             .is_some_and(|owner| owner.acting_participant == actor)
+            && let Some(scene) = view.scene
         {
-            if let Some(scene) = view.scene {
-                out.extend(
-                    scene
-                        .choices
-                        .into_iter()
-                        .filter(|c| c.enabled)
-                        .map(|c| c.action),
-                );
-            }
+            out.extend(
+                scene
+                    .choices
+                    .into_iter()
+                    .filter(|c| c.enabled)
+                    .map(|c| c.action),
+            );
         }
         if let Some(hub) = view.hub {
             out.extend(view.also_here.iter().map(|s| RunAction::PlayStorylet {
@@ -875,30 +945,32 @@ impl RunKernel {
                     .map(|m| RunAction::Move { to: m.to }),
             );
         }
-        if content.connections.is_empty() {
-            if let Some(location) = self.world.active_location(actor) {
-                let source = self.world.vertices.iter().find(|v| {
-                    v.layers
-                        .contains(&crate::chrono_state::GraphLayer::Location)
-                        && v.entity_index == Some(location)
-                });
-                if let Some(source) = source {
-                    for edge in self.world.edges.iter().filter(|e| {
+        if content.connections.is_empty()
+            && let Some(location) = self.world.active_location(actor)
+        {
+            let source = self.world.vertices.iter().find(|v| {
+                v.layers
+                    .contains(&crate::chrono_state::GraphLayer::Location)
+                    && v.entity_index == Some(location)
+            });
+            if let Some(source) = source {
+                for edge in
+                    self.world.edges.iter().filter(|e| {
                         e.relation_type == "connected" && e.source_id == source.vertex_id
-                    }) {
-                        if let Some(to) = self
-                            .world
-                            .vertices
-                            .iter()
-                            .find(|v| {
-                                v.vertex_id == edge.target_id
-                                    && v.layers
-                                        .contains(&crate::chrono_state::GraphLayer::Location)
-                            })
-                            .and_then(|v| v.entity_index)
-                        {
-                            out.push(RunAction::Move { to });
-                        }
+                    })
+                {
+                    if let Some(to) = self
+                        .world
+                        .vertices
+                        .iter()
+                        .find(|v| {
+                            v.vertex_id == edge.target_id
+                                && v.layers
+                                    .contains(&crate::chrono_state::GraphLayer::Location)
+                        })
+                        .and_then(|v| v.entity_index)
+                    {
+                        out.push(RunAction::Move { to });
                     }
                 }
             }
@@ -915,15 +987,14 @@ impl RunKernel {
             if let Some((_, items, _)) = inventory(&self.world, actor) {
                 let mut counts = BTreeMap::<u16, u16>::new();
                 for item in items {
-                    if let crate::chrono_state::AttributeValue::EntityRef(id) = item {
-                        if let Some(entity) = self
+                    if let crate::chrono_state::AttributeValue::EntityRef(id) = item
+                        && let Some(entity) = self
                             .world
                             .vertex(&id)
                             .and_then(|vertex| vertex.entity_index)
-                        {
-                            let count = counts.entry(entity).or_default();
-                            *count = count.saturating_add(1);
-                        }
+                    {
+                        let count = counts.entry(entity).or_default();
+                        *count = count.saturating_add(1);
                     }
                 }
                 for (resource, count) in counts {
@@ -965,7 +1036,11 @@ impl RunKernel {
         if !controlled {
             return Err(reject("authority does not control actor"));
         }
-        let body = serde_json::to_string(&(authority, &proposal)).unwrap_or_default();
+        let operation = crate::actions::RunOperation::Action {
+            authority,
+            proposal: proposal.clone(),
+        };
+        let body = serde_json::to_string(&operation).unwrap_or_default();
         if let Some((old, receipt)) = self.idempotency.get(&proposal.idempotency_key) {
             return if *old == body {
                 let mut r = receipt.clone();
@@ -987,26 +1062,26 @@ impl RunKernel {
         if proposal.idempotency_key.trim().is_empty() {
             return Err(reject("idempotency key is empty"));
         }
-        let backup = self.clone();
+        let backup = self.checkpoint();
         let mut old_history_lengths = BTreeMap::new();
         Self::history_lengths(&self.instance, &mut old_history_lengths);
         let step = match self.act_internal(content, proposal.actor, proposal.action.clone()) {
             Ok((step, _)) => step,
             Err(error) => {
-                *self = backup;
+                self.rollback(backup);
                 return Err(reject(&format!("{error:?}")));
             }
         };
         self.revision = match self.revision.checked_add(1) {
             Some(revision) => revision,
             None => {
-                *self = backup;
+                self.rollback(backup);
                 return Err(reject("revision overflow"));
             }
         };
         let id = self.next_event_id;
         let Some(next_event_id) = self.next_event_id.checked_add(1) else {
-            *self = backup;
+            self.rollback(backup);
             return Err(reject("event id overflow"));
         };
         self.next_event_id = next_event_id;
@@ -1052,14 +1127,14 @@ impl RunKernel {
             self.next_event_id = match self.next_event_id.checked_add(1) {
                 Some(next) => next,
                 None => {
-                    *self = backup;
+                    self.rollback(backup);
                     return Err(reject("event id overflow"));
                 }
             };
             self.revision = match self.revision.checked_add(1) {
                 Some(next) => next,
                 None => {
-                    *self = backup;
+                    self.rollback(backup);
                     return Err(reject("revision overflow"));
                 }
             };
@@ -1100,6 +1175,8 @@ impl RunKernel {
         self.idempotency
             .insert(proposal.idempotency_key.clone(), (body, receipt.clone()));
         self.proposals.push((proposal, authority));
+        self.operations.push(operation);
+        self.rewind_logs = None;
         self.snapshots[self.branch][self.current_step as usize] = self.snapshot();
         Ok(receipt)
     }
@@ -1204,93 +1281,90 @@ impl RunKernel {
         let mut also_here = vec![];
         let mut hub = None;
         let mut scene = None;
-        if let Some(guid) = self.pending() {
-            if let Some(owner) = Self::owner(&self.instance, guid) {
-                if let Some(def) = owner.asset.node(guid) {
-                    match &def.kind {
-                        NodeKind::Choice { .. } => {
-                            let choices = def
-                                .output_pins
-                                .iter()
-                                .enumerate()
-                                .map(|(i, p)| ChoiceView {
-                                    action: RunAction::Choose {
-                                        node_guid: guid,
-                                        output_pin: i as u16,
-                                    },
-                                    label: def
-                                        .payload
-                                        .get("nodeData")
-                                        .and_then(|x| x.get("choices"))
-                                        .and_then(|x| x.get(i))
-                                        .and_then(|x| x.get("text"))
-                                        .and_then(|x| x.as_str())
-                                        .unwrap_or(&p.pin_name)
-                                        .to_string(),
-                                    enabled: true,
-                                    requirement: None,
-                                })
-                                .collect();
-                            scene = Some(SceneView {
-                                storylet: Self::reference(content, self.storylet),
-                                lines: lines.clone(),
-                                choices,
+        if let Some(guid) = self.pending()
+            && let Some(owner) = Self::owner(&self.instance, guid)
+            && let Some(def) = owner.asset.node(guid)
+        {
+            match &def.kind {
+                NodeKind::Choice { .. } => {
+                    let choices = def
+                        .output_pins
+                        .iter()
+                        .enumerate()
+                        .map(|(i, p)| ChoiceView {
+                            action: RunAction::Choose {
                                 node_guid: guid,
-                            });
-                        }
-                        NodeKind::WaypointConversation { graph, .. } => {
-                            let current = owner
-                                .node(guid)
-                                .map(|n| n.current_topic_id.as_str())
-                                .unwrap_or("");
-                            let choices = graph
-                                .edges
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, edge)| edge.from_topic_id == current)
-                                .map(|(i, edge)| ChoiceView {
-                                    action: RunAction::Topic {
-                                        node_guid: guid,
-                                        edge_id: i as u32,
-                                    },
-                                    label: if edge.to_topic_id.is_empty() {
-                                        edge.edge_id.clone()
-                                    } else {
-                                        edge.to_topic_id.clone()
-                                    },
-                                    enabled: true,
-                                    requirement: None,
-                                })
-                                .collect();
-                            scene = Some(SceneView {
-                                storylet: Self::reference(content, self.storylet),
-                                lines: lines.clone(),
-                                choices,
-                                node_guid: guid,
-                            });
-                        }
-                        NodeKind::QbnHub { .. } => {
-                            hub = Some(guid);
-                            let mut copy = self.world.clone();
-                            let ctx = RuntimeContext::with_registries(
-                                &mut copy,
-                                &self.dispatcher,
-                                &self.registry,
-                                &self.passion_registry,
-                            );
-                            also_here = owner
-                                .present_deck_for(&ctx, guid, participant)
-                                .unwrap_or_default()
-                                .into_iter()
-                                .filter(|id| {
-                                    storylet_at_location(content, &self.world, participant, *id)
-                                })
-                                .map(|id| Self::reference(content, id))
-                                .collect();
-                        }
-                        _ => {}
-                    }
+                                output_pin: i as u16,
+                            },
+                            label: def
+                                .payload
+                                .get("nodeData")
+                                .and_then(|x| x.get("choices"))
+                                .and_then(|x| x.get(i))
+                                .and_then(|x| x.get("text"))
+                                .and_then(|x| x.as_str())
+                                .unwrap_or(&p.pin_name)
+                                .to_string(),
+                            enabled: true,
+                            requirement: None,
+                        })
+                        .collect();
+                    scene = Some(SceneView {
+                        storylet: Self::reference(content, self.storylet),
+                        lines: lines.clone(),
+                        choices,
+                        node_guid: guid,
+                    });
                 }
+                NodeKind::WaypointConversation { graph, .. } => {
+                    let current = owner
+                        .node(guid)
+                        .map(|n| n.current_topic_id.as_str())
+                        .unwrap_or("");
+                    let choices = graph
+                        .edges
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, edge)| edge.from_topic_id == current)
+                        .map(|(i, edge)| ChoiceView {
+                            action: RunAction::Topic {
+                                node_guid: guid,
+                                edge_id: i as u32,
+                            },
+                            label: if edge.to_topic_id.is_empty() {
+                                edge.edge_id.clone()
+                            } else {
+                                edge.to_topic_id.clone()
+                            },
+                            enabled: true,
+                            requirement: None,
+                        })
+                        .collect();
+                    scene = Some(SceneView {
+                        storylet: Self::reference(content, self.storylet),
+                        lines: lines.clone(),
+                        choices,
+                        node_guid: guid,
+                    });
+                }
+                NodeKind::QbnHub { .. } => {
+                    hub = Some(guid);
+                    let mut copy = self.world.clone();
+                    let ctx = RuntimeContext::with_registries(
+                        &mut copy,
+                        &self.dispatcher,
+                        &self.registry,
+                        &self.passion_registry,
+                    );
+                    also_here = owner
+                        .present_deck_for(&ctx, guid, participant)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|id| storylet_at_location(content, &self.world, participant, *id))
+                        .map(|id| Self::reference(content, id))
+                        .collect();
+                }
+                _ => {}
             }
         }
         let ending = if self.pending().is_none()
@@ -1349,7 +1423,7 @@ impl RunKernel {
                 "no actions left in this slot".into(),
             ));
         }
-        let backup = self.clone();
+        let backup = self.checkpoint();
         self.instance.acting_participant = participant;
         let pending = self.pending();
         let result = (|| {
@@ -1548,7 +1622,7 @@ impl RunKernel {
         match result {
             Ok(()) => {}
             Err(e) => {
-                *self = backup;
+                self.rollback(backup);
                 return Err(e);
             }
         }
@@ -1702,10 +1776,11 @@ impl RunKernel {
             if !def.is_repeatable && self.rule_played.contains(&(p, def.storylet_id)) {
                 continue;
             }
-            if let Some(mask) = content.storylet_location_tags.get(&def.storylet_id) {
-                if !mask.is_empty() && !location_tags.is_some_and(|tags| tags.intersects(mask)) {
-                    continue;
-                }
+            if let Some(mask) = content.storylet_location_tags.get(&def.storylet_id)
+                && !mask.is_empty()
+                && !location_tags.is_some_and(|tags| tags.intersects(mask))
+            {
+                continue;
             }
             if !self.dispatcher.is_eligible(def, &self.world) {
                 continue;
@@ -1834,43 +1909,90 @@ impl RunKernel {
     pub fn stalled(&self) -> Option<RunError> {
         self.stalled.clone()
     }
+    pub fn apply_operation(
+        &mut self,
+        content: &RunContent,
+        operation: crate::actions::RunOperation,
+    ) -> Result<crate::actions::ActionReceipt, crate::actions::ActionRejection> {
+        match operation {
+            crate::actions::RunOperation::Action {
+                authority,
+                proposal,
+            } => self.propose(content, authority, proposal),
+            crate::actions::RunOperation::Rewind { authority, request } => {
+                self.rewind(authority, request)
+            }
+        }
+    }
+    pub fn operations(&self) -> &[crate::actions::RunOperation] {
+        &self.operations
+    }
     pub fn rewind(
         &mut self,
         authority: crate::actions::Authority,
-        to_step: u32,
-    ) -> Result<(), RunError> {
-        if authority != crate::actions::Authority::Architect {
-            return Err(RunError::InvalidAction(
-                "rewind requires Architect authority".into(),
-            ));
+        request: crate::actions::RewindRequest,
+    ) -> Result<crate::actions::ActionReceipt, crate::actions::ActionRejection> {
+        use crate::actions::{ActionReceipt, ActionRejection, Authority, RunOperation};
+        let reject = |reason: &str| ActionRejection {
+            reason: reason.into(),
+        };
+        if authority != Authority::Architect {
+            return Err(reject("rewind requires Architect authority"));
         }
+        let operation = RunOperation::Rewind {
+            authority,
+            request: request.clone(),
+        };
+        let body = serde_json::to_string(&operation).unwrap_or_default();
+        if let Some((old, receipt)) = self.idempotency.get(&request.idempotency_key) {
+            return if *old == body {
+                let mut receipt = receipt.clone();
+                receipt.duplicate = true;
+                Ok(receipt)
+            } else {
+                Err(reject("idempotency key reused with different body"))
+            };
+        }
+        if request.idempotency_key.trim().is_empty() {
+            return Err(reject("idempotency key is empty"));
+        }
+        if request.expected_revision != self.revision {
+            return Err(reject("stale revision"));
+        }
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| reject("revision overflow"))?;
         let snap = self.snapshots[self.branch]
-            .get(to_step as usize)
+            .get(request.to_step as usize)
             .cloned()
-            .ok_or_else(|| RunError::InvalidAction("unknown step".into()))?;
-        let mut ctx = RuntimeContext::with_registries(
-            &mut self.world,
-            &self.dispatcher,
-            &self.registry,
-            &self.passion_registry,
-        );
-        self.instance
-            .checkout(&mut ctx, snap.commit)
-            .map_err(|e| RunError::Engine(e.to_string()))?;
-        let idempotency = self.idempotency.clone();
+            .ok_or_else(|| reject("unknown step"))?;
         self.world = snap.world;
         self.instance = snap.instance;
         self.storylet = snap.storylet;
         self.selections = snap.selections;
         self.rule_played = snap.rule_played;
         self.stalled = snap.stalled;
-        self.revision = snap.revision;
-        self.proposals = snap.proposals;
-        self.idempotency = idempotency;
-        self.event_log = snap.event_log;
-        self.current_step = to_step;
+        self.pending_rule_events = snap.pending_rule_events;
+        self.revision = revision;
+        let logs = self.rewind_logs.get_or_insert_with(|| RewindLogs {
+            proposals: self.proposals.clone(),
+            event_log: self.event_log.clone(),
+        });
+        self.proposals = logs.proposals[..snap.proposals].to_vec();
+        self.event_log = logs.event_log[..snap.event_log].to_vec();
+        self.current_step = request.to_step;
         self.rewound = true;
-        Ok(())
+        let receipt = ActionReceipt {
+            event_id: self.event_log.last().map_or(START_EVENT, |event| event.id),
+            revision,
+            step: request.to_step,
+            duplicate: false,
+        };
+        self.idempotency
+            .insert(request.idempotency_key, (body, receipt.clone()));
+        self.operations.push(operation);
+        Ok(receipt)
     }
     pub fn why_not(
         &self,
@@ -1899,59 +2021,59 @@ impl RunKernel {
                     content
                         .dispatcher
                         .explain_ineligible(d, &self.world, &content.registry);
-                if reason.is_none() {
-                    if let Some(graph) = &d.precondition_graph {
-                        let mut world = self.world.clone();
-                        let ctx = RuntimeContext::with_registries(
-                            &mut world,
-                            &content.dispatcher,
-                            &content.registry,
-                            &content.passion_registry,
-                        );
-                        match FlowGraphInstance::evaluate_precondition_graph_for(
-                            graph,
-                            &ctx,
-                            participant,
-                        ) {
-                            Err(error) => {
-                                reason = Some(format!("precondition evaluation failed: {error}"))
-                            }
-                            Ok(false) => {
-                                reason = graph.nodes.iter().find_map(|node| match node.kind {
-                                    NodeKind::Knows {
-                                        holder,
-                                        fact,
-                                        confirmed_only,
-                                    } => {
-                                        let holder = match holder {
-                                            crate::chrono_runtime::HolderRef::Acting => participant,
-                                            crate::chrono_runtime::HolderRef::Participant(p) => p,
-                                        };
-                                        let known =
-                                            self.world.knowledge.knows(holder, fact).is_some_and(
-                                                |r| !confirmed_only || r.kind.is_confirmed(),
-                                            );
-                                        if known {
-                                            None
-                                        } else {
-                                            let name = content
-                                                .registry
-                                                .tag(fact)
-                                                .unwrap_or("unknown")
-                                                .strip_prefix("fact.")
-                                                .unwrap_or("unknown")
-                                                .replace(['_', '.'], " ");
-                                            Some(format!("needs fact \"{name}\""))
-                                        }
-                                    }
-                                    _ => None,
-                                });
-                                if reason.is_none() {
-                                    reason = Some("needs another condition".into());
-                                }
-                            }
-                            Ok(true) => {}
+                if reason.is_none()
+                    && let Some(graph) = &d.precondition_graph
+                {
+                    let mut world = self.world.clone();
+                    let ctx = RuntimeContext::with_registries(
+                        &mut world,
+                        &content.dispatcher,
+                        &content.registry,
+                        &content.passion_registry,
+                    );
+                    match FlowGraphInstance::evaluate_precondition_graph_for(
+                        graph,
+                        &ctx,
+                        participant,
+                    ) {
+                        Err(error) => {
+                            reason = Some(format!("precondition evaluation failed: {error}"))
                         }
+                        Ok(false) => {
+                            reason = graph.nodes.iter().find_map(|node| match node.kind {
+                                NodeKind::Knows {
+                                    holder,
+                                    fact,
+                                    confirmed_only,
+                                } => {
+                                    let holder = match holder {
+                                        crate::chrono_runtime::HolderRef::Acting => participant,
+                                        crate::chrono_runtime::HolderRef::Participant(p) => p,
+                                    };
+                                    let known =
+                                        self.world.knowledge.knows(holder, fact).is_some_and(|r| {
+                                            !confirmed_only || r.kind.is_confirmed()
+                                        });
+                                    if known {
+                                        None
+                                    } else {
+                                        let name = content
+                                            .registry
+                                            .tag(fact)
+                                            .unwrap_or("unknown")
+                                            .strip_prefix("fact.")
+                                            .unwrap_or("unknown")
+                                            .replace(['_', '.'], " ");
+                                        Some(format!("needs fact \"{name}\""))
+                                    }
+                                }
+                                _ => None,
+                            });
+                            if reason.is_none() {
+                                reason = Some("needs another condition".into());
+                            }
+                        }
+                        Ok(true) => {}
                     }
                 }
                 reason.map(|reason| NearMiss {

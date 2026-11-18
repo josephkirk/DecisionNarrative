@@ -179,15 +179,15 @@ impl<'a> Matcher<'a> {
     fn edge_matches(&self, pattern_index: usize, edge_index: usize) -> bool {
         let ep = &self.pattern.edges[pattern_index];
         let edge = &self.graph.edges[edge_index];
-        if let Some(wanted) = &ep.edge_id {
-            if &edge.edge_id != wanted {
-                return false;
-            }
+        if let Some(wanted) = &ep.edge_id
+            && &edge.edge_id != wanted
+        {
+            return false;
         }
-        if let Some(wanted) = &ep.relation_type {
-            if &edge.relation_type != wanted {
-                return false;
-            }
+        if let Some(wanted) = &ep.relation_type
+            && &edge.relation_type != wanted
+        {
+            return false;
         }
         if let Some(binding) = &ep.source {
             match binding {

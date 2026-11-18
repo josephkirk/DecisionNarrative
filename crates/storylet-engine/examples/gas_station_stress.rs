@@ -16,7 +16,7 @@ fn main() {
             for actor in 0..ACTORS {
                 let id = ((trial as usize + turn as usize * 3 + actor * 7) % 128) as u16;
                 state.set_bit(id).unwrap();
-                if (turn + actor as u64) % 5 == 0 {
+                if (turn + actor as u64).is_multiple_of(5) {
                     state.clear_bit(id).unwrap();
                 }
             }

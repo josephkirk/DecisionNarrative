@@ -17,10 +17,9 @@ fn set_learn_visibility(
                 visibility: current,
                 ..
             } = &mut node.kind
+                && *learned == fact
             {
-                if *learned == fact {
-                    *current = visibility;
-                }
+                *current = visibility;
             }
         }
     }
@@ -194,16 +193,25 @@ fn colocated_learn_appears_only_for_witnesses() {
 fn knowledge_held_when_the_run_starts_traces_to_the_start_event() {
     let mut content = support::weirs_crossing::content_all_humans();
     let fact = content.registry.id("fact.tides").unwrap();
-    content.initial_world.knowledge.learn(storylet_engine::chrono_participants::KnowledgeRow {
-        holder: 0,
-        fact,
-        kind: storylet_engine::chrono_participants::KnowKind::Evidence,
-        source_event: 99,
-        told_by: None,
-    });
+    content
+        .initial_world
+        .knowledge
+        .learn(storylet_engine::chrono_participants::KnowledgeRow {
+            holder: 0,
+            fact,
+            kind: storylet_engine::chrono_participants::KnowKind::Evidence,
+            source_event: 99,
+            told_by: None,
+        });
     let run = RunKernel::start(&content, RunStart::Beginning, 4).unwrap();
     let start = storylet_engine::run::START_EVENT;
-    assert!(run.world().knowledge.rows.iter().all(|row| row.source_event == start));
+    assert!(
+        run.world()
+            .knowledge
+            .rows
+            .iter()
+            .all(|row| row.source_event == start)
+    );
     assert_eq!(run.step_of_event(start), Some(0));
     assert_eq!(run.explain(start), Some(Vec::new()));
 }

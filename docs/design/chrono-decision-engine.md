@@ -47,6 +47,8 @@ Rule participants are evaluated in deterministic participant order. Eligibility 
 
 The native ABI exposes `dn_run_start`, `dn_run_propose`, `dn_run_observe`, `dn_run_explain`, `dn_run_architect_view`, `dn_run_free`, and `dn_string_free`. `dn_engine_abi_version` reports ABI version 2. JSON is the wire format for content, starts, proposals, receipts, observations, explanations, and diagnostic views.
 
+JSON arguments must point to valid NUL-terminated strings for the duration of the call. `error_out` may be null or point to writable storage for a char pointer. Run handles must be null or live handles returned by `dn_run_start`; mutable calls require exclusive access. Release returned strings once with `dn_string_free` and handles once with `dn_run_free`. Never pass a freed pointer or a pointer obtained from another allocator.
+
 ## Runtime surface
 
 The crate exposes the Chrono `RunKernel`, typed content and graph structures, action catalog, actor observation, and the `dn_run_*` native interface. The separate `WorldState` command runtime, `StoryletRuntime`, project bundle runtime, legacy engine/playtest ABI, and their host and benchmark binaries are not part of the crate. Native-host example programs and the PowerShell runner are not included.

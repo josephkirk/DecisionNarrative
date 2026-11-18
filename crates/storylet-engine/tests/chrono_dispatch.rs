@@ -36,19 +36,21 @@ fn role_binding_never_shares_an_actor_and_honours_the_current_marker() {
     let courier = tags.id("role.courier").unwrap();
     let current = tags.id("location.current").unwrap();
 
-    let mut def = StoryletDef::default();
-    def.storylet_id = 5;
-    def.required_roles = vec![
-        RoleRequirement {
-            role_tag: "role.clerk".to_owned(),
-            location_tag: Some("location.current".to_owned()),
-            ..Default::default()
-        },
-        RoleRequirement {
-            role_tag: "role.courier".to_owned(),
-            ..Default::default()
-        },
-    ];
+    let def = StoryletDef {
+        storylet_id: 5,
+        required_roles: vec![
+            RoleRequirement {
+                role_tag: "role.clerk".to_owned(),
+                location_tag: Some("location.current".to_owned()),
+                ..Default::default()
+            },
+            RoleRequirement {
+                role_tag: "role.courier".to_owned(),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
 
     let mut dispatcher = UnifiedDispatcher::new(vec![def]);
     dispatcher.resolve(&tags).unwrap();
@@ -115,13 +117,17 @@ fn cooldown_units_are_kept_separate_and_conflicts_are_typed() {
 
 #[test]
 fn qbn_deck_order_and_salience_ties_are_deterministic() {
-    let mut low = StoryletDef::default();
-    low.storylet_id = 1;
-    low.display_priority = 3;
-    low.is_repeatable = false;
-    let mut high = StoryletDef::default();
-    high.storylet_id = 2;
-    high.display_priority = 5;
+    let mut low = StoryletDef {
+        storylet_id: 1,
+        display_priority: 3,
+        is_repeatable: false,
+        ..Default::default()
+    };
+    let mut high = StoryletDef {
+        storylet_id: 2,
+        display_priority: 5,
+        ..Default::default()
+    };
 
     low.required_arc_phases.set_bit(0).unwrap();
     high.required_arc_phases.set_bit(0).unwrap();

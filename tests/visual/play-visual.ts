@@ -174,9 +174,9 @@ try {
   await shot(page, "06-stale");
   check("stale banner is shown", await page.getByRole("button", { name: "Reload run" }).isVisible());
   await page.getByRole("button", { name: "Reload run" }).click();
-  await page.getByText(/Replayed \d+ of \d+ steps/).waitFor();
+  await page.getByText(/Replayed \d+ steps; no divergence/).waitFor();
   await shot(page, "07-reloaded");
-  check("reload note appears", await page.getByText(/Replayed \d+ of \d+ steps/).isVisible());
+  check("reload note appears", await page.getByText(/Replayed \d+ steps; no divergence/).isVisible());
   check("stale banner clears after reload", (await page.getByText("Content changed since this run started.").count()) === 0);
   check("edited prose is now shown", await page.getByText("A second line.").isVisible());
 

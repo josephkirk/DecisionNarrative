@@ -111,10 +111,9 @@ impl DataValue {
     }
     pub fn same_type(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Array(a), Self::Array(b)) => a
-                .first()
-                .zip(b.first())
-                .map_or(true, |(x, y)| x.same_type(y)),
+            (Self::Array(a), Self::Array(b)) => {
+                a.first().zip(b.first()).is_none_or(|(x, y)| x.same_type(y))
+            }
             _ => self.type_name() == other.type_name(),
         }
     }
@@ -739,12 +738,12 @@ impl FlowGraphAsset {
                     cost_ms: node.cost_ms,
                 });
             }
-            if let Some(scope) = node.mission_scope {
-                if scope == node.node_guid {
-                    return Err(GraphError::MissionScopeSelfReference {
-                        node_guid: node.node_guid,
-                    });
-                }
+            if let Some(scope) = node.mission_scope
+                && scope == node.node_guid
+            {
+                return Err(GraphError::MissionScopeSelfReference {
+                    node_guid: node.node_guid,
+                });
             }
             if let NodeKind::SceneSection {
                 section_duration_ms,
@@ -769,13 +768,13 @@ impl FlowGraphAsset {
             }
         }
         for node in &self.nodes {
-            if let Some(scope) = node.mission_scope {
-                if !self.has_node(scope) {
-                    return Err(GraphError::MissionScopeNotFound {
-                        node_guid: node.node_guid,
-                        scope,
-                    });
-                }
+            if let Some(scope) = node.mission_scope
+                && !self.has_node(scope)
+            {
+                return Err(GraphError::MissionScopeNotFound {
+                    node_guid: node.node_guid,
+                    scope,
+                });
             }
         }
         if !self.has_node(self.start_node_guid) {
@@ -1959,10 +1958,10 @@ impl FlowGraphInstance {
     pub fn rebuild_completed_bitset(&self) -> Result<StoryletBitset, GraphError> {
         let mut bits = StoryletBitset::new();
         for entry in self.history.call_history()? {
-            if entry.completed {
-                if let Some(storylet_id) = entry.chosen_storylet_id {
-                    let _ = bits.set(storylet_id);
-                }
+            if entry.completed
+                && let Some(storylet_id) = entry.chosen_storylet_id
+            {
+                let _ = bits.set(storylet_id);
             }
         }
         Ok(bits)
@@ -2054,6 +2053,7 @@ struct SectionFrame {
 }
 
 impl FlowGraphInstance {
+    #[allow(clippy::too_many_arguments)]
     fn plan(
         &self,
         ctx: &mut RuntimeContext,
@@ -2563,13 +2563,13 @@ impl FlowGraphInstance {
                 } else {
                     None
                 };
-                if let Some(destination) = destination {
-                    if self.asset.node(destination).is_none() {
-                        return Err(GraphError::TeleportDestinationNotFound {
-                            node_guid,
-                            destination,
-                        });
-                    }
+                if let Some(destination) = destination
+                    && self.asset.node(destination).is_none()
+                {
+                    return Err(GraphError::TeleportDestinationNotFound {
+                        node_guid,
+                        destination,
+                    });
                 }
                 plan.completed = true;
                 plan.record = true;
@@ -2582,16 +2582,15 @@ impl FlowGraphInstance {
             }
             NodeKind::QbnHub {
                 exit_storylet_id, ..
-            } => match storylet_id {
-                Some(id) => {
+            } => {
+                if let Some(id) = storylet_id {
                     self.plan_storylet(ctx, &mut plan, id)?;
                     if force || Some(id) == *exit_storylet_id {
                         plan.completed = true;
                         plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
                     }
                 }
-                None => {}
-            },
+            }
             NodeKind::SalienceSelector {
                 pool,
                 fallback_storylet_id,
@@ -2960,18 +2959,16 @@ impl FlowGraphInstance {
                     continue;
                 }
                 let count = ordinal.entry(entry.node_guid).or_default();
-                if index > position {
-                    if let Some(node_index) = self.node_index(entry.node_guid) {
-                        if let Some(NodeCallData::Delta { delta }) =
-                            self.nodes[node_index].call_data.get(*count)
-                        {
-                            for &(holder, fact) in &delta.knowledge_added {
-                                rebases.push((holder, fact, index as u32));
-                            }
-                            for &(holder, told) in &delta.tellings_added {
-                                telling_rebases.push((holder, told, index as u32));
-                            }
-                        }
+                if index > position
+                    && let Some(node_index) = self.node_index(entry.node_guid)
+                    && let Some(NodeCallData::Delta { delta }) =
+                        self.nodes[node_index].call_data.get(*count)
+                {
+                    for &(holder, fact) in &delta.knowledge_added {
+                        rebases.push((holder, fact, index as u32));
+                    }
+                    for &(holder, told) in &delta.tellings_added {
+                        telling_rebases.push((holder, told, index as u32));
                     }
                 }
                 *count += 1;
@@ -3055,7 +3052,7 @@ impl FlowGraphInstance {
             deferred_until_ms: 0,
         };
         self.next_token_id += 1;
-        self.tokens.push(token.clone());
+        self.tokens.push(token);
         self.token_invocations
             .insert(token.token_id, self.current_invocation);
         token
@@ -3873,7 +3870,7 @@ impl FlowGraphInstance {
                     instance_id: self.instance_id,
                 });
             }
-            let mut token = self.tokens[index].clone();
+            let mut token = self.tokens[index];
             let cost = self.node_cost(token.target_node_guid)?;
             if cost > remaining && (executions > 0 || frame_budget_ms == 0) {
                 let deferred = &mut self.tokens[index];
@@ -4041,7 +4038,7 @@ impl FlowGraphInstance {
                     storylet_id,
                 });
             }
-            let completed = self.completed_storylets.clone();
+            let completed = self.completed_storylets;
             let eligible = match ctx.dispatcher.storylet(storylet_id) {
                 Some(storylet) => {
                     ctx.dispatcher
@@ -5049,7 +5046,7 @@ impl FlowGraphInstance {
             let index = self
                 .node_index(node_guid)
                 .ok_or(GraphError::NodeNotFound { node_guid })?;
-            let child = self.nodes[index].sub_graph.as_mut().ok_or_else(|| {
+            let child = self.nodes[index].sub_graph.as_mut().ok_or({
                 GraphError::MissionAssetNotAttached {
                     node_guid,
                     sub_graph_asset_id: asset_id,
@@ -5289,23 +5286,23 @@ impl FlowGraphInstance {
                     },
                     None => None,
                 };
-                if let Some(asset_id) = mission_asset_id {
-                    if let Some(scoped) = mission_histories.get(&entry.node_guid) {
-                        let index =
-                            self.node_index(entry.node_guid)
-                                .ok_or(GraphError::NodeNotFound {
-                                    node_guid: entry.node_guid,
-                                })?;
-                        if self.nodes[index].state != NodeExecutionState::Completed {
-                            let child = self.nodes[index].sub_graph.as_mut().ok_or(
-                                GraphError::MissionAssetNotAttached {
-                                    node_guid: entry.node_guid,
-                                    sub_graph_asset_id: asset_id,
-                                },
-                            )?;
-                            child.acting_participant = self.acting_participant;
-                            child.replay_history_with_missions(ctx, scoped, mission_histories)?;
-                        }
+                if let Some(asset_id) = mission_asset_id
+                    && let Some(scoped) = mission_histories.get(&entry.node_guid)
+                {
+                    let index =
+                        self.node_index(entry.node_guid)
+                            .ok_or(GraphError::NodeNotFound {
+                                node_guid: entry.node_guid,
+                            })?;
+                    if self.nodes[index].state != NodeExecutionState::Completed {
+                        let child = self.nodes[index].sub_graph.as_mut().ok_or(
+                            GraphError::MissionAssetNotAttached {
+                                node_guid: entry.node_guid,
+                                sub_graph_asset_id: asset_id,
+                            },
+                        )?;
+                        child.acting_participant = self.acting_participant;
+                        child.replay_history_with_missions(ctx, scoped, mission_histories)?;
                     }
                 }
                 let _ = self.force_complete_with_input(
@@ -5335,10 +5332,10 @@ impl FlowGraphInstance {
                         node_guid: entry.node_guid,
                     });
                 }
-                if let Some(storylet_id) = entry.chosen_storylet_id {
-                    if ctx.dispatcher.storylet(storylet_id).is_none() {
-                        return Err(GraphError::UnresolvedStorylet { storylet_id });
-                    }
+                if let Some(storylet_id) = entry.chosen_storylet_id
+                    && ctx.dispatcher.storylet(storylet_id).is_none()
+                {
+                    return Err(GraphError::UnresolvedStorylet { storylet_id });
                 }
                 self.clock_ms = entry.frame_ms;
                 self.turn = self.turn.saturating_add(1);
@@ -5554,7 +5551,8 @@ impl FlowGraphInstance {
     ) -> Result<Vec<CallHistoryEntry>, GraphError> {
         let mut visited = BTreeSet::new();
         let mut entries: Vec<CallHistoryEntry> = Vec::new();
-        let mut stack: Vec<(u32, Option<(String, String)>, bool)> = vec![(target, None, false)];
+        type SeekEntry = (u32, Option<(String, String)>, bool);
+        let mut stack: Vec<SeekEntry> = vec![(target, None, false)];
         while let Some((guid, route, exiting)) = stack.pop() {
             if exiting {
                 if guid == target {
@@ -5755,10 +5753,10 @@ pub fn rebase_call_history(
         let Some(def) = updated.node(entry.node_guid) else {
             continue;
         };
-        if let Some(storylet_id) = entry.chosen_storylet_id {
-            if dispatcher.storylet(storylet_id).is_none() {
-                continue;
-            }
+        if let Some(storylet_id) = entry.chosen_storylet_id
+            && dispatcher.storylet(storylet_id).is_none()
+        {
+            continue;
         }
         if !entry.executed_input_pin.is_empty()
             && updated
@@ -5775,19 +5773,19 @@ pub fn rebase_call_history(
         {
             continue;
         }
-        if let Some(from) = previous {
-            if !updated.has_direct_edge(from, entry.node_guid) {
-                for (node_guid, input_pin, output_pin) in
-                    updated.shortest_bridge_path(from, entry.node_guid)?
-                {
-                    rebased.push(CallHistoryEntry {
-                        node_guid,
-                        executed_input_pin: input_pin,
-                        chosen_output_pin: output_pin,
-                        chosen_storylet_id: None,
-                        ..CallHistoryEntry::default()
-                    });
-                }
+        if let Some(from) = previous
+            && !updated.has_direct_edge(from, entry.node_guid)
+        {
+            for (node_guid, input_pin, output_pin) in
+                updated.shortest_bridge_path(from, entry.node_guid)?
+            {
+                rebased.push(CallHistoryEntry {
+                    node_guid,
+                    executed_input_pin: input_pin,
+                    chosen_output_pin: output_pin,
+                    chosen_storylet_id: None,
+                    ..CallHistoryEntry::default()
+                });
             }
         }
         rebased.push(entry.clone());
@@ -5909,27 +5907,6 @@ mod tests {
                 is_input: false,
             }],
             ..FlowNodeDef::default()
-        }
-    }
-
-    fn edge(from: u32, to: u32) -> EdgeConnection {
-        EdgeConnection {
-            source_node_guid: from,
-            source_pin_name: DEFAULT_OUTPUT_PIN.into(),
-            target_node_guid: to,
-            target_pin_name: DEFAULT_INPUT_PIN.into(),
-        }
-    }
-
-    fn mission_node(node_guid: u32, asset_id: &str) -> FlowNodeDef {
-        FlowNodeDef {
-            category: NodeCategory::ScopedContainer,
-            ..node(
-                node_guid,
-                NodeKind::MissionSubGraph {
-                    sub_graph_asset_id: asset_id.into(),
-                },
-            )
         }
     }
 

@@ -345,7 +345,7 @@ export interface RunEnvelope {
 export interface ActionReceipt { eventId: number; revision: number; step: number; duplicate: boolean }
 export interface DecisionProvenance { policyId: string; policyVersion: string; modelId: string; contextHash: string; decisionSeq: number }
 
-export interface RunReloadResult extends RunEnvelope { replayed: number; divergedAt: number | null }
+export type RunReloadResult = RunEnvelope | (RunEnvelope & { replayed: number; divergedAt: number | null });
 
 export interface RunSummary {
   id: string; title: string; steps: number; ending: StoryletRef | null; stale: boolean; updatedAt: number;

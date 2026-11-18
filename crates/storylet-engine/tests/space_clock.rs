@@ -175,7 +175,7 @@ fn choose_left() -> RunAction {
 fn closed_edge_blocks_with_until_label() {
     let content = content();
     let run = started_at(&content, 2);
-    let moves = moves_for(&run.world(), &content, 0);
+    let moves = moves_for(run.world(), &content, 0);
     let rock = moves.iter().find(|m| m.to == ROCK).unwrap();
     assert!(!rock.enabled);
     assert_eq!(rock.name, "Rock");
@@ -189,7 +189,7 @@ fn closed_edge_blocks_with_until_label() {
     assert!(harbor.enabled && harbor.block.is_none());
     let run = started_at(&content, 3);
     assert!(
-        moves_for(&run.world(), &content, 0)
+        moves_for(run.world(), &content, 0)
             .iter()
             .find(|m| m.to == ROCK)
             .unwrap()
@@ -203,7 +203,7 @@ fn edge_requires_fact() {
     content.connections[0].requires_fact = Some(1);
     let run = started(&content);
     let harbor = |run: &RunKernel| {
-        moves_for(&run.world(), &content, 0)
+        moves_for(run.world(), &content, 0)
             .into_iter()
             .find(|m| m.to == HARBOR)
             .unwrap()
@@ -215,7 +215,6 @@ fn edge_requires_fact() {
         })
     );
     assert!(!harbor(&run).enabled);
-    drop(harbor);
     content.initial_world.knowledge.learn(KnowledgeRow {
         holder: 0,
         fact: 1,
@@ -359,7 +358,7 @@ fn timeless_project_spends_nothing() {
     assert_eq!(place.actions_left, None);
     assert_eq!(place.clock_label, None);
     assert!(
-        moves_for(&run.world(), &content, 0)
+        moves_for(run.world(), &content, 0)
             .iter()
             .all(|m| m.enabled)
     );
@@ -370,8 +369,15 @@ fn clock_state_survives_rewind() {
     let content = content();
     let mut run = started(&content);
     test_act(&mut run, &content, 0, choose_left()).unwrap();
-    run.rewind(storylet_engine::Authority::Architect, 0)
-        .unwrap();
+    run.rewind(
+        storylet_engine::Authority::Architect,
+        storylet_engine::RewindRequest {
+            to_step: 0,
+            expected_revision: run.revision(),
+            idempotency_key: format!("rewind-{}", run.revision()),
+        },
+    )
+    .unwrap();
     assert_eq!(
         run.architect_view(&content, 0).place.unwrap().actions_left,
         Some(2)
@@ -556,8 +562,15 @@ fn rule_play_is_undone_by_rewind() {
     let fact_a = registry_fact(&content, "fact.a");
     let mut run = started(&content);
     test_act(&mut run, &content, 0, RunAction::Wait).unwrap();
-    run.rewind(storylet_engine::Authority::Architect, 0)
-        .unwrap();
+    run.rewind(
+        storylet_engine::Authority::Architect,
+        storylet_engine::RewindRequest {
+            to_step: 0,
+            expected_revision: run.revision(),
+            idempotency_key: format!("rewind-{}", run.revision()),
+        },
+    )
+    .unwrap();
     assert!(run.world().knowledge.knows(ROSA, fact_a).is_none());
     test_act(&mut run, &content, 0, RunAction::Wait).unwrap();
     assert!(

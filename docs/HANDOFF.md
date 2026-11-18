@@ -34,6 +34,16 @@ External MCP agents remain supported. The Vue studio publishes the active view, 
 
 The MCP server and studio use the same local project database. Context is a local UI snapshot with a capture timestamp and freshness signal; it does not authorize unrelated edits.
 
+## Play run persistence
+
+Starting a run uses the project revision and an idempotency key. Retrying the same start request returns the existing run while its row exists. Reusing the key with a different request is a conflict.
+
+Actions and Architect rewinds share the kernel's key space. Both require the current run revision and a key. A successful rewind advances the revision even when it moves the timeline to an earlier step. The service persists the ordered operations so a restart can reproduce the branch, revision, and retry receipts.
+
+Reload and delete take an expected run revision. Reloading a run that already uses the current project content returns the current envelope. Reloading after an edit replays the stored operations and reports where replay diverged, if applicable. Deleting an absent run succeeds, including a retry after a service restart.
+
+This branch changes the unreleased v8 schema in place. A v8 database created with the earlier `run_idempotency` table cannot open with this service. Set `STORYLET_STUDIO_DB_PATH` to a new file to try the branch alongside an existing workspace.
+
 ## Build and verification
 
 ```sh

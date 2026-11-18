@@ -346,7 +346,7 @@ fn test_invoke_equivalence_qbn_chaining() {
         def.effects_on_complete.push(StoryletEffect {
             target_id: name.to_owned(),
             kind: EffectKind::AddTag,
-            tag_mask: registry.ancestors_mask(bit).unwrap().clone(),
+            tag_mask: *registry.ancestors_mask(bit).unwrap(),
         });
         definitions.push(def);
     }

@@ -136,6 +136,59 @@ async fn start_and_act_round_trip_and_restart() {
 }
 
 #[tokio::test]
+async fn reload_in_another_service_refreshes_cached_scene() {
+    let (path, mut story) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let other = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, start) = req(
+        &app,
+        "POST",
+        "/api/v4/runs",
+        Some(json!({"start":{"kind":"beginning"},"expectedRevision":3,"idempotencyKey":"start"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{start}");
+    let uri = format!("/api/v4/runs/{}", start["id"].as_str().unwrap());
+    let (status, cached) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{cached}");
+    assert_eq!(cached["view"]["scene"]["storylet"]["title"], "Story");
+    assert_eq!(cached["contentRevision"], 3);
+    assert_eq!(cached["revision"], 0);
+
+    story["title"] = json!("Edited Story");
+    let store = storylet_engine_service::store::Store::open(&path).unwrap();
+    store
+        .save_content("storylets", "story", &story.to_string(), 2, None)
+        .unwrap();
+    let content_revision = store.get_project_metadata().unwrap().revision;
+    drop(store);
+    let (status, reloaded) = req(
+        &other,
+        "POST",
+        &format!("{uri}/reload"),
+        Some(json!({"expectedRevision":0})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reloaded}");
+    assert_eq!(
+        reloaded["view"]["scene"]["storylet"]["title"],
+        "Edited Story"
+    );
+    assert_eq!(reloaded["contentRevision"], content_revision);
+    assert_eq!(reloaded["revision"], cached["revision"]);
+
+    let (status, current) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    assert_eq!(
+        current["view"]["scene"]["storylet"]["title"],
+        "Edited Story"
+    );
+    assert_eq!(current["contentRevision"], content_revision);
+    assert_eq!(current["revision"], cached["revision"]);
+    assert_eq!(current["stale"], false);
+}
+
+#[tokio::test]
 async fn reload_reports_divergence_after_choice_removed() {
     let (path, mut story) = fixture();
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
@@ -177,19 +230,39 @@ async fn reload_reports_divergence_after_choice_removed() {
         &app,
         "POST",
         &format!("{uri}/reload"),
-        Some(json!({"expectedRevision":1,"idempotencyKey":"reload"})),
+        Some(json!({"expectedRevision":1})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{reload}");
     assert_eq!(reload["divergedAt"], 1);
     assert_eq!(reload["replayed"], 0);
     assert_eq!(reload["stale"], false);
+    let (status, current) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    let (status, repeated) = req(
+        &app,
+        "POST",
+        &format!("{uri}/reload"),
+        Some(json!({"expectedRevision":1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated, current);
     drop(app);
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
     let (status, restarted) = req(&app, "GET", &uri, None).await;
     assert_eq!(status, StatusCode::OK, "{restarted}");
     assert_eq!(restarted["view"], reload["view"]);
     assert_eq!(restarted["contentRevision"], reload["contentRevision"]);
+    let (status, repeated) = req(
+        &app,
+        "POST",
+        &format!("{uri}/reload"),
+        Some(json!({"expectedRevision":1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated, restarted);
 }
 
 #[tokio::test]
@@ -209,14 +282,30 @@ async fn rewound_branch_and_old_keys_survive_restart() {
     )
     .await;
     assert_eq!(first["view"]["currentStep"], 1);
-    let (_, rewound) = req(
-        &app,
-        "POST",
-        &format!("/api/v4/runs/{id}/rewind"),
-        Some(json!({"toStep":0,"expectedRevision":1,"idempotencyKey":"r"})),
-    )
-    .await;
+    let rewind = format!("/api/v4/runs/{id}/rewind");
+    let rewind_body = json!({"toStep":0,"expectedRevision":1,"idempotencyKey":"r"});
+    let (status, rewound) = req(&app, "POST", &rewind, Some(rewind_body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{rewound}");
     assert_eq!(rewound["view"]["currentStep"], 0, "{rewound}");
+    assert_eq!(rewound["revision"], 2);
+    assert_eq!(rewound["receipt"]["revision"], 2);
+    assert_eq!(rewound["receipt"]["step"], 0);
+    assert_eq!(rewound["receipt"]["duplicate"], false);
+    assert!(rewound["receipt"]["eventId"].as_u64().is_some());
+    let uri = format!("/api/v4/runs/{id}");
+    let (status, before_rejections) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{before_rejections}");
+    for rejected in [
+        json!({"toStep":1,"expectedRevision":1,"idempotencyKey":"r"}),
+        json!({"toStep":0,"expectedRevision":1,"idempotencyKey":"stale"}),
+        json!({"toStep":0,"expectedRevision":2,"idempotencyKey":"a"}),
+    ] {
+        let (status, result) = req(&app, "POST", &rewind, Some(rejected)).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{result}");
+        let (status, after_rejection) = req(&app, "GET", &uri, None).await;
+        assert_eq!(status, StatusCode::OK, "{after_rejection}");
+        assert_eq!(after_rejection, before_rejections);
+    }
     let (_,branched)=req(&app,"POST",&format!("/api/v4/runs/{id}/act"),Some(json!({"participant":0,"action":start["view"]["scene"]["choices"][1]["action"],"expectedRevision":rewound["revision"],"idempotencyKey":"b"}))).await;
     assert_eq!(
         branched["view"]["branches"].as_array().unwrap().len(),
@@ -228,11 +317,57 @@ async fn rewound_branch_and_old_keys_survive_restart() {
     let (_, replayed) = req(&app, "GET", &format!("/api/v4/runs/{id}"), None).await;
     assert_eq!(replayed["view"], branched["view"]);
     assert_eq!(replayed["revision"], branched["revision"]);
+    assert_eq!(replayed["revision"], 3);
+    let (status, retry) = req(&app, "POST", &rewind, Some(rewind_body)).await;
+    assert_eq!(status, StatusCode::OK, "{retry}");
+    assert_eq!(retry["receipt"]["duplicate"], true);
+    assert_eq!(retry["receipt"]["eventId"], rewound["receipt"]["eventId"]);
+    assert_eq!(retry["receipt"]["revision"], rewound["receipt"]["revision"]);
+    assert_eq!(retry["receipt"]["step"], rewound["receipt"]["step"]);
+    assert_eq!(retry["view"], replayed["view"]);
+    assert_eq!(retry["revision"], replayed["revision"]);
+    let (_, current) = req(&app, "GET", &format!("/api/v4/runs/{id}"), None).await;
+    assert_eq!(current, replayed);
     let (_, duplicate) = req(&app, "POST", &format!("/api/v4/runs/{id}/act"), Some(body)).await;
     assert_eq!(duplicate["receipt"]["duplicate"], true);
     assert_eq!(duplicate["receipt"]["eventId"], first["receipt"]["eventId"]);
-    let (_, same_start) = req(&app, "POST", "/api/v4/runs", Some(start_body)).await;
-    assert_eq!(same_start, start);
+    let mut different_start = start_body.clone();
+    different_start["seed"] = json!(88);
+    let (status, result) = req(&app, "POST", "/api/v4/runs", Some(different_start)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{result}");
+    let (status, after_conflict) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{after_conflict}");
+    assert_eq!(after_conflict, replayed);
+    let (status, same_start) = req(&app, "POST", "/api/v4/runs", Some(start_body)).await;
+    assert_eq!(status, StatusCode::OK, "{same_start}");
+    assert_eq!(same_start, replayed);
+}
+
+#[tokio::test]
+async fn deleting_a_missing_run_repeats_the_original_success() {
+    let (path, _) = fixture();
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (_, start) = req(
+        &app,
+        "POST",
+        "/api/v4/runs",
+        Some(json!({"start":{"kind":"beginning"},"expectedRevision":3,"idempotencyKey":"s"})),
+    )
+    .await;
+    let uri = format!("/api/v4/runs/{}", start["id"].as_str().unwrap());
+    let (status, result) = req(&app, "DELETE", &uri, Some(json!({"expectedRevision":1}))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{result}");
+    let (status, unchanged) = req(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{unchanged}");
+    assert_eq!(unchanged, start);
+    let (status, deleted) = req(&app, "DELETE", &uri, Some(json!({"expectedRevision":0}))).await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+    drop(app);
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, repeated) = req(&app, "DELETE", &uri, Some(json!({"expectedRevision":1}))).await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated, deleted);
+    assert_eq!(req(&app, "GET", &uri, None).await.0, StatusCode::NOT_FOUND);
 }
 #[tokio::test]
 async fn independent_service_instances_detect_stale_revisions() {
@@ -285,18 +420,22 @@ async fn stalled_start_returns_view_and_survives_restart() {
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
     let (_, after) = req(&app, "GET", &format!("/api/v4/runs/{id}"), None).await;
     assert_eq!(after, start);
-    let (_, rewound) = req(
+    let (status, rewound) = req(
         &app,
         "POST",
         &format!("/api/v4/runs/{id}/rewind"),
         Some(json!({"toStep":0,"expectedRevision":0,"idempotencyKey":"r"})),
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "{rewound}");
+    assert_eq!(rewound["revision"], 1);
     assert_eq!(rewound["stalled"], start["stalled"]);
     drop(app);
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
     let (_, after) = req(&app, "GET", &format!("/api/v4/runs/{id}"), None).await;
-    assert_eq!(after, rewound);
+    assert_eq!(after["view"], rewound["view"]);
+    assert_eq!(after["revision"], rewound["revision"]);
+    assert_eq!(after["stalled"], rewound["stalled"]);
 }
 #[tokio::test]
 async fn mcp_operations_share_http_state_and_idempotency() {
@@ -365,7 +504,9 @@ async fn rule_participant_cannot_be_controlled_by_http_caller() {
     let store = storylet_engine_service::store::Store::open(&path).unwrap();
     for (id, seat) in [("mara", 0), ("teodor", 1)] {
         let value = json!({"id":id,"name":id,"traits":[{"id":"character","template_id":"system.character","values":{}},{"template_id":"system.participant","values":{"controller":"human","seat":seat,"start_location":"harbor"}},{"template_id":"system.character_settings","values":{"home_location":"harbor","current_location":"harbor"}}]});
-        store.save_content("entities", id, &value.to_string(), 1, None).unwrap();
+        store
+            .save_content("entities", id, &value.to_string(), 1, None)
+            .unwrap();
     }
     let revision = store.get_project_metadata().unwrap().revision;
     drop(store);
@@ -375,7 +516,12 @@ async fn rule_participant_cannot_be_controlled_by_http_caller() {
     let id = start["id"].as_str().unwrap();
     let (status, result) = req(&app, "POST", &format!("/api/v4/runs/{id}/act"), Some(json!({"participant":1,"action":{"kind":"wait"},"expectedRevision":0,"idempotencyKey":"rule"}))).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{result}");
-    assert!(result["error"].as_str().unwrap().contains("rule participants"));
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .contains("rule participants")
+    );
 }
 
 #[tokio::test]
@@ -384,21 +530,53 @@ async fn observe_and_explain_endpoints_return_kernel_evidence() {
     let store = storylet_engine_service::store::Store::open(&path).unwrap();
     for (id, seat) in [("mara", 0), ("teodor", 1)] {
         let value = json!({"id":id,"name":id,"traits":[{"id":"character","template_id":"system.character","values":{}},{"template_id":"system.participant","values":{"controller":"human","seat":seat,"start_location":"harbor"}},{"template_id":"system.character_settings","values":{"home_location":"harbor","current_location":"harbor"}}]});
-        store.save_content("entities", id, &value.to_string(), 1, None).unwrap();
+        store
+            .save_content("entities", id, &value.to_string(), 1, None)
+            .unwrap();
     }
     let revision = store.get_project_metadata().unwrap().revision;
     drop(store);
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
-    let (_, start) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"expectedRevision":revision,"idempotencyKey":"s"}))).await;
-    assert_eq!(start["view"]["participants"].as_array().unwrap().len(), 2, "{start}");
+    let (_, start) = req(
+        &app,
+        "POST",
+        "/api/v4/runs",
+        Some(
+            json!({"start":{"kind":"beginning"},"expectedRevision":revision,"idempotencyKey":"s"}),
+        ),
+    )
+    .await;
+    assert_eq!(
+        start["view"]["participants"].as_array().unwrap().len(),
+        2,
+        "{start}"
+    );
     let id = start["id"].as_str().unwrap();
-    let (_, first) = req(&app, "GET", &format!("/api/v4/runs/{id}/observe?participant=0"), None).await;
-    let (_, second) = req(&app, "GET", &format!("/api/v4/runs/{id}/observe?participant=1"), None).await;
+    let (_, first) = req(
+        &app,
+        "GET",
+        &format!("/api/v4/runs/{id}/observe?participant=0"),
+        None,
+    )
+    .await;
+    let (_, second) = req(
+        &app,
+        "GET",
+        &format!("/api/v4/runs/{id}/observe?participant=1"),
+        None,
+    )
+    .await;
     assert_eq!(first["actor"], 0);
     assert_eq!(second["actor"], 1);
     assert_ne!(first, second);
     let (_, acted) = req(&app, "POST", &format!("/api/v4/runs/{id}/act"), Some(json!({"participant":0,"action":start["view"]["scene"]["choices"][0]["action"],"expectedRevision":0,"idempotencyKey":"a"}))).await;
-    let (_, chain) = req(&app, "GET", &format!("/api/v4/runs/{id}/explain?event=1"), None).await;
+    let (_, chain) = req(
+        &app,
+        "GET",
+        &format!("/api/v4/runs/{id}/explain?event=1"),
+        None,
+    )
+    .await;
     assert_eq!(chain[0]["id"], 1);
     assert_eq!(chain[0]["step"], acted["view"]["currentStep"]);
 }
@@ -407,13 +585,23 @@ async fn observe_and_explain_endpoints_return_kernel_evidence() {
 async fn supplied_provenance_is_preserved_without_fabricated_human_metadata() {
     let (path, _) = fixture();
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
-    let (_, start) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"expectedRevision":3,"idempotencyKey":"s"}))).await;
+    let (_, start) = req(
+        &app,
+        "POST",
+        "/api/v4/runs",
+        Some(json!({"start":{"kind":"beginning"},"expectedRevision":3,"idempotencyKey":"s"})),
+    )
+    .await;
     let id = start["id"].as_str().unwrap();
     let provenance = json!({"policyId":"policy.alpha","policyVersion":"3","modelId":"local-model","contextHash":"abc123","decisionSeq":9});
     let (_, acted) = req(&app, "POST", &format!("/api/v4/runs/{id}/act"), Some(json!({"participant":0,"action":start["view"]["scene"]["choices"][0]["action"],"expectedRevision":0,"idempotencyKey":"p","provenance":provenance}))).await;
     assert_eq!(acted["receipt"]["duplicate"], false);
     let conn = rusqlite::Connection::open(&path).unwrap();
-    let actions_json: String = conn.query_row("SELECT actions_json FROM runs WHERE id=?1", [id], |row| row.get(0)).unwrap();
+    let actions_json: String = conn
+        .query_row("SELECT actions_json FROM runs WHERE id=?1", [id], |row| {
+            row.get(0)
+        })
+        .unwrap();
     let actions: Value = serde_json::from_str(&actions_json).unwrap();
     assert_eq!(actions[0]["proposal"]["provenance"], provenance);
 }
@@ -424,7 +612,9 @@ async fn explain_rule_play_parents_over_http_and_mcp() {
     let store = storylet_engine_service::store::Store::open(&path).unwrap();
     for (id, controller, seat) in [("mara", "human", 0), ("rosa", "rule", 0)] {
         let value = json!({"id":id,"name":id,"traits":[{"id":"character","template_id":"system.character","values":{}},{"template_id":"system.participant","values":{"controller":controller,"seat":seat,"start_location":"harbor"}},{"template_id":"system.character_settings","values":{"home_location":"harbor","current_location":"harbor"}}]});
-        store.save_content("entities", id, &value.to_string(), 1, None).unwrap();
+        store
+            .save_content("entities", id, &value.to_string(), 1, None)
+            .unwrap();
     }
     let mut gossip = story.clone();
     gossip["id"] = json!("gossip");
@@ -437,7 +627,9 @@ async fn explain_rule_play_parents_over_http_and_mcp() {
     gossip["graph"]["edges"] = json!([
         {"id":"finish","from_node":"start","from_port":"output","to_node":"end","to_port":"input"}
     ]);
-    store.save_content("storylets", "gossip", &gossip.to_string(), 1, None).unwrap();
+    store
+        .save_content("storylets", "gossip", &gossip.to_string(), 1, None)
+        .unwrap();
     let revision = store.get_project_metadata().unwrap().revision;
     drop(store);
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
@@ -445,15 +637,38 @@ async fn explain_rule_play_parents_over_http_and_mcp() {
     let id = start["id"].as_str().unwrap();
     let (_, acted) = req(&app, "POST", &format!("/api/v4/runs/{id}/act"), Some(json!({"participant":0,"action":start["view"]["scene"]["choices"][0]["action"],"expectedRevision":0,"idempotencyKey":"a"}))).await;
     assert_eq!(acted["view"]["currentStep"], 1, "{acted}");
-    assert_eq!(acted["view"]["steps"][0]["rulePlays"].as_array().map(Vec::len), Some(1), "{acted}");
+    assert_eq!(
+        acted["view"]["steps"][0]["rulePlays"]
+            .as_array()
+            .map(Vec::len),
+        Some(1),
+        "{acted}"
+    );
     let rule_event = acted["receipt"]["eventId"].as_u64().unwrap() as u32 + 1;
-    let (_, http_chain) = req(&app, "GET", &format!("/api/v4/runs/{id}/explain?event={rule_event}"), None).await;
-    let http_rule = http_chain.as_array().unwrap().iter().find(|event| event["id"] == rule_event).unwrap();
+    let (_, http_chain) = req(
+        &app,
+        "GET",
+        &format!("/api/v4/runs/{id}/explain?event={rule_event}"),
+        None,
+    )
+    .await;
+    let http_rule = http_chain
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["id"] == rule_event)
+        .unwrap();
     assert_eq!(http_rule["parents"], json!([acted["receipt"]["eventId"]]));
     let service = StudioService::open(&path, ".").unwrap();
     let response = storylet_engine_service::mcp::handle_mcp_message(&service, &json!({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"narrative_platform","arguments":{"operation":"run.explain","id":id,"event":rule_event}}})).await.unwrap();
-    let mcp_chain: Value = serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-    let mcp_rule = mcp_chain.as_array().unwrap().iter().find(|event| event["id"] == rule_event).unwrap();
+    let mcp_chain: Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let mcp_rule = mcp_chain
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["id"] == rule_event)
+        .unwrap();
     assert_eq!(mcp_rule["parents"], json!([acted["receipt"]["eventId"]]));
 }
 #[tokio::test]
@@ -654,14 +869,33 @@ fn coverage_system_traits_are_available_to_old_and_new_projects() {
     use storylet_engine_service::contracts::{PropertyType, TraitTemplateRecord};
     let store = storylet_engine_service::store::Store::open_in_memory().unwrap();
     for (id, expected) in [
-        ("system.milestone", vec![("routes", PropertyType::Storylet, true), ("deadline_slot", PropertyType::Int, false)]),
-        ("system.intent_probe", vec![("holder_knows", PropertyType::String, true), ("expected_routes", PropertyType::Storylet, true)]),
+        (
+            "system.milestone",
+            vec![
+                ("routes", PropertyType::Storylet, true),
+                ("deadline_slot", PropertyType::Int, false),
+            ],
+        ),
+        (
+            "system.intent_probe",
+            vec![
+                ("holder_knows", PropertyType::String, true),
+                ("expected_routes", PropertyType::Storylet, true),
+            ],
+        ),
     ] {
-        let raw = store.get_content_json("trait_templates", id).unwrap().expect("missing system trait");
+        let raw = store
+            .get_content_json("trait_templates", id)
+            .unwrap()
+            .expect("missing system trait");
         let record: TraitTemplateRecord = serde_json::from_str(&raw).unwrap();
         assert!(record.allow_multiple);
         for (key, kind, array) in expected {
-            let property = record.properties.iter().find(|p| p.property.key == key).unwrap();
+            let property = record
+                .properties
+                .iter()
+                .find(|p| p.property.key == key)
+                .unwrap();
             assert_eq!(property.property.property_type, kind);
             assert_eq!(property.property.is_array, array);
         }
@@ -671,7 +905,13 @@ fn coverage_system_traits_are_available_to_old_and_new_projects() {
 #[tokio::test]
 async fn coverage_rejects_runs_over_50000() {
     let app = build_router(StudioService::open_in_memory(".").unwrap(), None);
-    let (status, _) = req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":50001}))).await;
+    let (status, _) = req(
+        &app,
+        "POST",
+        "/api/v4/coverage",
+        Some(json!({"runs":50001})),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
@@ -679,7 +919,13 @@ async fn coverage_rejects_runs_over_50000() {
 async fn coverage_runs_compiled_project() {
     let (path, _) = fixture();
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
-    let (status, report) = req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":1,"seed":7}))).await;
+    let (status, report) = req(
+        &app,
+        "POST",
+        "/api/v4/coverage",
+        Some(json!({"runs":1,"seed":7})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{report}");
     assert_eq!(report["cells"].as_array().unwrap().len(), 4);
     assert_eq!(report["error_count"], 0);
@@ -691,12 +937,31 @@ async fn coverage_runs_compiled_project() {
 async fn coverage_reports_milestones_from_world_traits() {
     let (path, _) = fixture();
     let store = storylet_engine_service::store::Store::open(&path).unwrap();
-    let mut world = store.list_entities().unwrap().into_iter().find(|entity| entity.id == "world").unwrap();
+    let mut world = store
+        .list_entities()
+        .unwrap()
+        .into_iter()
+        .find(|entity| entity.id == "world")
+        .unwrap();
     world.traits.push(serde_json::from_value(json!({"template_id":"system.milestone","values":{"key":"rescue","name":"Rescue","routes":["story"],"reachable_for":["solo","coop"],"deadline_slot":-1}})).unwrap());
-    store.save_content("entities", "world", &serde_json::to_string(&world).unwrap(), 2, None).unwrap();
+    store
+        .save_content(
+            "entities",
+            "world",
+            &serde_json::to_string(&world).unwrap(),
+            2,
+            None,
+        )
+        .unwrap();
     drop(store);
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
-    let (status, report) = req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":1,"seed":7}))).await;
+    let (status, report) = req(
+        &app,
+        "POST",
+        "/api/v4/coverage",
+        Some(json!({"runs":1,"seed":7})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{report}");
     assert_eq!(report["cells"][0]["milestone_reached"][0][0], "rescue");
 }
@@ -704,8 +969,16 @@ async fn coverage_reports_milestones_from_world_traits() {
 #[tokio::test]
 async fn mcp_workspace_coverage_listed() {
     let service = StudioService::open_in_memory(".").unwrap();
-    let response = storylet_engine_service::mcp::handle_mcp_message(&service, &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).await.unwrap();
-    let operations = response["result"]["tools"][0]["inputSchema"]["properties"]["operation"]["enum"].as_array().unwrap();
+    let response = storylet_engine_service::mcp::handle_mcp_message(
+        &service,
+        &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
+    )
+    .await
+    .unwrap();
+    let operations =
+        response["result"]["tools"][0]["inputSchema"]["properties"]["operation"]["enum"]
+            .as_array()
+            .unwrap();
     assert!(operations.contains(&json!("workspace.coverage")));
 }
 
@@ -713,10 +986,16 @@ async fn mcp_workspace_coverage_listed() {
 async fn concurrent_coverage_requests_do_not_overlap() {
     let (path, _) = fixture();
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
-    let (first, second) = tokio::join!(req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":5000}))), req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":5000}))));
+    let (first, second) = tokio::join!(
+        req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":5000}))),
+        req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":5000})))
+    );
     let statuses = [first.0, second.0];
     assert!(statuses.contains(&StatusCode::OK), "{first:?} {second:?}");
-    assert!(statuses.contains(&StatusCode::CONFLICT), "{first:?} {second:?}");
+    assert!(
+        statuses.contains(&StatusCode::CONFLICT),
+        "{first:?} {second:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -724,10 +1003,16 @@ async fn coverage_is_exclusive_across_services_for_the_same_project() {
     let (path, _) = fixture();
     let a = build_router(StudioService::open(&path, ".").unwrap(), None);
     let b = build_router(StudioService::open(&path, ".").unwrap(), None);
-    let (first, second) = tokio::join!(req(&a, "POST", "/api/v4/coverage", Some(json!({"runs":5000}))), req(&b, "POST", "/api/v4/coverage", Some(json!({"runs":5000}))));
+    let (first, second) = tokio::join!(
+        req(&a, "POST", "/api/v4/coverage", Some(json!({"runs":5000}))),
+        req(&b, "POST", "/api/v4/coverage", Some(json!({"runs":5000})))
+    );
     let statuses = [first.0, second.0];
     assert!(statuses.contains(&StatusCode::OK));
-    assert!(statuses.contains(&StatusCode::CONFLICT), "{first:?} {second:?}");
+    assert!(
+        statuses.contains(&StatusCode::CONFLICT),
+        "{first:?} {second:?}"
+    );
 }
 
 #[tokio::test]
@@ -735,11 +1020,20 @@ async fn mcp_and_http_coverage_return_the_same_report() {
     let (path, _) = fixture();
     let service = StudioService::open(&path, ".").unwrap();
     let app = build_router(service.clone(), None);
-    let (_, http) = req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":2,"seed":7}))).await;
+    let (_, http) = req(
+        &app,
+        "POST",
+        "/api/v4/coverage",
+        Some(json!({"runs":2,"seed":7})),
+    )
+    .await;
     let message = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"narrative_platform","arguments":{"operation":"workspace.coverage","runs":2,"seed":7}}});
-    let result = storylet_engine_service::mcp::handle_mcp_message(&service, &message).await.unwrap();
+    let result = storylet_engine_service::mcp::handle_mcp_message(&service, &message)
+        .await
+        .unwrap();
     assert!(result["result"]["isError"].is_null(), "{result}");
-    let mcp: Value = serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let mcp: Value =
+        serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(mcp, http);
 }
 
@@ -747,7 +1041,15 @@ async fn mcp_and_http_coverage_return_the_same_report() {
 async fn start_with_recorded_actions_opens_at_last_step_and_survives_restart() {
     let (path, _) = fixture();
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
-    let (_, original) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"expectedRevision":3,"idempotencyKey":"original"}))).await;
+    let (_, original) = req(
+        &app,
+        "POST",
+        "/api/v4/runs",
+        Some(
+            json!({"start":{"kind":"beginning"},"expectedRevision":3,"idempotencyKey":"original"}),
+        ),
+    )
+    .await;
     let action = original["view"]["scene"]["choices"][0]["action"].clone();
     let (status, replay) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"seed":7,"actions":[[0,action]],"expectedRevision":3,"idempotencyKey":"replay"}))).await;
     assert_eq!(status, StatusCode::OK, "{replay}");
@@ -766,7 +1068,9 @@ async fn replay_participant_configuration_survives_reload() {
     let store = storylet_engine_service::store::Store::open(&path).unwrap();
     for (id, seat) in [("mara", 0), ("teodor", 1)] {
         let value = json!({"id":id,"name":id,"traits":[{"id":"character","template_id":"system.character","values":{}},{"template_id":"system.participant","values":{"controller":"human","seat":seat,"start_location":"harbor"}},{"template_id":"system.character_settings","values":{"home_location":"harbor","current_location":"harbor"}}]});
-        store.save_content("entities", id, &value.to_string(), 1, None).unwrap();
+        store
+            .save_content("entities", id, &value.to_string(), 1, None)
+            .unwrap();
     }
     let revision = store.get_project_metadata().unwrap().revision;
     drop(store);
@@ -775,7 +1079,13 @@ async fn replay_participant_configuration_survives_reload() {
     assert_eq!(status, StatusCode::OK, "{start}");
     assert_eq!(start["view"]["participants"][1]["human"], false);
     let id = start["id"].as_str().unwrap();
-    let (status, reloaded) = req(&app, "POST", &format!("/api/v4/runs/{id}/reload"), Some(json!({"expectedRevision":0,"idempotencyKey":"reload"}))).await;
+    let (status, reloaded) = req(
+        &app,
+        "POST",
+        &format!("/api/v4/runs/{id}/reload"),
+        Some(json!({"expectedRevision":0})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{reloaded}");
     assert_eq!(reloaded["view"]["participants"][1]["human"], false);
 }
@@ -783,7 +1093,9 @@ async fn replay_participant_configuration_survives_reload() {
 #[test]
 fn fallback_storylet_metadata_reaches_the_explorer_dispatcher() {
     let story: storylet_engine_service::contracts::StoryletRecord = serde_json::from_value(json!({"id":"filler","title":"Filler","content":{"text_template":"Wait"},"created_at":1,"is_fallback":true})).unwrap();
-    let content = storylet_engine_service::chrono_adapter::compile_chrono_dispatch(&[story], &[], &[]).unwrap();
+    let content =
+        storylet_engine_service::chrono_adapter::compile_chrono_dispatch(&[story], &[], &[])
+            .unwrap();
     assert!(content.dispatcher.storylet(0).unwrap().is_fallback);
 }
 
@@ -792,7 +1104,13 @@ async fn coverage_and_replay_preserve_large_seeds_exactly() {
     let (path, _) = fixture();
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
     let seed = "18446744073709551615";
-    let (status, report) = req(&app, "POST", "/api/v4/coverage", Some(json!({"runs":1,"seed":seed}))).await;
+    let (status, report) = req(
+        &app,
+        "POST",
+        "/api/v4/coverage",
+        Some(json!({"runs":1,"seed":seed})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{report}");
     assert_eq!(report["seed"], seed);
     let (status, replay) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"seed":seed,"expectedRevision":3,"idempotencyKey":"wide-seed"}))).await;
@@ -803,19 +1121,38 @@ async fn coverage_and_replay_preserve_large_seeds_exactly() {
 async fn mcp_created_storylet_has_agent_origin() {
     let service = StudioService::open_in_memory(".").unwrap();
     let message = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"narrative_platform","arguments":{"operation":"content.save","entity":"storylets","payload":{"id":"agent-story","title":"Agent story","content":{"text_template":"Hello"},"created_at":1}}}});
-    let result = storylet_engine_service::mcp::handle_mcp_message(&service, &message).await.unwrap();
+    let result = storylet_engine_service::mcp::handle_mcp_message(&service, &message)
+        .await
+        .unwrap();
     assert!(result["result"]["isError"].is_null(), "{result}");
-    let story = service.get_content_item("storylets", "agent-story").await.unwrap();
+    let story = service
+        .get_content_item("storylets", "agent-story")
+        .await
+        .unwrap();
     assert_eq!(story["origin"], "agent");
     assert!(story["approved_revision"].is_null());
     let library = service.query_library(&Default::default()).await.unwrap();
-    assert_eq!(library.items.iter().find(|item| item.id == "agent-story").unwrap().origin, "agent");
+    assert_eq!(
+        library
+            .items
+            .iter()
+            .find(|item| item.id == "agent-story")
+            .unwrap()
+            .origin,
+        "agent"
+    );
     let mut edited = story.clone();
     edited["origin"] = json!("human");
-    let saved = service.save_content_item("storylets", &edited).await.unwrap();
+    let saved = service
+        .save_content_item("storylets", &edited)
+        .await
+        .unwrap();
     assert_eq!(saved["origin"], "agent");
     let revision = saved["revision"].as_u64().unwrap();
-    let approved = service.approve_storylet("agent-story", revision).await.unwrap();
+    let approved = service
+        .approve_storylet("agent-story", revision)
+        .await
+        .unwrap();
     assert_eq!(approved.origin, "agent");
     assert_eq!(approved.approved_revision, Some(revision));
 }
@@ -832,11 +1169,26 @@ async fn http_created_storylet_has_human_origin() {
 async fn storylet_window_is_compiled_and_used_at_start() {
     let (path, mut story) = fixture();
     let store = storylet_engine_service::store::Store::open(&path).unwrap();
-    let mut world = store.list_entities().unwrap().into_iter().find(|entity| entity.id == "world").unwrap();
+    let mut world = store
+        .list_entities()
+        .unwrap()
+        .into_iter()
+        .find(|entity| entity.id == "world")
+        .unwrap();
     world.traits.push(serde_json::from_value(json!({"template_id":"system.clock","values":{"slot_labels":["Dawn","Dusk"],"actions_per_slot":2}})).unwrap());
-    store.save_content("entities", "world", &serde_json::to_string(&world).unwrap(), 2, None).unwrap();
+    store
+        .save_content(
+            "entities",
+            "world",
+            &serde_json::to_string(&world).unwrap(),
+            2,
+            None,
+        )
+        .unwrap();
     story["window"] = json!([0]);
-    store.save_content("storylets", "story", &story.to_string(), 2, None).unwrap();
+    store
+        .save_content("storylets", "story", &story.to_string(), 2, None)
+        .unwrap();
     let revision = store.get_project_metadata().unwrap().revision;
     drop(store);
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
@@ -845,7 +1197,9 @@ async fn storylet_window_is_compiled_and_used_at_start() {
     assert_eq!(result["view"]["place"]["clockLabel"], "Dawn");
     let store = storylet_engine_service::store::Store::open(&path).unwrap();
     story["window"] = json!([1]);
-    store.save_content("storylets", "story", &story.to_string(), 3, None).unwrap();
+    store
+        .save_content("storylets", "story", &story.to_string(), 3, None)
+        .unwrap();
     let next_revision = store.get_project_metadata().unwrap().revision;
     drop(store);
     let (status, result) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"expectedRevision":next_revision,"idempotencyKey":"closed-window"}))).await;
@@ -880,5 +1234,5 @@ async fn compiled_run_content_is_served_for_native_hosts() {
     let (status, content) = req(&app, "GET", "/api/v4/run-content", None).await;
     assert_eq!(status, StatusCode::OK, "{content}");
     assert_eq!(content["contentRevision"], 3);
-    assert!(content["rootAsset"]["nodes"].as_array().unwrap().len() > 0);
+    assert!(!content["rootAsset"]["nodes"].as_array().unwrap().is_empty());
 }

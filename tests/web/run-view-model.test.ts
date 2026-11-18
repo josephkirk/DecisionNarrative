@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { usePlay, type RunsApi } from "../../src/web/studio/view-models/run.ts";
+import { StudioApi } from "../../src/web/studio/api.ts";
 import type { RunAction, RunEnvelope, RunView } from "../../src/web/studio/contracts.ts";
 
 function runView(over: Partial<RunView> = {}): RunView {
@@ -30,6 +31,25 @@ function fakeApi(over: Partial<RunsApi> = {}): RunsApi & { calls: string[] } {
   return Object.assign(api, { calls });
 }
 const action: RunAction = { kind: "wait" };
+
+test("reload and delete send only the expected revision", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ method: string | undefined; body: unknown }> = [];
+  globalThis.fetch = (async (_input, init) => {
+    requests.push({ method: init?.method, body: JSON.parse(String(init?.body)) });
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  try {
+    await StudioApi.runs.reload("r1", 7);
+    await StudioApi.runs.remove("r1", 8);
+    expect(requests).toEqual([
+      { method: "POST", body: { expectedRevision: 7 } },
+      { method: "DELETE", body: { expectedRevision: 8 } },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("act_while_busy_is_ignored", async () => {
   let release!: () => void;
@@ -75,12 +95,26 @@ test("undo at step zero does nothing", async () => {
 });
 
 test("stale_envelope_sets_banner_and_reload_note", async () => {
-  const api = fakeApi({ view: async () => env({ stale: true }, { currentStep: 14 }) });
+  const api = fakeApi({ view: async () => env({ stale: true }, { currentStep: 2 }) });
   const play = usePlay(api);
   await play.open("r1");
   expect(play.state.envelope?.stale).toBe(true);
   await play.reload();
-  expect(play.state.reloadNote).toBe("Replayed 12 of 14 steps; diverged at step 13");
+  expect(play.state.reloadNote).toBe("Replayed 12 steps; diverged at step 13");
+});
+
+test("reload distinguishes an already-current run from a zero-step replay", async () => {
+  const api = fakeApi({ view: async () => env({ stale: true }), reload: async () => env() });
+  const play = usePlay(api);
+  await play.open("r1");
+  await play.reload();
+  expect(play.state.reloadNote).toBe("Run is already current");
+  const replay = usePlay(fakeApi({
+    reload: async () => ({ ...env(), replayed: 0, divergedAt: null }),
+  }));
+  await replay.open("r1");
+  await replay.reload();
+  expect(replay.state.reloadNote).toBe("Replayed 0 steps; no divergence");
 });
 
 test("error from api lands in state and clears busy", async () => {

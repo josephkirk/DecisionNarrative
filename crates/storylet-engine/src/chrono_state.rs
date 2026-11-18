@@ -906,12 +906,12 @@ impl WorldStateTable {
         let previous = vertex.attributes.get(key).cloned();
         let next = match operation {
             "set" => {
-                if let Some(existing) = &previous {
-                    if std::mem::discriminant(existing) != std::mem::discriminant(&value) {
-                        return Err(ChronoStateError::AttributeTypeMismatch {
-                            key: key.to_owned(),
-                        });
-                    }
+                if let Some(existing) = &previous
+                    && std::mem::discriminant(existing) != std::mem::discriminant(&value)
+                {
+                    return Err(ChronoStateError::AttributeTypeMismatch {
+                        key: key.to_owned(),
+                    });
                 }
                 value
             }
@@ -1030,10 +1030,10 @@ impl WorldStateTable {
             if !vertex.layers.contains(&vertex_pattern.layer) {
                 continue;
             }
-            if let Some(id) = &vertex_pattern.vertex_id {
-                if &vertex.vertex_id != id {
-                    continue;
-                }
+            if let Some(id) = &vertex_pattern.vertex_id
+                && &vertex.vertex_id != id
+            {
+                continue;
             }
             if !matches_attributes(vertex, &vertex_pattern.attributes) {
                 continue;
@@ -1081,25 +1081,25 @@ impl WorldStateTable {
             if used.contains(&edge.edge_id) {
                 continue;
             }
-            if let Some(edge_id) = &edge_pattern.edge_id {
-                if &edge.edge_id != edge_id {
-                    continue;
-                }
+            if let Some(edge_id) = &edge_pattern.edge_id
+                && &edge.edge_id != edge_id
+            {
+                continue;
             }
-            if let Some(relation) = &edge_pattern.relation_type {
-                if &edge.relation_type != relation {
-                    continue;
-                }
+            if let Some(relation) = &edge_pattern.relation_type
+                && &edge.relation_type != relation
+            {
+                continue;
             }
-            if let Some(source) = &edge_pattern.source {
-                if resolve_binding(source, chosen)? != edge.source_id {
-                    continue;
-                }
+            if let Some(source) = &edge_pattern.source
+                && resolve_binding(source, chosen)? != edge.source_id
+            {
+                continue;
             }
-            if let Some(target) = &edge_pattern.target {
-                if resolve_binding(target, chosen)? != edge.target_id {
-                    continue;
-                }
+            if let Some(target) = &edge_pattern.target
+                && resolve_binding(target, chosen)? != edge.target_id
+            {
+                continue;
             }
             if *budget == 0 {
                 return Err(ChronoStateError::PatternSearchExhausted);
@@ -1979,7 +1979,7 @@ fn validate_entity_bounds(
         }
         let vertex = state
             .vertex_for_entity(entity_id)
-            .ok_or_else(|| ChronoStateError::EntityVertexMissing { index: entity_id })?;
+            .ok_or(ChronoStateError::EntityVertexMissing { index: entity_id })?;
         if !vertex.layers.contains(&GraphLayer::Location) {
             return Err(ChronoStateError::VertexLayerMismatch {
                 vertex_id: vertex.vertex_id.clone(),

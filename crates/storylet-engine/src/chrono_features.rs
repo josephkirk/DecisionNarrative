@@ -43,6 +43,10 @@ impl ActorTraitIndex {
     pub fn len(&self) -> usize {
         self.values.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -335,13 +339,13 @@ mod tests {
         let history = vec![
             CallHistoryEntry {
                 node_guid: 1,
-                choice_key: Some((1u64 << 16) | 0),
+                choice_key: Some(1u64 << 16),
                 scope_index: 0,
                 ..CallHistoryEntry::default()
             },
             CallHistoryEntry {
                 node_guid: 65_537,
-                choice_key: Some((65_537u64 << 16) | 0),
+                choice_key: Some(65_537u64 << 16),
                 scope_index: 0,
                 ..CallHistoryEntry::default()
             },
@@ -353,8 +357,8 @@ mod tests {
             },
         ];
         let index = FeatureIndex::rebuild_from_state(&WorldStateTable::new(), &history, 0).unwrap();
-        assert_eq!(index.choices.count((1u64 << 16) | 0), 1);
-        assert_eq!(index.choices.count((65_537u64 << 16) | 0), 1);
+        assert_eq!(index.choices.count(1u64 << 16), 1);
+        assert_eq!(index.choices.count(65_537u64 << 16), 1);
         assert_eq!(index.choices.count((1u64 << 16) | 1), 0);
     }
 
@@ -373,7 +377,7 @@ mod tests {
             incremental.items.set_quantity(owner, item, quantity);
         }
         for choice in choices {
-            incremental.choices.record(u64::from(choice));
+            incremental.choices.record(choice);
         }
         for stage in stages {
             incremental.world_stage.set(stage);

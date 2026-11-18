@@ -55,7 +55,7 @@ export interface RunsApi {
   whyNot(id: string, participant: number): Promise<{ nearMisses: NearMiss[] }>;
   inspect(id: string, participant: number): Promise<InspectView>;
   explain(id: string, event: number): Promise<RunEventView[]>;
-  reload(id: string, expectedRevision: number, idempotencyKey: string): Promise<RunReloadResult>;
+  reload(id: string, expectedRevision: number): Promise<RunReloadResult>;
 }
 
 function post<T>(path: string, body: unknown): Promise<T> {
@@ -66,7 +66,7 @@ const runPath = (id: string) => `/api/v4/runs/${encodeURIComponent(id)}`;
 const runs: RunsApi & {
   coverage(runs: number, seed?: string): Promise<CoverageReport>;
   list(): Promise<RunSummary[]>;
-  remove(id: string, expectedRevision: number, idempotencyKey: string): Promise<{ ok: boolean }>;
+  remove(id: string, expectedRevision: number): Promise<{ ok: boolean }>;
 } = {
   async start(input) {
     const expectedRevision = input.expectedRevision ?? (await request<ProjectMetadata>("/api/v3/project")).revision;
@@ -82,10 +82,10 @@ const runs: RunsApi & {
   whyNot: (id, participant) => request<{ nearMisses: NearMiss[] }>(`${runPath(id)}/why-not?participant=${participant}`),
   inspect: (id, participant) => request<InspectView>(`${runPath(id)}/inspect?participant=${participant}`),
   explain: (id, event) => request<RunEventView[]>(`${runPath(id)}/explain?event=${event}`),
-  reload: (id, expectedRevision, idempotencyKey) =>
-    post<RunReloadResult>(`${runPath(id)}/reload`, { expectedRevision, idempotencyKey }),
-  remove: (id, expectedRevision, idempotencyKey) =>
-    request<{ ok: boolean }>(runPath(id), { method: "DELETE", body: JSON.stringify({ expectedRevision, idempotencyKey }) }),
+  reload: (id, expectedRevision) =>
+    post<RunReloadResult>(`${runPath(id)}/reload`, { expectedRevision }),
+  remove: (id, expectedRevision) =>
+    request<{ ok: boolean }>(runPath(id), { method: "DELETE", body: JSON.stringify({ expectedRevision }) }),
 };
 
 export const StudioApi = {

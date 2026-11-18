@@ -173,8 +173,15 @@ fn act_after_rewind_creates_branch() {
         },
     )
     .unwrap();
-    run.rewind(storylet_engine::Authority::Architect, 0)
-        .unwrap();
+    run.rewind(
+        storylet_engine::Authority::Architect,
+        storylet_engine::RewindRequest {
+            to_step: 0,
+            expected_revision: run.revision(),
+            idempotency_key: format!("rewind-{}", run.revision()),
+        },
+    )
+    .unwrap();
     test_act(
         &mut run,
         &content,
@@ -409,8 +416,15 @@ fn nested_mission_choice_is_playable() {
     )
     .unwrap();
     assert!(run.architect_view(&content, 0).scene.is_none());
-    run.rewind(storylet_engine::Authority::Architect, 0)
-        .unwrap();
+    run.rewind(
+        storylet_engine::Authority::Architect,
+        storylet_engine::RewindRequest {
+            to_step: 0,
+            expected_revision: run.revision(),
+            idempotency_key: format!("rewind-{}", run.revision()),
+        },
+    )
+    .unwrap();
     assert_eq!(run.architect_view(&content, 0).scene.unwrap().node_guid, 1);
 }
 
@@ -505,8 +519,15 @@ fn movement_requires_a_connected_location() {
     assert!(test_act(&mut run, &content, 0, RunAction::Move { to: 2 }).is_err());
     test_act(&mut run, &content, 0, RunAction::Move { to: 1 }).unwrap();
     assert_eq!(run.world().active_location(0), Some(1));
-    run.rewind(storylet_engine::Authority::Architect, 0)
-        .unwrap();
+    run.rewind(
+        storylet_engine::Authority::Architect,
+        storylet_engine::RewindRequest {
+            to_step: 0,
+            expected_revision: run.revision(),
+            idempotency_key: format!("rewind-{}", run.revision()),
+        },
+    )
+    .unwrap();
     assert_eq!(run.world().active_location(0), Some(0));
 }
 #[test]
@@ -629,8 +650,15 @@ fn rewind_restores_storylet_before_new_choice() {
         run.architect_view(&content, 0).scene.unwrap().storylet.id,
         1
     );
-    run.rewind(storylet_engine::Authority::Architect, 0)
-        .unwrap();
+    run.rewind(
+        storylet_engine::Authority::Architect,
+        storylet_engine::RewindRequest {
+            to_step: 0,
+            expected_revision: run.revision(),
+            idempotency_key: format!("rewind-{}", run.revision()),
+        },
+    )
+    .unwrap();
     assert_eq!(
         run.architect_view(&content, 0).scene.unwrap().storylet.id,
         0
