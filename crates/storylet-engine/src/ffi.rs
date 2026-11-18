@@ -1,4 +1,3 @@
-//! Stable C ABI for native hosts. Inputs are UTF-8 JSON; outputs are owned buffers released with dn_buffer_free. ABI version: 1.
 use crate::{RuntimeSessionState, StoryletRuntime, WorldCommand, WorldState, apply_command};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -134,7 +133,6 @@ pub unsafe extern "C" fn dn_engine_submit_command(
     json_buffer(&response)
 }
 
-/// Create a host handle with no active project or playtest session.
 #[unsafe(no_mangle)]
 pub extern "C" fn dn_playtest_create() -> *mut DnPlaytestHandle {
     Box::into_raw(Box::new(DnPlaytestHandle {
@@ -150,7 +148,6 @@ pub unsafe extern "C" fn dn_playtest_destroy(handle: *mut DnPlaytestHandle) {
     }
 }
 
-/// Import a versioned project bundle and start one fresh scenario session.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dn_playtest_start(
     handle: *mut DnPlaytestHandle,
@@ -310,7 +307,6 @@ pub unsafe extern "C" fn dn_playtest_execute_choice(
     )
 }
 
-/// A native host owns one deterministic run and its immutable content.
 pub struct DnRunHandle {
     content: crate::run::RunContent,
     kernel: crate::run::RunKernel,

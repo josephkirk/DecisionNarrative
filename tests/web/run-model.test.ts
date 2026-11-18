@@ -60,7 +60,6 @@ test("timeless_project_hides_clock", () => {
 test("showParticipantTabs is true only for more than one human", () => {
   expect(showParticipantTabs(view())).toBe(false);
   expect(showParticipantTabs(view({ participants: [{ id: 0, name: "A", human: true }, { id: 1, name: "B", human: true }] }))).toBe(true);
-  // Rule participants are not seats.
   expect(showParticipantTabs(view({ participants: [{ id: 0, name: "A", human: true }, { id: 1, name: "Rosa", human: false }] }))).toBe(false);
 });
 

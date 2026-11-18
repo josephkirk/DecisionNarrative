@@ -1,15 +1,3 @@
-//! First-class beyond-branching dispatchers for the v5 runtime (CFN-SPEC-001 Module 2):
-//! the QBN deck query, the salience matcher, and the waypoint topic navigator.
-//!
-//! `UnifiedDispatcher` is the single eligibility and scoring policy shared by the QBN
-//! deck and the salience match. Authoring data uses gameplay tags and role
-//! requirements; runtime effects remain `MutationOp`, so the bijective delta and
-//! rollback path owned by `chrono_state` is unchanged.
-//!
-//! Determinism: every query walks the deck in the caller's order, ties break by
-//! storylet ID or edge ID, and the salience tie pick comes from the caller's seed.
-//! Nothing here reads a clock or a random source. Out-of-range IDs and non-finite
-//! values are rejected as ineligible or as typed errors; nothing indexes panics.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
@@ -21,9 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::chrono_completion::StoryletBitset;
 use crate::chrono_state::{GameplayTagRegistry, MutationOp, TagBitset, WorldStateTable};
 
-/// Salience distance penalty coefficient, `alpha` in REQ-BB-04.
 pub const SALIENCE_DISTANCE_ALPHA: f64 = 0.05;
-/// Scores inside this window are treated as ties and resolved from the seed.
 pub const SALIENCE_TIE_EPSILON: f64 = 0.0001;
 
 fn default_base_cost() -> f64 {
@@ -38,27 +24,18 @@ fn default_urgency_tag() -> String {
     "Standard".to_owned()
 }
 
-// ---------------------------------------------------------------------------
-// Authoring vocabulary (v5 section 5.3)
-// ---------------------------------------------------------------------------
 
-/// Pacing cluster of a storylet. Authoring data; the dispatcher does not branch on it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StoryletClusterType {
-    /// Constrained high-tension chain.
     LinearProgression,
-    /// Open hub for investigation or gearing up.
     #[default]
     PlayerPassage,
-    /// Randomized or weighted opportunity card deck.
     WheelDeck,
-    /// Rapid consequence sequence.
     AftermathAccelerator,
 }
 
 
-/// What one completion effect does. Effects mutate gameplay tags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectKind {
@@ -67,7 +44,6 @@ pub enum EffectKind {
     RemoveTag,
 }
 
-/// Authoring form of a tag completion effect.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StoryletEffect {
     pub target_id: String,
@@ -77,106 +53,73 @@ pub struct StoryletEffect {
     pub tag_mask: TagBitset,
 }
 
-/// Role selector bound to an available actor entity, the v5 form of the legacy
-/// `StoryletDefinition.required_roles` behavior.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RoleRequirement {
-    /// Role gameplay tag, for example `Role.Detective`.
     pub role_tag: String,
-    /// Optional location tag the actor must be at. The adapter writes the
-    /// current-location bit on the entity row; this module does not read vertex
-    /// adjacency because `WorldVertex` fields are not part of the shared contract.
     #[serde(default)]
     pub location_tag: Option<String>,
     #[serde(default)]
     pub role_index: Option<u16>,
     #[serde(default)]
     pub location_index: Option<u16>,
-    /// Compiled ancestor closure masks written by `UnifiedDispatcher::resolve`.
     #[serde(default)]
     pub role_mask: TagBitset,
     #[serde(default)]
     pub location_mask: TagBitset,
 }
 
-/// One role selector bound to one entity row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleBinding {
     pub role_index: u16,
     pub entity_index: usize,
 }
 
-/// A dispatchable storylet.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StoryletDef {
     pub storylet_id: u16,
-    /// Authoring marker: this storylet is a dedicated ending candidate.
     #[serde(default)]
     pub is_ending: bool,
-    /// Filler content used only when no progress storylet is available.
     #[serde(default)]
     pub is_fallback: bool,
-    /// Ranks storylets in a large QBN deck; higher first.
     #[serde(default)]
     pub display_priority: i32,
     #[serde(default = "default_urgency_tag")]
     pub urgency_tag: String,
     #[serde(default)]
     pub cluster_type: StoryletClusterType,
-    /// Tag closure masks, already compiled by the registry.
     #[serde(default)]
     pub required_tags: TagBitset,
-    /// Any-of mask: at least one bit must be present. Kept separate from
-    /// `required_tags`, which is an all-of mask.
     #[serde(default)]
     pub required_any_tags: TagBitset,
     #[serde(default)]
     pub forbidden_tags: TagBitset,
-    /// Tags that raise the salience specificity term when present.
     #[serde(default)]
     pub salience_bonus_tags: TagBitset,
-    /// Dramatic arc phases this storylet may fire in (REQ-BB-05). An empty mask
-    /// accepts any phase.
     #[serde(default)]
     pub required_arc_phases: TagBitset,
-    /// Role selectors. A non-empty list requires at least one bound entity.
     #[serde(default)]
     pub required_roles: Vec<RoleRequirement>,
-    /// Participants who may play this storylet. Empty = any human. A rule
-    /// participant plays its storylets on its own at the start of a slot.
     #[serde(default)]
     pub played_by: Vec<crate::chrono_participants::PartIx>,
-    /// Eligible clock slots; empty means any time.
     #[serde(default)]
     pub window: Vec<u32>,
-    /// Optional pure candidate gate compiled from the authored precondition graph.
     #[serde(default)]
     pub precondition_graph: Option<crate::chrono_runtime::FlowGraphAsset>,
 
-    /// Authoring effects; compiled into `on_complete_mutation`.
     #[serde(default)]
     pub effects_on_complete: Vec<StoryletEffect>,
-    /// Runtime effect applied on completion.
     #[serde(default)]
     pub on_complete_mutation: MutationOp,
     #[serde(default)]
     pub payload_node_guid: u32,
     #[serde(default)]
     pub is_repeatable: bool,
-    /// Cooldown in integer milliseconds after a completion. This module has no clock;
-    /// the caller's fixed-point clock supplies `now_ms` to `cooldown_remaining_ms`.
     #[serde(default)]
     pub cooldown_ms: i64,
-    /// Turn-based cooldown, kept separate from `cooldown_ms`: there is no conversion
-    /// contract between action turns and fixed-point milliseconds. A storylet that
-    /// declares both is reported by `cooldown_unit`.
     #[serde(default)]
     pub cooldown_turns: u64,
 }
 
-// ---------------------------------------------------------------------------
-// Waypoint topic graph (v5 section 5.3)
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WaypointTopicNode {
@@ -198,15 +141,12 @@ pub struct WaypointTopicEdge {
     pub dialogue_transition_asset_id: String,
     #[serde(default = "default_base_cost")]
     pub base_cost: f64,
-    /// Added once per traversal so the NPC routes around used edges.
     #[serde(default = "default_used_penalty_cost")]
     pub used_penalty_cost: f64,
     #[serde(default)]
     pub is_fallback_default: bool,
 }
 
-/// Directed topic graph. Node and edge order is the authoring order, and that order
-/// is part of the deterministic result.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WaypointTopicGraph {
     #[serde(default)]
@@ -215,23 +155,17 @@ pub struct WaypointTopicGraph {
     pub edges: Vec<WaypointTopicEdge>,
 }
 
-/// The transition the NPC takes this turn.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WaypointStep {
     pub edge_index: usize,
     pub edge_id: String,
     pub to_topic_id: String,
-    /// Dynamic cost of this edge: base plus penalty per recorded traversal.
     pub cost: f64,
-    /// True when the normal path was exhausted and a fallback edge was taken.
     pub via_fallback: bool,
-    /// Optional authored line/asset to speak while taking this edge.
     #[serde(default)]
     pub dialogue_transition_asset_id: String,
 }
 
-/// Which cooldown unit an authored storylet uses. Turns and milliseconds are not
-/// interchangeable; the engine keeps both paths.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CooldownUnit {
@@ -240,38 +174,25 @@ pub enum CooldownUnit {
     Turns,
 }
 
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DispatchError {
-    /// A topic or gameplay tag name is not registered.
     UnresolvedTarget { target_id: String },
-    /// The weighted distance term is not finite.
     NonFiniteDistance { storylet_id: u16 },
-    /// A storylet declares both a millisecond and a turn cooldown.
     CooldownUnitConflict {
         storylet_id: u16,
         cooldown_ms: i64,
         cooldown_turns: u64,
     },
-    /// A role selector has no distinct available actor.
     NoDistinctActorForRole { role_tag: String },
-    /// An entity row is outside the entity tag table.
     EntityIndexOutOfRange { entity_index: usize, len: usize },
-    /// An edge cost or traversal penalty is negative or not finite.
     InvalidEdgeCost { edge_id: String, cost: f64 },
-    /// A traversal count makes the dynamic edge cost non-finite.
     InvalidTraversalCount { edge_id: String, count: u64 },
-    /// A topic name is not in the topic graph.
     TopicNotFound { topic_id: String },
-    /// No path exists from the current topic to the goal topic.
     NoPathToGoal {
         from_topic_id: String,
         goal_topic_id: String,
     },
-    /// No path exists and the current topic has no fallback edge.
     NoFallbackEdge { from_topic_id: String },
 }
 
@@ -283,15 +204,11 @@ impl fmt::Display for DispatchError {
 
 impl Error for DispatchError {}
 
-// ---------------------------------------------------------------------------
-// Dispatcher
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct UnifiedDispatcher {
     #[serde(default)]
     pub storylets: Vec<StoryletDef>,
-    /// Dense ID -> row lookup. Skipped in JSON; rebuilt by `new`/`rebuild_index`.
     #[serde(skip, default)]
     index_by_id: Vec<Option<u32>>,
     #[serde(skip, default)]
@@ -336,7 +253,6 @@ impl UnifiedDispatcher {
         dispatcher
     }
 
-    /// Rebuild the dense ID index after direct mutation of `storylets`.
     pub fn rebuild_index(&mut self) {
         let max_id = self
             .storylets
@@ -355,9 +271,6 @@ impl UnifiedDispatcher {
         }
     }
 
-    /// Look up one storylet by ID. Declaration order defines the first match.
-    /// A built index is authoritative for hits and misses; the linear fallback
-    /// exists only for an index that was never built or became stale.
     pub fn storylet(&self, storylet_id: u16) -> Option<&StoryletDef> {
         if !self.index_by_id.is_empty() && self.indexed_count == self.storylets.len() {
             if let Some(Some(row)) = self.index_by_id.get(storylet_id as usize) {
@@ -375,7 +288,6 @@ impl UnifiedDispatcher {
             .find(|def| def.storylet_id == storylet_id)
     }
 
-    /// Compile gameplay tag and role references into dense registry indices.
     pub fn resolve(&mut self, tags: &GameplayTagRegistry) -> Result<usize, DispatchError> {
         let mut resolved = 0;
         for def in &mut self.storylets {
@@ -400,15 +312,10 @@ impl UnifiedDispatcher {
         Ok(resolved)
     }
 
-    /// Hard eligibility: all-of and any-of tag masks, the dramatic arc phase gate,
-    /// and a distinct available actor for every role selector. ChronoRuntime evaluates
-    /// the authored precondition graph before adding a storylet to a candidate pool.
-    /// Completion locks live in the caller's mask; use `is_playable` for the deck view.
     pub fn is_eligible(&self, def: &StoryletDef, table: &WorldStateTable) -> bool {
         self.try_is_eligible(def, table).unwrap_or(false)
     }
 
-    /// Describe the first missing hard requirement in reader-facing language.
     pub fn explain_ineligible(&self, def: &StoryletDef, table: &WorldStateTable, registry: &GameplayTagRegistry) -> Option<String> {
         if !def.window.is_empty() && table.clock.as_ref().is_none_or(|clock| !def.window.contains(&clock.slot)) { return Some("outside its time window".into()); }
         for i in (0..registry.tag_count()).rev() {
@@ -426,8 +333,6 @@ impl UnifiedDispatcher {
         if !def.required_roles.is_empty() && self.bind_roles(def, table).is_err() { return Some("needs a participant present".into()); }
         None
     }
-    /// Fallible form of `is_eligible`: malformed content returns the typed
-    /// dispatch error instead of silently deleting the storylet.
     pub fn try_is_eligible(
         &self,
         def: &StoryletDef,
@@ -456,10 +361,6 @@ impl UnifiedDispatcher {
         Ok(true)
     }
 
-    /// Bind every role selector to a distinct entity row: the legacy requirement that
-    /// each required role has its own available actor at the player's current
-    /// location. A row must carry the role mask and, when the selector declares a
-    /// location, the current-location bit the adapter writes on the actor row.
     pub fn bind_roles(
         &self,
         def: &StoryletDef,
@@ -468,11 +369,6 @@ impl UnifiedDispatcher {
         self.bind_roles_excluding(def, table, &BTreeSet::new())
     }
 
-    /// Same binding with busy or reserved rows excluded. Pass an empty set when the
-    /// runtime has no reservation state; the engine never infers it. Assignment is a
-    /// maximum bipartite matching (Kuhn) over role selectors in declaration order and
-    /// entity rows in index order, so a replay reproduces the same bindings. A role
-    /// that cannot get its own actor is a typed error, never a shared actor.
     pub fn bind_roles_excluding(
         &self,
         def: &StoryletDef,
@@ -530,8 +426,6 @@ impl UnifiedDispatcher {
         Ok(bindings)
     }
 
-    /// Eligibility plus the completion lock for non-repeatable storylets. `completed`
-    /// is the caller's mask of storylet IDs that have already run.
     pub fn is_playable(
         &self,
         def: &StoryletDef,
@@ -541,7 +435,6 @@ impl UnifiedDispatcher {
         self.try_is_playable(def, table, completed).unwrap_or(false)
     }
 
-    /// Fallible form of `is_playable`.
     pub fn try_is_playable(
         &self,
         def: &StoryletDef,
@@ -554,7 +447,6 @@ impl UnifiedDispatcher {
         self.try_is_eligible(def, table)
     }
 
-    /// Bitset form used by the per-scope completion contract.
     pub fn try_is_playable_bitset(
         &self,
         def: &StoryletDef,
@@ -567,9 +459,6 @@ impl UnifiedDispatcher {
         self.try_is_eligible(def, table)
     }
 
-    /// QBN deck query: filter the deck IDs to playable storylets and order them by
-    /// `display_priority` descending, then by storylet ID ascending. Unknown deck IDs
-    /// are skipped, and a repeated ID appears once.
     pub fn query_qbn_deck(
         &self,
         deck: &[u16],
@@ -580,7 +469,6 @@ impl UnifiedDispatcher {
             .unwrap_or_default()
     }
 
-    /// Fallible form of `query_qbn_deck`; malformed content fails the query.
     pub fn try_query_qbn_deck(
         &self,
         deck: &[u16],
@@ -608,8 +496,6 @@ impl UnifiedDispatcher {
         Ok(eligible.into_iter().map(|def| def.storylet_id).collect())
     }
 
-    /// Bitset deck query with an explicit ending opt-in. The default normal
-    /// profile passes `false`; an ending profile is fetched from its own pool.
     pub fn try_query_qbn_deck_bitset_with_ending(
         &self,
         deck: &[u16],
@@ -641,7 +527,6 @@ impl UnifiedDispatcher {
         Ok(eligible.into_iter().map(|def| def.storylet_id).collect())
     }
 
-    /// Bitset form of `try_query_qbn_deck`.
     pub fn try_query_qbn_deck_bitset(
         &self,
         deck: &[u16],
@@ -673,9 +558,6 @@ impl UnifiedDispatcher {
         Ok(f64::from(table.global_tags.popcount_intersection(&def.salience_bonus_tags)))
     }
 
-    /// Salience match: score only playable candidates and return the best. Scores
-    /// inside `SALIENCE_TIE_EPSILON` are ties, resolved from `seed` so a replay
-    /// reproduces the same pick. Returns `None` when nothing is eligible.
     pub fn match_most_salient(
         &self,
         pool: &[u16],
@@ -687,8 +569,6 @@ impl UnifiedDispatcher {
             .unwrap_or(None)
     }
 
-    /// Fallible form of `match_most_salient`; a malformed candidate fails the
-    /// dispatch instead of silently disappearing.
     pub fn try_match_most_salient(
         &self,
         pool: &[u16],
@@ -706,8 +586,6 @@ impl UnifiedDispatcher {
             let Some(def) = self.storylet(id) else {
                 continue;
             };
-            // REQ-BB-05: every salience candidate SHALL declare an arc-phase
-            // mask. An empty mask is the premature-climax case, so fail closed.
             if def.required_arc_phases.is_empty() {
                 continue;
             }
@@ -733,7 +611,6 @@ impl UnifiedDispatcher {
     }
 
 
-    /// Bitset form of `try_match_most_salient`.
     pub fn try_match_most_salient_bitset(
         &self,
         pool: &[u16],
@@ -775,9 +652,6 @@ impl UnifiedDispatcher {
         Ok(Some(best[deterministic_index(seed, best.len())]))
     }
 
-    /// Report the cooldown unit of an authored storylet. `Ok(None)` means the
-    /// storylet has no cooldown. A storylet that declares both units is a typed
-    /// incompatibility, so the service can keep the old turn-based path for it.
     pub fn cooldown_unit(&self, def: &StoryletDef) -> Result<Option<CooldownUnit>, DispatchError> {
         if def.cooldown_ms > 0 && def.cooldown_turns > 0 {
             return Err(DispatchError::CooldownUnitConflict {
@@ -795,9 +669,6 @@ impl UnifiedDispatcher {
         Ok(None)
     }
 
-    /// Turn-based cooldown remaining, given the turn of the last completion. Returns
-    /// 0 when the storylet is ready. This module owns no turn counter, so the caller
-    /// supplies both turns.
     pub fn cooldown_remaining_turns(
         def: &StoryletDef,
         last_completed_turn: u64,
@@ -810,9 +681,6 @@ impl UnifiedDispatcher {
             .saturating_sub(current_turn.saturating_sub(last_completed_turn))
     }
 
-    /// Millisecond cooldown remaining, given the millisecond of the last completion.
-    /// Returns 0 when the storylet is ready. This module owns no clock, so the caller
-    /// supplies both.
     pub fn cooldown_remaining_ms(def: &StoryletDef, last_completed_ms: i64, now_ms: i64) -> i64 {
         if def.cooldown_ms <= 0 {
             return 0;
@@ -822,13 +690,6 @@ impl UnifiedDispatcher {
             .max(0)
     }
 
-    /// Fold the authoring effects into a `MutationOp` for the current state. An
-    /// increment becomes a delta; a set becomes the delta that reaches the assigned
-    /// value from the current one; a tag kind writes the compiled mask into the global
-    /// add/remove masks. The result is the storylet's `on_complete_mutation` plus
-    /// these terms, so the runtime effect policy stays a single `MutationOp` and
-    /// `revert_delta` keeps the exact inverse. Entity-scoped tag effects stay in
-    /// `on_complete_mutation.entity_tag_ops`; this module does not build them.
     pub fn compile_effects(&self, def: &StoryletDef) -> Result<MutationOp, DispatchError> {
         let mut mutation = def.on_complete_mutation.clone();
         for effect in &def.effects_on_complete {
@@ -840,15 +701,6 @@ impl UnifiedDispatcher {
         Ok(mutation)
     }
 
-    /// Next conversational transition for the NPC.
-    ///
-    /// Edge weight is `base_cost + traversal_count * used_penalty_cost`. Player-only
-    /// topic nodes are excluded from the path, except when they are the explicit start
-    /// or goal. Ties between equal-cost paths are broken by the smaller edge ID. When
-    /// no path exists, the deterministic fallback edge from the current topic is
-    /// returned with `via_fallback` set; when that is also missing the call returns
-    /// `DispatchError::NoFallbackEdge`. Negative or non-finite costs are rejected with
-    /// `DispatchError::InvalidEdgeCost`.
     pub fn compute_next_npc_topic_step(
         &self,
         graph: &WaypointTopicGraph,
@@ -883,7 +735,6 @@ impl UnifiedDispatcher {
             })
             .collect::<Result<Vec<f64>, DispatchError>>()?;
 
-        // Adjacency in authoring order, then by edge ID, so relaxation is stable.
         let mut adjacency: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for (index, edge) in graph.edges.iter().enumerate() {
             let from = topic_index(graph, &edge.from_topic_id)?;
@@ -949,11 +800,8 @@ impl UnifiedDispatcher {
         }
 
         if best_cost[goal] < f64::INFINITY && goal != start {
-            // Walk back from the goal, then take the first edge of that path.
             let mut path = Vec::new();
             let mut node = goal;
-            // Bound the walk: a valid predecessor chain is shorter than the
-            // node count, so a longer walk means the pointers disagree.
             for _ in 0..=graph.nodes.len() {
                 let Some(edge_index) = best_edge[node] else {
                     break;
@@ -978,7 +826,6 @@ impl UnifiedDispatcher {
             }
         }
 
-        // Fallback: the player exhausted the normal routes.
         let mut fallback: Option<usize> = None;
         for (index, edge) in graph.edges.iter().enumerate() {
             if !edge.is_fallback_default || topic_index(graph, &edge.from_topic_id)? != start {
@@ -1006,9 +853,6 @@ impl UnifiedDispatcher {
     }
 }
 
-/// One Kuhn augmenting-path step: find a free row for `role`, moving an already
-/// matched row's owner elsewhere if that owner can move. Roles and rows are visited in
-/// a fixed order, so the matching is reproducible.
 fn augment_role(
     role: usize,
     candidates: &[(u16, Vec<usize>)],
@@ -1047,8 +891,6 @@ fn best_edge_id(graph: &WaypointTopicGraph, edge_index: Option<usize>) -> String
     }
 }
 
-/// Min-heap item ordered by cost, then edge ID, then node index. Costs are checked
-/// finite and non-negative before use, so their bit patterns order like the values.
 struct SearchItem {
     cost: f64,
     edge_id: String,
@@ -1082,7 +924,6 @@ impl Ord for SearchItem {
     }
 }
 
-/// Deterministic pick among tied candidates from the caller's seed.
 fn deterministic_index(seed: u64, count: usize) -> usize {
     let mut z = seed.wrapping_add(0x9e37_79b9_7f4a_7c15);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf03_8538_4dc2_d6fc);
@@ -1106,7 +947,6 @@ mod dense_lookup_tests {
         assert_eq!(dispatcher.storylet(7).unwrap().storylet_id, 7);
         assert!(dispatcher.storylet(9).is_none());
 
-        // Deserialization skips the dense index; lookup must still work.
         let encoded = serde_json::to_string(&dispatcher).unwrap();
         let decoded: UnifiedDispatcher = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded.storylet(7).unwrap().storylet_id, 7);
@@ -1117,7 +957,6 @@ mod dense_lookup_tests {
         assert_eq!(dispatcher.storylet(9).unwrap().storylet_id, 9);
         assert!(dispatcher.storylet(8).is_none());
 
-        // A stale cache falls back to a scan rather than reporting a false miss.
         let mut stale = dispatcher.clone();
         stale.storylets.reverse();
         assert!(stale.storylet(2).is_some());

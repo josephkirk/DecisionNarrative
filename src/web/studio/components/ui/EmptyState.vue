@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import StudioIcon from "../StudioIcon.vue";
 
-/** Centered zero-data message: icon, short title, optional hint, and the obvious next action in the slot. */
 defineProps<{ icon: string; title: string; hint?: string }>();
 </script>
 

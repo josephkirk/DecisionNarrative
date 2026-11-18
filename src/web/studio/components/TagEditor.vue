@@ -203,7 +203,6 @@ function focusInput() {
 .tag-editor__remove:hover { color: var(--status-danger); }
 .tag-editor__input {
   flex: 1 1 140px;
-  /* No hard minimum: inside two-column inspector grids a fixed min-width pushed fields past the card edge. */
   min-width: 0;
   text-overflow: ellipsis;
   height: 26px;

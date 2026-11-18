@@ -32,7 +32,6 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
   });
   let awaitingMove = false;
 
-  /** Run one in-flight operation; a second call while busy is ignored. */
   async function guarded(op: () => Promise<void>): Promise<void> {
     if (state.busy) return;
     state.busy = true;
@@ -82,7 +81,6 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
   async function act(action: RunAction): Promise<void> {
     const id = state.runId;
     if (!id) return;
-    // One key per user intent; a retry of the same intent must reuse it, a new click gets a new one.
     const key = crypto.randomUUID();
     await guarded(async () => {
       await adopt(await api.act(id, state.activeParticipant, action, currentRevision(), key));
@@ -150,7 +148,6 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
     const count = state.envelope?.view.participants.length ?? 0;
     if (!state.runId || id < 0 || id >= count) return;
     state.activeParticipant = id;
-    // Switching who is playing re-reads the view; the latest selection wins if reads overlap.
     api.view(state.runId, id).then(
       (envelope) => {
         if (id === state.activeParticipant) void adopt(envelope);
@@ -160,7 +157,6 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
   }
 
   function nextParticipant(dir: 1 | -1): void {
-    // Hot-seat: only people take turns; rule participants are skipped.
     const humans = state.envelope ? humanParticipants(state.envelope.view) : [];
     if (humans.length < 2) return;
     const at = humans.findIndex((p) => p.id === state.activeParticipant);

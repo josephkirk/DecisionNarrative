@@ -1,11 +1,11 @@
-import type { EntityRecord, EntityTemplateRecord, GameplayTagRecord, StoryletRecord, TraitTemplateRecord } from "./contracts.ts";
+import type { EntityRecord, GameplayTagRecord, StoryletRecord, TraitTemplateRecord } from "./contracts.ts";
 
 export const TAG_KINDS = [{ id: "gameplay", label: "Gameplay tags" }] as const;
 export type TagKind = "gameplay";
-export type TagEntityType = "entity" | "entity_template" | "storylet" | "trait_template";
+export type TagEntityType = "entity" | "storylet" | "trait_template";
 export interface TagReference { entityId: string; entityType: TagEntityType; entityLabel: string; detail: string; nodeId?: string; itemId?: string; }
 export interface TagEntry { kind: "gameplay"; name: string; references: TagReference[]; registered: boolean; protected: boolean; }
-export interface TagIndexInput { gameplayTags: GameplayTagRecord[]; entities: EntityRecord[]; entityTemplates: EntityTemplateRecord[]; storylets: StoryletRecord[]; traitTemplates: TraitTemplateRecord[]; }
+export interface TagIndexInput { gameplayTags: GameplayTagRecord[]; entities: EntityRecord[]; storylets: StoryletRecord[]; traitTemplates: TraitTemplateRecord[]; }
 export function normalizeTagName(value: unknown): string { return typeof value === "string" ? value.trim().toLowerCase() : ""; }
 export function uniqueTagNames(values: readonly unknown[] | undefined): string[] { const seen = new Set<string>(); const result: string[] = []; for (const value of values ?? []) { if (typeof value !== "string") continue; const name = value.trim(); const key = normalizeTagName(name); if (key && !seen.has(key)) { seen.add(key); result.push(name); } } return result; }
 function object(value: unknown): Record<string, unknown> | null { return value && typeof value === "object" ? value as Record<string, unknown> : null; }
@@ -15,14 +15,6 @@ export function buildTagIndex(input: TagIndexInput): TagEntry[] {
   const add = (raw: unknown, ref: TagReference) => { if (typeof raw !== "string") return; const name = raw.trim(); if (!name || name.includes("..") || name.startsWith(".") || name.endsWith(".")) return; const key = normalizeTagName(name); const entry = map.get(key) ?? { kind: "gameplay" as const, name, references: [], registered: false, protected: false }; map.set(key, entry); const rk = `${ref.entityType}:${ref.entityId}`; if (!entry.references.some((r) => `${r.entityType}:${r.entityId}` === rk)) entry.references.push(ref); };
   for (const entity of input.entities) {
     const ref = { entityId: entity.id, entityType: "entity" as const, entityLabel: entity.name || entity.id, detail: "Entity" };
-    for (const tag of uniqueTagNames(entity.tags)) add(tag, { ...ref, detail: "Entity tag" });
-    for (const trait of entity.traits ?? []) {
-      const value = object(trait.values)?.role;
-      if (typeof value === "string") add(value, { ...ref, detail: "Character role" });
-    }
-  }
-  for (const entity of input.entityTemplates) {
-    const ref = { entityId: entity.id, entityType: "entity_template" as const, entityLabel: entity.name || entity.id, detail: "Entity Template" };
     for (const tag of uniqueTagNames(entity.tags)) add(tag, { ...ref, detail: "Entity tag" });
     for (const trait of entity.traits ?? []) {
       const value = object(trait.values)?.role;

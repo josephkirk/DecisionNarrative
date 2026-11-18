@@ -1,18 +1,3 @@
-//! Token-driven flow graph, scene timeline, and call-history runtime for the v5
-//! contract (CFN-SPEC-001 Modules 3, 4, 5, and 6).
-//!
-//! `FlowGraphAsset` is the immutable topology: nodes, pins, and edges with
-//! persistent globally unique node GUIDs. `FlowGraphInstance` is one active
-//! execution of that asset: node states, the flat `SignalToken` vector, the
-//! fixed-point integer-millisecond clock, and the call history. World state and
-//! storylet policy come from `chrono_state` and `chrono_dispatch`; this module
-//! owns execution order, node call data, and the reversible records that make
-//! rollback exact.
-//!
-//! Determinism: tokens are consumed in ascending token id order, node lookups are
-//! ordered by node GUID or name, action parts are ordered by priority key then
-//! combiner entity, and every tie is broken by a stable key. Nothing here reads a
-//! wall clock or a random source; the caller supplies the seed.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -30,7 +15,6 @@ use crate::chrono_state::{
     PassionMutation, PassionRegistry, TagBitset, WorldStateTable, MAX_TAGS,
 };
 
-/// Operators used by typed condition and comparison nodes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PredicateOperator {
@@ -42,18 +26,12 @@ pub enum PredicateOperator {
     Lt,
     Lte,
 }
-/// Input pin name used when a call record is synthesized by replay or invoke.
 pub const DEFAULT_INPUT_PIN: &str = "In";
 
-/// Output pin name used when a node completes without an authored choice.
 pub const DEFAULT_OUTPUT_PIN: &str = "Out";
 
-/// Hard per-tick execution cap. Zero-cost cycles are rejected by
-/// `FlowGraphAsset::validate`; this cap also stops assets that bypassed
-/// validation from hanging the frame loop.
 pub const MAX_TICK_EXECUTIONS: usize = 4096;
 
-/// Node categories from REQ-FG-04.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeCategory {
@@ -65,7 +43,6 @@ pub enum NodeCategory {
     ScopedContainer,
 }
 
-/// Node execution states from REQ-FG-05.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeExecutionState {
@@ -76,7 +53,6 @@ pub enum NodeExecutionState {
     Aborted,
 }
 
-/// Composer activity for one action part inside a scene time window (REQ-SC-02).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventOverlapActivity {
@@ -86,8 +62,6 @@ pub enum EventOverlapActivity {
     EndActivity,
 }
 
-/// Timeline action classes, ordered by the composer priority key used for
-/// dispatch order and conflict arbitration (REQ-SC-03). Higher values win.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TimelineActionType {
@@ -100,8 +74,6 @@ pub enum TimelineActionType {
 }
 
 impl TimelineActionType {
-    /// Priority key for a timeline action. Authors may add a positive offset on
-    /// the event itself; the table value is the base.
     pub const fn action_key_priority(&self) -> i32 {
         match self {
             TimelineActionType::WorkspotPose => 0,
@@ -113,7 +85,6 @@ impl TimelineActionType {
     }
 }
 
-/// Typed values carried by graph data pins. Data edges never schedule execution.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum DataValue {
@@ -161,14 +132,12 @@ pub struct DataEdgeConnection {
 pub enum PropertyOperation { Set, Add, Subtract, Toggle }
 
 
-/// One pin on a node.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PinDefinition {
     pub pin_name: String,
     pub is_input: bool,
 }
 
-/// One edge between two pins (REQ-FG-02).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EdgeConnection {
     pub source_node_guid: u32,
@@ -177,23 +146,18 @@ pub struct EdgeConnection {
     pub target_pin_name: String,
 }
 
-/// Flat signal token (REQ-FG-03): 32 bytes, no heap payload. The pin is an
-/// index into the target node's `input_pins`; status lives in `flags`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalToken {
     pub token_id: u64,
     pub graph_instance_id: u64,
     pub target_node_guid: u32,
-    /// Position in the target node's `input_pins`; the asset owns the name.
     pub target_pin_index: u16,
     pub flags: u16,
     pub time_budget_ms: i32,
     pub deferred_until_ms: i32,
 }
 
-/// Token is waiting to be consumed.
 pub const TOKEN_ACTIVE: u16 = 1 << 0;
-/// Token was budget-starved and parked until `deferred_until_ms`.
 pub const TOKEN_DEFERRED: u16 = 1 << 1;
 
 impl SignalToken {
@@ -222,18 +186,13 @@ impl SignalToken {
     }
 }
 
-/// Clamp a millisecond budget into the token's packed i32 range.
 fn clamp_token_ms(value: i64) -> i32 {
     value.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
-/// Absolute deferred deadlines must fit the packed token; overflowing would
-/// silently turn the deadline into "wake immediately".
 fn checked_token_ms(value: i64) -> Result<i32, GraphError> {
     i32::try_from(value).map_err(|_| GraphError::TokenClockOverflow { value })
 }
-/// Host-consumable edge emitted when a passion crosses a configured threshold.
-/// Rollback emits the inverse edge; callers can activate or cancel the linked asset.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PassionThresholdTriggerEvent {
     pub node_guid: u32,
@@ -243,7 +202,6 @@ pub struct PassionThresholdTriggerEvent {
     pub activated: bool,
 }
 
-/// One authored node: identity, category, behavior, and pins (REQ-FG-01).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlowNodeDef {
     pub node_guid: u32,
@@ -252,7 +210,6 @@ pub struct FlowNodeDef {
     pub kind: NodeKind,
     #[serde(default)]
     pub entity_path: String,
-    /// Execution pins carried by flow edges. These are distinct from typed data pins.
     #[serde(default)]
     pub input_pins: Vec<PinDefinition>,
     #[serde(default)]
@@ -261,13 +218,10 @@ pub struct FlowNodeDef {
     pub data_input_pins: Vec<DataPinDefinition>,
     #[serde(default)]
     pub data_output_pins: Vec<DataPinDefinition>,
-    /// Integer milliseconds charged against the frame budget when this node runs.
     #[serde(default)]
     pub cost_ms: i64,
-    /// Mission node that owns this node's invocations, when scoped (REQ-CH-04).
     #[serde(default)]
     pub mission_scope: Option<u32>,
-    /// Authored labels and content preserved for UI and MCP consumers.
     #[serde(default)]
     pub payload: serde_json::Value,
 }
@@ -280,19 +234,13 @@ pub enum Visibility { Private, CoLocated }
 #[serde(rename_all = "snake_case")]
 pub enum HolderRef { Acting, Participant(PartIx) }
 
-/// Node behavior. Every kind is executable through the same three endpoints
-/// (`ExecuteNormal`, `ForceComplete`, `CancelAndRevert`).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NodeKind {
     Learn { fact: FactIx, #[serde(rename = "knowledge_kind")] kind: KnowKind, visibility: Visibility },
     MoveParticipant { location_entity: u16 },
-    /// Tells the acting participant a canon chronicle entry (and, when
-    /// co-located, witnesses) and teaches them its facts. `facts` is copied
-    /// from the entry at compile time so execution needs no chronicle lookup.
     Reveal { entry: ChronIx, #[serde(rename = "knowledge_kind")] kind: KnowKind, visibility: Visibility, #[serde(default)] facts: Vec<FactIx> },
     Knows { holder: HolderRef, fact: FactIx, confirmed_only: bool },
-    /// True when the acting participant shares a location with another participant.
     Colocated { participant: PartIx },
     GetEntity { entity_id: String },
     GetEntityProperty { property_key: String, value_type: String },
@@ -309,11 +257,9 @@ pub enum NodeKind {
     Mutation {
         op: MutationOp,
     },
-    /// Apply an attributed world-graph transformation and cache its exact inverse.
     GraphTransform {
         rule: GraphTransformRule,
     },
-    /// Reversible Star-NPC passion mutation with threshold graph events.
     PassionMutation {
         op: PassionMutation,
     },
@@ -321,8 +267,6 @@ pub enum NodeKind {
         duration_ms: i64,
         #[serde(default)]
         required_tags: TagBitset,
-        /// Named wait event from the authored graph. A waiter also wakes when
-        /// `signal_event` delivers this name, independently of its timer.
         #[serde(default)]
         wait_event: String,
     },
@@ -366,12 +310,9 @@ pub enum NodeKind {
     End {
         #[serde(default)]
         jump_to_storylet: Option<u16>,
-        /// When present on a pure precondition graph, determines candidate validity.
         #[serde(default = "default_precondition_result")]
         precondition_result: bool,
     },
-    /// Boolean value or branch gate driven by a typed data input.
-    /// Explicit deferred invoke target, preserved from the legacy
     Teleport {
         #[serde(default)]
         destination_storylet: Option<u16>,
@@ -380,7 +321,6 @@ pub enum NodeKind {
     }
 }
 
-/// One entry on a scene section timeline track (REQ-SC-01).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimelineTrackEvent {
     pub event_id: u64,
@@ -389,15 +329,12 @@ pub struct TimelineTrackEvent {
     pub start_time_ms: i64,
     pub duration_ms: i64,
     pub payload_asset_id: String,
-    /// Pose captured before this event overwrote it, used by reverse scrubbing.
     #[serde(default)]
     pub cached_previous_pose_id: String,
-    /// Author offset added to the action-type priority key.
     #[serde(default)]
     pub priority_offset: i32,
 }
 
-/// One resolved timeline action inside a time window (REQ-SC-02).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionPart {
     pub action_key_priority: i32,
@@ -407,7 +344,6 @@ pub struct ActionPart {
     pub event_ref: TimelineTrackEvent,
 }
 
-/// A command the composer dispatches after arbitration.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComposerCommand {
     pub node_guid: u32,
@@ -419,7 +355,6 @@ pub struct ComposerCommand {
     pub cached_previous_pose_id: String,
 }
 
-/// A recorded composer conflict: the winner and the parts it displaced.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComposerConflict {
     pub combiner_entity_path: String,
@@ -427,7 +362,6 @@ pub struct ComposerConflict {
     pub rejected: Vec<ComposerCommand>,
 }
 
-/// Per-entity pose arbitration for one scene section (REQ-SC-03).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SceneComposer {
     pub actor_pose: BTreeMap<String, String>,
@@ -435,7 +369,6 @@ pub struct SceneComposer {
     pub conflicts: Vec<ComposerConflict>,
 }
 
-/// One call-history record (REQ-CH-01).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallHistoryEntry {
     pub node_guid: u32,
@@ -461,12 +394,10 @@ pub struct CallHistoryEntry {
     pub tick: u32,
     #[serde(default)]
     pub completed: bool,
-    /// Canonical authored choice identity: `(node_guid << 16) | choice_index`.
     #[serde(default)]
     pub choice_key: Option<u64>,
 }
 
-/// One save-replay record: a call-history entry plus the frame it was played on.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SaveReplayEntry {
     pub node_guid: u32,
@@ -477,7 +408,6 @@ pub struct SaveReplayEntry {
     pub frame_ms: i64,
 }
 
-/// Per-node inverse cache. `CancelAndRevert` pops these in LIFO order.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeCallData {
@@ -487,15 +417,12 @@ pub enum NodeCallData {
     Storylet {
         storylet_id: u16,
         delta: BijectiveDelta,
-        /// Completion clock before this call, restored on rollback so a
-        /// rolled-back storylet is not left on cooldown.
         #[serde(default)]
         previous_completed_ms: Option<i64>,
     },
     WaypointStep {
         previous_topic_id: String,
         edge_id: String,
-        /// Authored line/asset the host should speak on this transition.
         #[serde(default)]
         dialogue_transition_asset_id: Option<String>,
         delta: BijectiveDelta,
@@ -503,8 +430,6 @@ pub enum NodeCallData {
     SceneSection {
         previous_clock_ms: i64,
         previous_poses: Vec<ScenePoseUndo>,
-        /// History commit created when the section completed; reopening is
-        /// only safe when this is the current head.
         #[serde(default)]
         completion_commit: Option<usize>,
     },
@@ -532,7 +457,6 @@ pub struct ScenePoseUndo {
 }
 
 impl NodeCallData {
-    /// The recorded delta, when the record carries one.
     pub fn delta(&self) -> Option<&BijectiveDelta> {
         match self {
             NodeCallData::Delta { delta }
@@ -543,7 +467,6 @@ impl NodeCallData {
     }
 }
 
-/// Runtime state for one node (REQ-FG-05).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlowNodeInstance {
     pub node_guid: u32,
@@ -552,25 +475,17 @@ pub struct FlowNodeInstance {
     pub executed_input_pin: Option<String>,
     pub chosen_output_pin: Option<String>,
     pub chosen_storylet_id: Option<u16>,
-    /// LIFO inverse cache for `CancelAndRevert`.
     pub call_data: Vec<NodeCallData>,
-    /// Input pins already arrived, for AND-gate fan-in.
     pub arrived_input_pins: BTreeSet<String>,
-    /// Completion lock keyed by storylet id, matching the dispatcher contract.
     pub completed_storylets: BTreeSet<u16>,
     pub current_topic_id: String,
     pub edge_use_counts: BTreeMap<String, u64>,
-    /// Mission-scoped invocations (REQ-CH-04).
     pub local_call_history: Vec<CallHistoryEntry>,
-    /// The nested instance a MissionSubGraph node owns (REQ-CH-04, spec §8.2).
     pub sub_graph: Option<Box<FlowGraphInstance>>,
     pub section_clock_ms: i64,
     pub waiter_wake_ms: i64,
 }
 
-/// One committed call-history record. The engine is a commit DAG: each commit
-/// points at its parent, so two clients that diverged can be reconciled by their
-/// lowest common ancestor (REQ-CH-05).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct HistoryCommit {
     pub index: usize,
@@ -579,10 +494,8 @@ pub struct HistoryCommit {
     pub delta: BijectiveDelta,
 }
 
-/// Persistent call-history engine (REQ-CH-05).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PersistentHistoryEngine {
-    /// Commit 0 is the root: an empty entry with no parent.
     pub commits: Vec<HistoryCommit>,
     pub head: usize,
 }
@@ -595,7 +508,6 @@ impl PersistentHistoryEngine {
         }
     }
 
-    /// Append a commit under `parent` and return its index.
     pub fn commit(
         &mut self,
         entry: &CallHistoryEntry,
@@ -612,7 +524,6 @@ impl PersistentHistoryEngine {
         index
     }
 
-    /// Append a commit under the current head.
     pub fn commit_for(&mut self, entry: &CallHistoryEntry, delta: &BijectiveDelta) -> usize {
         let index = self.commit(entry, delta, Some(self.head));
         self.head = index;
@@ -627,7 +538,6 @@ impl PersistentHistoryEngine {
         self.commits.get(index)
     }
 
-    /// Root-to-`commit` commit indices, in forward order.
     pub fn path_to(&self, commit: usize) -> Result<Vec<usize>, GraphError> {
         let mut path = Vec::new();
         let mut cursor = commit;
@@ -645,7 +555,6 @@ impl PersistentHistoryEngine {
         Ok(path)
     }
 
-    /// Entries on the path from the root to `commit`, root excluded.
     pub fn path_entries(&self, commit: usize) -> Result<Vec<CallHistoryEntry>, GraphError> {
         let mut entries = Vec::new();
         for &index in &self.path_to(commit)? {
@@ -657,7 +566,6 @@ impl PersistentHistoryEngine {
         Ok(entries)
     }
 
-    /// Entries on the path to the current head.
     pub fn call_history(&self) -> Result<Vec<CallHistoryEntry>, GraphError> {
         self.path_entries(self.head)
     }
@@ -666,7 +574,6 @@ impl PersistentHistoryEngine {
         Ok(self.path_to(commit)?.len() - 1)
     }
 
-    /// Lowest common ancestor of two commits (REQ-CH-05).
     pub fn lca(&self, left: usize, right: usize) -> Result<usize, GraphError> {
         let left_path = self.path_to(left)?;
         let right_path = self.path_to(right)?;
@@ -681,7 +588,6 @@ impl PersistentHistoryEngine {
     }
 }
 
-/// Immutable graph topology (REQ-FG-01).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlowGraphAsset {
     pub asset_id: String,
@@ -693,9 +599,6 @@ pub struct FlowGraphAsset {
 }
 
 impl FlowGraphAsset {
-    /// Structural validation: unique GUIDs, at least one pin per direction,
-    /// resolvable edge endpoints, non-negative costs, and resolvable mission
-    /// scopes.
     pub fn validate(&self) -> Result<(), GraphError> {
         if self.asset_id.is_empty() {
             return Err(GraphError::EmptyAssetId);
@@ -896,13 +799,7 @@ impl FlowGraphAsset {
         Ok(())
     }
 
-    /// A cycle made only of zero-cost nodes never consumes frame budget, so a
-    /// token can loop forever inside one tick. Every node on the cycle must be
-    /// rejected at load time (REQ-FG-03).
     fn validate_acyclic_zero_cost(&self) -> Result<(), GraphError> {
-        // A Choice or QBN hub stops the token until the host supplies input, so
-        // a loop through one cannot spin inside a single tick even when every
-        // node costs zero.
         let zero_cost: BTreeSet<u32> = self
             .nodes
             .iter()
@@ -929,7 +826,6 @@ impl FlowGraphAsset {
             targets.sort_unstable();
             targets.dedup();
         }
-        // 0 = unvisited, 1 = on the current stack, 2 = finished.
         let mut state: BTreeMap<u32, u8> = BTreeMap::new();
         for &start in zero_cost.iter() {
             if state.get(&start).copied().unwrap_or(0) != 0 {
@@ -981,7 +877,6 @@ impl FlowGraphAsset {
             .map(|pin| pin.pin_name.as_str())
     }
 
-    /// Incoming edges in deterministic order: source GUID, then source pin.
     pub fn incoming_edges(&self, node_guid: u32) -> Vec<&EdgeConnection> {
         let mut edges: Vec<&EdgeConnection> = self
             .edges
@@ -996,7 +891,6 @@ impl FlowGraphAsset {
         edges
     }
 
-    /// Outgoing edges in deterministic order: target GUID, then target pin.
     pub fn outgoing_edges(&self, node_guid: u32, pin_name: &str) -> Vec<&EdgeConnection> {
         let mut edges: Vec<&EdgeConnection> = self
             .edges
@@ -1017,9 +911,6 @@ impl FlowGraphAsset {
             .any(|edge| edge.source_node_guid == from && edge.target_node_guid == to)
     }
 
-    /// Shortest edge path from `from` to `to`, as `(node_guid, input_pin,
-    /// output_pin)` steps for the intermediate nodes only. Adjacency is ordered
-    /// by target GUID then target pin, so the result is reproducible.
     pub fn shortest_bridge_path(
         &self,
         from: u32,
@@ -1040,15 +931,11 @@ impl FlowGraphAsset {
                 )
             })
             .collect();
-        // BFS over the whole edge set. Sorting by source node, target node and
-        // target pin makes the chosen path reproducible.
         adjacency.sort_by(|a, b| {
             a.0.cmp(&b.0)
                 .then_with(|| a.1.cmp(&b.1))
                 .then_with(|| a.3.cmp(&b.3))
         });
-        // parent[node] = (previous node, pin entered on `node`, pin left on
-        // `previous`).
         let mut parent: BTreeMap<u32, (u32, String, String)> = BTreeMap::new();
         let mut queue = vec![from];
         let mut visited = BTreeSet::from([from]);
@@ -1122,7 +1009,6 @@ fn find_pin<'a>(
     pins.iter().find(|pin| pin.pin_name == pin_name)
 }
 
-/// Errors raised by the flow-graph runtime.
 #[derive(Clone, Debug, PartialEq)]
 pub enum GraphError {
     DataPinTypeMismatch {
@@ -1162,17 +1048,14 @@ pub enum GraphError {
         node_guid: u32,
         scope: u32,
     },
-    /// A mission node has no child instance attached (REQ-CH-04).
     MissionAssetNotAttached {
         node_guid: u32,
         sub_graph_asset_id: String,
     },
-    /// The supplied child asset does not match the node's `sub_graph_asset_id`.
     MissionAssetIdMismatch {
         node_guid: u32,
         asset_id: String,
     },
-    /// The child asset already appears in this instance's ancestor chain.
     MissionAssetCycle {
         node_guid: u32,
         asset_id: String,
@@ -1215,13 +1098,10 @@ pub enum GraphError {
     UnresolvedStorylet {
         storylet_id: u16,
     },
-    /// A direct storylet selection named an id outside the node's authored pool.
     StoryletNotInDeck {
         node_guid: u32,
         storylet_id: u16,
     },
-    /// A direct storylet selection named a storylet that is not currently
-    /// playable (completion lock, preconditions, arc phase, or cooldown).
     StoryletNotPlayable {
         node_guid: u32,
         storylet_id: u16,
@@ -1249,12 +1129,9 @@ pub enum GraphError {
         cursor_ms: i64,
     },
     NegativeFrameBudget(i64),
-    /// A cycle of zero-cost nodes would never consume frame budget.
     ZeroCostCycle {
         node_guid: u32,
     },
-    /// A frame exceeded the per-tick execution cap, which also stops
-    /// zero-cost tokens that were authored after validation.
     ExecutionLimitExceeded {
         limit: usize,
     },
@@ -1266,7 +1143,6 @@ pub enum GraphError {
         node_guid: u32,
         event_id: u64,
     },
-    /// A signal token minted by another instance must not drive this graph.
     TokenInstanceMismatch {
         token_instance_id: u64,
         instance_id: u64,
@@ -1280,13 +1156,10 @@ pub enum GraphError {
     CommitNotFound {
         commit_index: usize,
     },
-    /// A turn-based cooldown cannot be honored because the runtime clock is
-    /// integer milliseconds and no turn-to-millisecond conversion was supplied.
     TurnCooldownNotConvertible {
         storylet_id: u16,
         cooldown_turns: u64,
     },
-    /// A named tag effect cannot be resolved without a compiled registry.
     RegistryRequired {
         node_guid: u32,
         tag_name: String,
@@ -1623,9 +1496,6 @@ impl From<DispatchError> for GraphError {
     }
 }
 
-/// Everything a node execution needs from outside the graph: world state,
-/// storylet policy, and the optional hierarchical registry that makes tag
-/// predicates and effects resolve through ancestor masks.
 pub struct RuntimeContext<'a> {
     pub state: &'a mut WorldStateTable,
     pub dispatcher: &'a UnifiedDispatcher,
@@ -1679,8 +1549,6 @@ impl<'a> RuntimeContext<'a> {
     }
 }
 
-/// Salience coverage for one dynamic dispatcher node, so a caller can prove the
-/// pool is not starved before the node runs (REQ-SD-03).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SalienceCoverage {
     pub node_guid: u32,
@@ -1689,9 +1557,6 @@ pub struct SalienceCoverage {
 }
 
 impl SceneComposer {
-    /// Sort the parts by priority key then combiner entity, arbitrate one winner
-    /// per entity, and dispatch the winners in that order (REQ-SC-02, REQ-SC-03).
-    /// Ties are broken by node GUID then event id, so the winner is reproducible.
     pub fn execute_sorted_action_parts(
         &mut self,
         node_guid: u32,
@@ -1701,8 +1566,6 @@ impl SceneComposer {
         self.execute_sorted_action_parts_multi(&[(node_guid, parts)], is_reverse)
     }
 
-    /// Arbitrate commands from several concurrent scene sections in one pass so
-    /// conflicts span nodes (REQ-SC-06).
     pub fn execute_sorted_action_parts_multi(
         &mut self,
         owners: &[(u32, &[ActionPart])],
@@ -1796,8 +1659,6 @@ impl SceneComposer {
     }
 }
 
-/// Composer arbitration order: higher priority key wins, then the smaller node
-/// GUID, then the smaller event id.
 fn beats(winner: &ComposerCommand, challenger: &ComposerCommand) -> bool {
     challenger.action_key_priority > winner.action_key_priority
         || (challenger.action_key_priority == winner.action_key_priority
@@ -1806,56 +1667,36 @@ fn beats(winner: &ComposerCommand, challenger: &ComposerCommand) -> bool {
                     && challenger.event_id < winner.event_id)))
 }
 
-/// One active execution of an asset (REQ-FG-05).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlowGraphInstance {
     pub instance_id: u64,
     #[serde(default)]
     pub acting_participant: PartIx,
     pub asset: FlowGraphAsset,
-    /// Node instances, ordered by node GUID.
     pub nodes: Vec<FlowNodeInstance>,
-    /// Flat token vector, the runtime ring buffer from REQ-FG-03.
     pub tokens: Vec<SignalToken>,
-    /// Execution lineage for live tokens and latent nodes. Zero denotes legacy
-    /// unscoped execution. Maps are additive for older serialized sessions.
     #[serde(default)]
     pub token_invocations: BTreeMap<u64, u64>,
     #[serde(default)]
     pub node_invocations: BTreeMap<u32, u64>,
     #[serde(skip)]
     pub current_invocation: u64,
-    /// Linear call history for the branch that reaches the current head.
     pub global_call_history: Vec<CallHistoryEntry>,
     pub history: PersistentHistoryEngine,
     pub composer: SceneComposer,
-    /// Fixed-point integer-millisecond clock.
     pub clock_ms: i64,
     pub seed: u64,
     pub next_token_id: u64,
-    /// Turn counter. The runtime clock is milliseconds, so a turn-based cooldown
-    /// is only honored when `ms_per_turn` is supplied; otherwise the caller keeps
-    /// the legacy turn path.
     pub turn: u64,
     pub ms_per_turn: Option<i64>,
-    /// Frame at which each storylet last completed, for cooldown checks.
     pub last_completed_ms: BTreeMap<u16, i64>,
-    /// Once-only lock across every dispatcher node in this instance, not just
-    /// the node that completed the storylet (REQ-BB-02).
     #[serde(default)]
     pub completed_storylets: StoryletBitset,
-    /// Dense storylet index -> stable authoring key, supplied by the loader.
     #[serde(default)]
     pub storylet_keys: BTreeMap<u16, String>,
-    /// Dense scope row for call-history/feature projection. Root is 0; mission
-    /// children get a deterministic derived scope.
     #[serde(default)]
     pub scope_index: u64,
-    /// Asset ids from the root instance down to this instance, used to reject
-    /// mission cycles deterministically (REQ-CH-04).
     pub mission_asset_path: Vec<String>,
-    /// Transient host events from newly committed passion threshold crossings.
-    /// Timeline reconstruction suppresses replayed historical events.
     #[serde(skip)]
     pub pending_passion_events: Vec<PassionThresholdTriggerEvent>,
 }
@@ -1866,8 +1707,6 @@ impl FlowGraphInstance {
         Self::new_at_path(instance_id, asset, seed, vec![asset_id])
     }
 
-    /// Build an instance with a known mission ancestor chain, so attaching a
-    /// child asset can reject a cycle at attach time (REQ-CH-04).
     fn new_at_path(
         instance_id: u64,
         asset: FlowGraphAsset,
@@ -1911,7 +1750,6 @@ impl FlowGraphInstance {
         })
     }
 
-    /// Clear every runtime record without touching the asset.
     pub fn reset(&mut self) {
         for node in &mut self.nodes {
             let node_guid = node.node_guid;
@@ -1920,8 +1758,6 @@ impl FlowGraphInstance {
                 .node(node_guid)
                 .map(|def| def.entity_path.clone())
                 .unwrap_or_default();
-            // Attachments survive a reset: the child instance is reset in place,
-            // so a load rebuilds mission state from its scoped array.
             let mut sub_graph = node.sub_graph.take();
             if let Some(child) = sub_graph.as_mut() {
                 child.reset();
@@ -1947,8 +1783,6 @@ impl FlowGraphInstance {
         self.completed_storylets.clear_all();
         self.pending_passion_events.clear();
     }
-    /// Non-empty scoped mission arrays anywhere in this instance tree, keyed by
-    /// mission node GUID. This is the replay source for nested missions.
     pub fn nested_mission_histories(&self) -> BTreeMap<u32, Vec<CallHistoryEntry>> {
         fn collect(instance: &FlowGraphInstance, out: &mut BTreeMap<u32, Vec<CallHistoryEntry>>) {
             for node in &instance.nodes {
@@ -1965,8 +1799,6 @@ impl FlowGraphInstance {
         out
     }
 
-    /// Write scoped mission arrays back into this instance tree. Used after a
-    /// reset that must clear runtime state but keep the replay source alive.
     fn restore_mission_mirrors(
         &mut self,
         mirrors: &BTreeMap<u32, Vec<CallHistoryEntry>>,
@@ -1981,7 +1813,6 @@ impl FlowGraphInstance {
         }
     }
 
-    /// Take committed passion threshold events, including events from mission children.
     pub fn drain_passion_threshold_events(&mut self) -> Vec<PassionThresholdTriggerEvent> {
         let mut events = std::mem::take(&mut self.pending_passion_events);
         for node in &mut self.nodes {
@@ -2025,7 +1856,6 @@ impl FlowGraphInstance {
         &self.global_call_history
     }
 
-    /// Bind dense storylet indices to stable keys. Call once after content load.
     pub fn bind_storylet_keys(
         &mut self,
         keys: impl IntoIterator<Item = (u16, String)>,
@@ -2033,7 +1863,6 @@ impl FlowGraphInstance {
         self.storylet_keys = keys.into_iter().collect();
     }
 
-    /// Rebuild the materialized completion bitset from the canonical commit path.
     pub fn rebuild_completed_bitset(&self) -> Result<StoryletBitset, GraphError> {
         let mut bits = StoryletBitset::new();
         for entry in self.history.call_history()? {
@@ -2046,12 +1875,9 @@ impl FlowGraphInstance {
         Ok(bits)
     }
 
-    /// Debug/checkpoint verification: the live bitset equals the rebuilt path.
     pub fn verify_completed_bitset(&self) -> Result<bool, GraphError> {
         Ok(self.completed_storylets == self.rebuild_completed_bitset()?)
     }
-    /// Deliver an external gameplay verb and immediately release every matching
-    /// latent waiter, regardless of its timeout or required-tag condition.
     pub fn signal_event(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -2087,8 +1913,6 @@ impl FlowGraphInstance {
         Ok(emitted)
     }
 
-    /// Deterministic per-node seed, derived from the instance seed and the node
-    /// GUID. Same mixing as the dispatcher's deterministic index.
     pub fn next_deterministic_seed(&mut self, node_guid: u32) -> u64 {
         self.seed = mix64(self.seed ^ (node_guid as u64).wrapping_add(0x9e37_79b9_7f4a_7755));
         self.seed
@@ -2102,10 +1926,6 @@ fn mix64(value: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-/// A node execution decided against current state. `plan` performs the world
-/// change; `commit_plan` applies the record side effects (history, call data,
-/// node state). Splitting them keeps the borrow discipline simple: no borrow into
-/// the instance is held across a record call.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 struct NodePlan {
     node_guid: u32,
@@ -2128,7 +1948,6 @@ struct NodePlan {
     commit: bool,
 }
 
-/// One scene section's planned slice of a frame, before arbitration.
 #[derive(Clone, Debug)]
 struct SectionFrame {
     node_guid: u32,
@@ -2142,7 +1961,6 @@ struct SectionFrame {
 }
 
 impl FlowGraphInstance {
-    /// Decide one node execution for any kind through the same path.
     fn plan(
         &self,
         ctx: &mut RuntimeContext,
@@ -2388,8 +2206,6 @@ impl FlowGraphInstance {
             } => {
                 let wake = self.clock_ms.saturating_add(*duration_ms);
                 plan.waiter_wake_ms = Some(wake);
-                // A wake (timer or signal) re-enters a node that already owns
-                // its inverse record; pushing another would break rollback.
                 if node.state != NodeExecutionState::ActiveLatent {
                     plan.call_data = Some(NodeCallData::Waiter { wake_ms: wake });
                 }
@@ -2432,8 +2248,6 @@ impl FlowGraphInstance {
                 });
             }
             NodeKind::Choice { default_output_pin } => {
-                // A choice pauses until the player selects an output; only an
-                // explicit choice (or a force) records a route.
                 let pin = match chosen {
                     Some(pin) if !pin.is_empty() => pin.clone(),
                     _ if force && !default_output_pin.is_empty() => default_output_pin.clone(),
@@ -2480,8 +2294,6 @@ impl FlowGraphInstance {
                     });
                 } else {
                     plan.emit = false;
-                    // Every recorded node must be revertible (REQ-CH-06), so a
-                    // plain end keeps its route on the inverse cache.
                     plan.call_data = Some(NodeCallData::Route {
                         output_pin: plan.output_pin.clone().unwrap_or_default(),
                     });
@@ -2547,8 +2359,6 @@ impl FlowGraphInstance {
                         }
                     }
                     None => {
-                        // ExecuteNormal presents the deck; the node stays latent
-                        // until a storylet is chosen or the exit is reached.
                     }
                 }
             }
@@ -2561,8 +2371,6 @@ impl FlowGraphInstance {
                     Some(id) => Some(id),
                     None => {
                         let seed = mix64(self.seed ^ (node_guid as u64));
-                        // Both dispatch paths must honor cooldowns. Forced runs
-                        // (replay/invoke) skip the filter.
                         let mut candidates = Vec::with_capacity(pool.len());
                         for id in pool.iter().copied() {
                             if !force && !self.off_cooldown(ctx, id) {
@@ -2658,11 +2466,6 @@ impl FlowGraphInstance {
                 }
             }
             NodeKind::MissionSubGraph { sub_graph_asset_id } => {
-                // The mission boundary completes when its child instance has
-                // nothing left to run. `plan` is reached without `force` only
-                // through `execute_mission`, which always starts the child
-                // first, so a never-started child is not mistaken for a
-                // finished one.
                 let child_finished = self.nodes[index]
                     .sub_graph
                     .as_ref()
@@ -2680,8 +2483,6 @@ impl FlowGraphInstance {
                 section_duration_ms,
                 ..
             } => {
-                // Re-entering a completed section restarts its timeline from
-                // zero instead of reporting a phantom completion at the end.
                 let cursor = if node.state == NodeExecutionState::Completed {
                     0
                 } else {
@@ -2693,8 +2494,6 @@ impl FlowGraphInstance {
                     cursor
                 });
                 plan.call_data = Some(NodeCallData::SceneSection {
-                    // Undo data must describe the real prior state, even when
-                    // the new plan restarts a completed section from zero.
                     previous_clock_ms: node.section_clock_ms,
                     previous_poses: Vec::new(),
                     completion_commit: None,
@@ -2764,8 +2563,6 @@ impl FlowGraphInstance {
             if plan.commit {
                 self.record_call(&entry, &plan.delta)?;
             } else {
-                // A replay branch must not append commits to the history DAG,
-                // but mission-scoped nodes still record into their scope.
                 match self
                     .asset
                     .node(entry.node_guid)
@@ -2834,8 +2631,6 @@ impl FlowGraphInstance {
             } else {
                 NodeExecutionState::ActiveLatent
             };
-            // AND-gate fan-in reads this set on the next arrival. Completion
-            // consumes the set so a later re-entry starts from zero pins.
             if plan.completed {
                 node.arrived_input_pins.clear();
             } else {
@@ -2878,9 +2673,6 @@ impl FlowGraphInstance {
         Ok(emitted)
     }
 
-    /// Append one record. Nodes inside a mission scope write only to that
-    /// mission node's local history; the mission node itself writes globally
-    /// (REQ-CH-04).
     fn record_call(
         &mut self,
         entry: &CallHistoryEntry,
@@ -2899,8 +2691,6 @@ impl FlowGraphInstance {
                         scope: mission,
                     })?;
                 self.nodes[index].local_call_history.push(entry.clone());
-                // Scoped calls were always committed to the DAG; keep that so
-                // checkout/reconcile can undo and replay them.
                 self.history.commit_for(entry, delta);
             }
             None => {
@@ -2911,7 +2701,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Remove the last record for a node, used by revert paths.
     fn remove_record(
         &mut self,
         node_guid: u32,
@@ -2925,9 +2714,6 @@ impl FlowGraphInstance {
         };
         let position = history.iter().rposition(|entry| entry.node_guid == node_guid && entry.chosen_storylet_id == storylet_id);
         if let Some(position) = position {
-            // A Learn node's delta identifies exactly which knowledge rows its
-            // invocation inserted. Other graph instances may reuse the same
-            // source index, so never rebase rows by index alone.
             let mut ordinal = BTreeMap::<u32, usize>::new();
             let mut rebases = Vec::new();
             let mut telling_rebases = Vec::new();
@@ -3030,8 +2816,6 @@ impl FlowGraphInstance {
         token
     }
 
-    /// True when the storylet has no millisecond cooldown outstanding at the
-    /// instance clock. Unknown ids are treated as ready; callers validate those.
     fn off_cooldown(&self, ctx: &RuntimeContext, storylet_id: u16) -> bool {
         ctx.dispatcher
             .storylet(storylet_id)
@@ -3051,7 +2835,6 @@ impl FlowGraphInstance {
         Ok(def.cost_ms)
     }
 
-    /// Smallest active token id, so consumption order is reproducible.
     fn next_active_token_index(&self) -> Option<usize> {
         let mut best: Option<(u64, usize)> = None;
         for (index, token) in self.tokens.iter().enumerate() {
@@ -3083,7 +2866,6 @@ impl FlowGraphInstance {
             None => ctx.state.global_tags.contains_all(mask),
         }
     }
-    /// Evaluate flow and data edges without scheduling data dependencies.
     pub fn evaluate_precondition_graph(
         asset: &FlowGraphAsset,
         ctx: &RuntimeContext,
@@ -3332,16 +3114,10 @@ fn default_output(def: &FlowNodeDef) -> String {
 }
 
 impl FlowGraphInstance {
-    /// Reset the instance and seed the start node's token. Execution happens on
-    /// the next `tick`, which owns the frame budget the first token is charged
-    /// against.
     pub fn start(&mut self) -> Result<Vec<SignalToken>, GraphError> {
         self.start_at_node(self.asset.start_node_guid)
     }
 
-    /// Reset the instance and seed a token at a stable authored entry point.
-    /// Dispatchers use this to enter a selected storylet without rebuilding
-    /// the aggregate project graph.
     pub fn start_at_node(&mut self, node_guid: u32) -> Result<Vec<SignalToken>, GraphError> {
         if self
             .asset
@@ -3357,11 +3133,6 @@ impl FlowGraphInstance {
         Ok(vec![token])
     }
 
-    /// Advance one frame. The clock moves first, latent waiters that are ready
-    /// wake in node GUID order, then active tokens are consumed in ascending
-    /// token id order against the frame budget. A token whose node costs more
-    /// than the remaining budget is deferred to a later frame instead of being
-    /// dropped.
     pub fn tick(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3420,10 +3191,6 @@ impl FlowGraphInstance {
                 }
             }
         }
-        // A mission keeps running across frames: the token loop below only
-        // consumes the parent's tokens, so a child instance that is still
-        // working is continued here, in node GUID order. Nodes with a token
-        // pending this frame are handled by that loop instead.
         let running: Vec<u32> = self
             .nodes
             .iter()
@@ -3476,8 +3243,6 @@ impl FlowGraphInstance {
             let mut token = self.tokens[index].clone();
             let cost = self.node_cost(token.target_node_guid)?;
             if cost > remaining && (executions > 0 || frame_budget_ms == 0) {
-                // Defer exactly one frame and keep the unused budget; deferring
-                // by `cost` would livelock a node that costs more than a frame.
                 let deferred = &mut self.tokens[index];
                 deferred.set_active(false);
                 deferred.set_deferred(true);
@@ -3486,9 +3251,6 @@ impl FlowGraphInstance {
                 )?;
                 continue;
             }
-            // The token carries this token's share of the frame budget. The
-            // first execution may overrun the frame so a node costing more than
-            // one frame still makes progress.
             token.time_budget_ms = clamp_token_ms(remaining.max(cost));
             remaining = (remaining - cost).max(0);
             executions += 1;
@@ -3500,19 +3262,16 @@ impl FlowGraphInstance {
                 token.target_pin_index,
                 &token,
             )?;
-            // New tokens appended by this node remain active in the same frame.
             self.tokens[index].set_active(false);
             self.tokens[index].set_deferred(false);
             executed.extend(emitted);
         }
-        // Consumed tokens are never reused; keep the ring buffer bounded.
         self.tokens.retain(|token| token.is_active() || token.is_deferred());
         self.token_invocations.retain(|id, _| self.tokens.iter().any(|token| token.token_id == *id));
         self.current_invocation = 0;
         Ok(executed)
     }
 
-    /// ExecuteNormal: run a node when a token arrives at a named input pin.
     pub fn execute_input(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3530,7 +3289,6 @@ impl FlowGraphInstance {
         self.execute_input_at_index(ctx, node_guid, pin_index, token)
     }
 
-    /// ExecuteNormal with the pin already resolved to an index.
     pub fn execute_input_at_index(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3596,7 +3354,6 @@ impl FlowGraphInstance {
         result
     }
 
-    /// Resolve a dynamic branch by choosing an output pin.
     pub fn choose(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3620,7 +3377,6 @@ impl FlowGraphInstance {
         result
     }
 
-    /// Run one storylet on a QBN hub or salience selector.
     pub fn select_storylet(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3636,8 +3392,6 @@ impl FlowGraphInstance {
             NodeKind::SalienceSelector { pool, .. } => Some(pool),
             _ => None,
         };
-        // A dispatcher node with an empty pool rejects every id; testing
-        // `!pool.is_empty()` would accept anything.
         if let Some(pool) = pool {
             if !pool.contains(&storylet_id) {
                 return Err(GraphError::StoryletNotInDeck {
@@ -3669,7 +3423,6 @@ impl FlowGraphInstance {
         self.commit_storylet_selection(ctx, node_guid, storylet_id)
     }
 
-    /// Complete a previously validated selection after its scene has played.
     pub fn complete_reserved_storylet(&mut self, ctx: &mut RuntimeContext, node_guid: u32, storylet_id: u16) -> Result<Vec<SignalToken>, GraphError> {
         let def = self.asset.node(node_guid).ok_or(GraphError::NodeNotFound { node_guid })?;
         match &def.kind {
@@ -3704,7 +3457,6 @@ impl FlowGraphInstance {
         result
     }
 
-    /// Queue a selected storylet entry without resetting the active hub or history.
     pub fn enter_storylet(&mut self, node_guid: u32) -> Result<(), GraphError> {
         self.enter_storylet_invocation(node_guid, 0)
     }
@@ -3717,7 +3469,6 @@ impl FlowGraphInstance {
         self.current_invocation = 0;
         Ok(())
     }
-    /// The deck a hub would present right now, in dispatcher order.
     pub fn present_deck(
         &self,
         ctx: &RuntimeContext,
@@ -3761,9 +3512,6 @@ impl FlowGraphInstance {
         Ok(ready)
     }
 
-    /// Deck filtered by turn-based cooldowns. A storylet whose cooldown cannot be
-    /// converted to milliseconds is reported as a typed incompatibility so the
-    /// caller keeps the legacy turn path for it rather than the runtime guessing.
     pub fn present_deck_with_turn_cooldowns(
         &self,
         ctx: &RuntimeContext,
@@ -3806,8 +3554,6 @@ impl FlowGraphInstance {
         Ok((expires - self.clock_ms).max(0))
     }
 
-    /// Salience coverage for a selector, so a caller can prove the pool is not
-    /// starved before the node runs (REQ-SD-03).
     pub fn salience_coverage(
         &self,
         ctx: &RuntimeContext,
@@ -3834,7 +3580,6 @@ impl FlowGraphInstance {
             let Some(def) = ctx.dispatcher.storylet(storylet_id) else {
                 continue;
             };
-            // Same fail-closed arc-phase and ending exclusion as selection.
             if def.required_arc_phases.is_empty() {
                 continue;
             }
@@ -3911,8 +3656,6 @@ impl FlowGraphInstance {
             let node = &mut self.nodes[index];
             node.state = NodeExecutionState::Completed;
             node.chosen_output_pin = Some(DEFAULT_OUTPUT_PIN.to_string());
-            // The inverse record was pushed when the waiter became latent; a
-            // second one here would leave an unmatched entry for rollback.
             executed.extend(self.emit_tokens(node_guid, DEFAULT_OUTPUT_PIN, 0));
         }
         self.current_invocation = 0;
@@ -3921,8 +3664,6 @@ impl FlowGraphInstance {
 }
 
 impl FlowGraphInstance {
-    /// ForceComplete: run a node instantly without a token, as the replay and
-    /// invoke paths do.
     pub fn force_complete(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -3942,8 +3683,6 @@ impl FlowGraphInstance {
         output_pin: &str,
         storylet_id: Option<u16>,
     ) -> Result<BijectiveDelta, GraphError> {
-        // Older persisted histories can carry an empty input pin; replay used
-        // to synthesize the default, so keep that behavior.
         let input_pin = if input_pin.is_empty() {
             DEFAULT_INPUT_PIN
         } else {
@@ -3985,11 +3724,6 @@ impl FlowGraphInstance {
             if self.nodes[index].state == NodeExecutionState::Completed {
                 return Ok(BijectiveDelta::default());
             }
-            // ForceComplete completes the mission boundary. When the child is
-            // fresh and the adapter supplied its scoped array, that array is
-            // replayed into the child so the world state is rebuilt without
-            // serializing it (REQ-CH-03); otherwise the child graph is driven
-            // by frame ticks, not by a force.
             let scoped = self.nodes[index].local_call_history.clone();
             let nested = self.nodes[index]
                 .sub_graph
@@ -4070,8 +3804,6 @@ impl FlowGraphInstance {
         Ok(delta)
     }
 
-    /// CancelAndRevert: pop this node's inverse cache and undo exactly,
-    /// including waypoint edge use counts and revealed property values.
     pub fn cancel_and_revert(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4165,9 +3897,6 @@ impl FlowGraphInstance {
             NodeCallData::Waiter { .. } => self.nodes[index].waiter_wake_ms = 0,
             NodeCallData::Route { .. } => self.nodes[index].chosen_output_pin = None,
             NodeCallData::Mission { .. } => {
-                // Snapshot the child's scoped mirrors before unwinding: they
-                // are the replay source for the forward reconcile pass, but a
-                // plain reset would discard them.
                 let mirrors = self.nodes[index]
                     .sub_graph
                     .as_deref()
@@ -4178,7 +3907,6 @@ impl FlowGraphInstance {
                     child.reset();
                     child.restore_mission_mirrors(&mirrors);
                 }
-                // Do not sync: that would erase the mirror we just restored.
             }
             NodeCallData::Delta { .. }
             | NodeCallData::Poi { .. }
@@ -4186,8 +3914,6 @@ impl FlowGraphInstance {
         }
         let cancelled_storylet = record_storylet(&record);
         self.remove_record(node_guid, cancelled_storylet, Some(ctx.state))?;
-        // A direct revert of the current head must move the head to its parent;
-        // otherwise a later checkout/reconcile cancels the same call again.
         let head = self.history.head;
         if head != 0 {
             let commit = &self.history.commits[head];
@@ -4207,10 +3933,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Process a scene time window. Forward windows are half-open `[t0, t1)`;
-    /// backward scrubbing uses `(t1, t0]` and inverts the activity mapping.
-    /// Parts are sorted by priority key then combiner entity, arbitrated per
-    /// entity, and dispatched in that order (REQ-SC-02, REQ-SC-03).
     pub fn process_time_window(
         &mut self,
         node_guid: u32,
@@ -4219,8 +3941,6 @@ impl FlowGraphInstance {
         self.process_time_window_inner(node_guid, delta_ms, true, true, 0)
     }
 
-    /// Scrub a scene window without touching call history or emitting tokens.
-    /// Used by preview clients that apply the result to a throwaway instance.
     pub fn preview_time_window(
         &mut self,
         node_guid: u32,
@@ -4254,8 +3974,6 @@ impl FlowGraphInstance {
         Ok(parts)
     }
 
-    /// First half of a scene window: resolve the time slice and its parts
-    /// without mutating the clock, composer, call_data, or history.
     fn plan_section_frame(
         &self,
         node_guid: u32,
@@ -4336,8 +4054,6 @@ impl FlowGraphInstance {
             }
         }
         if delta_ms < 0 {
-            // Only commands that actually won arbitration during forward play
-            // may write a pose on the way back.
             parts.retain(|part| {
                 self.composer.applied.iter().any(|command| {
                     command.node_guid == node_guid
@@ -4365,8 +4081,6 @@ impl FlowGraphInstance {
             previous_poses,
         })
     }
-    /// Second half: apply a frame's arbitrated commands and update its clock,
-    /// inverse cache, completion record, and emitted tokens.
     fn apply_section_frame(
         &mut self,
         frame: SectionFrame,
@@ -4408,9 +4122,6 @@ impl FlowGraphInstance {
                 node.state = NodeExecutionState::Completed;
                 node.chosen_output_pin = Some(DEFAULT_OUTPUT_PIN.to_string());
             } else if frame.reopened {
-                // Scrubbing back below the end reopens the section; otherwise
-                // the clock disagrees with `Completed` and forward play can
-                // never emit completion again.
                 node.state = NodeExecutionState::ActiveLatent;
                 node.chosen_output_pin = None;
             }
@@ -4444,9 +4155,6 @@ impl FlowGraphInstance {
                 emitted = self.emit_tokens(node_guid, DEFAULT_OUTPUT_PIN, completion_budget_ms);
             }
         } else if frame.reopened && record_completion {
-            // Drop the completion record so a later forward pass records it
-            // once. Only a tail completion can be removed without rewriting
-            // the DAG; anything else must go through checkout first.
             let recorded = self.nodes[index]
                 .call_data
                 .iter()
@@ -4458,9 +4166,6 @@ impl FlowGraphInstance {
                     _ => None,
                 });
             let head = self.history.head;
-            // A non-tail completion cannot be removed without reverting its
-            // descendants; the section still reopens so previews remain
-            // usable, and `checkout` is the path that reconciles the DAG.
             let removable = recorded.map_or_else(
                 || {
                     head != 0
@@ -4477,8 +4182,6 @@ impl FlowGraphInstance {
         Ok(emitted)
     }
 
-    /// The step the NPC would take from the current topic, without changing
-    /// anything.
     pub fn next_topic_step(
         &self,
         ctx: &RuntimeContext,
@@ -4513,8 +4216,6 @@ impl FlowGraphInstance {
             .map_err(GraphError::Dispatch)
     }
 
-    /// Player diverts the conversation onto a specific topic edge. The step is
-    /// recorded so the exact inverse restores the prior topic and edge-use count.
     pub fn divert_topic(
         &mut self,
         _ctx: &mut RuntimeContext,
@@ -4594,11 +4295,6 @@ impl FlowGraphInstance {
         result
     }
 
-    /// Attach the child asset a mission node owns (REQ-CH-04, spec §8.2). The
-    /// adapter builds instances top-down, one call per mission node. The child
-    /// asset must validate, must match the node's `sub_graph_asset_id`, and must
-    /// not already appear in this instance's ancestor chain — that is what makes
-    /// a mission cycle impossible.
     pub fn attach_mission_asset(
         &mut self,
         node_guid: u32,
@@ -4645,8 +4341,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Attach every authored mission asset and recursively attach its children.
-    /// Asset identity in a MissionSubGraph node is the target storylet ID.
     pub fn attach_mission_assets(
         &mut self,
         mission_assets: &BTreeMap<String, FlowGraphAsset>,
@@ -4685,15 +4379,11 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// The nested instance a mission node owns, when one is attached.
     pub fn mission_instance(&self, node_guid: u32) -> Option<&FlowGraphInstance> {
         self.node(node_guid)
             .and_then(|node| node.sub_graph.as_deref())
     }
 
-    /// The scoped array the adapter serializes for a mission node (REQ-CH-02,
-    /// REQ-CH-04). The engine keeps it in sync with the attached child's own
-    /// history; for legacy same-asset mission scopes it is the scoped list.
     pub fn mission_call_history(&self, node_guid: u32) -> &[CallHistoryEntry] {
         match self.node_index(node_guid) {
             Some(index) => &self.nodes[index].local_call_history,
@@ -4701,9 +4391,6 @@ impl FlowGraphInstance {
         }
     }
 
-    /// True while this instance still has work pending: an active token or a
-    /// latent node. A mission boundary completes only when its child reaches
-    /// this point.
     fn has_pending_work(&self) -> bool {
         self.tokens
             .iter()
@@ -4714,7 +4401,6 @@ impl FlowGraphInstance {
                 .any(|node| node.state == NodeExecutionState::ActiveLatent)
     }
 
-    /// Mirror the child instance's history into the mission node's scoped array.
     fn sync_mission_history(&mut self, node_guid: u32) -> Result<(), GraphError> {
         let index = self
             .node_index(node_guid)
@@ -4729,9 +4415,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Unwind a mission's local history in reverse (REQ-CH-04). Only the child
-    /// instance's records are touched; the mission node's own record is the
-    /// caller's responsibility.
     fn unwind_mission_history(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4750,11 +4433,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Execute one mission node: run the attached child against the shared world
-    /// state, then decide the mission boundary itself. The mission node records
-    /// globally with an empty delta — a boundary marker — because every real
-    /// delta lives in the child instance, so a revert never applies the same
-    /// change twice.
     fn execute_mission(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4778,9 +4456,6 @@ impl FlowGraphInstance {
             .node_index(node_guid)
             .ok_or(GraphError::NodeNotFound { node_guid })?;
         if self.nodes[index].state == NodeExecutionState::Completed {
-            // Re-entering would double-apply the child while replay cannot
-            // distinguish invocations; reject until scoped histories carry an
-            // invocation ordinal.
             return Err(GraphError::MissionReentry { node_guid });
         }
         let first_activation = self.nodes[index].state == NodeExecutionState::Idle;
@@ -4808,8 +4483,6 @@ impl FlowGraphInstance {
         executed.extend(emitted);
         Ok(executed)
     }
-    /// Unwind a mission to its start. Only the mission's local history is
-    /// unwound; the mission node's own global record is left intact (REQ-CH-04).
     pub fn rollback_mission_to_start(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4832,8 +4505,6 @@ impl FlowGraphInstance {
             .ok_or(GraphError::NodeNotFound { node_guid })?;
         let attached = self.nodes[index].sub_graph.is_some();
         if attached {
-            // Spec §8.2: unwind the child instance's records in reverse, clear
-            // the scoped array, then restart the child from its start node.
             {
                 let child = self.nodes[index].sub_graph.as_mut().unwrap();
                 let local = child.call_history().to_vec();
@@ -4850,8 +4521,6 @@ impl FlowGraphInstance {
         }
         self.nodes[index].local_call_history.clear();
         let node = &mut self.nodes[index];
-        // An attached mission stays open so the restarted child continues on the
-        // next frame; an unattached mission node returns to Idle as before.
         node.state = if attached {
             NodeExecutionState::ActiveLatent
         } else {
@@ -4911,7 +4580,6 @@ impl<'a> RuntimeContext<'a> {
 }
 
 impl FlowGraphInstance {
-    /// Replay a call history from a clean instance (REQ-CH-03).
     pub fn replay_history(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4920,13 +4588,6 @@ impl FlowGraphInstance {
         self.replay_history_with_missions(ctx, entries, &BTreeMap::new())
     }
 
-    /// Replay a global history plus the scoped mission arrays (REQ-CH-03). The
-    /// world state is rebuilt by re-running the recorded nodes; nothing about
-    /// the world itself is serialized. `mission_histories` is keyed by mission
-    /// node GUID and replayed at the point that node is force-completed, so
-    /// mission effects land in the same order as the original run. Node GUIDs
-    /// are unique across the instance tree, so nested missions resolve against
-    /// the same map.
     pub fn replay_history_with_missions(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -4978,7 +4639,6 @@ impl FlowGraphInstance {
         result
     }
 
-    /// Replay a save file, validating every record against the asset first.
     pub fn replay_save(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -5012,16 +4672,11 @@ impl FlowGraphInstance {
         self.clear_pending_passion_threshold_events();
         result
     }
-    /// Reconcile with an external history (REQ-CH-06): find the lowest common
-    /// ancestor by prefix comparison, revert to it, then append the divergent
-    /// suffix as new commits. Returns the new head.
     pub fn reconcile_history(
         &mut self,
         ctx: &mut RuntimeContext,
         target: &[CallHistoryEntry],
     ) -> Result<usize, GraphError> {
-        // `path_to` starts at the root sentinel commit 0, which carries no
-        // entry; compare only real commits.
         let current: Vec<usize> = self
             .history
             .path_to(self.history.head)?
@@ -5053,9 +4708,6 @@ impl FlowGraphInstance {
         Ok(self.history.head)
     }
 
-    /// Move the head to an existing commit: revert to the LCA with the stored
-    /// deltas, then re-run the forward branch. A recomputed delta that differs
-    /// from the stored one means the history and the graph disagree.
     pub fn checkout(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -5064,7 +4716,6 @@ impl FlowGraphInstance {
         let lca = self.history.lca(self.history.head, target_commit)?;
         self.revert_to_commit(ctx, lca)?;
         let path = self.history.path_to(target_commit)?;
-        // Ancestors of the LCA are already applied; replay only the suffix.
         let start = path
             .iter()
             .position(|&commit| commit == lca)
@@ -5077,10 +4728,6 @@ impl FlowGraphInstance {
             let record = self.history.commits[commit].clone();
             let state_snapshot = ctx.state.clone();
             let instance_snapshot = self.clone();
-            // Re-run the recorded call through the same path as a live
-            // execution so scene timelines and mission children replay too.
-            // `commit: false` keeps the DAG untouched; the target commit is
-            // already stored, and appending a copy would orphan it.
             let delta = self.force_complete_with_input_commit(
                 ctx,
                 record.entry.node_guid,
@@ -5115,9 +4762,6 @@ impl FlowGraphInstance {
         Ok(())
     }
 
-    /// Invoke the story up to a point of interest (REQ-CH-02): post-order seek
-    /// with an explicit stack, resolve each hub's prerequisite chain, then
-    /// force-complete the path and the POI.
     pub fn invoke_story_to_poi(
         &mut self,
         ctx: &mut RuntimeContext,
@@ -5206,7 +4850,6 @@ impl FlowGraphInstance {
         Ok(path)
     }
 
-    /// Queue the authored outgoing edges after a point-of-interest seek.
     pub fn resume_from_poi(&mut self, node_guid: u32) -> Result<(), GraphError> {
         let def = self.asset.node(node_guid).ok_or(GraphError::NodeNotFound { node_guid })?;
         if !matches!(def.kind, NodeKind::Poi { .. }) {
@@ -5215,10 +4858,6 @@ impl FlowGraphInstance {
         self.emit_tokens(node_guid, DEFAULT_OUTPUT_PIN, 0);
         Ok(())
     }
-    /// Post-order seek from a POI back through the graph. AND gates take every
-    /// incoming edge; ANY, choice, and multi-fan-in nodes take the declared
-    /// route, falling back to the first incoming edge in deterministic order.
-    /// Completed nodes stop that branch.
     fn seek_backward(
         &self,
         target: u32,
@@ -5242,9 +4881,6 @@ impl FlowGraphInstance {
                 let (_, output_pin) =
                     route.ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
                 let input_pin = if matches!(def.kind, NodeKind::LogicAll) {
-                    // The gate completes on its last arriving branch, which is
-                    // the last predecessor in deterministic edge order; replay
-                    // compares this recorded pin against live execution.
                     self.asset
                         .incoming_edges(guid)
                         .last()
@@ -5310,10 +4946,6 @@ impl FlowGraphInstance {
         Ok(entries)
     }
 
-    /// Greedy prerequisite chain for a hub: pick deck members that are eligible
-    /// against a simulated copy of the world and contribute a tag the exit
-    /// storylet still needs, ordered by display priority then storylet id, then
-    /// append the exit.
     fn qbn_prerequisite_chain(
         &self,
         ctx: &RuntimeContext,
@@ -5423,9 +5055,6 @@ impl FlowGraphInstance {
     }
 }
 
-/// Rebase a saved call history onto an updated asset (REQ-CH-07): drop records
-/// whose node or storylet no longer exists, then bridge consecutive records that
-/// are no longer directly connected.
 pub fn rebase_call_history(
     updated: &FlowGraphAsset,
     dispatcher: &UnifiedDispatcher,

@@ -1,7 +1,3 @@
-//! Host-independent storylet decision and simulation engine.
-//!
-//! This crate owns deterministic state transitions. It deliberately contains no
-//! networking, persistence, model calls, or engine-specific dependencies.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -25,7 +21,6 @@ pub mod chrono_runtime;
 pub mod chrono_selection;
 pub mod chrono_state;
 
-/// Serializable world state shared by the studio, native hosts, and replay.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorldState {
     pub revision: u64,
@@ -58,7 +53,6 @@ impl WorldState {
     }
 }
 
-/// A single idempotent request to mutate the world and advance one action turn.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorldCommand {
     pub idempotency_key: String,
@@ -78,7 +72,6 @@ fn default_true() -> bool {
     true
 }
 
-/// Typed operations on entity properties. Resource movement is an explicit transfer.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Effect {
@@ -89,7 +82,6 @@ pub enum Effect {
     MoveActor { actor_id: String, location_id: String },
 }
 
-/// The before/after values for one property changed by a committed event.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PropertyDelta {
     pub key: String,
@@ -97,7 +89,6 @@ pub struct PropertyDelta {
     pub after: Option<Value>,
 }
 
-/// Durable causal record of an accepted command.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorldEvent {
     pub id: String,
@@ -238,8 +229,6 @@ impl fmt::Display for EngineError {
 
 impl Error for EngineError {}
 
-/// Validates and atomically applies a command. Replaying an accepted command
-/// returns its original event without changing state a second time.
 pub fn apply_command(
     state: &mut WorldState,
     command: WorldCommand,
@@ -248,7 +237,6 @@ pub fn apply_command(
         return Err(EngineError::EmptyIdempotencyKey);
     }
 
-    // Idempotency wins over revision checking so a retried request remains safe.
     if let Some(event_id) = state.applied_commands.get(&command.idempotency_key) {
         let event = state
             .events
@@ -365,7 +353,6 @@ pub fn apply_command(
         terminal: command.terminal,
     };
 
-    // Commit only after every effect has validated successfully.
     if let Some(location_id) = &next_location {
         next_entity_tags.entry(location_id.clone()).or_default().insert("visited".into());
         for (actor_id, actor) in &next_actors {
@@ -462,7 +449,6 @@ fn number_value(number: f64, key: &str) -> Result<Value, EngineError> {
         })
 }
 
-/// Rebuild a branch by replaying its append-only event prefix from a scenario baseline.
 pub fn replay_events(
     mut state: WorldState,
     events: &[WorldEvent],
@@ -491,7 +477,6 @@ pub fn replay_events(
     Ok(state)
 }
 
-/// Create a branch state at the event with the requested ID (inclusive).
 pub fn fork_at(
     initial: WorldState,
     events: &[WorldEvent],

@@ -1,4 +1,3 @@
-//! Application service coordinator for Storylet Studio.
 
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -23,7 +22,7 @@ impl std::fmt::Display for ContentDeleteError {
 use crate::chrono_adapter::compile_chrono_dispatch_for_storylet_validation;
 use crate::contracts::{
     AssetRecord, AuthoringOptions, CharacterRecord, ContentReference, EntityRecord,
-    EntityTemplateRecord, FolderRecord, GameplayTagRecord, LibraryPageResult, LibraryQuery,
+    FolderRecord, GameplayTagRecord, LibraryPageResult, LibraryQuery,
     ProjectBundle, ProjectBundleContent, ProjectMetadata, ScenarioRecord, StoryletRecord,
     TraitTemplateRecord, CONTENT_KINDS, FOLDER_ROOTS, PROJECT_BUNDLE_SCHEMA_VERSION,
 };
@@ -33,11 +32,11 @@ use crate::references::{self, ReferenceContext};
 use crate::scenario::resolve_scenario_start;
 use crate::store::Store;
 
-fn persisted_runtime(store: &Store, templates: &[TraitTemplateRecord], entity_templates: &[EntityTemplateRecord]) -> Result<entities::RuntimeRecords, String> {
+fn persisted_runtime(store: &Store, templates: &[TraitTemplateRecord], entities: &[EntityRecord]) -> Result<entities::RuntimeRecords, String> {
     let world = store.list_entities().map_err(|e| e.to_string())?
         .into_iter().find(|entity| entity.id == entities::WORLD_ENTITY_ID)
         .ok_or_else(|| "Intrinsic World entity is missing from persisted entities".to_string())?;
-    Ok(entities::runtime_records_with_world(&world, entity_templates, templates))
+    Ok(entities::runtime_records_with_world(&world, entities, templates))
 }
 
 #[derive(Clone)]
@@ -130,7 +129,6 @@ impl StudioService {
         })
     }
 
-    // --- Project Settings & Bundles ---
 
     pub async fn get_project_metadata(&self) -> Result<ProjectMetadata, String> {
         let inner = self.inner.lock().await;
@@ -166,9 +164,7 @@ impl StudioService {
             .get_project_metadata()
             .map_err(|e| e.to_string())?;
 
-        let entities = inner.store.list_content_json("entities").map_err(|e| e.to_string())?
-            .into_iter().filter_map(|s| serde_json::from_str::<EntityRecord>(&s).ok()).collect();
-        let entity_templates = inner.store.list_entity_templates().map_err(|e| e.to_string())?;
+        let entities = inner.store.list_entities().map_err(|e| e.to_string())?;
         let gameplay_tags = inner.store.list_gameplay_tags().map_err(|e| e.to_string())?;
         let folders = inner.store.list_folders().map_err(|e| e.to_string())?;
         let trait_templates = inner
@@ -185,7 +181,6 @@ impl StudioService {
             project,
             content: ProjectBundleContent {
                 entities,
-                entity_templates,
                 gameplay_tags,
                 folders,
                 trait_templates,
@@ -234,7 +229,6 @@ impl StudioService {
             .map_err(|e| e.to_string())
     }
 
-    // --- Content CRUD ---
 
     pub async fn list_content(&self, entity: &str) -> Result<Value, String> {
         ensure_content_kind(entity)?;
@@ -298,24 +292,12 @@ impl StudioService {
             "entities" => {
                 let stored: Option<EntityRecord> =
                     load_stored_record(&inner.store, "entities", stored_id)?;
-                let prepared = entities::prepare_entity_record(payload, stored.as_ref(), &index)?;
+                let prepared = entities::prepare_entity(payload, stored.as_ref(), &index)?;
                 if prepared.id == entities::WORLD_ENTITY_ID && index.templates.iter().any(|template|
                     template.key == crate::tree_graph::TREE_GRAPH_KEY && prepared.traits.iter().any(|instance| instance.template_id == template.id))
                 {
                     return Err("The intrinsic World cannot have a TreeGraph trait".into());
                 }
-                if crate::tree_graph::requires_validation(&index, stored.as_ref().map_or(&[], |record| record.traits.as_slice()), &prepared.traits) {
-                    let issues = crate::tree_graph::validate_tree_graphs(&index, Some((&prepared.id, &prepared.name, &prepared.traits)), None);
-                    if !issues.is_empty() { return Err(issues.join("; ")); }
-                    let storylets = inner.store.list_storylets().map_err(|error| error.to_string())?;
-                    crate::tree_pointer::validate_owner_references(&prepared.id, Some(&prepared.traits), &index.templates, &storylets)?;
-                }
-                serde_json::to_value(prepared).map_err(|e| e.to_string())?
-            }
-            "entity_templates" => {
-                let stored: Option<EntityTemplateRecord> =
-                    load_stored_record(&inner.store, "entity_templates", stored_id)?;
-                let prepared = entities::prepare_entity(payload, stored.as_ref(), &index)?;
                 if crate::tree_graph::requires_validation(&index, stored.as_ref().map_or(&[], |record| record.traits.as_slice()), &prepared.traits) {
                     let issues = crate::tree_graph::validate_tree_graphs(&index, Some((&prepared.id, &prepared.name, &prepared.traits)), None);
                     if !issues.is_empty() { return Err(issues.join("; ")); }
@@ -337,10 +319,9 @@ impl StudioService {
                     let schema_changed = previous.key != prepared.key
                         || (previous.key == "tree_graph"
                             && previous.properties.iter().any(|property| !prepared.properties.contains(property)));
-                    if is_tree_trait && schema_changed && (
-                        index.entities.iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == previous.id))
-                        || index.entity_templates.iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == previous.id))
-                    ) {
+                    if is_tree_trait && schema_changed
+                        && index.entities.iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == previous.id))
+                    {
                         return Err("TreeGraph and TreeItem trait keys and active graph schemas cannot be changed while in use".into());
                     }
                 }
@@ -353,9 +334,6 @@ impl StudioService {
                     for record in inner.store.list_entities().map_err(|error| error.to_string())? {
                         entities::validate_unique_traits(&record.traits, &templates, &format!("entity '{}'", record.name))?;
                     }
-                    for record in inner.store.list_entity_templates().map_err(|error| error.to_string())? {
-                        entities::validate_unique_traits(&record.traits, &templates, &format!("entity template '{}'", record.name))?;
-                    }
                 }
                 if prepared.key == crate::tree_graph::TREE_ITEM_KEY {
                     let mut templates = inner.store.list_trait_templates().map_err(|error| error.to_string())?;
@@ -363,9 +341,6 @@ impl StudioService {
                     templates.push(prepared.clone());
                     for record in inner.store.list_entities().map_err(|error| error.to_string())? {
                         crate::tree_graph::validate_tree_item_traits(&record.traits, &templates, &format!("entity '{}'", record.name))?;
-                    }
-                    for record in inner.store.list_entity_templates().map_err(|error| error.to_string())? {
-                        crate::tree_graph::validate_tree_item_traits(&record.traits, &templates, &format!("entity template '{}'", record.name))?;
                     }
                 }
                 serde_json::to_value(prepared).map_err(|e| e.to_string())?
@@ -450,20 +425,20 @@ impl StudioService {
             )
         };
 
-        if entity == "entity_templates" {
-            let mut templates = inner
+        if entity == "entities" {
+            let mut all_entities = inner
                 .store
-                .list_entity_templates()
+                .list_entities()
                 .map_err(|error| error.to_string())?;
-            let candidate: EntityTemplateRecord = serde_json::from_value(final_payload.clone())
-                .map_err(|error| format!("Entity template validation failed: {error}"))?;
-            templates.retain(|item| item.id != candidate.id);
-            templates.push(candidate);
+            let candidate: EntityRecord = serde_json::from_value(final_payload.clone())
+                .map_err(|error| format!("Entity validation failed: {error}"))?;
+            all_entities.retain(|item| item.id != candidate.id);
+            all_entities.push(candidate);
             let trait_templates = inner
                 .store
                 .list_trait_templates()
                 .map_err(|error| error.to_string())?;
-                let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)?;
+            let runtime = persisted_runtime(&inner.store, &trait_templates, &all_entities)?;
             for character in &runtime.characters {
                 validate_character(character, &runtime.characters, |storylet_id| {
                     Ok(inner
@@ -493,16 +468,16 @@ impl StudioService {
                 | crate::narrative_graph::NarrativeNodeData::InventoryRemove {}
                 | crate::narrative_graph::NarrativeNodeData::InventoryHas {}))
             {
-                let mut runtime_entities = index.entity_templates.clone();
-                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.entities, &index.templates)
+                let mut runtime_entities = entities::runtime_entities(&index.entities);
+                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.templates)
                     .map_err(|error| format!("Inventory validation failed: {error}"))?;
                 crate::inventory::validate_inventory_graph(&graph, &runtime_entities)
                     .map_err(|error| format!("Inventory validation failed: {error}"))?;
             }
             if crate::tree_pointer::uses_pointer(&graph) || storylet.precondition_graph.as_ref().is_some_and(crate::tree_pointer::uses_pointer) {
-                let mut runtime_entities = index.entity_templates.clone();
-                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.entities, &index.templates)?;
-                crate::tree_pointer::project_tree_entities(&mut runtime_entities, &index.entities, &index.templates)?;
+                let mut runtime_entities = entities::runtime_entities(&index.entities);
+                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.templates)?;
+                crate::tree_pointer::project_tree_entities(&mut runtime_entities, &index.templates)?;
                 crate::tree_pointer::validate_pointer_graph(&graph, &runtime_entities, &index.templates)
                     .map_err(|error| format!("Tree position validation failed: {error}"))?;
                 if let Some(precondition) = &storylet.precondition_graph {
@@ -527,15 +502,15 @@ impl StudioService {
                     .map(Value::String)
                     .unwrap_or(Value::Null),
             );
-            let templates = inner
+            let entities = inner
                 .store
-                .list_entity_templates()
+                .list_entities()
                 .map_err(|error| error.to_string())?;
             let trait_templates = inner
                 .store
                 .list_trait_templates()
                 .map_err(|error| error.to_string())?;
-            let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)?;
+            let runtime = persisted_runtime(&inner.store, &trait_templates, &entities)?;
             compile_chrono_dispatch_for_storylet_validation(
                 &[storylet],
                 &runtime.locations,
@@ -564,12 +539,11 @@ impl StudioService {
             ));
         }
         let inner = self.inner.lock().await;
-        if matches!(entity, "entities" | "entity_templates") {
+        if entity == "entities" {
             let index = build_workspace_index(&inner.store).map_err(ContentDeleteError::Persistence)?;
             let issues = crate::tree_graph::validate_tree_graphs(&index, None, Some(id));
             if !issues.is_empty() { return Err(ContentDeleteError::Conflict(issues.join("; "))); }
-            let exists = if entity == "entities" { index.entities.iter().any(|record| record.id == id) }
-                else { index.entity_templates.iter().any(|record| record.id == id) };
+            let exists = index.entities.iter().any(|record| record.id == id);
             if exists {
                 let storylets = inner.store.list_storylets().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
                 crate::tree_pointer::validate_owner_references(id, None, &index.templates, &storylets)
@@ -577,15 +551,15 @@ impl StudioService {
             }
         }
         if entity == "storylets" {
-            let templates = inner
+            let entities = inner
                 .store
-                .list_entity_templates()
+                .list_entities()
                 .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
             let trait_templates = inner
                 .store
                 .list_trait_templates()
                 .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
-            let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)
+            let runtime = persisted_runtime(&inner.store, &trait_templates, &entities)
                 .map_err(ContentDeleteError::Persistence)?;
             if let Some(character) = runtime.characters.iter().find(|character| {
                 character
@@ -626,7 +600,7 @@ impl StudioService {
         }
         if matches!(
             entity,
-            "entity_templates" | "gameplay_tags" | "assets" | "trait_templates"
+            "entities" | "gameplay_tags" | "assets" | "trait_templates"
         ) {
             if inner
                 .store
@@ -646,12 +620,10 @@ impl StudioService {
                     ));
                 }
                 if template.as_ref().is_some_and(|template| matches!(template.key.as_str(), "tree_graph" | "tree_item"))
-                    && (inner.store.list_entities().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
+                    && inner.store.list_entities().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
                         .iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == id))
-                        || inner.store.list_entity_templates().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
-                        .iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == id)))
                 {
-                    return Err(ContentDeleteError::Conflict("Cannot delete a tree trait used by an entity or entity template".into()));
+                    return Err(ContentDeleteError::Conflict("Cannot delete a tree trait used by an entity".into()));
                 }
             }
             if entity == "gameplay_tags" {
@@ -732,7 +704,6 @@ impl StudioService {
             .map_err(|error| ContentDeleteError::Persistence(error.to_string()))
     }
 
-    /// Move an item (or a folder) into a different folder of the same root.
     pub async fn move_content_item(
         &self,
         kind: &str,
@@ -791,7 +762,6 @@ impl StudioService {
         Ok(value)
     }
 
-    /// Where an entity template, gameplay tag, asset, or trait is used.
     pub async fn content_references(
         &self,
         kind: &str,
@@ -799,7 +769,7 @@ impl StudioService {
     ) -> Result<Vec<ContentReference>, String> {
         if !matches!(
             kind,
-            "entity_templates" | "gameplay_tags" | "assets" | "trait_templates" | "storylets"
+            "entities" | "gameplay_tags" | "assets" | "trait_templates" | "storylets"
         ) {
             return Err("Unsupported reference kind".into());
         }
@@ -837,15 +807,15 @@ impl StudioService {
             .map_err(|e| format!("Invalid scenario format: {e}"))?;
 
         let inner = self.inner.lock().await;
-        let templates = inner
+        let all_entities = inner
             .store
-            .list_entity_templates()
+            .list_entities()
             .map_err(|e| e.to_string())?;
         let trait_templates = inner
             .store
             .list_trait_templates()
             .map_err(|e| e.to_string())?;
-        let runtime = persisted_runtime(&inner.store, &trait_templates, &templates)?;
+        let runtime = persisted_runtime(&inner.store, &trait_templates, &all_entities)?;
         let resolved =
             resolve_scenario_start(&scenario, &runtime.locations, &runtime.characters);
         serde_json::to_value(&resolved).map_err(|e| e.to_string())
@@ -870,7 +840,6 @@ impl StudioService {
         }
     }
 
-    // --- Studio Interaction Context ---
 
     pub async fn save_interaction_context(&self, context: &Value) -> Result<(), String> {
         let inner = self.inner.lock().await;
@@ -950,7 +919,7 @@ fn ensure_content_kind(entity: &str) -> Result<(), String> {
 
 fn kind_label(kind: &str) -> &'static str {
     match kind {
-        "entity_templates" => "entity template",
+        "entities" => "entity",
         "gameplay_tags" => "gameplay tag",
         "assets" => "asset",
         "trait_templates" => "trait",
@@ -961,9 +930,6 @@ fn kind_label(kind: &str) -> &'static str {
 fn build_workspace_index(store: &Store) -> Result<WorkspaceIndex, String> {
     Ok(WorkspaceIndex {
         entities: store.list_entities().map_err(|error| error.to_string())?,
-        entity_templates: store
-            .list_entity_templates()
-            .map_err(|error| error.to_string())?,
         gameplay_tags: store
             .list_gameplay_tags()
             .map_err(|error| error.to_string())?,
@@ -1054,7 +1020,7 @@ fn gameplay_tag_references_for_store(
     target: &GameplayTagRecord,
 ) -> Result<Vec<ContentReference>, String> {
     let entities = store
-        .list_entity_templates()
+        .list_entities()
         .map_err(|error| error.to_string())?;
     let templates = store
         .list_trait_templates()
@@ -1203,16 +1169,16 @@ fn collect_references(
 ) -> Result<Vec<ContentReference>, String> {
     if !matches!(
         kind,
-        "entity_templates" | "gameplay_tags" | "assets" | "trait_templates" | "storylets"
+        "entities" | "gameplay_tags" | "assets" | "trait_templates" | "storylets"
     ) {
         return Err(
-            "References are available for entity templates, gameplay tags, assets, traits, and storylets"
+            "References are available for entities, gameplay tags, assets, traits, and storylets"
                 .to_string(),
         );
     }
     let entities = inner
         .store
-        .list_entity_templates()
+        .list_entities()
         .map_err(|error| error.to_string())?;
     let gameplay_tags = inner
         .store
@@ -1243,11 +1209,11 @@ fn collect_references(
         gameplay_tags: &gameplay_tags,
     };
     match kind {
-        "entity_templates" => {
+        "entities" => {
             let target = entities
                 .iter()
                 .find(|entity| entity.id == id)
-                .ok_or_else(|| format!("entity_templates item '{id}' not found"))?;
+                .ok_or_else(|| format!("entities item '{id}' not found"))?;
             Ok(references::entity_references(target, &context))
         }
         "gameplay_tags" => {

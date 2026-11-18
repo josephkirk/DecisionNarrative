@@ -1,5 +1,4 @@
 <script lang="ts">
-/** Shared pointer state, so the inspector can tell a click from a drag. */
 const pointer = { down: false, at: { x: 0, y: 0 } };
 if (typeof window !== "undefined") {
   window.addEventListener("mousedown", (event) => { pointer.down = true; pointer.at = { x: event.clientX, y: event.clientY }; }, true);
@@ -23,11 +22,6 @@ import { updateEntityCanvas } from "./versionStore.ts";
 import CanvasShapeView from "./CanvasShapeView.vue";
 import VectorCanvas from "./VectorCanvas.vue";
 
-/**
- * Modify Canvas inspector. Selecting the node opens the full canvas editor on
- * a working copy (undo only, no history). Saving writes the result as the
- * node's single version in the entity's canvas history.
- */
 const props = defineProps<{ node: NarrativeNode; config: ModifyCanvasConfig; graph: NarrativeGraph }>();
 const emit = defineEmits<{ (e: "update:config", value: ModifyCanvasConfig): void }>();
 const route = useRoute();
@@ -49,7 +43,6 @@ const editorKey = ref(0);
 const saving = ref(false);
 const uid = newId("mc");
 
-/** Working copy: the node's saved version, or the entity's canvas when there is none. */
 function startEditing() {
   const base = baseDoc.value;
   if (!base) { working.value = null; return; }
@@ -60,10 +53,6 @@ function startEditing() {
 function openEditor() { open.value = true; startEditing(); }
 function closeEditor() { open.value = false; working.value = null; }
 
-/**
- * Open on a click, not on mouse-down: the graph selects a node on mouse-down,
- * so wait for the release and skip it if the node was dragged.
- */
 function openOnClick() {
   if (!target.value) return;
   if (!pointer.down) { openEditor(); return; }
@@ -89,7 +78,6 @@ async function saveVersion() {
       snapshot,
     };
     await updateEntityCanvas(entity.id, (doc) => stageNodeVersion(doc, version));
-    // Moving the node to another entity: its old version goes away.
     const previous = props.config;
     if (!reuse && previous.canvas_entity && previous.version_id) {
       await updateEntityCanvas(previous.canvas_entity, (doc) => stageNodeVersionRemoval(doc, previous.version_id));

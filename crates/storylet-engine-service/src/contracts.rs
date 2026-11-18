@@ -1,4 +1,3 @@
-//! Authored contracts and API payloads for Storylet Studio.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -76,7 +75,6 @@ pub struct CharacterRecord {
     pub zero_sum_passion_links: Vec<ZeroSumPassionLinkRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
-    /// Derived runtime attributes; never persisted directly.
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub attributes: Value,
 }
@@ -96,7 +94,6 @@ pub struct LocationRecord {
     pub devices: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
-    /// Derived runtime attributes; never persisted directly.
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub attributes: Value,
 }
@@ -107,21 +104,19 @@ pub struct EventRecord {
     pub id: String,
     pub title: String,
     pub description: String,
-    pub event_type: String, // "canon" | "world"
+    pub event_type: String,
     pub trigger: Value,
     pub effects: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delay_turns: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeatable: Option<bool>,
-    /// Canon events with a story time form the chronicle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub story_time: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub story_time_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location_id: Option<String>,
-    /// Fact tags (under `fact.`) a participant learns when told this event.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub facts: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,7 +124,6 @@ pub struct EventRecord {
 }
 
 impl EventRecord {
-    /// A canon event with a story time is a chronicle entry.
     pub fn is_chronicle_entry(&self) -> bool {
         self.event_type == "canon" && self.story_time.is_some()
     }
@@ -139,8 +133,6 @@ impl EventRecord {
 pub struct StoryletParameterRecord {
     pub param_name: String,
     pub query: String,
-    /// Role binding scope: `current` keeps the actor at the player's current
-    /// location; `any` allows a role to bind a remote or abstract actor.
     #[serde(
         default = "default_role_location_policy",
         skip_serializing_if = "is_default_role_location_policy"
@@ -250,13 +242,10 @@ pub struct StoryletRecord {
     pub origin: String,
     #[serde(default)]
     pub ending: bool,
-    /// Filler offered when no progress storylet is available.
     #[serde(default)]
     pub is_fallback: bool,
-    /// Participant entity ids who play this storylet; empty = any human.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub played_by: Vec<String>,
-    /// Eligible clock slots; empty means any slot.
     #[serde(default)]
     pub window: Vec<u32>,
     #[serde(default = "default_learn_visibility")]
@@ -309,7 +298,7 @@ fn default_repeatability() -> String {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StartLocationPolicy {
-    pub mode: String, // "fixed" | "random" | "by_attribute"
+    pub mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -331,7 +320,7 @@ impl Default for StartLocationPolicy {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ActorLocationPolicy {
-    pub mode: String, // "fixed" | "random" | "by_attribute"
+    pub mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -353,7 +342,7 @@ impl Default for ActorLocationPolicy {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ActorPopulationPolicy {
-    pub mode: String, // "all" | "random" | "by_attribute"
+    pub mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -389,7 +378,6 @@ pub struct ScenarioRecord {
     pub actor_locations: BTreeMap<String, String>,
     #[serde(default)]
     pub actor_population_policy: ActorPopulationPolicy,
-    /// Gameplay tag that seeds `Blackboard.current_dramatic_arc_phase`.
     #[serde(default)]
     pub current_arc_phase: String,
 }
@@ -428,10 +416,10 @@ pub struct LibrarySummaryItem {
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct LibraryQuery {
     pub q: Option<String>,
-    pub status: Option<String>, // "all" | "draft" | "approved"
+    pub status: Option<String>,
     pub location_tag: Option<String>,
-    pub ending: Option<String>, // "all" | "ending" | "non-ending"
-    pub sort: Option<String>,   // "title" | "created_desc"
+    pub ending: Option<String>,
+    pub sort: Option<String>,
     pub page: Option<usize>,
     pub page_size: Option<usize>,
 }
@@ -453,10 +441,8 @@ pub struct AuthoringOptions {
     pub policy_modes: Vec<String>,
     pub event_types: Vec<String>,
 }
-/// Authored content kinds addressable through the service.
-pub const CONTENT_KINDS: [&str; 9] = [
+pub const CONTENT_KINDS: [&str; 8] = [
     "entities",
-    "entity_templates",
     "gameplay_tags",
     "folders",
     "trait_templates",
@@ -466,15 +452,12 @@ pub const CONTENT_KINDS: [&str; 9] = [
     "scenarios",
 ];
 
-/// Project-tree roots that own folders.
-pub const FOLDER_ROOTS: [&str; 5] = [
+pub const FOLDER_ROOTS: [&str; 4] = [
     "storylets",
-    "entity_templates",
     "entities",
     "trait_templates",
     "assets",
 ];
-/// Canonical storylet pacing categories accepted by authored projects.
 pub const STORYLET_CLUSTER_TYPES: [&str; 4] = [
     "player_passage",
     "linear_progression",
@@ -482,8 +465,7 @@ pub const STORYLET_CLUSTER_TYPES: [&str; 4] = [
     "aftermath_accelerator",
 ];
 
-/// The persisted project interchange schema.
-pub const PROJECT_BUNDLE_SCHEMA_VERSION: u32 = 6;
+pub const PROJECT_BUNDLE_SCHEMA_VERSION: u32 = 7;
 
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -491,7 +473,6 @@ pub struct FolderRecord {
     #[serde(default)]
     pub id: String,
     pub name: String,
-    /// One of [`FOLDER_ROOTS`]; a folder never leaves its root.
     pub root: String,
     #[serde(default)]
     pub parent_id: Option<String>,
@@ -514,7 +495,6 @@ pub enum PropertyType {
     Json,
 }
 
-/// A reusable typed property definition for traits.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TraitPropertyDefinition {
     #[serde(flatten)]
@@ -657,7 +637,6 @@ pub const SYSTEM_TRAIT_TEMPLATES: &[SystemTraitTemplateSpec] = &[
     ] },
 ];
 
-/// An entity-owned typed property value.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EntityProperty {
     #[serde(default)]
@@ -674,7 +653,6 @@ pub struct EntityProperty {
     pub value: Value,
 }
 
-/// One composed trait instance. Stable IDs make repeatable traits independently editable.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TraitInstance {
     #[serde(default)]
@@ -696,41 +674,9 @@ pub struct GameplayTagRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
 }
-/// Concrete entity instances (e.g. David using Character template, or empty entities).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EntityRecord {
-    #[serde(default)]
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub object_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub game_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub template_id: Option<String>,
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub tags: Vec<String>,
-    #[serde(default)]
-    pub description: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thumbnail: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub folder_id: Option<String>,
-    #[serde(default)]
-    pub properties: Vec<EntityProperty>,
-    #[serde(default)]
-    pub traits: Vec<TraitInstance>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<i64>,
-}
-
-
-/// Authored entity consumed directly by runtime projection.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EntityTemplateRecord {
     #[serde(default)]
     pub id: String,
     #[serde(default)]
@@ -739,6 +685,11 @@ pub struct EntityTemplateRecord {
     pub game_id: String,
     #[serde(default)]
     pub game_id_auto: bool,
+    #[serde(default)]
+    pub template_id: Option<String>,
+    #[serde(default)]
+    pub is_template: bool,
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub description: String,
@@ -763,7 +714,6 @@ pub struct TraitTemplateRecord {
     pub id: String,
     #[serde(default)]
     pub key: String,
-    /// True when the server generated `key` and may regenerate it on rename.
     #[serde(default)]
     pub key_auto: bool,
     pub name: String,
@@ -840,7 +790,6 @@ pub enum WorldObjectLayer {
     Generic,
 }
 
-/// An item or fact entity projected into the runtime graph.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorldObjectRecord {
     pub id: String,
@@ -857,7 +806,6 @@ pub enum ReferenceVia {
     Tag,
 }
 
-/// Where an entity, asset, or trait is used.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ContentReference {
     pub source_kind: String,
@@ -873,8 +821,6 @@ pub struct ContentReference {
 pub struct ProjectBundleContent {
     #[serde(default)]
     pub entities: Vec<EntityRecord>,
-    #[serde(default)]
-    pub entity_templates: Vec<EntityTemplateRecord>,
     #[serde(default)]
     pub gameplay_tags: Vec<GameplayTagRecord>,
     #[serde(default)]

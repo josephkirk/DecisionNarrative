@@ -5,7 +5,7 @@ import type {
   TraitTemplateRecord,
 } from "../../contracts.ts";
 import { defaultPropertyValue } from "../../propertyModel.ts";
-import type { AnyEntity } from "../runtime.ts";
+import type { EntityRecord } from "../../contracts.ts";
 
 export interface TreeListColumn {
   id: string;
@@ -14,10 +14,6 @@ export interface TreeListColumn {
   traitTemplateId: string;
 }
 
-/**
- * Returns column definitions for properties defined on the TreeItem trait template.
- * If the template is missing or has no properties, returns an empty array.
- */
 export function treeItemColumns(template: TraitTemplateRecord | undefined): TreeListColumn[] {
   if (!template || !Array.isArray(template.properties)) {
     return [];
@@ -30,12 +26,7 @@ export function treeItemColumns(template: TraitTemplateRecord | undefined): Tree
   }));
 }
 
-/**
- * Reads a column value from the first matching trait instance on the entity.
- * Preserves explicitly defined null, false, 0, empty string, etc.
- * Falls back to property.default when the value is undefined, and then to defaultPropertyValue.
- */
-export function treeColumnValue(item: AnyEntity, column: TreeListColumn): PropertyValue {
+export function treeColumnValue(item: EntityRecord, column: TreeListColumn): PropertyValue {
   const traits = item.traits ?? [];
   const instance = traits.find((t) => t.template_id === column.traitTemplateId);
 
@@ -57,16 +48,11 @@ export function treeColumnValue(item: AnyEntity, column: TreeListColumn): Proper
   return defaultPropertyValue(column.property.type, Boolean(column.property.is_array));
 }
 
-/**
- * Immutably updates the column value in the first matching trait instance.
- * Throws an error if the entity does not have a matching trait instance for column.traitTemplateId.
- * Preserves other traits, other properties, and other values on the instance.
- */
 export function setTreeColumnValue(
-  item: AnyEntity,
+  item: EntityRecord,
   column: TreeListColumn,
   value: PropertyValue
-): AnyEntity {
+): EntityRecord {
   const traits = item.traits ? [...item.traits] : [];
   const matchIndex = traits.findIndex((t) => t.template_id === column.traitTemplateId);
 
@@ -89,5 +75,5 @@ export function setTreeColumnValue(
   return {
     ...item,
     traits,
-  } as AnyEntity;
+  } as EntityRecord;
 }

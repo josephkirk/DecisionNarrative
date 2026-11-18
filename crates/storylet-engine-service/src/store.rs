@@ -1,4 +1,3 @@
-//! Single SQLite store implementation for DecisionNarrative Storylet Studio.
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::path::Path;
@@ -6,14 +5,11 @@ use std::path::Path;
 use crate::narrative_graph::NarrativeGraph;
 
 use crate::contracts::{
-    AssetRecord, EntityRecord, EntityTemplateRecord, EventRecord, FolderRecord, GameplayTagRecord,
+    AssetRecord, EntityRecord, EventRecord, FolderRecord, GameplayTagRecord,
     LibraryPageResult, LibraryQuery, LibrarySummaryItem, ProjectBundleContent, ProjectMetadata,
     ScenarioRecord, StoryletRecord, TraitTemplateRecord, SYSTEM_TRAIT_TEMPLATES,
 };
 use serde_json::{json, Value};
-/// Older records may carry an `ending` flag written before the graph became
-/// authoritative. Normalize on read so library filters and approvals see the
-/// same value the next save will persist.
 fn normalize_storylet_ending(mut storylet: StoryletRecord) -> StoryletRecord {
     if let Some(graph) = storylet.graph.clone() {
         storylet.ending = graph.ending_from_graph();
@@ -109,7 +105,6 @@ impl Store {
         Ok(())
     }
 
-    // --- Project Metadata ---
 
     pub fn get_project_metadata(&self) -> Result<ProjectMetadata, rusqlite::Error> {
         self.conn.query_row(
@@ -146,7 +141,6 @@ impl Store {
         Ok(rev)
     }
 
-    // --- Generic Content Records ---
 
     pub fn get_content_json(
         &self,
@@ -205,11 +199,6 @@ impl Store {
         Ok(count > 0)
     }
 
-    pub fn list_entity_templates(&self) -> Result<Vec<EntityTemplateRecord>, rusqlite::Error> {
-        Ok(self.list_content_json("entity_templates")?.into_iter()
-            .filter_map(|s| serde_json::from_str(&s).ok()).collect())
-    }
-
     pub fn list_entities(&self) -> Result<Vec<EntityRecord>, rusqlite::Error> {
         Ok(self.list_content_json("entities")?.into_iter()
             .filter_map(|s| serde_json::from_str(&s).ok()).collect())
@@ -246,8 +235,6 @@ impl Store {
     }
 
 
-    /// Rewrite only the JSON payload of an existing row, leaving its revision
-    /// and approval columns untouched (folder moves must not re-approve).
     pub fn update_content_json(
         &self,
         entity: &str,
@@ -347,7 +334,6 @@ impl Store {
         Ok(Some(st))
     }
 
-    // --- Library Paged Query ---
 
     pub fn query_library(
         &self,
@@ -502,7 +488,6 @@ impl Store {
         })
     }
 
-    // --- Studio Interaction Context ---
 
     pub fn save_interaction_context(
         &self,
@@ -555,7 +540,6 @@ impl Store {
         Ok(None)
     }
 
-    // --- Transactional Project Content Replacement ---
 
     pub fn replace_project_content(
         &mut self,
@@ -569,8 +553,6 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM content_records", [])?;
-        // A bundle can carry the revision it was exported at. Importing it must
-        // still move the counter forward so live sessions see new content.
         let current_revision: i64 = tx
             .query_row(
                 "SELECT revision FROM project_metadata WHERE singleton = 1",
@@ -601,20 +583,6 @@ impl Store {
             now,
         )?;
 
-        insert_rows(
-            &tx,
-            "entity_templates",
-            content.entity_templates.iter().map(|template| {
-                Ok((
-                    template.id.clone(),
-                    serde_json::to_string(template)
-                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
-                    1,
-                    None,
-                ))
-            }),
-            now,
-        )?;
         insert_rows(
             &tx,
             "gameplay_tags",
@@ -812,7 +780,7 @@ pub fn ensure_world_entity(conn: &rusqlite::Connection) -> Result<(), rusqlite::
         "SELECT 1 FROM content_records WHERE entity='entities' AND id='world'",
         [], |_| Ok(true)).optional()?.unwrap_or(false);
     if !exists {
-        let world = json!({"id":"world","name":"World","tags":[]});
+        let world = serde_json::to_value(crate::entities::default_world_entity()).expect("world entity serializes");
         conn.execute(
             "INSERT INTO content_records (entity,id,data_json,revision,updated_at)
              VALUES ('entities','world',?1,1,0)", params![world.to_string()])?;

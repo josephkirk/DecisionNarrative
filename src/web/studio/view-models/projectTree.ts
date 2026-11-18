@@ -1,8 +1,8 @@
 import { computed, ref, watch } from "vue";
-import { focusedRoute, focusedRouter } from "./panes.ts";
+import { focusedRoute, focusedRouter, paneState } from "./panes.ts";
 import { StudioApi } from "../api.ts";
-import type { AssetRecord, ContentRoot, EntityRecord, EntityTemplateRecord, FolderRecord, TraitTemplateRecord } from "../contracts.ts";
-import { newEntityTemplateDraft, traitLabels } from "../entityModel.ts";
+import type { AssetRecord, ContentRoot, EntityRecord, FolderRecord, TraitTemplateRecord } from "../contracts.ts";
+import { buildEntityDraft, withTemplateFlag } from "../entityModel.ts";
 import {
   buildTreeItems,
   CONTENT_ROOTS,
@@ -19,6 +19,7 @@ import {
 } from "../projectTree.ts";
 import { notify, studioState } from "../state.ts";
 import { refreshWorkspace } from "./workspace.ts";
+import { chooseTemplate, NO_TEMPLATE_ID, templatePickerItems } from "./templatePicker.ts";
 
 const EXPANDED_KEY = "dn.studio.tree.expanded";
 
@@ -32,7 +33,6 @@ function loadExpanded(): Set<string> {
       }
     }
   } catch {
-    // Fall through to defaults when storage is unavailable or corrupt.
   }
   return new Set(defaultExpandedKeys());
 }
@@ -41,6 +41,11 @@ function newId(): string {
   const cryptoApi = globalThis.crypto;
   if (cryptoApi && typeof cryptoApi.randomUUID === "function") return cryptoApi.randomUUID();
   return `id-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+}
+
+function pickerAnchor(origin: HTMLElement | null): HTMLElement | null {
+  if (origin?.closest(".studio-pane")) return origin;
+  return document.querySelector<HTMLElement>(`.studio-pane[data-pane-id="${paneState.activeId}"]`) ?? origin;
 }
 
 export const activeDragRoot = ref<string | null>(null);
@@ -52,7 +57,6 @@ export interface DragPayload {
 }
 
 export function useProjectTree() {
-  // Tree actions navigate whichever split pane has focus.
   const router = focusedRouter;
   const expanded = ref<Set<string>>(loadExpanded());
   const query = ref("");
@@ -63,7 +67,6 @@ export function useProjectTree() {
       try {
         localStorage.setItem(EXPANDED_KEY, JSON.stringify([...value]));
       } catch {
-        // Persisting the collapsed state is best effort.
       }
     },
     { deep: true },
@@ -74,7 +77,6 @@ export function useProjectTree() {
       projectName: studioState.project?.name ?? "Workspace",
       folders: studioState.folders,
       entities: studioState.entities,
-      entityTemplates: studioState.entityTemplates,
       traitTemplates: studioState.traitTemplates,
       assets: studioState.assets,
       storylets: studioState.storylets,
@@ -130,7 +132,6 @@ export function useProjectTree() {
     if (name === "edit-storylet") return itemKey("storylets", String(params.id ?? ""));
     if (name === "new-storylet") return rootKey("storylets");
     if (name === "entity") return itemKey("entities", String(params.id ?? ""));
-    if (name === "entity-template") return itemKey("entity_templates", String(params.id ?? ""));
     if (name === "trait-template") return itemKey("trait_templates", String(params.id ?? ""));
     if (name === "asset") return itemKey("assets", String(params.id ?? ""));
     return "";
@@ -176,75 +177,27 @@ export function useProjectTree() {
     }
   }
 
-  async function createItem(definition: ContentRootDefinition, folderId: string | null) {
+  async function createItem(definition: ContentRootDefinition, folderId: string | null, origin: HTMLElement | null = null) {
     try {
       switch (definition.root) {
         case "storylets":
           router.push({ path: "/storylets/new", query: folderId ? { folder: folderId } : {} });
           return;
         case "entities": {
-          const templates = studioState.entityTemplates;
-          let newDraft: EntityRecord;
-          let chosenTemplate: EntityTemplateRecord | undefined;
+          const templates = studioState.entities.filter((entity) => entity.is_template);
+          let template: EntityRecord | null = null;
           if (templates.length > 0) {
-            const promptOptions = [
-              "0. Empty Entity (no template)",
-              ...templates.map((t, i) => `${i + 1}. ${t.name} (${t.id}) ${traitLabels(t, studioState.traitTemplates).join(" · ")}`)
-            ].join("\n");
-            const choice = window.prompt(
-              `Create an Entity:\nSelect an Entity Template to base it on, or 0 for an empty entity:\n${promptOptions}`,
-              "0"
-            );
+            const choice = await chooseTemplate(templatePickerItems(templates, studioState.traitTemplates), pickerAnchor(origin));
             if (choice === null) return;
-            const num = parseInt(choice.trim(), 10);
-            if (!isNaN(num) && num >= 1 && num <= templates.length) {
-              chosenTemplate = templates[num - 1];
-            } else if (choice.trim() && choice.trim() !== "0") {
-              chosenTemplate = templates.find(t => t.name.toLowerCase() === choice.trim().toLowerCase() || t.id === choice.trim());
+            if (choice !== NO_TEMPLATE_ID) {
+              template = templates.find((entity) => entity.id === choice) ?? null;
+              if (!template) throw new Error("The chosen template no longer exists.");
             }
           }
-          if (chosenTemplate) {
-            newDraft = {
-              id: "",
-              template_id: chosenTemplate.id,
-              name: `New ${chosenTemplate.name}`,
-              description: chosenTemplate.description || "",
-              folder_id: folderId,
-              thumbnail: chosenTemplate.thumbnail || null,
-              tags: [...chosenTemplate.tags],
-              properties: chosenTemplate.properties.map((tp) => ({
-                ...tp,
-                value: tp.value !== undefined && tp.value !== null ? tp.value : tp.default,
-              })),
-              traits: chosenTemplate.traits.map((tt) => ({
-                ...JSON.parse(JSON.stringify(tt)),
-                id: crypto.randomUUID(),
-              })),
-            };
-          } else {
-            newDraft = {
-              id: "",
-              template_id: null,
-              name: "New Entity",
-              description: "",
-              folder_id: folderId,
-              thumbnail: null,
-              tags: [],
-              properties: [],
-              traits: [],
-            };
-          }
-          const saved = await StudioApi.saveContent<EntityRecord>("entities", newDraft);
+          const saved = await StudioApi.saveContent<EntityRecord>("entities", buildEntityDraft(template, folderId));
           if (!saved.id?.trim()) throw new Error("The server did not return an ID for the new entity.");
           await refreshWorkspace(["entities"]);
           router.push(`/entities/${encodeURIComponent(saved.id)}`);
-          return;
-        }
-        case "entity_templates": {
-          const saved = await StudioApi.saveContent<EntityTemplateRecord>("entity_templates", newEntityTemplateDraft(folderId));
-          if (!saved.id?.trim()) throw new Error("The server did not return an ID for the new entity template.");
-          await refreshWorkspace(["entity_templates"]);
-          router.push(`/entity-templates/${encodeURIComponent(saved.id)}`);
           return;
         }
         case "trait_templates": {
@@ -349,6 +302,11 @@ export function useProjectTree() {
       await refreshWorkspace();
       const world = studioState.entities.find((entity) => entity.id === "world") ?? {
         id: "world",
+        object_id: "world",
+        game_id: "world",
+        game_id_auto: true,
+        template_id: null,
+        is_template: false,
         name: "World",
         description: "",
         tags: [],
@@ -357,7 +315,7 @@ export function useProjectTree() {
       };
       const bundle = {
         format: "decision-narrative-project",
-        schema_version: 6,
+        schema_version: 7,
         project: {
           id: `project-${Date.now()}`,
           name: chosenName.trim(),
@@ -365,7 +323,6 @@ export function useProjectTree() {
         },
         content: {
           entities: [world],
-          entity_templates: [],
           gameplay_tags: studioState.gameplayTags.filter((tag) => tag.protected),
           storylets: [],
           events: [],
@@ -379,6 +336,20 @@ export function useProjectTree() {
       await refreshWorkspace();
       notify(`Created new project '${chosenName.trim()}'`, "success");
       router.push("/project");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    }
+  }
+
+  async function toggleTemplate(row: TreeRow) {
+    if (row.kind !== "item" || row.root !== "entities" || !row.id) return;
+    const entity = studioState.entities.find((candidate) => candidate.id === row.id);
+    if (!entity) return;
+    const next = !entity.is_template;
+    try {
+      await StudioApi.saveContent<EntityRecord>("entities", withTemplateFlag(entity, next));
+      await refreshWorkspace(["entities"]);
+      notify(next ? `'${entity.name}' is now a template` : `'${entity.name}' is no longer a template`, "success");
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error), "error");
     }
@@ -417,5 +388,6 @@ export function useProjectTree() {
     openRow,
     createNewProject,
     deleteItem,
+    toggleTemplate,
   };
 }

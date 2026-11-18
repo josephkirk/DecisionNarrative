@@ -2,16 +2,16 @@
 import { computed, ref } from "vue";
 import { thumbnailUrl } from "../../thumbnails.ts";
 import { studioState } from "../../state.ts";
-import type { AnyEntity } from "../runtime.ts";
+import type { EntityRecord } from "../../contracts.ts";
 import { INVENTORY_OWNER_KEY, ITEM_KEY, MAX_GRID_DIMENSION, inventoryErrors, inventoryOf, setInventory, traitInstance } from "./model.ts";
 
-const props = defineProps<{ entity: AnyEntity; readonly?: boolean }>();
-const emit = defineEmits<{ (event: "patch", patch: Partial<AnyEntity>): void }>();
+const props = defineProps<{ entity: EntityRecord; readonly?: boolean }>();
+const emit = defineEmits<{ (event: "patch", patch: Partial<EntityRecord>): void }>();
 const selected = ref("");
 const error = ref("");
 const owner = computed(() => traitInstance(props.entity, studioState.traitTemplates, INVENTORY_OWNER_KEY));
 const inventory = computed(() => owner.value ? inventoryOf(owner.value) : null);
-const entities = computed(() => [...studioState.entities, ...studioState.entityTemplates]);
+const entities = computed(() => studioState.entities);
 const itemEntities = computed(() => entities.value.filter((entity) => !!traitInstance(entity, studioState.traitTemplates, ITEM_KEY)));
 const available = computed(() => itemEntities.value.filter((entity) => !inventory.value?.items.includes(entity.id)));
 const byId = computed(() => new Map(entities.value.map((entity) => [entity.id, entity])));

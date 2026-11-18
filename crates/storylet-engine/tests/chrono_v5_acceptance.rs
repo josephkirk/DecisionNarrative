@@ -426,8 +426,6 @@ fn test_invoke_equivalence_qbn_chaining() {
         vec![100, 101, 102, 103]
     );
     assert_eq!(state_snapshot(invoke_ctx.state), normal_snapshot);
-    // Wall-clock only in optimized builds; debug builds under parallel test
-    // load are not a meaningful latency measurement.
     if !cfg!(debug_assertions) {
         assert!(elapsed.as_millis() < 50, "invoke took {elapsed:?}");
     }
@@ -1293,7 +1291,6 @@ fn cancel_keeps_the_mission_scope_for_reconcile_replay() {
     assert_eq!(instance.node(2).unwrap().state, NodeExecutionState::Completed);
     assert_eq!(instance.node(2).unwrap().local_call_history.len(), 1);
 
-    // A fresh start must not carry the old mirror into a new timeline.
     instance.reset();
     assert!(instance.node(2).unwrap().local_call_history.is_empty());
 }
@@ -1333,7 +1330,6 @@ fn salience_rejects_candidates_without_an_arc_phase() {
     let mut instance = FlowGraphInstance::new(1, graph, 7).unwrap();
     let mut ctx = RuntimeContext::with_registry(&mut state, &fallback_dispatcher, &registry);
 
-    // No arc phase: the gated candidate is rejected before scoring.
     instance.force_complete(&mut ctx, 1, "Out", None).unwrap();
     assert_eq!(instance.node(1).unwrap().chosen_storylet_id, Some(2));
 
@@ -1494,9 +1490,6 @@ fn concurrent_sections_arbitrate_in_one_composer_pass() {
         Some("pose.11")
     );
 
-    // Reverse the frame in descending GUID order. The winner restores its
-    // prior pose; the loser never wrote one, so reversing it must not change
-    // the pose again.
     instance.process_time_window(11, -10).unwrap();
     assert_eq!(
         instance.composer.actor_pose.get("actor").map(String::as_str),
@@ -1800,8 +1793,6 @@ fn macro_passions_clamp_to_the_spec_range() {
     let registry = PassionRegistry::compile(
         [StarNpcDef {
             npc_id: 0,
-            // Micro values clamp at 100; inertia pushes the raw macro to 101,
-            // so only the spec clamp keeps the result at 100.
             trust_inertia: 1.0,
             micro_passions: vec![MicroPassionDef {
                 npc_id: 0,
@@ -1882,8 +1873,6 @@ fn threshold_events_follow_the_value_transition() {
     assert!(delta.threshold_events[0].activated);
     assert!(flags.bit(bit));
 
-    // A below-threshold move emits nothing even when an external write left
-    // the tag set.
     let mut quiet = WorldStateTable::new();
     quiet.passions = PassionState::with_capacity(1, 2);
     quiet.passions.active[1] = true;

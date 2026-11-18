@@ -1,7 +1,3 @@
-//! Derived feature indexes.
-//!
-//! These are dense projections of authoritative state. Rebuild is the source of
-//! truth for verification; incremental updates are an optimization.
 
 use crate::chrono_runtime::CallHistoryEntry;
 use crate::chrono_state::{AttributeValue, TagBitset, WorldStateTable};
@@ -207,8 +203,6 @@ impl std::fmt::Display for FeatureError {
 impl std::error::Error for FeatureError {}
 
 impl FeatureIndex {
-    /// Derive the index from authoritative world state plus the resolved
-    /// call-history path for one scope. Unknown relation types are ignored.
     pub fn rebuild_from_state(
         state: &WorldStateTable,
         history: &[CallHistoryEntry],
@@ -255,8 +249,6 @@ impl FeatureIndex {
         Ok(index)
     }
 
-    /// Record an authored actor-trait binding. Trait identity is not inferred
-    /// from passion storage; the project must supply the stable binding.
     pub fn record_actor_trait(
         &mut self,
         actor: u16,
@@ -270,8 +262,6 @@ impl FeatureIndex {
         }
     }
 
-    /// Record an authored choice key. Choice identity must be supplied by the
-    /// recording site; output-pin ordinals are not stable choice keys.
     pub fn record_choice(&mut self, choice_key: u64) -> Result<(), FeatureError> {
         self.choices.record(choice_key);
         Ok(())

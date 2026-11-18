@@ -1,15 +1,3 @@
-//! Standalone validation prototype for the dense runtime design.
-//!
-//! This is **not** production engine code and does not use the engine tables.
-//! It models the layouts proposed in `docs/design/chrono-decision-engine.md`
-//! to measure:
-//! - dense storylet-completion bitset vs `BTreeSet`
-//! - CSR trigger bucket lookup vs full subscription scan
-//! - pre-sorted ending component resolution
-//! - write-set conflict detection with tag masks
-//!
-//! Run:
-//!   cargo run --release --manifest-path crates/storylet-engine/Cargo.toml --example dense_runtime_prototype
 
 use std::collections::BTreeSet;
 use std::hint::black_box;
@@ -89,7 +77,6 @@ fn main() {
     black_box(set_hits);
     let set_query = t.elapsed();
 
-    // Trigger table: 4096 subscriptions over 64 event keys, CSR buckets.
     let mut subscriptions = Vec::new();
     for i in 0..4096usize {
         subscriptions.push((i % 64, i, (i % 17) as i16));
@@ -131,7 +118,6 @@ fn main() {
     black_box(scan_checksum);
     let scan_query = t.elapsed();
 
-    // Ending components: 128 rows, 3 exclusivity groups, priority-sorted resolution.
     let mut endings: Vec<(u8, u16, i16, u32)> = (0..128)
         .map(|i| {
             (
@@ -157,7 +143,6 @@ fn main() {
     black_box(winner);
     let ending_resolve = t.elapsed();
 
-    // Write-set conflict: 10k transactions, tag mask intersections.
     let mut writes = Vec::with_capacity(10_000);
     for i in 0..10_000usize {
         let mut b = Bits::default();

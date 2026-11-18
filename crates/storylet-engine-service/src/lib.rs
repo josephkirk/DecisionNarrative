@@ -1,4 +1,3 @@
-//! HTTP and persistence host for the host-independent storylet engine.
 #![recursion_limit = "256"]
 
 pub mod chrono_adapter;

@@ -1,4 +1,3 @@
-//! Deterministic run persistence and shared HTTP/MCP operations.
 use crate::{
     run_content::compile_run_content,
     service::{StudioInner, StudioService, chrono_now_ms},
@@ -322,7 +321,6 @@ fn require_key(key: &str) -> Result<(), RunApiError> {
 #[serde(rename_all = "camelCase")]
 pub struct StartRequest {
     start: RunStart,
-    /// Start at this storylet (by authored id); overrides `start`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     storylet_id: Option<String>,
     scenario_id: Option<String>,

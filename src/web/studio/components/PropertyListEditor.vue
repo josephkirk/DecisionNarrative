@@ -29,9 +29,6 @@ const rows = computed(() => props.modelValue);
 const valueKey = computed(() => (props.mode === "instance" ? "value" : "default"));
 
 function valueOf(row: Row): PropertyValue {
-  // Entity rows from the server carry `value`; template edits are staged under
-  // `default` (which the backend maps onto `value`). Prefer whichever key the
-  // row actually defines so saved values survive a reload in either shape.
   const asEntity = row as Partial<EntityProperty>;
   const asDef = row as Partial<PropertyDefinition>;
   if (props.mode === "instance") {
@@ -67,8 +64,6 @@ function patch(index: number, changes: Partial<Row>) {
     if (position !== index) return row;
     const updated = { ...row, ...changes } as Row & Record<string, unknown>;
     if (!row.id) rowKeys.set(toRaw(updated), rowKey(row) as number);
-    // Keep a single canonical value key per mode: the backend rejects
-    // payloads that carry both `value` and its `default` alias.
     if (props.mode === "definition") delete updated.value;
     else delete updated.default;
     return updated as Row;
@@ -192,7 +187,6 @@ function add() {
 
 <template>
   <div class="property-list" :class="{ 'has-categories': categories, 'is-pointer-reordering': pointerReordering }">
-    <!-- Column heads only label rows; an empty list shows just its empty state, so it never scrolls sideways. -->
     <div v-if="rows.length" class="property-list__head">
       <span></span>
       <span>Name</span>
@@ -301,7 +295,6 @@ function add() {
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md, 9px);
-  /* The table keeps its columns and scrolls sideways inside narrow panes. */
   overflow-x: auto;
   overflow-y: hidden;
 }

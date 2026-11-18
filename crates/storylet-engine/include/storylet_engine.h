@@ -10,10 +10,6 @@ typedef struct DnRunHandle DnRunHandle;
 typedef struct DnEngineHandle DnEngineHandle;
 typedef struct DnPlaytestHandle DnPlaytestHandle;
 typedef struct { uint8_t *data; size_t len; } DnBuffer;
-/* Run API: UTF-8, NUL-terminated JSON. Returned strings belong to the engine
- * and must be released with dn_string_free. On start failure, error_out receives
- * an error JSON string when non-NULL. Rewind returns 0 on success and -1 on error.
- * A handle is owned by one caller and must not be accessed concurrently. */
 DnRunHandle *dn_run_start(const char *content_json, const char *start_json, uint64_t seed, char **error_out);
 char *dn_run_view(DnRunHandle *run, uint16_t participant);
 char *dn_run_act(DnRunHandle *run, uint16_t participant, const char *action_json);
@@ -27,14 +23,6 @@ void dn_buffer_free(DnBuffer buffer);
 bool dn_engine_import_snapshot(DnEngineHandle *handle, const uint8_t *data, size_t len);
 DnBuffer dn_engine_export_snapshot(const DnEngineHandle *handle);
 DnBuffer dn_engine_submit_command(DnEngineHandle *handle, const uint8_t *data, size_t len);
-/*
- * Runtime ABI uses UTF-8 JSON. Input pointers are borrowed only for the call.
- * Returned buffers are engine-owned and must be released exactly once with
- * dn_buffer_free, including when the JSON result has ok:false. Results use
- * {"ok":true,"result":...} or {"ok":false,"error":"..."}.
- * A playtest handle hosts one active scenario; destroy and recreate it to
- * switch scenarios. Handles must be destroyed with their matching function.
- */
 DnPlaytestHandle *dn_playtest_create(void);
 void dn_playtest_destroy(DnPlaytestHandle *handle);
 DnBuffer dn_playtest_start(DnPlaytestHandle *handle, const uint8_t *project_json, size_t project_len,

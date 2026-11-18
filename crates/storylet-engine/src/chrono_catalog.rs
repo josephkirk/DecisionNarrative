@@ -1,16 +1,9 @@
-//! Stable authoring keys and the dense storylet catalog.
-//!
-//! Authoring and persistence use stable keys. Runtime selection uses dense
-//! `StoryletIndex` values resolved once at load. The catalog is the load-time
-//! and working-set boundary, not a second source of truth.
 
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use serde::{Deserialize, Serialize};
 
-/// One `u16` storylet index space. Capacity is a single contract shared by the
-/// catalog, completion bitset, and profile pools.
 pub const MAX_STORYLETS: usize = 65_536;
 pub type StoryletIndex = u16;
 
@@ -41,7 +34,6 @@ impl fmt::Display for CatalogError {
 
 impl Error for CatalogError {}
 
-/// Stable-key -> dense-index registry.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoryletSpace {
     keys: Vec<String>,
@@ -75,7 +67,6 @@ impl StoryletSpace {
         MAX_STORYLETS.saturating_sub(self.keys.len())
     }
 
-    /// Insert a stable key. The dense index is the insertion order.
     pub fn insert(&mut self, key: impl Into<String>) -> Result<StoryletIndex, CatalogError> {
         if self.frozen {
             return Err(CatalogError::Frozen);
@@ -102,8 +93,6 @@ impl StoryletSpace {
         Ok(index)
     }
 
-    /// Resolve a stable key at load/authoring time. Runtime code must use
-    /// `key(index)` and dense indices instead.
     pub fn resolve(&self, key: &str) -> Option<StoryletIndex> {
         self.by_key.get(key).copied()
     }
@@ -126,9 +115,6 @@ impl StoryletSpace {
             .map(|(index, key)| (index as StoryletIndex, key.as_str()))
     }
 
-    /// Freeze the registry at a content revision. Load-time lookup remains
-    /// available, but no new identity may be inserted. Freezing twice is an
-    /// error, so a post-load holder cannot rewrite the revision.
     pub fn freeze(&mut self, revision: u64) -> Result<(), CatalogError> {
         if self.frozen {
             return Err(CatalogError::Frozen);
@@ -139,9 +125,6 @@ impl StoryletSpace {
     }
 }
 
-/// Catalog metadata needed by selection and working-set loading. The catalog is
-/// the storylet registry plus payload/profile metadata; it is not a
-/// parallel registry.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StoryletCatalog {
     space: StoryletSpace,
@@ -176,7 +159,6 @@ impl StoryletCatalog {
         &self.space
     }
 
-    /// Insert one storylet with its catalog metadata.
     pub fn insert(
         &mut self,
         key: impl Into<String>,
@@ -233,7 +215,6 @@ impl StoryletCatalog {
         self.duration_minutes.get(index as usize).copied()
     }
 
-    /// Dense ending pool. `include_ending=false` is the normal deck's default.
     pub fn ending_pool(&self) -> Vec<StoryletIndex> {
         (0..self.len())
             .filter(|index| self.is_ending(*index as StoryletIndex) == Some(true))
@@ -241,8 +222,6 @@ impl StoryletCatalog {
             .collect()
     }
 
-    /// Bounded working set. The caller supplies the profile predicate; the
-    /// catalog only enforces the candidate limit and index range.
     pub fn working_set(
         &self,
         predicate: impl Fn(StoryletIndex) -> bool,

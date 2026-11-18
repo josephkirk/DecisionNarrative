@@ -4,7 +4,6 @@ import { inventoryPlugin } from "./inventory/index.ts";
 import { treeGraphPlugin } from "./tree/index.ts";
 import { pluginManager } from "./manager.ts";
 
-/** Built-in plugins. Third-party plugins load the same way via `pluginManager.register()`. */
 export const BUILTIN_PLUGINS: Plugin[] = [vectorCanvasPlugin, inventoryPlugin, treeGraphPlugin];
 
 let installed = false;

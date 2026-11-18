@@ -346,7 +346,6 @@ async fn query_library(
     }
 }
 
-// Content CRUD
 fn unknown_kind(entity: &str) -> Option<Response> {
     if crate::contracts::CONTENT_KINDS.contains(&entity) {
         None
@@ -578,7 +577,6 @@ async fn approve_storylet(
 
 
 
-// Scenarios
 async fn list_scenarios(State(s): State<StudioService>) -> Response {
     list_content(State(s), Path("scenarios".into())).await
 }

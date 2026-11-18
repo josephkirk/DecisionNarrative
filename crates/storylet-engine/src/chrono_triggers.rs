@@ -1,7 +1,3 @@
-//! Indexed trigger events and derived fired state.
-//!
-//! The table is an index over content; the event queue is runtime state. Fired
-//! state is derived from call history, not independent saved state.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -162,7 +158,6 @@ impl TriggerTable {
         self.stable_keys.get(stable_key).copied()
     }
 
-    /// Build the CSR buckets once after load. Sorting is deterministic.
     pub fn build(&mut self) {
         let mut order: Vec<u32> = (0..self.rows.len() as u32).collect();
         order.sort_by_key(|index| {
@@ -277,15 +272,11 @@ pub struct TriggerTickReport {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TriggerCursor {
-    /// Sequence of the event currently being drained, if any.
     pub sequence: Option<u32>,
-    /// Next candidate offset in that event's CSR bucket.
     pub offset: usize,
 }
 
 impl TriggerTable {
-    /// Deterministic event processing. `cursor` must persist across ticks so a
-    /// capped event resumes at the next candidate instead of blocking forever.
     pub fn process_tick(
         &self,
         queue: &mut EventQueue,
@@ -357,8 +348,6 @@ impl TriggerTable {
     }
 }
 
-/// Per-session fired bits, derived from call history. A trigger-caused start
-/// records its subscription index in the call entry.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TriggerFireTable {
     fired: BTreeSet<(u64, u32)>,
@@ -389,7 +378,6 @@ impl TriggerFireTable {
         self.fired.is_empty()
     }
 
-    /// Runtime convenience: rebuild directly from canonical commit entries.
     pub fn rebuild_history(entries: &[CallHistoryEntry], scope: u64) -> Self {
         let mut table = Self::new();
         for entry in entries {

@@ -6,6 +6,7 @@ import { studioState, notify } from "./studio/state.ts";
 import { StudioApi } from "./studio/api.ts";
 import { refreshWorkspace } from "./studio/view-models/workspace.ts";
 import ProjectTree from "./studio/components/ProjectTree.vue";
+import TemplatePickerHost from "./studio/components/TemplatePickerHost.vue";
 import PaneWorkspace from "./studio/components/PaneWorkspace.vue";
 import StudioIcon from "./studio/components/StudioIcon.vue";
 import { buildInteractionContext, interactionContextKey, type InteractionFocus } from "./studio/interactionContext.ts";
@@ -17,7 +18,6 @@ import { appearance, applyAppearance, onAppearanceStorageError } from "./studio/
 applyAppearance();
 onAppearanceStorageError((message) => notify(message, "error"));
 
-/** Toolbar destinations open in the focused split pane; modified clicks keep browser behavior. */
 function navigate(path: string, event: MouseEvent) {
   if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
@@ -58,7 +58,6 @@ watch(interactionContext, (context) => {
 const TREE_WIDTH_KEY = "dn.studio.treeWidth";
 const treeWidth = ref(readTreeWidth());
 const resizing = ref(false);
-// On phones the navigator is an overlay: start closed and close it after each navigation.
 const phoneQuery = window.matchMedia("(max-width: 768px)");
 const isTreeCollapsed = ref(phoneQuery.matches);
 watch(() => route.fullPath, () => { if (phoneQuery.matches) isTreeCollapsed.value = true; });
@@ -68,7 +67,6 @@ function readTreeWidth(): number {
     const raw = Number(localStorage.getItem(TREE_WIDTH_KEY));
     if (Number.isFinite(raw) && raw >= 220 && raw <= 520) return raw;
   } catch {
-    // Ignore unreadable storage.
   }
   return 300;
 }
@@ -92,7 +90,6 @@ function stopResize() {
   try {
     localStorage.setItem(TREE_WIDTH_KEY, String(treeWidth.value));
   } catch {
-    // Persisting the panel width is best effort.
   }
 }
 
@@ -190,5 +187,6 @@ onMounted(async () => {
         </div>
       </main>
     </div>
+    <TemplatePickerHost />
   </div>
 </template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import type { AssetLinkValue, EntityRecord, EntityTemplateRecord, PropertyScalar, PropertyType, PropertyValue } from "../contracts.ts";
+import type { AssetLinkValue, EntityRecord, PropertyScalar, PropertyType, PropertyValue } from "../contracts.ts";
 import { defaultPropertyValue } from "../propertyModel.ts";
 import { traitLabels, hasTraitKey } from "../entityModel.ts";
 import { studioState } from "../state.ts";
@@ -21,8 +21,6 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ "update:modelValue": [value: PropertyValue] }>();
 
-// Local mirror so two clicks inside one render tick compose instead of both
-// reading the stale prop (Vue applies the parent update on the next tick).
 const local = ref<PropertyValue>(props.modelValue);
 watch(
   () => [props.modelValue, props.type, props.isArray],
@@ -34,7 +32,7 @@ watch(
 const isArray = computed(() => props.isArray ?? false);
 
 const entitiesByType = computed(() => {
-  const entities = [...studioState.entities, ...studioState.entityTemplates];
+  const entities = studioState.entities;
   return [{ type: "entities", label: "Entities", entities: entities.filter((entity) =>
     !props.traitKeyFilter || hasTraitKey(entity, studioState.traitTemplates, props.traitKeyFilter),
   ) }];
@@ -76,7 +74,6 @@ function textValue(value: PropertyScalar): string {
   if (typeof value === "number") return String(value);
   return "";
 }
-// Declared trait bounds apply to typed, stepped and keyboard-adjusted values alike.
 function clampNumber(value: number): number {
   const lower = props.min == null ? value : Math.max(value, props.min);
   return props.max == null ? lower : Math.min(lower, props.max);
@@ -84,7 +81,7 @@ function clampNumber(value: number): number {
 function onNumber(event: Event, write: (value: number) => void, integer: boolean) {
   const raw = (event.target as HTMLInputElement).value.trim();
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return; // Partial input such as "-" or "1e"
+  if (!Number.isFinite(parsed)) return;
   write(clampNumber(integer ? Math.trunc(parsed) : parsed));
 }
 function stepNumber(current: PropertyScalar, delta: number, integer: boolean): number {
@@ -117,9 +114,6 @@ function onNumKey(event: KeyboardEvent, write: (value: number) => void, integer:
   write(clampNumber(integer ? Math.trunc(base + delta) : base + delta));
 }
 
-// Tag properties use the same multi-chip editor as entity Gameplay tags.
-// Scalar slots wrap the single value so chips, `#` prefix, remove buttons
-// and the suggestion popup match the rest of the studio.
 function tagAsArray(value: PropertyScalar): string[] {
   return typeof value === "string" && value ? [value] : [];
 }
@@ -131,9 +125,6 @@ function elementAt(index: number): PropertyScalar {
   return Array.isArray(local.value) ? local.value[index] ?? null : null;
 }
 
-// Tag arrays are edited as one multi-chip field (like Gameplay tags):
-// each chip carries its own remove control, so no per-element inputs
-// or remove buttons are needed.
 const tagArrayValue = computed((): string[] => {
   if (!Array.isArray(local.value)) return [];
   return local.value.filter((item): item is string => typeof item === "string" && item.length > 0);
@@ -151,7 +142,6 @@ function onEntity(event: Event, write: (value: string | null) => void) {
   write(value ? value : null);
 }
 
-// Generic link picker (assets, entities, storylets)
 const pickerOpen = ref(false);
 const pickerTarget = ref<number | null>(null);
 

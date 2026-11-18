@@ -1,4 +1,5 @@
 import { StudioApi } from "../../api.ts";
+import type { TraitTemplateRecord } from "../../contracts.ts";
 import { notify, studioState } from "../../state.ts";
 import { refreshWorkspace } from "../../view-models/workspace.ts";
 import { definePlugin } from "../runtime.ts";
@@ -16,16 +17,17 @@ export const treeGraphPlugin = definePlugin({
     let creating = false;
     async function ensureTraits() {
       if (creating || !studioState.project) return;
-      const defaults = [treeGraphTemplate(), treeItemTemplate()];
-      const templates = defaults.flatMap((template) => {
-        const existing = studioState.traitTemplates.find((candidate) => candidate.key === template.key);
-        if (!existing) return [template];
-        const missing = template.properties.filter((property) => !existing.properties.some((candidate) => candidate.key === property.key));
-        return missing.length ? [{ ...existing, properties: [...existing.properties, ...missing] }] : [];
-      });
-      if (!templates.length) return;
       creating = true;
       try {
+        const stored = await StudioApi.listContent<TraitTemplateRecord>("trait_templates");
+        const defaults = [treeGraphTemplate(), treeItemTemplate()];
+        const templates = defaults.flatMap((template) => {
+          const existing = stored.find((candidate) => candidate.key === template.key);
+          if (!existing) return [template];
+          const missing = template.properties.filter((property) => !existing.properties.some((candidate) => candidate.key === property.key));
+          return missing.length ? [{ ...existing, properties: [...existing.properties, ...missing] }] : [];
+        });
+        if (!templates.length) return;
         for (const template of templates) await StudioApi.saveContent("trait_templates", template);
         await refreshWorkspace(["trait_templates"]);
       } catch (error) {

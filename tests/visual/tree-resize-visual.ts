@@ -1,5 +1,3 @@
-// Visual regression test: resizing a TreeGraph node must not shift other nodes.
-// Run: node tests/visual/tree-resize-visual.ts
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import os from "node:os";
@@ -83,12 +81,10 @@ function assertBoxesEqual(
 
 let browser;
 try {
-  // Wait for service
   for (let i = 0; i < 50; i++) {
     try {
       if ((await fetch(base + "/api/v3/project")).ok) break;
     } catch {
-      /* starting */
     }
     await sleep(200);
   }
@@ -102,7 +98,6 @@ try {
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("dialog", (d) => void d.accept());
 
-  // 1. Create traits via opening the app
   await page.goto(`${base}/#/storylets`);
   let graphTrait: { id: string; key: string } | undefined;
   let itemTrait: { id: string; key: string } | undefined;
@@ -116,18 +111,17 @@ try {
   check("tree traits created on app load", !!graphTrait && !!itemTrait);
   if (!graphTrait || !itemTrait) throw new Error("TreeGraph or TreeItem trait template not found");
 
-  // 2. POST two entity templates plus TreeGraph owner
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-a",
     name: "Item A",
     traits: [{ id: "ti-a", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "item-b",
     name: "Item B",
     traits: [{ id: "ti-b", template_id: itemTrait.id, values: {} }],
   });
-  await api("POST", "/api/v3/content/entity_templates", {
+  await api("POST", "/api/v3/content/entities", {
     id: "tree-owner",
     name: "Tree Owner",
     traits: [
@@ -144,8 +138,7 @@ try {
     ],
   });
 
-  // 3. Open Tree tab
-  await page.goto(`${base}/#/entity-templates/tree-owner`);
+  await page.goto(`${base}/#/entities/tree-owner`);
   const treeTab = page.getByRole("button", { name: "Tree", exact: true });
   await treeTab.waitFor();
   await treeTab.click();
@@ -155,7 +148,6 @@ try {
   await nodeA.waitFor();
   await nodeB.waitFor();
 
-  // Compare world coordinates rather than viewport coordinates, which change on page scroll.
   const nodeBox = (node: typeof nodeA) => node.evaluate((element) => {
     const style = (element as HTMLElement).style;
     return { x: parseFloat(style.left), y: parseFloat(style.top), width: parseFloat(style.width), height: parseFloat(style.height) };
@@ -163,7 +155,6 @@ try {
   const initialBoxA = await nodeBox(nodeA);
   const initialBoxB = await nodeBox(nodeB);
 
-  // 5. Drag bottom edge of first and assert second position/dimensions unchanged
   const resizeHandleS = nodeA.locator(".tree-resize.resize-s");
   await resizeHandleS.waitFor();
   const handleBox = (await resizeHandleS.boundingBox())!;
@@ -179,7 +170,6 @@ try {
   check("first node resized vertically via pointer drag", draggedBoxA.height > initialBoxA.height + 30);
   assertBoxesEqual(draggedBoxB, initialBoxB, "second node after pointer resize");
 
-  // 6. Reload without saving to reset
   await page.reload();
   await page.getByRole("button", { name: "Tree", exact: true }).click();
   await nodeA.waitFor();
@@ -190,7 +180,6 @@ try {
   check("first node reset height after reload without saving", Math.abs(resetBoxA.height - initialBoxA.height) < 2);
   assertBoxesEqual(resetBoxB, initialBoxB, "second node after reload");
 
-  // 7. Change first node height in context menu and assert second unchanged
   const nodeAOptions = nodeA.locator('.tree-remove[aria-label="Options for Item A"]');
   await nodeAOptions.click();
 

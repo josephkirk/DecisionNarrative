@@ -1,8 +1,3 @@
-// Visual interaction test for the Play view (plan Task 2.4, step 6).
-// Run: bun run test:visual   (runs under Node: Playwright cannot drive Chromium from Bun).
-// Needs `bun run build` first and a built storylet-engine-service binary (STORYLET_SERVICE_BIN).
-// Spawns the service on a temp database, seeds one storylet, drives a real Chromium, takes screenshots
-// into tests/visual/out/ and asserts the behaviour of the script in the plan.
 import { chromium, type Page } from "playwright-core";
 import fs from "node:fs";
 import os from "node:os";
@@ -84,13 +79,12 @@ async function shot(page: Page, name: string) {
 let browser;
 try {
   for (let i = 0; i < 50; i++) {
-    try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { /* not up yet */ }
+    try { if ((await fetch(base + "/api/v3/project")).ok) break; } catch { }
     await sleep(200);
   }
-  await api("POST", "/api/v3/content/entity_templates", { id: "harbor", name: "Harbor", traits: [{ id: "location", template_id: "system.location", values: {} }] });
+  await api("POST", "/api/v3/content/entities", { id: "harbor", name: "Harbor", traits: [{ id: "location", template_id: "system.location", values: {} }] });
   await api("POST", "/api/v3/content/scenarios", { id: "scenario", name: "Scenario", seed: 7, start_location_policy: { mode: "fixed", location_id: "harbor" } });
   await api("POST", "/api/v3/content/storylets", lantern());
-  // Knowledge content for the Inspect panel: a learn node, a reveal node, a canon event.
   await api("POST", "/api/v3/content/gameplay_tags", { id: "fact", name: "fact", protected: false });
   await api("POST", "/api/v3/content/gameplay_tags", { id: "fact.clue", name: "fact.clue", protected: false });
   await api("POST", "/api/v3/content/events", {
@@ -129,14 +123,12 @@ try {
   page.on("response", (r) => { if (r.status() >= 400) errors.push(`${r.status()} ${r.url()}`); });
   page.on("pageerror", (e) => errors.push(String(e)));
 
-  // 1. Toolbar has a primary Play action that opens the start screen.
   await page.goto(`${base}/#/storylets`);
   await page.getByRole("link", { name: "Play the project" }).click();
   await page.getByRole("heading", { name: "Play" }).waitFor();
   await shot(page, "01-start");
   check("start screen offers Start playing", await page.getByRole("button", { name: "Start playing" }).isEnabled());
 
-  // 2. Start: the scene shows, with numbered choices.
   await page.getByLabel("From a storylet…").check();
   await page.getByLabel("Find a storylet").fill("lantern");
   await page.getByLabel("Storylet", { exact: true }).selectOption({ label: "The Lantern on the Water" });
@@ -155,21 +147,18 @@ try {
   const storyBox = await page.locator(".play-story").boundingBox();
   check("story column keeps a readable measure (<= 70ch)", !!storyBox && storyBox.width <= 820, JSON.stringify(storyBox));
 
-  // 3. Press 1: a step is added and the run ends.
   await page.keyboard.press("1");
   await page.getByText("The end").waitFor();
   await shot(page, "03-ending");
   check("pressing 1 adds a step (dot 0 + step 1)", (await page.locator(".play-dot").count()) === 2);
   check("ending shows its actions", await page.getByRole("button", { name: "Play again" }).isVisible());
 
-  // 4. Ctrl+Z rewinds one step.
   await page.keyboard.press("Control+z");
   await page.getByRole("heading", { name: "The Lantern on the Water" }).waitFor();
   await shot(page, "04-undo");
   check("undo restores the scene", await page.locator(".play-choice").count() === 3);
   check("undone step stays as a ghost dot", (await page.locator(".play-dot.is-ghost").count()) === 1);
 
-  // 5. Choose differently: a branch selector appears.
   check("no branch selector yet", (await page.locator(".play-branches").count()) === 0);
   await page.keyboard.press("2");
   await page.getByText("The end").waitFor();
@@ -178,7 +167,6 @@ try {
   await page.keyboard.press("Control+z");
   await page.getByRole("heading", { name: "The Lantern on the Water" }).waitFor();
 
-  // 6. Edit the storylet elsewhere: stale banner; Reload run shows the note.
   const stored = await api("GET", "/api/v3/content/storylets/lantern");
   await api("PUT", "/api/v3/content/storylets/lantern", { ...stored, ...lantern(" A second line."), revision: stored.revision });
   await page.reload();
@@ -192,7 +180,6 @@ try {
   check("stale banner clears after reload", (await page.getByText("Content changed since this run started.").count()) === 0);
   check("edited prose is now shown", await page.getByText("A second line.").isVisible());
 
-  // 7. Play from here in the storylet editor.
   await page.goto(`${base}/#/storylets/lantern/edit`);
   await page.getByRole("button", { name: /Play from here/ }).waitFor();
   await page.getByRole("button", { name: /Play from here/ }).click();
@@ -200,7 +187,6 @@ try {
   check("Play from here opens a run", /#\/play\/[0-9a-f-]{36}$/.test(page.url()), page.url());
   await shot(page, "08-play-from-here");
 
-  // 7a. Inspect panel (Task 3.3): knowledge provenance and the chronicle.
   const knowRun = await api("POST", "/api/v4/runs", {
     start: { kind: "beginning" }, storyletId: "clue", expectedRevision: (await api("GET", "/api/v3/project")).revision, idempotencyKey: "visual-clue",
   });
@@ -225,7 +211,6 @@ try {
   await page.keyboard.press("Escape");
   check("Esc closes inspect", (await page.locator(".play-inspect").count()) === 0);
 
-  // 7b. Codex: a canon event is authored through visible-label chronicle fields (Task 3.2).
   await page.goto(`${base}/#/codex`);
   await page.getByRole("button", { name: "New event" }).first().click();
   await page.getByLabel("Event type").selectOption("canon");
@@ -246,26 +231,25 @@ try {
   await page.getByLabel("Event type").selectOption("world");
   check("switching to a world event shows the trigger editor again", (await page.getByText("Trigger condition (JSON)").count()) === 1);
 
-  // 7c. Space, clock and rule participants (Tasks 4.1-4.4), authored through system traits.
   const world = await api("GET", "/api/v3/content/entities/world");
   await api("PUT", "/api/v3/content/entities/world", {
     ...world,
     traits: [...(world.traits ?? []), { id: "clock", template_id: "system.clock", values: { slot_labels: ["D1 evening", "D2 morning", "D2 evening"], actions_per_slot: 2 } }],
   });
-  await api("POST", "/api/v3/content/entity_templates", { id: "lighthouse", name: "Lighthouse", traits: [{ id: "location", template_id: "system.location", values: {} },
+  await api("POST", "/api/v3/content/entities", { id: "lighthouse", name: "Lighthouse", traits: [{ id: "location", template_id: "system.location", values: {} },
     { id: "c1", template_id: "system.connection", values: { to: "harbor" } },
     { id: "c2", template_id: "system.connection", values: { to: "harbor", open_slots: [], on_close: "" } },
     { id: "c3", template_id: "system.connection", values: { to: "rock", open_slots: [1], on_close: "return", return_to: "lighthouse" } },
   ] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "rock", name: "Rock", traits: [{ id: "location", template_id: "system.location", values: {} }] });
-  const harbor = await api("GET", "/api/v3/content/entity_templates/harbor");
-  await api("PUT", "/api/v3/content/entity_templates/harbor", { ...harbor, traits: [{ id: "location", template_id: "system.location", values: {} }, { id: "h1", template_id: "system.connection", values: { to: "lighthouse" } }] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "mara", name: "Mara", traits: [
+  await api("POST", "/api/v3/content/entities", { id: "rock", name: "Rock", traits: [{ id: "location", template_id: "system.location", values: {} }] });
+  const harbor = await api("GET", "/api/v3/content/entities/harbor");
+  await api("PUT", "/api/v3/content/entities/harbor", { ...harbor, traits: [{ id: "location", template_id: "system.location", values: {} }, { id: "h1", template_id: "system.connection", values: { to: "lighthouse" } }] });
+  await api("POST", "/api/v3/content/entities", { id: "mara", name: "Mara", traits: [
     { id: "character", template_id: "system.character", values: {} },
     { id: "p1", template_id: "system.participant", values: { controller: "human", seat: 0, start_location: "harbor" } },
     { id: "s1", template_id: "system.character_settings", values: { home_location: "harbor", current_location: "harbor" } },
   ] });
-  await api("POST", "/api/v3/content/entity_templates", { id: "rosa", name: "Rosa", traits: [
+  await api("POST", "/api/v3/content/entities", { id: "rosa", name: "Rosa", traits: [
     { id: "character", template_id: "system.character", values: {} },
     { id: "p2", template_id: "system.participant", values: { controller: "rule", seat: 0, start_location: "harbor" } },
     { id: "s2", template_id: "system.character_settings", values: { home_location: "harbor", current_location: "harbor" } },
@@ -311,8 +295,6 @@ try {
   check("the closing tide drives the occupant back", await page.getByText(/is driven from Rock back to Lighthouse/).isVisible());
   check("the occupant is back at the lighthouse", (await page.locator(".play-place__name").textContent()) === "Lighthouse");
 
-  // Coverage: use a real report, adding a synthetic violation so replay is testable
-  // without deliberately corrupting the temporary project's content.
   await page.route("**/api/v4/coverage", async (route) => {
     const response = await route.fetch();
     const report = await response.json();
@@ -339,7 +321,6 @@ try {
   check("replay opens at the recorded step", await page.getByRole("button", { name: /Step 1:.*Waited/ }).getAttribute("aria-current") === "step");
   await shot(page, "18-coverage-replay");
   await page.unroute("**/api/v4/coverage");
-  // Agent origin remains visible until a person approves the current revision.
   const draftPayload = { ...lantern(), id: "agent-draft", title: "Agent draft example" };
   const draftResult = await api("POST", "/mcp", { jsonrpc: "2.0", id: 42, method: "tools/call", params: { name: "narrative_platform", arguments: { operation: "content.save", entity: "storylets", payload: draftPayload } } });
   if (draftResult.result?.isError) throw new Error(JSON.stringify(draftResult));
@@ -380,7 +361,6 @@ try {
   await approvedCard.waitFor();
   check("library shows the time window", await approvedCard.getByText("D2 morning", { exact: true }).isVisible());
   check("library identifies the selected participant", await approvedCard.getByLabel("Played by Mara").isVisible());
-  // 8. Narrow viewport keeps the layout usable.
   await page.setViewportSize({ width: 390, height: 780 });
   await shot(page, "09-narrow");
   check("no horizontal overflow at 390px", await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
@@ -394,7 +374,7 @@ try {
   child.kill();
   await sleep(500);
   for (const suffix of ["", "-wal", "-shm"]) {
-    try { fs.rmSync(dbPath + suffix, { force: true }); } catch { /* still locked; temp file */ }
+    try { fs.rmSync(dbPath + suffix, { force: true }); } catch { }
   }
 }
 if (failures.length) {

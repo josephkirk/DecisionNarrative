@@ -1,9 +1,3 @@
-/**
- * Split-pane workspace layout. A layout is a binary tree: leaves are panes that
- * each show one studio route, splits divide their area between two children.
- * The pane with id MAIN_PANE follows the browser URL; other panes keep their own
- * route. All operations are pure and return a new tree.
- */
 export const MAIN_PANE = "main";
 export const MAX_PANES = 6;
 export const MIN_RATIO = 0.15;
@@ -33,7 +27,6 @@ export function clampRatio(ratio: number): number {
   return Math.min(MAX_RATIO, Math.max(MIN_RATIO, ratio));
 }
 
-/** Places a new pane showing `path` on one side of `targetId`. Returns the tree unchanged at the pane limit. */
 export function splitPane(node: PaneNode, targetId: string, side: DropSide, path: string, newId: string): PaneNode {
   if (panes(node).length >= MAX_PANES || !findPane(node, targetId) || findPane(node, newId)) return node;
   const fresh: PaneLeaf = { kind: "pane", id: newId, path };
@@ -49,7 +42,6 @@ export function splitPane(node: PaneNode, targetId: string, side: DropSide, path
   return visit(node);
 }
 
-/** Removes a pane and lets its sibling take the freed space. The last pane and the main pane stay. */
 export function closePane(node: PaneNode, id: string): PaneNode {
   if (id === MAIN_PANE || node.kind === "pane") return node;
   const visit = (current: PaneNode): PaneNode => {
@@ -62,7 +54,6 @@ export function closePane(node: PaneNode, id: string): PaneNode {
   return visit(node);
 }
 
-/** Takes a leaf out of the tree (main included); its sibling takes the freed space. */
 function detachPane(node: PaneNode, id: string): PaneNode {
   if (node.kind === "pane") return node;
   const [a, b] = node.children;
@@ -71,7 +62,6 @@ function detachPane(node: PaneNode, id: string): PaneNode {
   return { ...node, children: [detachPane(a, id), detachPane(b, id)] };
 }
 
-/** Moves an existing pane to one side of another, keeping its id (and so its live view). */
 export function movePane(node: PaneNode, movingId: string, targetId: string, side: DropSide): PaneNode {
   const moving = findPane(node, movingId);
   if (!moving || movingId === targetId || !findPane(node, targetId)) return node;
@@ -95,7 +85,6 @@ function splitIds(node: PaneNode): string[] {
   return node.kind === "pane" ? [] : [node.id, ...splitIds(node.children[0]), ...splitIds(node.children[1])];
 }
 
-/** Exchanges the places of two panes; both keep their ids and views. */
 export function swapPanes(node: PaneNode, aId: string, bId: string): PaneNode {
   const a = findPane(node, aId), b = findPane(node, bId);
   if (!a || !b || aId === bId) return node;
@@ -117,7 +106,6 @@ export function setRatio(node: PaneNode, splitId: string, ratio: number): PaneNo
   return { ...node, children: [setRatio(node.children[0], splitId, ratio), setRatio(node.children[1], splitId, ratio)] };
 }
 
-/** Accepts only well-formed stored layouts that still contain the main pane. */
 export function parseLayout(raw: unknown): PaneNode | null {
   const ids = new Set<string>();
   const valid = (value: unknown): value is PaneNode => {
@@ -136,10 +124,6 @@ export function parseLayout(raw: unknown): PaneNode | null {
 export interface Box { x: number; y: number; w: number; h: number }
 export interface PaneGeometry { panes: Array<{ id: string; box: Box }>; handles: Array<{ splitId: string; direction: SplitDirection; ratio: number; box: Box }> }
 
-/**
- * Flattens the tree into fractional boxes (0..1 of the workspace) so panes can
- * render as stable siblings: splitting or closing never remounts a pane.
- */
 export function paneGeometry(node: PaneNode, box: Box = { x: 0, y: 0, w: 1, h: 1 }): PaneGeometry {
   if (node.kind === "pane") return { panes: [{ id: node.id, box }], handles: [] };
   const row = node.direction === "row";
@@ -154,7 +138,6 @@ export function paneGeometry(node: PaneNode, box: Box = { x: 0, y: 0, w: 1, h: 1
   };
 }
 
-/** Which part of a pane a pointer at (x, y) inside a w × h box targets. Edges take the outer quarter. */
 export function dropSide(x: number, y: number, width: number, height: number): DropSide | "center" {
   if (width <= 0 || height <= 0) return "center";
   const fx = x / width, fy = y / height;

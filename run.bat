@@ -1,13 +1,7 @@
 @echo off
 setlocal
-rem Build the studio frontend and run the local service.
-rem   run.bat          -> default database (data\storylet_studio_v8.db), http://127.0.0.1:3000
-rem   run.bat fresh    -> clean database (data\storylet_studio_v8_clean.db), port 3001
-rem Stops any active server from a previous run before starting.
 cd /d "%~dp0"
 
-rem Stop any active server so ports 3000/3001 are free (the build takes a
-rem while, giving the OS time to release the ports before the new server binds).
 echo [run] Stopping any active server...
 taskkill /F /IM storylet-engine-service.exe /T >nul 2>&1
 for %%P in (3000 3001) do (

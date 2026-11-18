@@ -1,10 +1,8 @@
-//! Deterministic, rule-authored autonomous actions for non-player characters.
 
 use serde::{Deserialize, Serialize};
 
 use crate::{Effect, EngineError, PredicateSet, WorldEvent, WorldState, apply_command};
 
-/// An authored NPC behavior. Rules are project data and contain no executable code.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NpcBehaviorRule {
     pub id: String,
@@ -17,17 +15,12 @@ pub struct NpcBehaviorRule {
     pub effects: Vec<Effect>,
 }
 
-/// Results and an explicit diagnostic when the per-turn action bound is reached.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NpcSimulationReport {
     pub events: Vec<WorldEvent>,
     pub limit_reached: bool,
 }
 
-/// Resolve eligible NPC rules by priority, then stable rule and actor IDs.
-/// Each actor acts at most once per call. NPC events share the current turn and
-/// point to the player or world events that caused this simulation pass.
-/// Mutations are committed as one batch: a failed effect leaves the world intact.
 pub fn advance_npcs(
     world: &mut WorldState,
     rules: &[NpcBehaviorRule],
