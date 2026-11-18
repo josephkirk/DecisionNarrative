@@ -1,4 +1,3 @@
-
 use std::error::Error;
 use std::fmt;
 
@@ -255,8 +254,6 @@ pub struct PersistedCallEntry {
 mod tests {
     use super::*;
 
-
-
     #[test]
     fn bitset_set_clear_contains_all_and_roundtrip() {
         let mut bits = StoryletBitset::new();
@@ -295,10 +292,6 @@ mod tests {
         );
     }
 
-
-
-
-
     #[test]
     fn inheritance_is_opt_in_and_does_not_copy_parent_bits() {
         let mut parent = ScopeCompletion {
@@ -321,8 +314,6 @@ mod tests {
         child.inherits = false;
         assert!(!child.visible_contains(4, &[parent, child]).unwrap());
     }
-
-
 
     #[test]
     fn word_count_is_1024() {

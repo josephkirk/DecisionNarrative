@@ -1,4 +1,3 @@
-
 #[derive(Clone, Debug)]
 pub struct SeededRng(u32);
 
@@ -93,6 +92,7 @@ mod tests {
             fact: 1,
             kind: KnowKind::Evidence,
             source_event: 2,
+            told_by: None,
         });
         assert!(has_unsourced_knowledge(&world, &baseline, |event| event < 2));
         assert!(!has_unsourced_knowledge(&world, &baseline, |event| event < 3));
@@ -121,6 +121,7 @@ mod tests {
             fact,
             kind: KnowKind::Recollection,
             source_event: 0,
+            told_by: None,
         });
         world.telling.reveal(TellingRow {
             holder: 1,
@@ -341,6 +342,38 @@ fn has_unsourced_knowledge(
         .iter()
         .any(|row| !initial.knowledge.rows.contains(row) && !has_source(row.source_event))
 }
+
+fn propose_action(
+    run: &mut crate::run::RunKernel,
+    content: &crate::run::RunContent,
+    actor: crate::chrono_participants::PartIx,
+    action: crate::run::RunAction,
+) -> Result<crate::actions::ActionReceipt, crate::actions::ActionRejection> {
+    let authority = match run.world().participants.controller.get(actor as usize) {
+        Some(crate::chrono_participants::Controller::Human { seat }) => {
+            crate::actions::Authority::Human { seat: *seat }
+        }
+        Some(crate::chrono_participants::Controller::Rule) => crate::actions::Authority::Policy,
+        None => {
+            return Err(crate::actions::ActionRejection {
+                reason: "unknown actor".into(),
+            });
+        }
+    };
+    let revision = run.revision();
+    run.propose(
+        content,
+        authority,
+        crate::actions::ActionProposal {
+            schema_version: 1,
+            actor,
+            action,
+            expected_revision: revision,
+            idempotency_key: format!("explore-{revision}-{actor}"),
+            provenance: None,
+        },
+    )
+}
 fn contradictory_pair(
     world: &crate::chrono_state::WorldStateTable,
     registry: &crate::chrono_state::GameplayTagRegistry,
@@ -396,11 +429,11 @@ fn has_unhandled_closed_occupant(
         })
 }
 fn equal_serialized_views(a: &RunKernel, b: &RunKernel, content: &RunContent) -> bool {
-    a.world.participants.len() == b.world.participants.len()
-        && (0..a.world.participants.len() as PartIx).all(|participant| {
+    a.world().participants.len() == b.world().participants.len()
+        && (0..a.world().participants.len() as PartIx).all(|participant| {
             match (
-                serde_json::to_vec(&a.view(content, participant)),
-                serde_json::to_vec(&b.view(content, participant)),
+                serde_json::to_vec(&a.architect_view(content, participant)),
+                serde_json::to_vec(&b.architect_view(content, participant)),
             ) {
                 (Ok(left), Ok(right)) => left == right,
                 _ => false,
@@ -556,14 +589,14 @@ fn explore_chunk(
                 let mut seen_probe = vec![0u32; cfg.probes.len()];
                 let mut filled_probe = vec![0u32; cfg.probes.len()];
                 for step in 0..cfg.max_steps {
-                    let humans: Vec<_> = run.world.participants.humans().collect();
+                    let humans: Vec<_> = run.world().participants.humans().collect();
                     if humans.is_empty() {
                         break;
                     }
                     let available: Vec<_> = humans
                         .into_iter()
                         .filter(|p| {
-                            run.world
+                            run.world()
                                 .clock
                                 .as_ref()
                                 .and_then(|c| c.actions_left.get(*p as usize))
@@ -598,10 +631,10 @@ fn explore_chunk(
                         if probe
                             .holder_knows
                             .iter()
-                            .all(|f| run.world.knowledge.knows(p, *f).is_some())
+                            .all(|f| run.world().knowledge.knows(p, *f).is_some())
                             && probe.colocated_with.is_none_or(|other| {
-                                run.world.participants.colocated(p).any(|q| {
-                                    run.world.participants.entity.get(q as usize) == Some(&other)
+                                run.world().participants.colocated(p).any(|q| {
+                                    run.world().participants.entity.get(q as usize) == Some(&other)
                                 })
                             })
                         {
@@ -643,6 +676,8 @@ fn explore_chunk(
                     if configured.clock.is_some() {
                         candidates.push(RunAction::Wait);
                     }
+                    let legal = run.observe(&configured, p).available_actions;
+                    candidates.retain(|candidate| legal.contains(candidate));
                     if candidates.is_empty() {
                         break;
                     }
@@ -660,8 +695,8 @@ fn explore_chunk(
                         let mut destinations = Vec::new();
                         if view.hub.is_some() {
                             for &place in configured.entity_names.keys() {
-                                if place as usize >= run.world.entity_tags.len()
-                                    || Some(place) == run.world.active_location(p)
+                                if place as usize >= run.world().entity_tags.len()
+                                    || Some(place) == run.world().active_location(p)
                                 {
                                     continue;
                                 }
@@ -670,7 +705,7 @@ fn explore_chunk(
                                 }
                             }
                         }
-                        let travel = first_move_toward(&run.world, &configured, p, &destinations)
+                        let travel = first_move_toward(&run.world(), &configured, p, &destinations)
                             .and_then(|to| candidates.iter().find(|a| matches!(a, RunAction::Move { to: destination } if *destination == to)));
                         ranked
                             .or(choice)
@@ -687,8 +722,8 @@ fn explore_chunk(
                     } else {
                         candidates[random_index(&mut rng, candidates.len())].clone()
                     };
-                    let slot_before = run.world.clock.as_ref().map(|clock| clock.slot);
-                    if let Err(error) = run.act(&configured, p, action.clone()) {
+                    let slot_before = run.world().clock.as_ref().map(|clock| clock.slot);
+                    if let Err(error) = propose_action(&mut run, &configured, p, action.clone()) {
                         report.error_count += 1;
                         if report.errors.len() < 20 {
                             report.errors.push(ExploreError {
@@ -705,7 +740,7 @@ fn explore_chunk(
                         if milestone
                             .routes
                             .iter()
-                            .any(|storylet| run.instance.completed_storylets.contains(*storylet))
+                            .any(|storylet| run.instance().completed_storylets.contains(*storylet))
                             && milestone.deadline_slot.is_none_or(|deadline| {
                                 slot_before.is_none_or(|slot| slot <= deadline)
                             })
@@ -714,7 +749,7 @@ fn explore_chunk(
                         }
                     }
                     if let Some(other) = &mut replay {
-                        if other.act(&configured, p, action.clone()).is_err()
+                        if propose_action(other, &configured, p, action.clone()).is_err()
                             || !equal_serialized_views(&run, other, &configured)
                         {
                             mismatch = true;
@@ -724,7 +759,7 @@ fn explore_chunk(
                     actions.push((p, action));
                     if report.violations.len() < 20 {
                         if let Some((left, right)) = contradictory_pair(
-                            &run.world,
+                            &run.world(),
                             &configured.registry,
                             &cfg.contradictory_props,
                         ) {
@@ -739,7 +774,7 @@ fn explore_chunk(
                             break;
                         }
                     }
-                    if report.violations.len() < 20 && has_untold_past(&run.world, &configured) {
+                    if report.violations.len() < 20 && has_untold_past(&run.world(), &configured) {
                         report.violations.push(Violation {
                             invariant: Invariant::PastWithoutTelling,
                             seed,
@@ -751,9 +786,11 @@ fn explore_chunk(
                         break;
                     }
                     if report.violations.len() < 20
-                        && has_unsourced_knowledge(&run.world, &configured.initial_world, |event| {
-                            run.step_of_event(event).is_some()
-                        })
+                        && has_unsourced_knowledge(
+                            &run.world(),
+                            &configured.initial_world,
+                            |event| run.step_of_event(event).is_some(),
+                        )
                     {
                         report.violations.push(Violation {
                             invariant: Invariant::KnowledgeWithoutSource,
@@ -766,7 +803,7 @@ fn explore_chunk(
                         break;
                     }
                     if report.violations.len() < 20
-                        && has_unhandled_closed_occupant(&run.world, &configured)
+                        && has_unhandled_closed_occupant(&run.world(), &configured)
                     {
                         report.violations.push(Violation {
                             invariant: Invariant::OccupantBeyondClosedEdge,
@@ -788,8 +825,8 @@ fn explore_chunk(
                 for (i, hits) in filled_probe.into_iter().enumerate() {
                     cell.probe_hits[i].2 += hits;
                 }
-                for p in 0..run.world.participants.len() as PartIx {
-                    let order = run.world.telling.order_for(p);
+                for p in 0..run.world().participants.len() as PartIx {
+                    let order = run.world().telling.order_for(p);
                     if !order.is_empty() {
                         orders.insert(order);
                     }

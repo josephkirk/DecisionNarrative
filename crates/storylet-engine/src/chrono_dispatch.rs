@@ -1,4 +1,3 @@
-
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::error::Error;
@@ -24,7 +23,6 @@ fn default_urgency_tag() -> String {
     "Standard".to_owned()
 }
 
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StoryletClusterType {
@@ -34,7 +32,6 @@ pub enum StoryletClusterType {
     WheelDeck,
     AftermathAccelerator,
 }
-
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -120,7 +117,6 @@ pub struct StoryletDef {
     pub cooldown_turns: u64,
 }
 
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WaypointTopicNode {
     pub topic_id: String,
@@ -174,26 +170,44 @@ pub enum CooldownUnit {
     Turns,
 }
 
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum DispatchError {
-    UnresolvedTarget { target_id: String },
-    NonFiniteDistance { storylet_id: u16 },
+    UnresolvedTarget {
+        target_id: String,
+    },
+    NonFiniteDistance {
+        storylet_id: u16,
+    },
     CooldownUnitConflict {
         storylet_id: u16,
         cooldown_ms: i64,
         cooldown_turns: u64,
     },
-    NoDistinctActorForRole { role_tag: String },
-    EntityIndexOutOfRange { entity_index: usize, len: usize },
-    InvalidEdgeCost { edge_id: String, cost: f64 },
-    InvalidTraversalCount { edge_id: String, count: u64 },
-    TopicNotFound { topic_id: String },
+    NoDistinctActorForRole {
+        role_tag: String,
+    },
+    EntityIndexOutOfRange {
+        entity_index: usize,
+        len: usize,
+    },
+    InvalidEdgeCost {
+        edge_id: String,
+        cost: f64,
+    },
+    InvalidTraversalCount {
+        edge_id: String,
+        count: u64,
+    },
+    TopicNotFound {
+        topic_id: String,
+    },
     NoPathToGoal {
         from_topic_id: String,
         goal_topic_id: String,
     },
-    NoFallbackEdge { from_topic_id: String },
+    NoFallbackEdge {
+        from_topic_id: String,
+    },
 }
 
 impl fmt::Display for DispatchError {
@@ -203,7 +217,6 @@ impl fmt::Display for DispatchError {
 }
 
 impl Error for DispatchError {}
-
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct UnifiedDispatcher {
@@ -292,20 +305,46 @@ impl UnifiedDispatcher {
         let mut resolved = 0;
         for def in &mut self.storylets {
             for role in &mut def.required_roles {
-                let index = tags.id(&role.role_tag).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: role.role_tag.clone() })?;
+                let index =
+                    tags.id(&role.role_tag)
+                        .ok_or_else(|| DispatchError::UnresolvedTarget {
+                            target_id: role.role_tag.clone(),
+                        })?;
                 role.role_index = Some(index);
-                role.role_mask = *tags.ancestors_mask(index).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: role.role_tag.clone() })?;
+                role.role_mask =
+                    *tags
+                        .ancestors_mask(index)
+                        .ok_or_else(|| DispatchError::UnresolvedTarget {
+                            target_id: role.role_tag.clone(),
+                        })?;
                 resolved += 1;
                 if let Some(location_tag) = &role.location_tag {
-                    let index = tags.id(location_tag).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: location_tag.clone() })?;
+                    let index =
+                        tags.id(location_tag)
+                            .ok_or_else(|| DispatchError::UnresolvedTarget {
+                                target_id: location_tag.clone(),
+                            })?;
                     role.location_index = Some(index);
-                    role.location_mask = *tags.ancestors_mask(index).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: location_tag.clone() })?;
+                    role.location_mask = *tags.ancestors_mask(index).ok_or_else(|| {
+                        DispatchError::UnresolvedTarget {
+                            target_id: location_tag.clone(),
+                        }
+                    })?;
                     resolved += 1;
                 }
             }
             for effect in &mut def.effects_on_complete {
-                let index = tags.id(&effect.target_id).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: effect.target_id.clone() })?;
-                effect.tag_mask = *tags.ancestors_mask(index).ok_or_else(|| DispatchError::UnresolvedTarget { target_id: effect.target_id.clone() })?;
+                let index =
+                    tags.id(&effect.target_id)
+                        .ok_or_else(|| DispatchError::UnresolvedTarget {
+                            target_id: effect.target_id.clone(),
+                        })?;
+                effect.tag_mask =
+                    *tags
+                        .ancestors_mask(index)
+                        .ok_or_else(|| DispatchError::UnresolvedTarget {
+                            target_id: effect.target_id.clone(),
+                        })?;
                 resolved += 1;
             }
         }
@@ -316,21 +355,52 @@ impl UnifiedDispatcher {
         self.try_is_eligible(def, table).unwrap_or(false)
     }
 
-    pub fn explain_ineligible(&self, def: &StoryletDef, table: &WorldStateTable, registry: &GameplayTagRegistry) -> Option<String> {
-        if !def.window.is_empty() && table.clock.as_ref().is_none_or(|clock| !def.window.contains(&clock.slot)) { return Some("outside its time window".into()); }
+    pub fn explain_ineligible(
+        &self,
+        def: &StoryletDef,
+        table: &WorldStateTable,
+        registry: &GameplayTagRegistry,
+    ) -> Option<String> {
+        if !def.window.is_empty()
+            && table
+                .clock
+                .as_ref()
+                .is_none_or(|clock| !def.window.contains(&clock.slot))
+        {
+            return Some("outside its time window".into());
+        }
         for i in (0..registry.tag_count()).rev() {
             let i = i as u16;
             if def.required_tags.bit(i) && !table.global_tags.bit(i) {
                 let tag = registry.tag(i).unwrap_or("requirement");
-                let label = tag.strip_prefix("fact.").unwrap_or(tag).replace(['_', '.'], " ");
-                let reason = if tag.starts_with("fact.") { format!("needs fact \"{label}\"") } else { format!("needs {label}") };
+                let label = tag
+                    .strip_prefix("fact.")
+                    .unwrap_or(tag)
+                    .replace(['_', '.'], " ");
+                let reason = if tag.starts_with("fact.") {
+                    format!("needs fact \"{label}\"")
+                } else {
+                    format!("needs {label}")
+                };
                 return Some(reason.chars().take(120).collect());
             }
         }
-        if !def.required_any_tags.is_empty() && !table.global_tags.intersects(&def.required_any_tags) { return Some("needs an alternative requirement".into()); }
-        if !def.forbidden_tags.is_empty() && table.global_tags.intersects(&def.forbidden_tags) { return Some("a forbidden condition is present".into()); }
-        if !def.required_arc_phases.is_empty() && !table.global_tags.intersects(&def.required_arc_phases) { return Some("needs a different story phase".into()); }
-        if !def.required_roles.is_empty() && self.bind_roles(def, table).is_err() { return Some("needs a participant present".into()); }
+        if !def.required_any_tags.is_empty()
+            && !table.global_tags.intersects(&def.required_any_tags)
+        {
+            return Some("needs an alternative requirement".into());
+        }
+        if !def.forbidden_tags.is_empty() && table.global_tags.intersects(&def.forbidden_tags) {
+            return Some("a forbidden condition is present".into());
+        }
+        if !def.required_arc_phases.is_empty()
+            && !table.global_tags.intersects(&def.required_arc_phases)
+        {
+            return Some("needs a different story phase".into());
+        }
+        if !def.required_roles.is_empty() && self.bind_roles(def, table).is_err() {
+            return Some("needs a participant present".into());
+        }
         None
     }
     pub fn try_is_eligible(
@@ -338,7 +408,14 @@ impl UnifiedDispatcher {
         def: &StoryletDef,
         table: &WorldStateTable,
     ) -> Result<bool, DispatchError> {
-        if !def.window.is_empty() && table.clock.as_ref().is_none_or(|clock| !def.window.contains(&clock.slot)) { return Ok(false); }
+        if !def.window.is_empty()
+            && table
+                .clock
+                .as_ref()
+                .is_none_or(|clock| !def.window.contains(&clock.slot))
+        {
+            return Ok(false);
+        }
         if !table.global_tags.contains_all(&def.required_tags) {
             return Ok(false);
         }
@@ -554,8 +631,16 @@ impl UnifiedDispatcher {
         Ok(eligible.into_iter().map(|def| def.storylet_id).collect())
     }
 
-    pub fn salience_score(&self, def: &StoryletDef, table: &WorldStateTable) -> Result<f64, DispatchError> {
-        Ok(f64::from(table.global_tags.popcount_intersection(&def.salience_bonus_tags)))
+    pub fn salience_score(
+        &self,
+        def: &StoryletDef,
+        table: &WorldStateTable,
+    ) -> Result<f64, DispatchError> {
+        Ok(f64::from(
+            table
+                .global_tags
+                .popcount_intersection(&def.salience_bonus_tags),
+        ))
     }
 
     pub fn match_most_salient(
@@ -609,7 +694,6 @@ impl UnifiedDispatcher {
         }
         Ok(Some(best[deterministic_index(seed, best.len())]))
     }
-
 
     pub fn try_match_most_salient_bitset(
         &self,
@@ -873,7 +957,6 @@ fn augment_role(
     false
 }
 
-
 fn topic_index(graph: &WaypointTopicGraph, topic_id: &str) -> Result<usize, DispatchError> {
     graph
         .nodes
@@ -931,7 +1014,6 @@ fn deterministic_index(seed: u64, count: usize) -> usize {
     (z ^ (z >> 31)) as usize % count
 }
 
-
 #[cfg(test)]
 mod dense_lookup_tests {
     use super::*;
@@ -939,9 +1021,18 @@ mod dense_lookup_tests {
     #[test]
     fn dense_id_lookup_and_rebuild() {
         let mut dispatcher = UnifiedDispatcher::new(vec![
-            StoryletDef { storylet_id: 7, ..Default::default() },
-            StoryletDef { storylet_id: 2, ..Default::default() },
-            StoryletDef { storylet_id: 7, ..Default::default() },
+            StoryletDef {
+                storylet_id: 7,
+                ..Default::default()
+            },
+            StoryletDef {
+                storylet_id: 2,
+                ..Default::default()
+            },
+            StoryletDef {
+                storylet_id: 7,
+                ..Default::default()
+            },
         ]);
         assert_eq!(dispatcher.storylet(2).unwrap().storylet_id, 2);
         assert_eq!(dispatcher.storylet(7).unwrap().storylet_id, 7);
@@ -952,7 +1043,10 @@ mod dense_lookup_tests {
         assert_eq!(decoded.storylet(7).unwrap().storylet_id, 7);
         assert_eq!(decoded, dispatcher);
 
-        dispatcher.storylets.push(StoryletDef { storylet_id: 9, ..Default::default() });
+        dispatcher.storylets.push(StoryletDef {
+            storylet_id: 9,
+            ..Default::default()
+        });
         dispatcher.rebuild_index();
         assert_eq!(dispatcher.storylet(9).unwrap().storylet_id, 9);
         assert!(dispatcher.storylet(8).is_none());

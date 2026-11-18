@@ -1,4 +1,3 @@
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::hint::black_box;
 use std::time::Instant;
@@ -47,7 +46,6 @@ struct Resolution {
 fn id(prefix: &str, index: usize) -> String {
     format!("{prefix}.{index:05}")
 }
-
 
 fn build_world(locations: usize, characters: usize, items: usize) -> WorldStateTable {
     let mut graph = WorldStateTable::new();
@@ -109,7 +107,6 @@ fn build_world(locations: usize, characters: usize, items: usize) -> WorldStateT
     graph
 }
 
-
 fn vp(layer: GraphLayer) -> VertexPattern {
     VertexPattern {
         layer,
@@ -162,7 +159,6 @@ fn pattern_char_item_location() -> GraphPattern {
         edges: vec![edge("owns", 0, 1), edge("located_at", 0, 2)],
     }
 }
-
 
 struct Matcher<'a> {
     graph: &'a WorldStateTable,
@@ -325,7 +321,6 @@ fn match_all(graph: &WorldStateTable, pattern: &GraphPattern, cap: usize) -> Mat
     }
 }
 
-
 fn resolve(productions: &[ProductionDef], graph: &WorldStateTable) -> Resolution {
     let mut resolution = Resolution::default();
     let mut matched_per_production: Vec<(&'static str, MatchRun)> = Vec::new();
@@ -365,7 +360,6 @@ fn resolve(productions: &[ProductionDef], graph: &WorldStateTable) -> Resolution
     }
     resolution
 }
-
 
 fn measure(
     label: &str,

@@ -1,4 +1,3 @@
-
 use crate::chrono_runtime::CallHistoryEntry;
 use crate::chrono_state::{AttributeValue, TagBitset, WorldStateTable};
 
@@ -213,13 +212,22 @@ impl FeatureIndex {
             if !edge.relation_type.eq_ignore_ascii_case("owns") {
                 continue;
             }
-            let Some(owner_vertex) = state.vertices.iter().find(|v| v.vertex_id == edge.source_id) else {
+            let Some(owner_vertex) = state
+                .vertices
+                .iter()
+                .find(|v| v.vertex_id == edge.source_id)
+            else {
                 continue;
             };
-            let Some(item_vertex) = state.vertices.iter().find(|v| v.vertex_id == edge.target_id) else {
+            let Some(item_vertex) = state
+                .vertices
+                .iter()
+                .find(|v| v.vertex_id == edge.target_id)
+            else {
                 continue;
             };
-            let (Some(owner), Some(item)) = (owner_vertex.entity_index, item_vertex.entity_index) else {
+            let (Some(owner), Some(item)) = (owner_vertex.entity_index, item_vertex.entity_index)
+            else {
                 continue;
             };
             let quantity = match item_vertex.attributes.get("quantity") {
@@ -373,4 +381,3 @@ mod tests {
         assert_eq!(rebuilt, incremental);
     }
 }
-

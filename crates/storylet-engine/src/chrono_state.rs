@@ -1,4 +1,3 @@
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -6,9 +5,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::chrono_chronicle::{ChronIx, TellingRow, TellingTable};
-use crate::chrono_participants::{
-    FactIx, KnowledgeRow, KnowledgeTable, ParticipantTable, PartIx,
-};
+use crate::chrono_participants::{FactIx, KnowledgeRow, KnowledgeTable, PartIx, ParticipantTable};
 
 pub const WORD_COUNT: usize = 4;
 pub const MAX_TAGS: usize = WORD_COUNT * 64;
@@ -354,7 +351,6 @@ pub struct GraphDiffRecord {
     pub previous_attributes: BTreeMap<String, BTreeMap<String, Option<AttributeValue>>>,
 }
 
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GameplayTagRegistry {
     tag_to_id: BTreeMap<String, u16>,
@@ -421,7 +417,6 @@ impl GameplayTagRegistry {
         Ok(registry)
     }
 
-
     pub fn tag_count(&self) -> usize {
         self.tag_to_id.len()
     }
@@ -465,10 +460,7 @@ impl GameplayTagRegistry {
             None => false,
         }
     }
-
 }
-
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MicroPassionDef {
@@ -731,14 +723,20 @@ impl WorldStateTable {
         if table.is_empty() {
             self.participants = ParticipantTable::implicit_player(self.current_location_entity);
         }
-        self.knowledge.rows.sort_by_key(|row| (row.holder, row.fact));
+        self.knowledge
+            .rows
+            .sort_by_key(|row| (row.holder, row.fact));
         self.knowledge
             .rows
             .dedup_by_key(|row| (row.holder, row.fact));
     }
 
     pub fn active_location(&self, p: PartIx) -> Option<u16> {
-        self.participants.location.get(p as usize).copied().flatten()
+        self.participants
+            .location
+            .get(p as usize)
+            .copied()
+            .flatten()
     }
 
     fn stamp_previous_location(&self, delta: &mut BijectiveDelta) {
@@ -764,12 +762,25 @@ impl WorldStateTable {
         delta: &mut BijectiveDelta,
     ) -> bool {
         self.stamp_previous_location(delta);
-        if !self.telling.reveal(TellingRow { holder, entry, source_event }) {
+        if !self.telling.reveal(TellingRow {
+            holder,
+            entry,
+            source_event,
+        }) {
             return false;
         }
         delta.tellings_added.push((holder, entry));
         for &fact in facts {
-            self.apply_learn(KnowledgeRow { holder, fact, kind, source_event }, delta);
+            self.apply_learn(
+                KnowledgeRow {
+                    holder,
+                    fact,
+                    kind,
+                    source_event,
+                    told_by: None,
+                },
+                delta,
+            );
         }
         true
     }
@@ -887,46 +898,77 @@ impl WorldStateTable {
                 value: value.as_f64().unwrap_or_default(),
             });
         }
-        let vertex = self.vertex_mut(vertex_id).ok_or_else(|| ChronoStateError::VertexNotFound {
-            vertex_id: vertex_id.to_owned(),
-        })?;
+        let vertex =
+            self.vertex_mut(vertex_id)
+                .ok_or_else(|| ChronoStateError::VertexNotFound {
+                    vertex_id: vertex_id.to_owned(),
+                })?;
         let previous = vertex.attributes.get(key).cloned();
         let next = match operation {
             "set" => {
                 if let Some(existing) = &previous {
                     if std::mem::discriminant(existing) != std::mem::discriminant(&value) {
-                        return Err(ChronoStateError::AttributeTypeMismatch { key: key.to_owned() });
+                        return Err(ChronoStateError::AttributeTypeMismatch {
+                            key: key.to_owned(),
+                        });
                     }
                 }
                 value
             }
             "toggle" => match (previous.as_ref(), value) {
-                (Some(AttributeValue::Bool(current)), AttributeValue::Bool(_)) =>
-                    AttributeValue::Bool(!current),
-                _ => return Err(ChronoStateError::AttributeTypeMismatch { key: key.to_owned() }),
+                (Some(AttributeValue::Bool(current)), AttributeValue::Bool(_)) => {
+                    AttributeValue::Bool(!current)
+                }
+                _ => {
+                    return Err(ChronoStateError::AttributeTypeMismatch {
+                        key: key.to_owned(),
+                    });
+                }
             },
             "add" | "subtract" => {
-                let amount = value.as_f64().ok_or_else(|| ChronoStateError::AttributeTypeMismatch { key: key.to_owned() })?;
-                let current = previous.as_ref().and_then(AttributeValue::as_f64)
-                    .ok_or_else(|| ChronoStateError::AttributeTypeMismatch { key: key.to_owned() })?;
-                let result = if operation == "add" { current + amount } else { current - amount };
+                let amount =
+                    value
+                        .as_f64()
+                        .ok_or_else(|| ChronoStateError::AttributeTypeMismatch {
+                            key: key.to_owned(),
+                        })?;
+                let current = previous
+                    .as_ref()
+                    .and_then(AttributeValue::as_f64)
+                    .ok_or_else(|| ChronoStateError::AttributeTypeMismatch {
+                        key: key.to_owned(),
+                    })?;
+                let result = if operation == "add" {
+                    current + amount
+                } else {
+                    current - amount
+                };
                 if !result.is_finite() {
                     return Err(ChronoStateError::NonFiniteAttributeValue {
-                        vertex_id: vertex_id.to_owned(), key: key.to_owned(), value: result,
+                        vertex_id: vertex_id.to_owned(),
+                        key: key.to_owned(),
+                        value: result,
                     });
                 }
                 match previous {
-                    Some(AttributeValue::Int(_)) if result.fract() == 0.0 =>
-                        AttributeValue::Int(result as i64),
+                    Some(AttributeValue::Int(_)) if result.fract() == 0.0 => {
+                        AttributeValue::Int(result as i64)
+                    }
                     Some(AttributeValue::Float(_)) => AttributeValue::Float(result),
-                    _ => return Err(ChronoStateError::AttributeTypeMismatch { key: key.to_owned() }),
+                    _ => {
+                        return Err(ChronoStateError::AttributeTypeMismatch {
+                            key: key.to_owned(),
+                        });
+                    }
                 }
             }
             _ => return Err(ChronoStateError::InvalidAttributeOperation),
         };
         vertex.attributes.insert(key.to_owned(), next);
         let mut diff = GraphDiffRecord::default();
-        diff.previous_attributes.entry(vertex_id.to_owned()).or_default()
+        diff.previous_attributes
+            .entry(vertex_id.to_owned())
+            .or_default()
             .insert(key.to_owned(), previous);
         Ok(diff)
     }
@@ -981,14 +1023,7 @@ impl WorldStateTable {
         budget: &mut usize,
     ) -> Result<bool, ChronoStateError> {
         if index == pattern.vertices.len() {
-            return self.match_pattern_edges(
-                pattern,
-                0,
-                chosen,
-                used_edges,
-                matched_edges,
-                budget,
-            );
+            return self.match_pattern_edges(pattern, 0, chosen, used_edges, matched_edges, budget);
         }
         let vertex_pattern = &pattern.vertices[index];
         for vertex in &self.vertices {
@@ -1282,9 +1317,7 @@ impl WorldStateTable {
             }
         }
         for edge in &diff.removed_edges {
-            if self.edge(&edge.edge_id).is_some()
-                && !diff.added_edge_ids.contains(&edge.edge_id)
-            {
+            if self.edge(&edge.edge_id).is_some() && !diff.added_edge_ids.contains(&edge.edge_id) {
                 return Err(ChronoStateError::DuplicateEdgeId {
                     edge_id: edge.edge_id.clone(),
                 });
@@ -1461,9 +1494,8 @@ pub fn apply_mutation_with_registry(
         state.current_location_entity = Some(entity_id);
     }
     for word in 0..WORD_COUNT {
-        new_global.words[word] =
-            (new_global.words[word] | op.add_global_tags.words[word])
-                & !op.remove_global_tags.words[word];
+        new_global.words[word] = (new_global.words[word] | op.add_global_tags.words[word])
+            & !op.remove_global_tags.words[word];
     }
     delta.global_xor_mask = state.global_tags.xor_with(&new_global);
     delta.location_tag_mask_xor = state.current_location_tag_mask.xor_with(&new_location_mask);
@@ -1484,10 +1516,9 @@ pub fn apply_mutation_with_registry(
             });
         }
     }
-    if let (Some(location_vertex_id), Some(current_tag)) = (
-        moved_location_vertex,
-        registry.id(LOCATION_CURRENT_TAG),
-    ) {
+    if let (Some(location_vertex_id), Some(current_tag)) =
+        (moved_location_vertex, registry.id(LOCATION_CURRENT_TAG))
+    {
         state.sync_actor_presence(
             &mut delta,
             &location_vertex_id,
@@ -1504,7 +1535,9 @@ pub fn revert_delta(
 ) -> Result<(), ChronoStateError> {
     for pair in &delta.entity_xor_masks {
         if pair.entity_id as usize >= state.entity_tags.len() {
-            return Err(ChronoStateError::EntityIndexOutOfRange { index: pair.entity_id });
+            return Err(ChronoStateError::EntityIndexOutOfRange {
+                index: pair.entity_id,
+            });
         }
     }
     for &(p, _, _) in &delta.participant_moves {
@@ -1519,7 +1552,9 @@ pub fn revert_delta(
         revert_passion_delta(&mut state.passions, passion_delta, &mut state.global_tags)?;
     }
     state.global_tags.apply_xor(&delta.global_xor_mask);
-    state.current_location_tag_mask.apply_xor(&delta.location_tag_mask_xor);
+    state
+        .current_location_tag_mask
+        .apply_xor(&delta.location_tag_mask_xor);
     for pair in &delta.entity_xor_masks {
         state.entity_tags[pair.entity_id as usize].apply_xor(&pair.xor_mask);
     }
@@ -1692,14 +1727,10 @@ pub fn apply_passion_mutation(
         if npc.npc_id as usize >= state.macro_values.len() {
             return Err(ChronoStateError::EntityIndexOutOfRange { index: npc.npc_id });
         }
-        if let Some(micro) = npc
-            .micro_passions
-            .iter()
-            .find(|micro| {
-                micro.passion_id as usize >= state.micro.len()
-                    || micro.passion_id as usize >= state.active.len()
-            })
-        {
+        if let Some(micro) = npc.micro_passions.iter().find(|micro| {
+            micro.passion_id as usize >= state.micro.len()
+                || micro.passion_id as usize >= state.active.len()
+        }) {
             return Err(ChronoStateError::PassionIndexOutOfRange {
                 index: micro.passion_id,
             });
@@ -1931,14 +1962,15 @@ fn validate_passion_threshold(rule: &PassionThresholdRule) -> Result<(), ChronoS
     Ok(())
 }
 
-
 fn validate_entity_bounds(
     state: &WorldStateTable,
     op: &MutationOp,
 ) -> Result<(), ChronoStateError> {
     for item in &op.entity_tag_ops {
         if item.entity_id as usize >= state.entity_tags.len() {
-            return Err(ChronoStateError::EntityIndexOutOfRange { index: item.entity_id });
+            return Err(ChronoStateError::EntityIndexOutOfRange {
+                index: item.entity_id,
+            });
         }
     }
     if let Some(entity_id) = op.move_player {
@@ -1991,9 +2023,9 @@ fn resolve_binding(binding: &GraphBinding, matched: &[String]) -> Result<String,
             .get(*index)
             .cloned()
             .ok_or(ChronoStateError::PatternIndexOutOfRange { index: *index }),
-        GraphBinding::EdgePattern(index) => Err(ChronoStateError::PatternIndexOutOfRange {
-            index: *index,
-        }),
+        GraphBinding::EdgePattern(index) => {
+            Err(ChronoStateError::PatternIndexOutOfRange { index: *index })
+        }
     }
 }
 
@@ -2011,7 +2043,7 @@ fn resolve_edge_ids(
                 .cloned()
                 .ok_or(ChronoStateError::PatternIndexOutOfRange { index: *index })?,
             GraphBinding::VertexPattern(index) => {
-                return Err(ChronoStateError::PatternIndexOutOfRange { index: *index })
+                return Err(ChronoStateError::PatternIndexOutOfRange { index: *index });
             }
         };
         ids.push(id);
@@ -2245,10 +2277,7 @@ impl fmt::Display for ChronoStateError {
             Self::PassionOverflow { passion_id, value } => {
                 write!(formatter, "passion {passion_id} would overflow to {value}")
             }
-            Self::InvalidHysteresis {
-                passion_id,
-                value,
-            } => {
+            Self::InvalidHysteresis { passion_id, value } => {
                 write!(
                     formatter,
                     "hysteresis for passion {passion_id} must be a non-negative finite value, got {value}"
@@ -2297,7 +2326,9 @@ impl fmt::Display for ChronoStateError {
                     "attribute '{key}' on vertex '{vertex_id}' must be finite, got {value}"
                 )
             }
-            Self::AttributeTypeMismatch { key } => write!(formatter, "attribute '{key}' has an incompatible type"),
+            Self::AttributeTypeMismatch { key } => {
+                write!(formatter, "attribute '{key}' has an incompatible type")
+            }
             Self::InvalidAttributeOperation => write!(formatter, "invalid attribute operation"),
             Self::PatternIndexOutOfRange { index } => {
                 write!(formatter, "graph pattern index {index} is out of range")
@@ -2339,7 +2370,10 @@ impl fmt::Display for ChronoStateError {
                 )
             }
             Self::EmptyPassionPool { npc_id } => {
-                write!(formatter, "star npc {npc_id} must declare at least one micro passion")
+                write!(
+                    formatter,
+                    "star npc {npc_id} must declare at least one micro passion"
+                )
             }
         }
     }
@@ -2359,7 +2393,6 @@ mod tests {
         registry.id(name).expect("tag must be compiled")
     }
 
-
     #[test]
     fn one_vertex_can_match_multiple_capabilities_and_be_a_location() {
         let mut layers = GraphLayers::from(GraphLayer::Character);
@@ -2373,15 +2406,24 @@ mod tests {
         });
         for layer in [GraphLayer::Character, GraphLayer::Location] {
             let pattern = GraphPattern {
-                vertices: vec![VertexPattern { layer, ..Default::default() }],
+                vertices: vec![VertexPattern {
+                    layer,
+                    ..Default::default()
+                }],
                 ..Default::default()
             };
             assert!(state.match_graph_pattern(&pattern).is_ok());
         }
-        assert!(validate_entity_bounds(&state, &MutationOp {
-            move_player: Some(0),
-            ..Default::default()
-        }).is_ok());
+        assert!(
+            validate_entity_bounds(
+                &state,
+                &MutationOp {
+                    move_player: Some(0),
+                    ..Default::default()
+                }
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -2476,8 +2518,6 @@ mod tests {
         );
         assert_eq!(state, before);
     }
-
-
 
     #[test]
     fn deterministic_roundtrip_restores_exact_state() {
@@ -2681,7 +2721,3 @@ mod tests {
         assert_eq!(flags, original_flags);
     }
 }
-
-
-
-

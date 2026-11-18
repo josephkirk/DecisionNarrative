@@ -1,8 +1,7 @@
-
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
-use serde::{Deserialize, Serialize};
 
 pub const MAX_STORYLETS: usize = 65_536;
 pub type StoryletIndex = u16;

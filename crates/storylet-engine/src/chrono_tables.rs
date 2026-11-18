@@ -1,4 +1,3 @@
-
 use crate::chrono_catalog::StoryletIndex;
 use crate::chrono_completion::{ScopeCompletion, StoryletBitset};
 

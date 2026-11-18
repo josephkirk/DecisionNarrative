@@ -12,6 +12,7 @@ fn row(holder: u16, fact: u16, kind: KnowKind, source_event: u32) -> KnowledgeRo
         fact,
         kind,
         source_event,
+        told_by: None,
     }
 }
 
@@ -253,7 +254,6 @@ fn seed_current_location_after_ensure_participants_moves_participant_zero() {
     assert_eq!(world.current_location_entity, Some(3));
     assert_eq!(world.active_location(0), Some(3));
 }
-
 
 use storylet_engine::chrono_dispatch::UnifiedDispatcher;
 use storylet_engine::chrono_runtime::{

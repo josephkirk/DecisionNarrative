@@ -10,7 +10,6 @@ fn tag_registry(names: &[&str]) -> GameplayTagRegistry {
     GameplayTagRegistry::compile(names.iter().map(|name| (*name).to_owned())).unwrap()
 }
 
-
 fn node(topic_id: &str) -> WaypointTopicNode {
     WaypointTopicNode {
         topic_id: topic_id.to_owned(),
@@ -29,7 +28,6 @@ fn edge(edge_id: &str, from: &str, to: &str, base_cost: f64, fallback: bool) -> 
         is_fallback_default: fallback,
     }
 }
-
 
 #[test]
 fn role_binding_never_shares_an_actor_and_honours_the_current_marker() {
@@ -129,9 +127,7 @@ fn qbn_deck_order_and_salience_ties_are_deterministic() {
     high.required_arc_phases.set_bit(0).unwrap();
 
     let mut dispatcher = UnifiedDispatcher::new(vec![low, high]);
-    dispatcher
-        .resolve(&GameplayTagRegistry::empty())
-        .unwrap();
+    dispatcher.resolve(&GameplayTagRegistry::empty()).unwrap();
 
     let mut table = WorldStateTable::new();
     table.global_tags.set_bit(0).unwrap();
@@ -229,4 +225,3 @@ fn waypoint_ties_resolve_by_edge_id_and_replay_identically() {
         })
     );
 }
-

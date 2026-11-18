@@ -1,18 +1,18 @@
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::chrono_completion::StoryletBitset;
 use crate::chrono_chronicle::ChronIx;
-use crate::chrono_participants::{FactIx, KnowKind, KnowledgeRow, PartIx};
+use crate::chrono_completion::StoryletBitset;
 use crate::chrono_dispatch::{DispatchError, UnifiedDispatcher, WaypointStep, WaypointTopicGraph};
+use crate::chrono_participants::{FactIx, KnowKind, KnowledgeRow, PartIx};
 use crate::chrono_state::{
-    apply_mutation, apply_mutation_with_registry, apply_passion_mutation, revert_delta,
-    AttributeValue, BijectiveDelta, ChronoStateError, EntityTagMutation, GameplayTagRegistry, GraphTransformRule, MutationOp,
-    PassionMutation, PassionRegistry, TagBitset, WorldStateTable, MAX_TAGS,
+    AttributeValue, BijectiveDelta, ChronoStateError, EntityTagMutation, GameplayTagRegistry,
+    GraphTransformRule, MAX_TAGS, MutationOp, PassionMutation, PassionRegistry, TagBitset,
+    WorldStateTable, apply_mutation, apply_mutation_with_registry, apply_passion_mutation,
+    revert_delta,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,14 +100,21 @@ pub enum DataValue {
 impl DataValue {
     pub fn type_name(&self) -> &'static str {
         match self {
-            Self::Bool(_) => "bool", Self::Int(_) => "int", Self::Float(_) => "float",
-            Self::String(_) => "string", Self::Asset(_) => "asset",
-            Self::EntityRef(_) => "entity_ref", Self::Array(_) => "array",
+            Self::Bool(_) => "bool",
+            Self::Int(_) => "int",
+            Self::Float(_) => "float",
+            Self::String(_) => "string",
+            Self::Asset(_) => "asset",
+            Self::EntityRef(_) => "entity_ref",
+            Self::Array(_) => "array",
         }
     }
     pub fn same_type(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Array(a), Self::Array(b)) => a.first().zip(b.first()).map_or(true, |(x,y)| x.same_type(y)),
+            (Self::Array(a), Self::Array(b)) => a
+                .first()
+                .zip(b.first())
+                .map_or(true, |(x, y)| x.same_type(y)),
             _ => self.type_name() == other.type_name(),
         }
     }
@@ -129,8 +136,12 @@ pub struct DataEdgeConnection {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PropertyOperation { Set, Add, Subtract, Toggle }
-
+pub enum PropertyOperation {
+    Set,
+    Add,
+    Subtract,
+    Toggle,
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PinDefinition {
@@ -228,32 +239,80 @@ pub struct FlowNodeDef {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Visibility { Private, CoLocated }
+pub enum Visibility {
+    Private,
+    CoLocated,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum HolderRef { Acting, Participant(PartIx) }
+pub enum HolderRef {
+    Acting,
+    Participant(PartIx),
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NodeKind {
-    Learn { fact: FactIx, #[serde(rename = "knowledge_kind")] kind: KnowKind, visibility: Visibility },
-    MoveParticipant { location_entity: u16 },
-    Reveal { entry: ChronIx, #[serde(rename = "knowledge_kind")] kind: KnowKind, visibility: Visibility, #[serde(default)] facts: Vec<FactIx> },
-    Knows { holder: HolderRef, fact: FactIx, confirmed_only: bool },
-    Colocated { participant: PartIx },
-    GetEntity { entity_id: String },
-    GetEntityProperty { property_key: String, value_type: String },
-    ApplyCommand { property_key: String, operation: PropertyOperation, value: DataValue },
+    Learn {
+        fact: FactIx,
+        #[serde(rename = "knowledge_kind")]
+        kind: KnowKind,
+        visibility: Visibility,
+    },
+    MoveParticipant {
+        location_entity: u16,
+    },
+    Reveal {
+        entry: ChronIx,
+        #[serde(rename = "knowledge_kind")]
+        kind: KnowKind,
+        visibility: Visibility,
+        #[serde(default)]
+        facts: Vec<FactIx>,
+    },
+    Knows {
+        holder: HolderRef,
+        fact: FactIx,
+        confirmed_only: bool,
+    },
+    Colocated {
+        participant: PartIx,
+    },
+    GetEntity {
+        entity_id: String,
+    },
+    GetEntityProperty {
+        property_key: String,
+        value_type: String,
+    },
+    ApplyCommand {
+        property_key: String,
+        operation: PropertyOperation,
+        value: DataValue,
+    },
     InventoryAdd,
     InventoryRemove,
     InventoryHas,
-    HasEntityTag { entity_id: String, tag: String, match_mode: String },
-    Compare { operator: PredicateOperator, literal: DataValue },
-    Condition { operator: PredicateOperator, literal: Option<DataValue> },
+    HasEntityTag {
+        entity_id: String,
+        tag: String,
+        match_mode: String,
+    },
+    Compare {
+        operator: PredicateOperator,
+        literal: DataValue,
+    },
+    Condition {
+        operator: PredicateOperator,
+        literal: Option<DataValue>,
+    },
     And,
     Or,
-    TagMutation { op: MutationOp, adding: bool },
+    TagMutation {
+        op: MutationOp,
+        adding: bool,
+    },
     Mutation {
         op: MutationOp,
     },
@@ -318,7 +377,7 @@ pub enum NodeKind {
         destination_storylet: Option<u16>,
         #[serde(default)]
         destination_node_guid: Option<u32>,
-    }
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -647,7 +706,10 @@ impl FlowGraphAsset {
                     }
                 }
             }
-            for (pins, is_input) in [(&node.data_input_pins, true), (&node.data_output_pins, false)] {
+            for (pins, is_input) in [
+                (&node.data_input_pins, true),
+                (&node.data_output_pins, false),
+            ] {
                 let mut names = BTreeSet::new();
                 for pin in pins {
                     if !names.insert(pin.pin_name.as_str()) || pin.is_input != is_input {
@@ -746,21 +808,37 @@ impl FlowGraphAsset {
             })?;
         }
         for edge in &self.data_edges {
-            let source = self.node(edge.source_node_guid).ok_or(GraphError::EdgeReferencesMissingNode {
-                node_guid: edge.source_node_guid,
-            })?;
-            let target = self.node(edge.target_node_guid).ok_or(GraphError::EdgeReferencesMissingNode {
-                node_guid: edge.target_node_guid,
-            })?;
-            let source_pin = source.data_output_pins.iter().find(|pin| pin.pin_name == edge.source_pin_name)
+            let source =
+                self.node(edge.source_node_guid)
+                    .ok_or(GraphError::EdgeReferencesMissingNode {
+                        node_guid: edge.source_node_guid,
+                    })?;
+            let target =
+                self.node(edge.target_node_guid)
+                    .ok_or(GraphError::EdgeReferencesMissingNode {
+                        node_guid: edge.target_node_guid,
+                    })?;
+            let source_pin = source
+                .data_output_pins
+                .iter()
+                .find(|pin| pin.pin_name == edge.source_pin_name)
                 .ok_or_else(|| GraphError::EdgeReferencesUnknownPin {
-                    node_guid: edge.source_node_guid, pin_name: edge.source_pin_name.clone(),
+                    node_guid: edge.source_node_guid,
+                    pin_name: edge.source_pin_name.clone(),
                 })?;
-            let target_pin = target.data_input_pins.iter().find(|pin| pin.pin_name == edge.target_pin_name)
+            let target_pin = target
+                .data_input_pins
+                .iter()
+                .find(|pin| pin.pin_name == edge.target_pin_name)
                 .ok_or_else(|| GraphError::EdgeReferencesUnknownPin {
-                    node_guid: edge.target_node_guid, pin_name: edge.target_pin_name.clone(),
+                    node_guid: edge.target_node_guid,
+                    pin_name: edge.target_pin_name.clone(),
                 })?;
-            if source_pin.is_input || !target_pin.is_input || (target_pin.value_type != "any" && source_pin.value_type != target_pin.value_type) {
+            if source_pin.is_input
+                || !target_pin.is_input
+                || (target_pin.value_type != "any"
+                    && source_pin.value_type != target_pin.value_type)
+            {
                 return Err(GraphError::DataPinTypeMismatch {
                     source_node_guid: edge.source_node_guid,
                     source_pin: edge.source_pin_name.clone(),
@@ -776,9 +854,16 @@ impl FlowGraphAsset {
     fn validate_acyclic_data(&self) -> Result<(), GraphError> {
         let mut adjacency: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
         for edge in &self.data_edges {
-            adjacency.entry(edge.source_node_guid).or_default().push(edge.target_node_guid);
+            adjacency
+                .entry(edge.source_node_guid)
+                .or_default()
+                .push(edge.target_node_guid);
         }
-        fn visit(node: u32, adjacency: &BTreeMap<u32, Vec<u32>>, state: &mut BTreeMap<u32, u8>) -> Result<(), GraphError> {
+        fn visit(
+            node: u32,
+            adjacency: &BTreeMap<u32, Vec<u32>>,
+            state: &mut BTreeMap<u32, u8>,
+        ) -> Result<(), GraphError> {
             match state.get(&node).copied().unwrap_or(0) {
                 1 => Err(GraphError::ZeroCostCycle { node_guid: node }),
                 2 => Ok(()),
@@ -804,17 +889,13 @@ impl FlowGraphAsset {
             .nodes
             .iter()
             .filter(|node| node.cost_ms == 0)
-            .filter(|node| {
-                !matches!(
-                    node.kind,
-                    NodeKind::Choice { .. } | NodeKind::QbnHub { .. }
-                )
-            })
+            .filter(|node| !matches!(node.kind, NodeKind::Choice { .. } | NodeKind::QbnHub { .. }))
             .map(|node| node.node_guid)
             .collect();
         let mut adjacency: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
         for edge in &self.edges {
-            if zero_cost.contains(&edge.source_node_guid) && zero_cost.contains(&edge.target_node_guid)
+            if zero_cost.contains(&edge.source_node_guid)
+                && zero_cost.contains(&edge.target_node_guid)
             {
                 adjacency
                     .entry(edge.source_node_guid)
@@ -984,12 +1065,8 @@ impl FlowGraphAsset {
             if node == from || node == to {
                 continue;
             }
-            let (_, input_pin, _) = parent
-                .get(&node)
-                .expect("bridge step has an entering edge");
-            let (_, _, output_pin) = parent
-                .get(&next)
-                .expect("bridge step has a leaving edge");
+            let (_, input_pin, _) = parent.get(&node).expect("bridge step has an entering edge");
+            let (_, _, output_pin) = parent.get(&next).expect("bridge step has a leaving edge");
             steps.push((node, input_pin.clone(), output_pin.clone()));
         }
         steps
@@ -1167,7 +1244,10 @@ pub enum GraphError {
     PassionRegistryRequired {
         node_guid: u32,
     },
-    ParticipantNotFound { node_guid: u32, participant: PartIx },
+    ParticipantNotFound {
+        node_guid: u32,
+        participant: PartIx,
+    },
     EntityIndexOutOfRange {
         node_guid: u32,
         entity_index: u16,
@@ -1201,7 +1281,10 @@ pub enum GraphError {
         node_guid: u32,
         category: NodeCategory,
     },
-    Inventory { node_guid: u32, message: String },
+    Inventory {
+        node_guid: u32,
+        message: String,
+    },
     State(ChronoStateError),
     Dispatch(DispatchError),
 }
@@ -1209,8 +1292,15 @@ pub enum GraphError {
 impl fmt::Display for GraphError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GraphError::Inventory { node_guid, message } => write!(f, "inventory node {node_guid}: {message}"),
-            GraphError::DataPinTypeMismatch { source_node_guid, source_pin, target_node_guid, target_pin } => write!(
+            GraphError::Inventory { node_guid, message } => {
+                write!(f, "inventory node {node_guid}: {message}")
+            }
+            GraphError::DataPinTypeMismatch {
+                source_node_guid,
+                source_pin,
+                target_node_guid,
+                target_pin,
+            } => write!(
                 f,
                 "data pin {source_node_guid}:{source_pin} is incompatible with {target_node_guid}:{target_pin}"
             ),
@@ -1374,7 +1464,10 @@ impl fmt::Display for GraphError {
                 f,
                 "scene section {node_guid} has a negative duration of {duration_ms} ms"
             ),
-            GraphError::NegativeEventTime { node_guid, event_id } => write!(
+            GraphError::NegativeEventTime {
+                node_guid,
+                event_id,
+            } => write!(
                 f,
                 "scene section {node_guid} event {event_id} has a negative time"
             ),
@@ -1460,7 +1553,13 @@ impl fmt::Display for GraphError {
                 f,
                 "teleport at node {node_guid} targets unknown node {destination}"
             ),
-            GraphError::ParticipantNotFound { node_guid, participant } => write!(f, "node {node_guid} references unknown participant {participant}"),
+            GraphError::ParticipantNotFound {
+                node_guid,
+                participant,
+            } => write!(
+                f,
+                "node {node_guid} references unknown participant {participant}"
+            ),
             GraphError::EntityIndexOutOfRange {
                 node_guid,
                 entity_index,
@@ -1799,10 +1898,7 @@ impl FlowGraphInstance {
         out
     }
 
-    fn restore_mission_mirrors(
-        &mut self,
-        mirrors: &BTreeMap<u32, Vec<CallHistoryEntry>>,
-    ) {
+    fn restore_mission_mirrors(&mut self, mirrors: &BTreeMap<u32, Vec<CallHistoryEntry>>) {
         for node in &mut self.nodes {
             if let Some(entries) = mirrors.get(&node.node_guid) {
                 node.local_call_history.clone_from(entries);
@@ -1856,10 +1952,7 @@ impl FlowGraphInstance {
         &self.global_call_history
     }
 
-    pub fn bind_storylet_keys(
-        &mut self,
-        keys: impl IntoIterator<Item = (u16, String)>,
-    ) {
+    pub fn bind_storylet_keys(&mut self, keys: impl IntoIterator<Item = (u16, String)>) {
         self.storylet_keys = keys.into_iter().collect();
     }
 
@@ -2016,44 +2109,101 @@ impl FlowGraphInstance {
                     category: def.category,
                 });
             }
-            NodeKind::Learn { fact, kind, visibility } => {
+            NodeKind::Learn {
+                fact,
+                kind,
+                visibility,
+            } => {
                 let actor = self.acting_participant;
                 if usize::from(actor) >= ctx.state.participants.len() {
-                    return Err(GraphError::ParticipantNotFound { node_guid, participant: actor });
+                    return Err(GraphError::ParticipantNotFound {
+                        node_guid,
+                        participant: actor,
+                    });
                 }
                 let source_event = match def.mission_scope {
-                    Some(scope) => self.nodes[self.node_index(scope).ok_or(GraphError::MissionScopeNotFound { node_guid, scope })?].local_call_history.len(),
+                    Some(scope) => self.nodes[self
+                        .node_index(scope)
+                        .ok_or(GraphError::MissionScopeNotFound { node_guid, scope })?]
+                    .local_call_history
+                    .len(),
                     None => self.global_call_history.len(),
                 } as u32;
                 let witnesses: Vec<_> = if *visibility == Visibility::CoLocated {
                     ctx.state.participants.colocated(actor).collect()
-                } else { Vec::new() };
-                ctx.state.apply_learn(KnowledgeRow { holder: actor, fact: *fact, kind: *kind, source_event }, &mut plan.delta);
+                } else {
+                    Vec::new()
+                };
+                ctx.state.apply_learn(
+                    KnowledgeRow {
+                        holder: actor,
+                        fact: *fact,
+                        kind: *kind,
+                        source_event,
+                        told_by: None,
+                    },
+                    &mut plan.delta,
+                );
                 for holder in witnesses {
-                    ctx.state.apply_learn(KnowledgeRow { holder, fact: *fact, kind: KnowKind::Witnessed, source_event }, &mut plan.delta);
+                    ctx.state.apply_learn(
+                        KnowledgeRow {
+                            holder,
+                            fact: *fact,
+                            kind: KnowKind::Witnessed,
+                            source_event,
+                            told_by: None,
+                        },
+                        &mut plan.delta,
+                    );
                 }
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
             }
-            NodeKind::Reveal { entry, kind, visibility, facts } => {
+            NodeKind::Reveal {
+                entry,
+                kind,
+                visibility,
+                facts,
+            } => {
                 let actor = self.acting_participant;
                 if usize::from(actor) >= ctx.state.participants.len() {
-                    return Err(GraphError::ParticipantNotFound { node_guid, participant: actor });
+                    return Err(GraphError::ParticipantNotFound {
+                        node_guid,
+                        participant: actor,
+                    });
                 }
                 let source_event = match def.mission_scope {
-                    Some(scope) => self.nodes[self.node_index(scope).ok_or(GraphError::MissionScopeNotFound { node_guid, scope })?].local_call_history.len(),
+                    Some(scope) => self.nodes[self
+                        .node_index(scope)
+                        .ok_or(GraphError::MissionScopeNotFound { node_guid, scope })?]
+                    .local_call_history
+                    .len(),
                     None => self.global_call_history.len(),
                 } as u32;
                 let witnesses: Vec<_> = if *visibility == Visibility::CoLocated {
                     ctx.state.participants.colocated(actor).collect()
-                } else { Vec::new() };
-                ctx.state.apply_reveal(actor, *entry, facts, *kind, source_event, &mut plan.delta);
+                } else {
+                    Vec::new()
+                };
+                ctx.state
+                    .apply_reveal(actor, *entry, facts, *kind, source_event, &mut plan.delta);
                 for holder in witnesses {
-                    ctx.state.apply_reveal(holder, *entry, facts, KnowKind::Witnessed, source_event, &mut plan.delta);
+                    ctx.state.apply_reveal(
+                        holder,
+                        *entry,
+                        facts,
+                        KnowKind::Witnessed,
+                        source_event,
+                        &mut plan.delta,
+                    );
                 }
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
@@ -2061,76 +2211,141 @@ impl FlowGraphInstance {
             NodeKind::MoveParticipant { location_entity } => {
                 let actor = self.acting_participant;
                 if usize::from(actor) >= ctx.state.participants.len() {
-                    return Err(GraphError::ParticipantNotFound { node_guid, participant: actor });
+                    return Err(GraphError::ParticipantNotFound {
+                        node_guid,
+                        participant: actor,
+                    });
                 }
                 if usize::from(*location_entity) >= ctx.state.entity_tags.len() {
-                    return Err(GraphError::EntityIndexOutOfRange { node_guid, entity_index: *location_entity });
+                    return Err(GraphError::EntityIndexOutOfRange {
+                        node_guid,
+                        entity_index: *location_entity,
+                    });
                 }
-                ctx.state.apply_move(actor, Some(*location_entity), &mut plan.delta);
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                ctx.state
+                    .apply_move(actor, Some(*location_entity), &mut plan.delta);
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
             }
-            NodeKind::ApplyCommand { property_key, operation, value } => {
-                let entity = match resolve_data_input(self, ctx, node_guid, "entity", &mut BTreeSet::new())? {
-                    DataValue::EntityRef(id) => id,
-                    other => return Err(GraphError::DataPinTypeMismatch {
-                        source_node_guid: node_guid, source_pin: other.type_name().into(),
-                        target_node_guid: node_guid, target_pin: "entity".into(),
-                    }),
-                };
+            NodeKind::ApplyCommand {
+                property_key,
+                operation,
+                value,
+            } => {
+                let entity =
+                    match resolve_data_input(self, ctx, node_guid, "entity", &mut BTreeSet::new())?
+                    {
+                        DataValue::EntityRef(id) => id,
+                        other => {
+                            return Err(GraphError::DataPinTypeMismatch {
+                                source_node_guid: node_guid,
+                                source_pin: other.type_name().into(),
+                                target_node_guid: node_guid,
+                                target_pin: "entity".into(),
+                            });
+                        }
+                    };
                 let attribute_key = format!("prop.{property_key}");
-                if !ctx.state.vertex(&entity).is_some_and(|vertex| vertex.attributes.contains_key(&attribute_key)) {
-                    return Err(GraphError::State(ChronoStateError::AttributeTypeMismatch { key: attribute_key }));
+                if !ctx
+                    .state
+                    .vertex(&entity)
+                    .is_some_and(|vertex| vertex.attributes.contains_key(&attribute_key))
+                {
+                    return Err(GraphError::State(ChronoStateError::AttributeTypeMismatch {
+                        key: attribute_key,
+                    }));
                 }
-                let attribute = data_value_to_attribute(value)
-                    .ok_or(GraphError::UnsupportedNode { node_guid, category: def.category })?;
+                let attribute =
+                    data_value_to_attribute(value).ok_or(GraphError::UnsupportedNode {
+                        node_guid,
+                        category: def.category,
+                    })?;
                 let op = match operation {
                     PropertyOperation::Set => "set",
                     PropertyOperation::Add => "add",
                     PropertyOperation::Subtract => "subtract",
                     PropertyOperation::Toggle => "toggle",
                 };
-                let diff = ctx.state.apply_property_command(
-                    &entity, &format!("prop.{property_key}"), op, attribute
-                ).map_err(GraphError::State)?;
+                let diff = ctx
+                    .state
+                    .apply_property_command(&entity, &format!("prop.{property_key}"), op, attribute)
+                    .map_err(GraphError::State)?;
                 plan.delta.graph_diffs.push(diff);
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
             }
             NodeKind::InventoryAdd | NodeKind::InventoryRemove => {
-                let DataValue::EntityRef(owner) = resolve_data_input(self, ctx, node_guid, "entity", &mut BTreeSet::new())? else {
-                    return Err(GraphError::Inventory { node_guid, message: "owner must be an entity".into() });
+                let DataValue::EntityRef(owner) =
+                    resolve_data_input(self, ctx, node_guid, "entity", &mut BTreeSet::new())?
+                else {
+                    return Err(GraphError::Inventory {
+                        node_guid,
+                        message: "owner must be an entity".into(),
+                    });
                 };
-                let DataValue::EntityRef(item) = resolve_data_input(self, ctx, node_guid, "item", &mut BTreeSet::new())? else {
-                    return Err(GraphError::Inventory { node_guid, message: "item must be an entity".into() });
+                let DataValue::EntityRef(item) =
+                    resolve_data_input(self, ctx, node_guid, "item", &mut BTreeSet::new())?
+                else {
+                    return Err(GraphError::Inventory {
+                        node_guid,
+                        message: "item must be an entity".into(),
+                    });
                 };
                 let (current, capacity) = inventory_state(ctx.state, &owner, &item, node_guid)?;
                 let mut next = current.to_vec();
                 let item_value = AttributeValue::EntityRef(item);
                 if matches!(&def.kind, NodeKind::InventoryAdd) {
                     if !next.contains(&item_value) {
-                        if next.len() >= capacity { return Err(GraphError::Inventory { node_guid, message: "inventory is full".into() }); }
+                        if next.len() >= capacity {
+                            return Err(GraphError::Inventory {
+                                node_guid,
+                                message: "inventory is full".into(),
+                            });
+                        }
                         next.push(item_value);
                     }
                 } else {
                     next.retain(|value| value != &item_value);
                 }
-                let diff = ctx.state.apply_property_command(&owner, "prop.__inventory_items", "set", AttributeValue::Array(next)).map_err(GraphError::State)?;
+                let diff = ctx
+                    .state
+                    .apply_property_command(
+                        &owner,
+                        "prop.__inventory_items",
+                        "set",
+                        AttributeValue::Array(next),
+                    )
+                    .map_err(GraphError::State)?;
                 plan.delta.graph_diffs.push(diff);
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
             }
             NodeKind::TagMutation { op, adding } => {
                 let mut resolved = op.clone();
-                if let Some(edge) = self.asset.data_edges.iter().find(|edge| edge.target_node_guid == node_guid && edge.target_pin_name == "target") {
-                    let DataValue::EntityRef(target) = resolve_data_node(self, ctx, edge.source_node_guid, &mut BTreeSet::new())? else {
-                        return Err(GraphError::DataPinTypeMismatch { source_node_guid: edge.source_node_guid, source_pin: "target".into(), target_node_guid: node_guid, target_pin: "target".into() });
+                if let Some(edge) = self.asset.data_edges.iter().find(|edge| {
+                    edge.target_node_guid == node_guid && edge.target_pin_name == "target"
+                }) {
+                    let DataValue::EntityRef(target) =
+                        resolve_data_node(self, ctx, edge.source_node_guid, &mut BTreeSet::new())?
+                    else {
+                        return Err(GraphError::DataPinTypeMismatch {
+                            source_node_guid: edge.source_node_guid,
+                            source_pin: "target".into(),
+                            target_node_guid: node_guid,
+                            target_pin: "target".into(),
+                        });
                     };
                     let target = target.trim();
                     let mut tags = TagBitset::new();
@@ -2145,15 +2360,30 @@ impl FlowGraphInstance {
                     resolved.remove_global_tags = TagBitset::new();
                     resolved.entity_tag_ops.clear();
                     if target.eq_ignore_ascii_case("world") || target.is_empty() {
-                        if adding { resolved.add_global_tags = tags; } else { resolved.remove_global_tags = tags; }
+                        if adding {
+                            resolved.add_global_tags = tags;
+                        } else {
+                            resolved.remove_global_tags = tags;
+                        }
                     } else {
-                        let vertex = ctx.state.vertex(target).ok_or(GraphError::NodeNotFound { node_guid })?;
-                        let entity_id = vertex.entity_index.ok_or(GraphError::NodeNotFound { node_guid })?;
-                        resolved.entity_tag_ops.push(EntityTagMutation { entity_id, add_tags: if adding { tags } else { TagBitset::new() }, remove_tags: if adding { TagBitset::new() } else { tags } });
+                        let vertex = ctx
+                            .state
+                            .vertex(target)
+                            .ok_or(GraphError::NodeNotFound { node_guid })?;
+                        let entity_id = vertex
+                            .entity_index
+                            .ok_or(GraphError::NodeNotFound { node_guid })?;
+                        resolved.entity_tag_ops.push(EntityTagMutation {
+                            entity_id,
+                            add_tags: if adding { tags } else { TagBitset::new() },
+                            remove_tags: if adding { TagBitset::new() } else { tags },
+                        });
                     }
                 }
                 plan.delta = ctx.apply_op(&resolved)?;
-                plan.call_data = Some(NodeCallData::Delta { delta: plan.delta.clone() });
+                plan.call_data = Some(NodeCallData::Delta {
+                    delta: plan.delta.clone(),
+                });
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
@@ -2269,7 +2499,9 @@ impl FlowGraphInstance {
                     poi_id: poi_id.clone(),
                 });
             }
-            NodeKind::End { jump_to_storylet, .. } => {
+            NodeKind::End {
+                jump_to_storylet, ..
+            } => {
                 plan.completed = true;
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
@@ -2300,7 +2532,8 @@ impl FlowGraphInstance {
                 }
             }
             NodeKind::Condition { operator, literal } => {
-                let input = resolve_data_input(self, ctx, node_guid, "input", &mut BTreeSet::new())?;
+                let input =
+                    resolve_data_input(self, ctx, node_guid, "input", &mut BTreeSet::new())?;
                 let branch = evaluate_typed_condition(&input, *operator, literal.as_ref())?;
                 let pin = if branch { "true" } else { "false" };
                 if find_pin(def, pin, false).is_none() {
@@ -2349,19 +2582,16 @@ impl FlowGraphInstance {
             }
             NodeKind::QbnHub {
                 exit_storylet_id, ..
-            } => {
-                match storylet_id {
-                    Some(id) => {
-                        self.plan_storylet(ctx, &mut plan, id)?;
-                        if force || Some(id) == *exit_storylet_id {
-                            plan.completed = true;
-                            plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
-                        }
-                    }
-                    None => {
+            } => match storylet_id {
+                Some(id) => {
+                    self.plan_storylet(ctx, &mut plan, id)?;
+                    if force || Some(id) == *exit_storylet_id {
+                        plan.completed = true;
+                        plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
                     }
                 }
-            }
+                None => {}
+            },
             NodeKind::SalienceSelector {
                 pool,
                 fallback_storylet_id,
@@ -2381,7 +2611,11 @@ impl FlowGraphInstance {
                                 .storylet(id)
                                 .and_then(|storylet| storylet.precondition_graph.as_ref())
                             {
-                                Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
+                                Some(graph) => Self::evaluate_precondition_graph_for(
+                                    graph,
+                                    ctx,
+                                    self.acting_participant,
+                                )?,
                                 None => true,
                             };
                             if graph_eligible {
@@ -2488,11 +2722,7 @@ impl FlowGraphInstance {
                 } else {
                     node.section_clock_ms
                 };
-                plan.section_clock_ms = Some(if force {
-                    *section_duration_ms
-                } else {
-                    cursor
-                });
+                plan.section_clock_ms = Some(if force { *section_duration_ms } else { cursor });
                 plan.call_data = Some(NodeCallData::SceneSection {
                     previous_clock_ms: node.section_clock_ms,
                     previous_poses: Vec::new(),
@@ -2634,14 +2864,14 @@ impl FlowGraphInstance {
             if plan.completed {
                 node.arrived_input_pins.clear();
             } else {
-                node.arrived_input_pins
-                    .clone_from(&plan.arrived_input_pins);
+                node.arrived_input_pins.clone_from(&plan.arrived_input_pins);
             }
         }
         if plan.completed {
             self.node_invocations.remove(&plan.node_guid);
         } else {
-            self.node_invocations.insert(plan.node_guid, self.current_invocation);
+            self.node_invocations
+                .insert(plan.node_guid, self.current_invocation);
         }
         self.pending_passion_events.extend(passion_events);
         if let Some(storylet_id) = plan.storylet_id {
@@ -2656,11 +2886,7 @@ impl FlowGraphInstance {
                     .node(destination)
                     .is_some_and(|def| !def.input_pins.is_empty())
                 {
-                    emitted.push(self.enqueue_token(
-                        destination,
-                        0,
-                        plan.remaining_budget_ms,
-                    ));
+                    emitted.push(self.enqueue_token(destination, 0, plan.remaining_budget_ms));
                 }
             } else {
                 emitted.extend(self.emit_tokens(
@@ -2709,20 +2935,36 @@ impl FlowGraphInstance {
     ) -> Result<(), GraphError> {
         let scope = self.asset.node(node_guid).and_then(|def| def.mission_scope);
         let history = match scope {
-            Some(mission) => &self.nodes[self.node_index(mission).ok_or(GraphError::MissionScopeNotFound { node_guid, scope: mission })?].local_call_history,
+            Some(mission) => {
+                &self.nodes[self
+                    .node_index(mission)
+                    .ok_or(GraphError::MissionScopeNotFound {
+                        node_guid,
+                        scope: mission,
+                    })?]
+                .local_call_history
+            }
             None => &self.global_call_history,
         };
-        let position = history.iter().rposition(|entry| entry.node_guid == node_guid && entry.chosen_storylet_id == storylet_id);
+        let position = history.iter().rposition(|entry| {
+            entry.node_guid == node_guid && entry.chosen_storylet_id == storylet_id
+        });
         if let Some(position) = position {
             let mut ordinal = BTreeMap::<u32, usize>::new();
             let mut rebases = Vec::new();
             let mut telling_rebases = Vec::new();
             for (index, entry) in history.iter().enumerate() {
-                if !self.asset.node(entry.node_guid).is_some_and(|def| matches!(def.kind, NodeKind::Learn { .. } | NodeKind::Reveal { .. })) { continue; }
+                if !self.asset.node(entry.node_guid).is_some_and(|def| {
+                    matches!(def.kind, NodeKind::Learn { .. } | NodeKind::Reveal { .. })
+                }) {
+                    continue;
+                }
                 let count = ordinal.entry(entry.node_guid).or_default();
                 if index > position {
                     if let Some(node_index) = self.node_index(entry.node_guid) {
-                        if let Some(NodeCallData::Delta { delta }) = self.nodes[node_index].call_data.get(*count) {
+                        if let Some(NodeCallData::Delta { delta }) =
+                            self.nodes[node_index].call_data.get(*count)
+                        {
                             for &(holder, fact) in &delta.knowledge_added {
                                 rebases.push((holder, fact, index as u32));
                             }
@@ -2736,17 +2978,24 @@ impl FlowGraphInstance {
             }
             if let Some(state) = state {
                 for (holder, fact, old_index) in rebases {
-                    if let Some(row) = state.knowledge.rows.iter_mut().find(|row| row.holder == holder && row.fact == fact && row.source_event == old_index) {
+                    if let Some(row) = state.knowledge.rows.iter_mut().find(|row| {
+                        row.holder == holder && row.fact == fact && row.source_event == old_index
+                    }) {
                         row.source_event -= 1;
                     }
                 }
                 for (holder, told, old_index) in telling_rebases {
-                    if let Some(row) = state.telling.rows.iter_mut().find(|row| row.holder == holder && row.entry == told && row.source_event == old_index) {
+                    if let Some(row) = state.telling.rows.iter_mut().find(|row| {
+                        row.holder == holder && row.entry == told && row.source_event == old_index
+                    }) {
                         row.source_event -= 1;
                     }
                 }
             } else {
-                debug_assert!(rebases.is_empty() && telling_rebases.is_empty(), "history removal without state must be tail-only");
+                debug_assert!(
+                    rebases.is_empty() && telling_rebases.is_empty(),
+                    "history removal without state must be tail-only"
+                );
             }
         }
         if let Some(mission) = scope {
@@ -2795,12 +3044,7 @@ impl FlowGraphInstance {
             .collect()
     }
 
-    fn enqueue_token(
-        &mut self,
-        node_guid: u32,
-        pin_index: u16,
-        budget_ms: i64,
-    ) -> SignalToken {
+    fn enqueue_token(&mut self, node_guid: u32, pin_index: u16, budget_ms: i64) -> SignalToken {
         let token = SignalToken {
             token_id: self.next_token_id,
             graph_instance_id: self.instance_id,
@@ -2812,19 +3056,20 @@ impl FlowGraphInstance {
         };
         self.next_token_id += 1;
         self.tokens.push(token.clone());
-        self.token_invocations.insert(token.token_id, self.current_invocation);
+        self.token_invocations
+            .insert(token.token_id, self.current_invocation);
         token
     }
 
     fn off_cooldown(&self, ctx: &RuntimeContext, storylet_id: u16) -> bool {
-        ctx.dispatcher
-            .storylet(storylet_id)
-            .is_none_or(|storylet| match self.last_completed_ms.get(&storylet_id) {
+        ctx.dispatcher.storylet(storylet_id).is_none_or(|storylet| {
+            match self.last_completed_ms.get(&storylet_id) {
                 Some(last) => {
                     UnifiedDispatcher::cooldown_remaining_ms(storylet, *last, self.clock_ms) == 0
                 }
                 None => true,
-            })
+            }
+        })
     }
 
     fn node_cost(&self, node_guid: u32) -> Result<i64, GraphError> {
@@ -2878,93 +3123,274 @@ impl FlowGraphInstance {
         ctx: &RuntimeContext,
         acting_participant: PartIx,
     ) -> Result<bool, GraphError> {
-        fn value(asset: &FlowGraphAsset, ctx: &RuntimeContext, acting_participant: PartIx, guid: u32, seen: &mut BTreeSet<u32>) -> Result<DataValue, GraphError> {
-            if !seen.insert(guid) { return Err(GraphError::ZeroCostCycle { node_guid: guid }); }
-            let node = asset.node(guid).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+        fn value(
+            asset: &FlowGraphAsset,
+            ctx: &RuntimeContext,
+            acting_participant: PartIx,
+            guid: u32,
+            seen: &mut BTreeSet<u32>,
+        ) -> Result<DataValue, GraphError> {
+            if !seen.insert(guid) {
+                return Err(GraphError::ZeroCostCycle { node_guid: guid });
+            }
+            let node = asset
+                .node(guid)
+                .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
             let mut input = |pin: &str| -> Result<DataValue, GraphError> {
-                let edge = asset.data_edges.iter().find(|e| e.target_node_guid == guid && e.target_pin_name == pin)
+                let edge = asset
+                    .data_edges
+                    .iter()
+                    .find(|e| e.target_node_guid == guid && e.target_pin_name == pin)
                     .ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
                 value(asset, ctx, acting_participant, edge.source_node_guid, seen)
             };
-            let out = match &node.kind {
-                NodeKind::Colocated { participant } => DataValue::Bool(participants_colocated(ctx.state, acting_participant, *participant, guid)?),
-                NodeKind::Knows { holder, fact, confirmed_only } => {
-                    let participant = match holder { HolderRef::Acting => acting_participant, HolderRef::Participant(p) => *p };
-                    if usize::from(participant) >= ctx.state.participants.len() { return Err(GraphError::ParticipantNotFound { node_guid: guid, participant }); }
-                    DataValue::Bool(ctx.state.knowledge.knows(participant, *fact).is_some_and(|row| !confirmed_only || row.kind.is_confirmed()))
-                }
-                NodeKind::GetEntity { entity_id } => DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() { node.entity_path.clone() } else { entity_id.clone() }),
-                NodeKind::InventoryHas => {
-                    let DataValue::EntityRef(owner) = input("entity")? else { return Err(GraphError::Inventory { node_guid: guid, message: "owner must be an entity".into() }); };
-                    let DataValue::EntityRef(item) = input("item")? else { return Err(GraphError::Inventory { node_guid: guid, message: "item must be an entity".into() }); };
-                    let (items, _) = inventory_state(ctx.state, &owner, &item, guid)?;
-                    DataValue::Bool(items.iter().any(|value| matches!(value, AttributeValue::EntityRef(id) if id == &item)))
-                }
-                NodeKind::HasEntityTag { entity_id, tag, match_mode } => {
-                    let registry = ctx.registry.ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-                    let id = registry.id(tag).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-                    let mask = *registry.ancestors_mask(id).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-                    let target = match asset.data_edges.iter().find(|e| e.target_node_guid == guid && e.target_pin_name == "target") {
-                        Some(edge) => match value(asset, ctx, acting_participant, edge.source_node_guid, &mut BTreeSet::new())? { DataValue::EntityRef(value) => value, _ => return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }) },
-                        None => entity_id.clone(),
-                    };
-                    let container = if target.is_empty() || target.eq_ignore_ascii_case("world") {
-                        &ctx.state.global_tags
-                    } else {
-                        let vertex = ctx.state.vertex(&target).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
-                        &ctx.state.entity_tags[vertex.entity_index.ok_or(GraphError::NodeNotFound { node_guid: guid })? as usize]
-                    };
-                    let result = if match_mode.eq_ignore_ascii_case("any") { container.intersects(&mask) } else { container.contains_all(&mask) };
-                    DataValue::Bool(result)
-                }
-                NodeKind::Compare { operator, literal } => {
-                    DataValue::Bool(evaluate_typed_condition(&input("input")?, *operator, Some(literal))?)
-                }
-                NodeKind::GetEntityProperty { property_key, .. } => {
-                    let DataValue::EntityRef(entity) = input("entity")? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
-                    let vertex = ctx.state.vertex(&entity).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
-                    attribute_to_data_value(vertex.attributes.get(&format!("prop.{property_key}")).ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?)
-                        .ok_or(GraphError::UnsupportedNode { node_guid: guid, category: node.category })?
-                }
-                NodeKind::And | NodeKind::Or => {
-                    let edges: Vec<_> = asset.data_edges.iter().filter(|e| e.target_node_guid == guid).collect();
-                    if edges.is_empty() { return Err(GraphError::NoDeclaredRoute { node_guid: guid }); }
-                    let mut values = edges.iter().map(|e| value(asset, ctx, acting_participant, e.source_node_guid, seen));
-                    let DataValue::Bool(mut result) = values.next().unwrap()? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
-                    for next in values { let DataValue::Bool(v) = next? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); }; result = if matches!(&node.kind, NodeKind::And) { result && v } else { result || v }; }
-                    DataValue::Bool(result)
-                }
-                NodeKind::Condition { operator, literal } => {
-                    let input = input("input")?;
-                    DataValue::Bool(evaluate_typed_condition(&input, *operator, literal.as_ref())?)
-                }
-                _ => return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }),
-            };
+            let out =
+                match &node.kind {
+                    NodeKind::Colocated { participant } => DataValue::Bool(participants_colocated(
+                        ctx.state,
+                        acting_participant,
+                        *participant,
+                        guid,
+                    )?),
+                    NodeKind::Knows {
+                        holder,
+                        fact,
+                        confirmed_only,
+                    } => {
+                        let participant = match holder {
+                            HolderRef::Acting => acting_participant,
+                            HolderRef::Participant(p) => *p,
+                        };
+                        if usize::from(participant) >= ctx.state.participants.len() {
+                            return Err(GraphError::ParticipantNotFound {
+                                node_guid: guid,
+                                participant,
+                            });
+                        }
+                        DataValue::Bool(
+                            ctx.state
+                                .knowledge
+                                .knows(participant, *fact)
+                                .is_some_and(|row| !confirmed_only || row.kind.is_confirmed()),
+                        )
+                    }
+                    NodeKind::GetEntity { entity_id } => {
+                        DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() {
+                            node.entity_path.clone()
+                        } else {
+                            entity_id.clone()
+                        })
+                    }
+                    NodeKind::InventoryHas => {
+                        let DataValue::EntityRef(owner) = input("entity")? else {
+                            return Err(GraphError::Inventory {
+                                node_guid: guid,
+                                message: "owner must be an entity".into(),
+                            });
+                        };
+                        let DataValue::EntityRef(item) = input("item")? else {
+                            return Err(GraphError::Inventory {
+                                node_guid: guid,
+                                message: "item must be an entity".into(),
+                            });
+                        };
+                        let (items, _) = inventory_state(ctx.state, &owner, &item, guid)?;
+                        DataValue::Bool(items.iter().any(
+                            |value| matches!(value, AttributeValue::EntityRef(id) if id == &item),
+                        ))
+                    }
+                    NodeKind::HasEntityTag {
+                        entity_id,
+                        tag,
+                        match_mode,
+                    } => {
+                        let registry = ctx.registry.ok_or(GraphError::RegistryRequired {
+                            node_guid: guid,
+                            tag_name: tag.clone(),
+                        })?;
+                        let id = registry.id(tag).ok_or(GraphError::RegistryRequired {
+                            node_guid: guid,
+                            tag_name: tag.clone(),
+                        })?;
+                        let mask =
+                            *registry
+                                .ancestors_mask(id)
+                                .ok_or(GraphError::RegistryRequired {
+                                    node_guid: guid,
+                                    tag_name: tag.clone(),
+                                })?;
+                        let target =
+                            match asset.data_edges.iter().find(|e| {
+                                e.target_node_guid == guid && e.target_pin_name == "target"
+                            }) {
+                                Some(edge) => match value(
+                                    asset,
+                                    ctx,
+                                    acting_participant,
+                                    edge.source_node_guid,
+                                    &mut BTreeSet::new(),
+                                )? {
+                                    DataValue::EntityRef(value) => value,
+                                    _ => {
+                                        return Err(GraphError::UnsupportedNode {
+                                            node_guid: guid,
+                                            category: node.category,
+                                        });
+                                    }
+                                },
+                                None => entity_id.clone(),
+                            };
+                        let container = if target.is_empty() || target.eq_ignore_ascii_case("world")
+                        {
+                            &ctx.state.global_tags
+                        } else {
+                            let vertex = ctx
+                                .state
+                                .vertex(&target)
+                                .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+                            &ctx.state.entity_tags[vertex
+                                .entity_index
+                                .ok_or(GraphError::NodeNotFound { node_guid: guid })?
+                                as usize]
+                        };
+                        let result = if match_mode.eq_ignore_ascii_case("any") {
+                            container.intersects(&mask)
+                        } else {
+                            container.contains_all(&mask)
+                        };
+                        DataValue::Bool(result)
+                    }
+                    NodeKind::Compare { operator, literal } => DataValue::Bool(
+                        evaluate_typed_condition(&input("input")?, *operator, Some(literal))?,
+                    ),
+                    NodeKind::GetEntityProperty { property_key, .. } => {
+                        let DataValue::EntityRef(entity) = input("entity")? else {
+                            return Err(GraphError::UnsupportedNode {
+                                node_guid: guid,
+                                category: node.category,
+                            });
+                        };
+                        let vertex = ctx
+                            .state
+                            .vertex(&entity)
+                            .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+                        attribute_to_data_value(
+                            vertex
+                                .attributes
+                                .get(&format!("prop.{property_key}"))
+                                .ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?,
+                        )
+                        .ok_or(GraphError::UnsupportedNode {
+                            node_guid: guid,
+                            category: node.category,
+                        })?
+                    }
+                    NodeKind::And | NodeKind::Or => {
+                        let edges: Vec<_> = asset
+                            .data_edges
+                            .iter()
+                            .filter(|e| e.target_node_guid == guid)
+                            .collect();
+                        if edges.is_empty() {
+                            return Err(GraphError::NoDeclaredRoute { node_guid: guid });
+                        }
+                        let mut values = edges.iter().map(|e| {
+                            value(asset, ctx, acting_participant, e.source_node_guid, seen)
+                        });
+                        let DataValue::Bool(mut result) = values.next().unwrap()? else {
+                            return Err(GraphError::UnsupportedNode {
+                                node_guid: guid,
+                                category: node.category,
+                            });
+                        };
+                        for next in values {
+                            let DataValue::Bool(v) = next? else {
+                                return Err(GraphError::UnsupportedNode {
+                                    node_guid: guid,
+                                    category: node.category,
+                                });
+                            };
+                            result = if matches!(&node.kind, NodeKind::And) {
+                                result && v
+                            } else {
+                                result || v
+                            };
+                        }
+                        DataValue::Bool(result)
+                    }
+                    NodeKind::Condition { operator, literal } => {
+                        let input = input("input")?;
+                        DataValue::Bool(evaluate_typed_condition(
+                            &input,
+                            *operator,
+                            literal.as_ref(),
+                        )?)
+                    }
+                    _ => {
+                        return Err(GraphError::UnsupportedNode {
+                            node_guid: guid,
+                            category: node.category,
+                        });
+                    }
+                };
             seen.remove(&guid);
             Ok(out)
         }
-        fn walk(asset: &FlowGraphAsset, ctx: &RuntimeContext, acting_participant: PartIx, guid: u32, seen: &mut BTreeSet<u32>) -> Result<bool, GraphError> {
-            if !seen.insert(guid) { return Err(GraphError::ZeroCostCycle { node_guid: guid }); }
-            let node = asset.node(guid).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+        fn walk(
+            asset: &FlowGraphAsset,
+            ctx: &RuntimeContext,
+            acting_participant: PartIx,
+            guid: u32,
+            seen: &mut BTreeSet<u32>,
+        ) -> Result<bool, GraphError> {
+            if !seen.insert(guid) {
+                return Err(GraphError::ZeroCostCycle { node_guid: guid });
+            }
+            let node = asset
+                .node(guid)
+                .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
             let result = match &node.kind {
-                NodeKind::End { precondition_result, .. } => *precondition_result,
+                NodeKind::End {
+                    precondition_result,
+                    ..
+                } => *precondition_result,
                 NodeKind::Condition { .. } => {
-                    let DataValue::Bool(branch) = value(asset, ctx, acting_participant, guid, &mut BTreeSet::new())? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
+                    let DataValue::Bool(branch) =
+                        value(asset, ctx, acting_participant, guid, &mut BTreeSet::new())?
+                    else {
+                        return Err(GraphError::UnsupportedNode {
+                            node_guid: guid,
+                            category: node.category,
+                        });
+                    };
                     let pin = if branch { "true" } else { "false" };
-                    let edge = asset.edges.iter().find(|e| e.source_node_guid == guid && e.source_pin_name == pin).ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
+                    let edge = asset
+                        .edges
+                        .iter()
+                        .find(|e| e.source_node_guid == guid && e.source_pin_name == pin)
+                        .ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
                     walk(asset, ctx, acting_participant, edge.target_node_guid, seen)?
                 }
                 _ => {
-                    let edge = asset.edges.iter().find(|e| e.source_node_guid == guid).ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
+                    let edge = asset
+                        .edges
+                        .iter()
+                        .find(|e| e.source_node_guid == guid)
+                        .ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
                     walk(asset, ctx, acting_participant, edge.target_node_guid, seen)?
                 }
             };
             seen.remove(&guid);
             Ok(result)
         }
-        walk(asset, ctx, acting_participant, asset.start_node_guid, &mut BTreeSet::new())
+        walk(
+            asset,
+            ctx,
+            acting_participant,
+            asset.start_node_guid,
+            &mut BTreeSet::new(),
+        )
     }
-
 }
 
 fn data_value_to_attribute(value: &DataValue) -> Option<AttributeValue> {
@@ -2975,7 +3401,11 @@ fn data_value_to_attribute(value: &DataValue) -> Option<AttributeValue> {
         DataValue::String(v) => AttributeValue::String(v.clone()),
         DataValue::Asset(v) => AttributeValue::Asset(v.clone()),
         DataValue::EntityRef(v) => AttributeValue::EntityRef(v.clone()),
-        DataValue::Array(v) => AttributeValue::Array(v.iter().map(data_value_to_attribute).collect::<Option<Vec<_>>>()?),
+        DataValue::Array(v) => AttributeValue::Array(
+            v.iter()
+                .map(data_value_to_attribute)
+                .collect::<Option<Vec<_>>>()?,
+        ),
         DataValue::Float(_) => return None,
     })
 }
@@ -2987,109 +3417,308 @@ fn attribute_to_data_value(value: &AttributeValue) -> Option<DataValue> {
         AttributeValue::String(v) => DataValue::String(v.clone()),
         AttributeValue::Asset(v) => DataValue::Asset(v.clone()),
         AttributeValue::EntityRef(v) => DataValue::EntityRef(v.clone()),
-        AttributeValue::Array(v) => DataValue::Array(v.iter().map(attribute_to_data_value).collect::<Option<Vec<_>>>()?),
+        AttributeValue::Array(v) => DataValue::Array(
+            v.iter()
+                .map(attribute_to_data_value)
+                .collect::<Option<Vec<_>>>()?,
+        ),
         AttributeValue::Tag(v) => DataValue::Int(i64::from(*v)),
         AttributeValue::Float(_) => return None,
     })
 }
 
-fn participants_colocated(world: &WorldStateTable, actor: PartIx, other: PartIx, node_guid: u32) -> Result<bool, GraphError> {
-    let actor_location = world.participants.location.get(actor as usize).ok_or(GraphError::ParticipantNotFound { node_guid, participant: actor })?;
-    let other_location = world.participants.location.get(other as usize).ok_or(GraphError::ParticipantNotFound { node_guid, participant: other })?;
+fn participants_colocated(
+    world: &WorldStateTable,
+    actor: PartIx,
+    other: PartIx,
+    node_guid: u32,
+) -> Result<bool, GraphError> {
+    let actor_location =
+        world
+            .participants
+            .location
+            .get(actor as usize)
+            .ok_or(GraphError::ParticipantNotFound {
+                node_guid,
+                participant: actor,
+            })?;
+    let other_location =
+        world
+            .participants
+            .location
+            .get(other as usize)
+            .ok_or(GraphError::ParticipantNotFound {
+                node_guid,
+                participant: other,
+            })?;
     Ok(actor != other && actor_location.is_some() && actor_location == other_location)
 }
-fn resolve_data_input(instance: &FlowGraphInstance, ctx: &RuntimeContext, target: u32, pin: &str, seen: &mut BTreeSet<u32>) -> Result<DataValue, GraphError> {
-    let edge = instance.asset.data_edges.iter().find(|e| e.target_node_guid == target && e.target_pin_name == pin)
+fn resolve_data_input(
+    instance: &FlowGraphInstance,
+    ctx: &RuntimeContext,
+    target: u32,
+    pin: &str,
+    seen: &mut BTreeSet<u32>,
+) -> Result<DataValue, GraphError> {
+    let edge = instance
+        .asset
+        .data_edges
+        .iter()
+        .find(|e| e.target_node_guid == target && e.target_pin_name == pin)
         .ok_or(GraphError::NoDeclaredRoute { node_guid: target })?;
     resolve_data_node(instance, ctx, edge.source_node_guid, seen)
 }
 
-fn resolve_data_node(instance: &FlowGraphInstance, ctx: &RuntimeContext, guid: u32, seen: &mut BTreeSet<u32>) -> Result<DataValue, GraphError> {
-    if !seen.insert(guid) { return Err(GraphError::ZeroCostCycle { node_guid: guid }); }
-    let node = instance.asset.node(guid).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+fn resolve_data_node(
+    instance: &FlowGraphInstance,
+    ctx: &RuntimeContext,
+    guid: u32,
+    seen: &mut BTreeSet<u32>,
+) -> Result<DataValue, GraphError> {
+    if !seen.insert(guid) {
+        return Err(GraphError::ZeroCostCycle { node_guid: guid });
+    }
+    let node = instance
+        .asset
+        .node(guid)
+        .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
     let result = match &node.kind {
-        NodeKind::Colocated { participant } => DataValue::Bool(participants_colocated(ctx.state, instance.acting_participant, *participant, guid)?),
-        NodeKind::Knows { holder, fact, confirmed_only } => {
-            let participant = match holder { HolderRef::Acting => instance.acting_participant, HolderRef::Participant(p) => *p };
-            if usize::from(participant) >= ctx.state.participants.len() { return Err(GraphError::ParticipantNotFound { node_guid: guid, participant }); }
-            DataValue::Bool(ctx.state.knowledge.knows(participant, *fact).is_some_and(|row| !confirmed_only || row.kind.is_confirmed()))
+        NodeKind::Colocated { participant } => DataValue::Bool(participants_colocated(
+            ctx.state,
+            instance.acting_participant,
+            *participant,
+            guid,
+        )?),
+        NodeKind::Knows {
+            holder,
+            fact,
+            confirmed_only,
+        } => {
+            let participant = match holder {
+                HolderRef::Acting => instance.acting_participant,
+                HolderRef::Participant(p) => *p,
+            };
+            if usize::from(participant) >= ctx.state.participants.len() {
+                return Err(GraphError::ParticipantNotFound {
+                    node_guid: guid,
+                    participant,
+                });
+            }
+            DataValue::Bool(
+                ctx.state
+                    .knowledge
+                    .knows(participant, *fact)
+                    .is_some_and(|row| !confirmed_only || row.kind.is_confirmed()),
+            )
         }
 
-        NodeKind::GetEntity { entity_id } => DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() { node.entity_path.clone() } else { entity_id.clone() }),
-        NodeKind::InventoryHas => {
-            let DataValue::EntityRef(owner) = resolve_data_input(instance, ctx, guid, "entity", seen)? else { return Err(GraphError::Inventory { node_guid: guid, message: "owner must be an entity".into() }); };
-            let DataValue::EntityRef(item) = resolve_data_input(instance, ctx, guid, "item", seen)? else { return Err(GraphError::Inventory { node_guid: guid, message: "item must be an entity".into() }); };
-            let (items, _) = inventory_state(ctx.state, &owner, &item, guid)?;
-            DataValue::Bool(items.iter().any(|value| matches!(value, AttributeValue::EntityRef(id) if id == &item)))
+        NodeKind::GetEntity { entity_id } => {
+            DataValue::EntityRef(if entity_id == "self" || entity_id.is_empty() {
+                node.entity_path.clone()
+            } else {
+                entity_id.clone()
+            })
         }
-        NodeKind::HasEntityTag { entity_id, tag, match_mode } => {
-            let registry = ctx.registry.ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-            let id = registry.id(tag).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-            let mask = *registry.ancestors_mask(id).ok_or(GraphError::RegistryRequired { node_guid: guid, tag_name: tag.clone() })?;
-            let target = match instance.asset.data_edges.iter().find(|e| e.target_node_guid == guid && e.target_pin_name == "target") {
-                Some(edge) => match resolve_data_node(instance, ctx, edge.source_node_guid, seen)? { DataValue::EntityRef(value) => value, _ => return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }) },
+        NodeKind::InventoryHas => {
+            let DataValue::EntityRef(owner) =
+                resolve_data_input(instance, ctx, guid, "entity", seen)?
+            else {
+                return Err(GraphError::Inventory {
+                    node_guid: guid,
+                    message: "owner must be an entity".into(),
+                });
+            };
+            let DataValue::EntityRef(item) = resolve_data_input(instance, ctx, guid, "item", seen)?
+            else {
+                return Err(GraphError::Inventory {
+                    node_guid: guid,
+                    message: "item must be an entity".into(),
+                });
+            };
+            let (items, _) = inventory_state(ctx.state, &owner, &item, guid)?;
+            DataValue::Bool(
+                items
+                    .iter()
+                    .any(|value| matches!(value, AttributeValue::EntityRef(id) if id == &item)),
+            )
+        }
+        NodeKind::HasEntityTag {
+            entity_id,
+            tag,
+            match_mode,
+        } => {
+            let registry = ctx.registry.ok_or(GraphError::RegistryRequired {
+                node_guid: guid,
+                tag_name: tag.clone(),
+            })?;
+            let id = registry.id(tag).ok_or(GraphError::RegistryRequired {
+                node_guid: guid,
+                tag_name: tag.clone(),
+            })?;
+            let mask = *registry
+                .ancestors_mask(id)
+                .ok_or(GraphError::RegistryRequired {
+                    node_guid: guid,
+                    tag_name: tag.clone(),
+                })?;
+            let target = match instance
+                .asset
+                .data_edges
+                .iter()
+                .find(|e| e.target_node_guid == guid && e.target_pin_name == "target")
+            {
+                Some(edge) => {
+                    match resolve_data_node(instance, ctx, edge.source_node_guid, seen)? {
+                        DataValue::EntityRef(value) => value,
+                        _ => {
+                            return Err(GraphError::UnsupportedNode {
+                                node_guid: guid,
+                                category: node.category,
+                            });
+                        }
+                    }
+                }
                 None => entity_id.clone(),
             };
-            let container = if target.is_empty() || target.eq_ignore_ascii_case("world") { &ctx.state.global_tags } else {
-                let vertex = ctx.state.vertex(&target).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
-                &ctx.state.entity_tags[vertex.entity_index.ok_or(GraphError::NodeNotFound { node_guid: guid })? as usize]
+            let container = if target.is_empty() || target.eq_ignore_ascii_case("world") {
+                &ctx.state.global_tags
+            } else {
+                let vertex = ctx
+                    .state
+                    .vertex(&target)
+                    .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+                &ctx.state.entity_tags[vertex
+                    .entity_index
+                    .ok_or(GraphError::NodeNotFound { node_guid: guid })?
+                    as usize]
             };
-            DataValue::Bool(if match_mode.eq_ignore_ascii_case("any") { container.intersects(&mask) } else { container.contains_all(&mask) })
+            DataValue::Bool(if match_mode.eq_ignore_ascii_case("any") {
+                container.intersects(&mask)
+            } else {
+                container.contains_all(&mask)
+            })
         }
         NodeKind::Compare { operator, literal } => {
             let input = resolve_data_input(instance, ctx, guid, "input", seen)?;
             DataValue::Bool(evaluate_typed_condition(&input, *operator, Some(literal))?)
         }
         NodeKind::GetEntityProperty { property_key, .. } => {
-            let DataValue::EntityRef(entity) = resolve_data_input(instance, ctx, guid, "entity", seen)? else {
-                return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category });
+            let DataValue::EntityRef(entity) =
+                resolve_data_input(instance, ctx, guid, "entity", seen)?
+            else {
+                return Err(GraphError::UnsupportedNode {
+                    node_guid: guid,
+                    category: node.category,
+                });
             };
-            let vertex = ctx.state.vertex(&entity).ok_or(GraphError::NodeNotFound { node_guid: guid })?;
-            let value = vertex.attributes.get(&format!("prop.{property_key}")).ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
-            attribute_to_data_value(value).ok_or(GraphError::UnsupportedNode { node_guid: guid, category: node.category })?
+            let vertex = ctx
+                .state
+                .vertex(&entity)
+                .ok_or(GraphError::NodeNotFound { node_guid: guid })?;
+            let value = vertex
+                .attributes
+                .get(&format!("prop.{property_key}"))
+                .ok_or(GraphError::NoDeclaredRoute { node_guid: guid })?;
+            attribute_to_data_value(value).ok_or(GraphError::UnsupportedNode {
+                node_guid: guid,
+                category: node.category,
+            })?
         }
         NodeKind::And | NodeKind::Or => {
-            let edges: Vec<_> = instance.asset.data_edges.iter().filter(|e| e.target_node_guid == guid).collect();
-            if edges.is_empty() { return Err(GraphError::NoDeclaredRoute { node_guid: guid }); }
-            let mut values = edges.into_iter().map(|e| resolve_data_node(instance, ctx, e.source_node_guid, seen));
-            let DataValue::Bool(mut out) = values.next().unwrap()? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
+            let edges: Vec<_> = instance
+                .asset
+                .data_edges
+                .iter()
+                .filter(|e| e.target_node_guid == guid)
+                .collect();
+            if edges.is_empty() {
+                return Err(GraphError::NoDeclaredRoute { node_guid: guid });
+            }
+            let mut values = edges
+                .into_iter()
+                .map(|e| resolve_data_node(instance, ctx, e.source_node_guid, seen));
+            let DataValue::Bool(mut out) = values.next().unwrap()? else {
+                return Err(GraphError::UnsupportedNode {
+                    node_guid: guid,
+                    category: node.category,
+                });
+            };
             for value in values {
-                let DataValue::Bool(v) = value? else { return Err(GraphError::UnsupportedNode { node_guid: guid, category: node.category }); };
-                out = if matches!(&node.kind, NodeKind::And) { out && v } else { out || v };
+                let DataValue::Bool(v) = value? else {
+                    return Err(GraphError::UnsupportedNode {
+                        node_guid: guid,
+                        category: node.category,
+                    });
+                };
+                out = if matches!(&node.kind, NodeKind::And) {
+                    out && v
+                } else {
+                    out || v
+                };
             }
             DataValue::Bool(out)
         }
         _ => {
-            let raw = node.payload.get("value").cloned().ok_or(GraphError::UnsupportedNode { node_guid: guid, category: node.category })?;
-            serde_json::from_value(raw).map_err(|_| GraphError::UnsupportedNode { node_guid: guid, category: node.category })?
+            let raw = node
+                .payload
+                .get("value")
+                .cloned()
+                .ok_or(GraphError::UnsupportedNode {
+                    node_guid: guid,
+                    category: node.category,
+                })?;
+            serde_json::from_value(raw).map_err(|_| GraphError::UnsupportedNode {
+                node_guid: guid,
+                category: node.category,
+            })?
         }
     };
     seen.remove(&guid);
     Ok(result)
 }
 
-fn inventory_state<'a>(state: &'a WorldStateTable, owner: &str, item: &str, node_guid: u32) -> Result<(&'a [AttributeValue], usize), GraphError> {
-    let invalid = |message: &str| GraphError::Inventory { node_guid, message: message.into() };
-    let item_vertex = state.vertex(item).ok_or_else(|| invalid("item entity does not exist"))?;
+fn inventory_state<'a>(
+    state: &'a WorldStateTable,
+    owner: &str,
+    item: &str,
+    node_guid: u32,
+) -> Result<(&'a [AttributeValue], usize), GraphError> {
+    let invalid = |message: &str| GraphError::Inventory {
+        node_guid,
+        message: message.into(),
+    };
+    let item_vertex = state
+        .vertex(item)
+        .ok_or_else(|| invalid("item entity does not exist"))?;
     if item_vertex.attributes.get("prop.__inventory_item") != Some(&AttributeValue::Bool(true)) {
         return Err(invalid("item entity does not have the Item trait"));
     }
-    let vertex = state.vertex(owner).ok_or_else(|| invalid("inventory owner does not exist"))?;
+    let vertex = state
+        .vertex(owner)
+        .ok_or_else(|| invalid("inventory owner does not exist"))?;
     let Some(AttributeValue::Array(items)) = vertex.attributes.get("prop.__inventory_items") else {
         return Err(invalid("entity does not have the InventoryOwner trait"));
     };
-    let (Some(AttributeValue::Int(columns)), Some(AttributeValue::Int(rows))) =
-        (vertex.attributes.get("prop.__inventory_columns"), vertex.attributes.get("prop.__inventory_rows")) else {
-            return Err(invalid("inventory dimensions are missing"));
-        };
-    if !(1..=20).contains(columns) || !(1..=20).contains(rows) || items.iter().any(|v| !matches!(v, AttributeValue::EntityRef(_))) {
+    let (Some(AttributeValue::Int(columns)), Some(AttributeValue::Int(rows))) = (
+        vertex.attributes.get("prop.__inventory_columns"),
+        vertex.attributes.get("prop.__inventory_rows"),
+    ) else {
+        return Err(invalid("inventory dimensions are missing"));
+    };
+    if !(1..=20).contains(columns)
+        || !(1..=20).contains(rows)
+        || items
+            .iter()
+            .any(|v| !matches!(v, AttributeValue::EntityRef(_)))
+    {
         return Err(invalid("invalid inventory dimensions or item references"));
     }
     let capacity = (*columns as usize) * (*rows as usize);
-    if items.len() > capacity { return Err(invalid("inventory exceeds its capacity")); }
+    if items.len() > capacity {
+        return Err(invalid("inventory exceeds its capacity"));
+    }
     Ok((items, capacity))
 }
-
 
 fn default_precondition_result() -> bool {
     true
@@ -3179,7 +3808,11 @@ impl FlowGraphInstance {
                     by_node.entry(command.node_guid).or_default().push(command);
                 }
                 for frame in frames {
-                    self.current_invocation = self.node_invocations.get(&frame.node_guid).copied().unwrap_or(0);
+                    self.current_invocation = self
+                        .node_invocations
+                        .get(&frame.node_guid)
+                        .copied()
+                        .unwrap_or(0);
                     let commands = by_node.remove(&frame.node_guid).unwrap_or_default();
                     executed.extend(self.apply_section_frame(
                         frame,
@@ -3246,16 +3879,19 @@ impl FlowGraphInstance {
                 let deferred = &mut self.tokens[index];
                 deferred.set_active(false);
                 deferred.set_deferred(true);
-                deferred.deferred_until_ms = checked_token_ms(
-                    self.clock_ms.saturating_add(frame_budget_ms.max(1)),
-                )?;
+                deferred.deferred_until_ms =
+                    checked_token_ms(self.clock_ms.saturating_add(frame_budget_ms.max(1)))?;
                 continue;
             }
             token.time_budget_ms = clamp_token_ms(remaining.max(cost));
             remaining = (remaining - cost).max(0);
             executions += 1;
             executed.push(token);
-            self.current_invocation = self.token_invocations.get(&token.token_id).copied().unwrap_or(0);
+            self.current_invocation = self
+                .token_invocations
+                .get(&token.token_id)
+                .copied()
+                .unwrap_or(0);
             let emitted = self.execute_input_at_index(
                 ctx,
                 token.target_node_guid,
@@ -3266,8 +3902,10 @@ impl FlowGraphInstance {
             self.tokens[index].set_deferred(false);
             executed.extend(emitted);
         }
-        self.tokens.retain(|token| token.is_active() || token.is_deferred());
-        self.token_invocations.retain(|id, _| self.tokens.iter().any(|token| token.token_id == *id));
+        self.tokens
+            .retain(|token| token.is_active() || token.is_deferred());
+        self.token_invocations
+            .retain(|id, _| self.tokens.iter().any(|token| token.token_id == *id));
         self.current_invocation = 0;
         Ok(executed)
     }
@@ -3296,7 +3934,11 @@ impl FlowGraphInstance {
         pin_index: u16,
         token: &SignalToken,
     ) -> Result<Vec<SignalToken>, GraphError> {
-        self.current_invocation = self.token_invocations.get(&token.token_id).copied().unwrap_or(0);
+        self.current_invocation = self
+            .token_invocations
+            .get(&token.token_id)
+            .copied()
+            .unwrap_or(0);
         if token.graph_instance_id != self.instance_id {
             return Err(GraphError::TokenInstanceMismatch {
                 token_instance_id: token.graph_instance_id,
@@ -3311,11 +3953,17 @@ impl FlowGraphInstance {
                 pin_name: pin_index.to_string(),
             })?
             .to_string();
-        if self.node(node_guid).is_some_and(|node| node.state == NodeExecutionState::ActiveLatent)
-            && self.node_invocations.get(&node_guid).copied().unwrap_or(0) != self.current_invocation
+        if self
+            .node(node_guid)
+            .is_some_and(|node| node.state == NodeExecutionState::ActiveLatent)
+            && self.node_invocations.get(&node_guid).copied().unwrap_or(0)
+                != self.current_invocation
         {
             let category = self.asset.node(node_guid).unwrap().category;
-            return Err(GraphError::UnsupportedNode { node_guid, category });
+            return Err(GraphError::UnsupportedNode {
+                node_guid,
+                category,
+            });
         }
         let cost = self.node_cost(node_guid)?;
         let budget_ms = i64::from(token.time_budget_ms);
@@ -3331,13 +3979,7 @@ impl FlowGraphInstance {
             .node(node_guid)
             .is_some_and(|def| matches!(&def.kind, NodeKind::MissionSubGraph { .. }))
         {
-            return self.execute_mission(
-                ctx,
-                node_guid,
-                &input_pin,
-                budget_ms - cost,
-                false,
-            );
+            return self.execute_mission(ctx, node_guid, &input_pin, budget_ms - cost, false);
         }
         let plan = self.plan(
             ctx,
@@ -3407,7 +4049,11 @@ impl FlowGraphInstance {
                         .map_err(GraphError::Dispatch)?
                         && self.off_cooldown(ctx, storylet_id)
                         && match storylet.precondition_graph.as_ref() {
-                            Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
+                            Some(graph) => Self::evaluate_precondition_graph_for(
+                                graph,
+                                ctx,
+                                self.acting_participant,
+                            )?,
                             None => true,
                         }
                 }
@@ -3423,17 +4069,35 @@ impl FlowGraphInstance {
         self.commit_storylet_selection(ctx, node_guid, storylet_id)
     }
 
-    pub fn complete_reserved_storylet(&mut self, ctx: &mut RuntimeContext, node_guid: u32, storylet_id: u16) -> Result<Vec<SignalToken>, GraphError> {
-        let def = self.asset.node(node_guid).ok_or(GraphError::NodeNotFound { node_guid })?;
+    pub fn complete_reserved_storylet(
+        &mut self,
+        ctx: &mut RuntimeContext,
+        node_guid: u32,
+        storylet_id: u16,
+    ) -> Result<Vec<SignalToken>, GraphError> {
+        let def = self
+            .asset
+            .node(node_guid)
+            .ok_or(GraphError::NodeNotFound { node_guid })?;
         match &def.kind {
             NodeKind::QbnHub { deck, .. } if deck.contains(&storylet_id) => {}
             NodeKind::SalienceSelector { pool, .. } if pool.contains(&storylet_id) => {}
-            _ => return Err(GraphError::StoryletNotInDeck { node_guid, storylet_id }),
+            _ => {
+                return Err(GraphError::StoryletNotInDeck {
+                    node_guid,
+                    storylet_id,
+                });
+            }
         }
         self.commit_storylet_selection(ctx, node_guid, storylet_id)
     }
 
-    fn commit_storylet_selection(&mut self, ctx: &mut RuntimeContext, node_guid: u32, storylet_id: u16) -> Result<Vec<SignalToken>, GraphError> {
+    fn commit_storylet_selection(
+        &mut self,
+        ctx: &mut RuntimeContext,
+        node_guid: u32,
+        storylet_id: u16,
+    ) -> Result<Vec<SignalToken>, GraphError> {
         self.current_invocation = self.node_invocations.get(&node_guid).copied().unwrap_or(0);
         let index = self
             .node_index(node_guid)
@@ -3461,9 +4125,18 @@ impl FlowGraphInstance {
         self.enter_storylet_invocation(node_guid, 0)
     }
 
-    pub fn enter_storylet_invocation(&mut self, node_guid: u32, invocation: u64) -> Result<(), GraphError> {
-        let node = self.asset.node(node_guid).ok_or(GraphError::NodeNotFound { node_guid })?;
-        if node.input_pins.is_empty() { return Err(GraphError::NodeHasNoPins { node_guid }); }
+    pub fn enter_storylet_invocation(
+        &mut self,
+        node_guid: u32,
+        invocation: u64,
+    ) -> Result<(), GraphError> {
+        let node = self
+            .asset
+            .node(node_guid)
+            .ok_or(GraphError::NodeNotFound { node_guid })?;
+        if node.input_pins.is_empty() {
+            return Err(GraphError::NodeHasNoPins { node_guid });
+        }
         self.current_invocation = invocation;
         self.enqueue_token(node_guid, 0, 0);
         self.current_invocation = 0;
@@ -3477,7 +4150,12 @@ impl FlowGraphInstance {
         self.present_deck_for(ctx, node_guid, self.acting_participant)
     }
 
-    pub fn present_deck_for(&self, ctx: &RuntimeContext, node_guid: u32, participant: PartIx) -> Result<Vec<u16>, GraphError> {
+    pub fn present_deck_for(
+        &self,
+        ctx: &RuntimeContext,
+        node_guid: u32,
+        participant: PartIx,
+    ) -> Result<Vec<u16>, GraphError> {
         let def = self
             .asset
             .node(node_guid)
@@ -3498,7 +4176,12 @@ impl FlowGraphInstance {
                 continue;
             }
             let eligible = match ctx.dispatcher.storylet(storylet_id) {
-                Some(storylet) if !storylet.played_by.is_empty() && !storylet.played_by.contains(&participant) => false,
+                Some(storylet)
+                    if !storylet.played_by.is_empty()
+                        && !storylet.played_by.contains(&participant) =>
+                {
+                    false
+                }
                 Some(storylet) => match storylet.precondition_graph.as_ref() {
                     Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, participant)?,
                     None => true,
@@ -3584,7 +4267,9 @@ impl FlowGraphInstance {
                 continue;
             }
             let graph_eligible = match def.precondition_graph.as_ref() {
-                Some(graph) => Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?,
+                Some(graph) => {
+                    Self::evaluate_precondition_graph_for(graph, ctx, self.acting_participant)?
+                }
                 None => true,
             };
             if ctx
@@ -3959,11 +4644,9 @@ impl FlowGraphInstance {
     ) -> Result<Vec<ActionPart>, GraphError> {
         let frame = self.plan_section_frame(node_guid, delta_ms)?;
         let parts = frame.parts.clone();
-        let applied = self.composer.execute_sorted_action_parts(
-            node_guid,
-            &frame.parts,
-            frame.is_reverse,
-        )?;
+        let applied =
+            self.composer
+                .execute_sorted_action_parts(node_guid, &frame.parts, frame.is_reverse)?;
         self.apply_section_frame(
             frame,
             &applied,
@@ -4056,8 +4739,7 @@ impl FlowGraphInstance {
         if delta_ms < 0 {
             parts.retain(|part| {
                 self.composer.applied.iter().any(|command| {
-                    command.node_guid == node_guid
-                        && command.event_id == part.event_ref.event_id
+                    command.node_guid == node_guid && command.event_id == part.event_ref.event_id
                 })
             });
         }
@@ -4126,7 +4808,9 @@ impl FlowGraphInstance {
                 node.chosen_output_pin = None;
             }
         }
-        if frame.just_completed { self.node_invocations.remove(&node_guid); }
+        if frame.just_completed {
+            self.node_invocations.remove(&node_guid);
+        }
         let mut emitted = Vec::new();
         if frame.just_completed {
             let entry = CallHistoryEntry {
@@ -4144,8 +4828,7 @@ impl FlowGraphInstance {
                 self.record_call(&entry, &BijectiveDelta::default())?;
                 let commit = self.history.head;
                 if let Some(NodeCallData::SceneSection {
-                    completion_commit,
-                    ..
+                    completion_commit, ..
                 }) = self.nodes[index].call_data.last_mut()
                 {
                     *completion_commit = Some(commit);
@@ -4155,22 +4838,20 @@ impl FlowGraphInstance {
                 emitted = self.emit_tokens(node_guid, DEFAULT_OUTPUT_PIN, completion_budget_ms);
             }
         } else if frame.reopened && record_completion {
-            let recorded = self.nodes[index]
-                .call_data
-                .iter()
-                .rev()
-                .find_map(|record| match record {
-                    NodeCallData::SceneSection {
-                        completion_commit, ..
-                    } => *completion_commit,
-                    _ => None,
-                });
+            let recorded =
+                self.nodes[index]
+                    .call_data
+                    .iter()
+                    .rev()
+                    .find_map(|record| match record {
+                        NodeCallData::SceneSection {
+                            completion_commit, ..
+                        } => *completion_commit,
+                        _ => None,
+                    });
             let head = self.history.head;
             let removable = recorded.map_or_else(
-                || {
-                    head != 0
-                        && self.history.commits[head].entry.node_guid == node_guid
-                },
+                || head != 0 && self.history.commits[head].entry.node_guid == node_guid,
                 |commit| commit == head,
             );
             if removable && head != 0 {
@@ -4470,7 +5151,9 @@ impl FlowGraphInstance {
             if first_activation {
                 child.start()?;
                 for token in &child.tokens {
-                    child.token_invocations.insert(token.token_id, self.current_invocation);
+                    child
+                        .token_invocations
+                        .insert(token.token_id, self.current_invocation);
                 }
             }
             child.tick(ctx, budget_ms)?
@@ -4851,9 +5534,15 @@ impl FlowGraphInstance {
     }
 
     pub fn resume_from_poi(&mut self, node_guid: u32) -> Result<(), GraphError> {
-        let def = self.asset.node(node_guid).ok_or(GraphError::NodeNotFound { node_guid })?;
+        let def = self
+            .asset
+            .node(node_guid)
+            .ok_or(GraphError::NodeNotFound { node_guid })?;
         if !matches!(def.kind, NodeKind::Poi { .. }) {
-            return Err(GraphError::UnsupportedNode { node_guid, category: def.category });
+            return Err(GraphError::UnsupportedNode {
+                node_guid,
+                category: def.category,
+            });
         }
         self.emit_tokens(node_guid, DEFAULT_OUTPUT_PIN, 0);
         Ok(())
@@ -5115,7 +5804,10 @@ fn evaluate_typed_condition(
     let Some(literal) = literal else {
         return match input {
             DataValue::Bool(value) => Ok(*value),
-            _ => Err(GraphError::UnsupportedNode { node_guid: 0, category: NodeCategory::LogicGate }),
+            _ => Err(GraphError::UnsupportedNode {
+                node_guid: 0,
+                category: NodeCategory::LogicGate,
+            }),
         };
     };
     let ordering = match (input, literal) {
@@ -5229,8 +5921,6 @@ mod tests {
         }
     }
 
-
-
     fn mission_node(node_guid: u32, asset_id: &str) -> FlowNodeDef {
         FlowNodeDef {
             category: NodeCategory::ScopedContainer,
@@ -5286,10 +5976,12 @@ mod tests {
         let dispatcher = UnifiedDispatcher::default();
         let mut state = WorldStateTable::with_capacity(1);
         let mut context = RuntimeContext::new(&mut state, &dispatcher);
-        assert!(instance
-            .signal_event(&mut context, "player.open_door")
-            .unwrap()
-            .is_empty());
+        assert!(
+            instance
+                .signal_event(&mut context, "player.open_door")
+                .unwrap()
+                .is_empty()
+        );
         instance.start().unwrap();
         instance.tick(&mut context, 0).unwrap();
         assert_eq!(
@@ -5307,10 +5999,12 @@ mod tests {
             instance.node(2).unwrap().state,
             NodeExecutionState::Completed
         );
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 2));
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 2)
+        );
         instance.tick(&mut context, 0).unwrap();
         let end_calls = instance
             .global_call_history
@@ -5374,14 +6068,18 @@ mod tests {
         instance.start().unwrap();
         instance.tick(&mut context, 0).unwrap();
 
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 2));
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 3));
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 2)
+        );
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 3)
+        );
     }
     #[test]
     fn graph_transform_node_is_reversible_through_call_history_cache() {
@@ -5519,18 +6217,24 @@ mod tests {
             .invoke_story_to_poi(&mut context, 3, &BTreeMap::new())
             .unwrap();
 
-        assert!(!instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 1));
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 2));
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 3));
+        assert!(
+            !instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 1)
+        );
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 2)
+        );
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 3)
+        );
     }
     #[test]
     fn active_scene_sections_advance_on_tick_and_reconcile_exactly() {
@@ -5585,10 +6289,12 @@ mod tests {
         );
         assert_eq!(instance.node(2).unwrap().section_clock_ms, 50);
         assert_eq!(instance.composer.actor_pose["actor:guide"], "pose:walk");
-        assert!(instance
-            .global_call_history
-            .iter()
-            .any(|entry| entry.node_guid == 2));
+        assert!(
+            instance
+                .global_call_history
+                .iter()
+                .any(|entry| entry.node_guid == 2)
+        );
         instance.reconcile_history(&mut context, &[]).unwrap();
         assert!(instance.composer.actor_pose.is_empty());
         assert_eq!(instance.node(2).unwrap().state, NodeExecutionState::Idle);
@@ -5740,15 +6446,14 @@ mod tests {
         instance.reconcile_history(&mut context, &[]).unwrap();
         assert!(instance.call_history().is_empty());
         assert_eq!(instance.node(1).unwrap().current_topic_id, "opening");
-        assert!(instance
-            .node(1)
-            .unwrap()
-            .edge_use_counts
-            .values()
-            .all(|count| *count == 0));
+        assert!(
+            instance
+                .node(1)
+                .unwrap()
+                .edge_use_counts
+                .values()
+                .all(|count| *count == 0)
+        );
         assert!(context.state.global_tags.is_empty());
     }
 }
-
-
-

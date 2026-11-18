@@ -1,12 +1,11 @@
-
 use storylet_engine::chrono_dispatch::{StoryletDef, UnifiedDispatcher};
 use storylet_engine::chrono_runtime::{
     EdgeConnection, FlowGraphAsset, FlowGraphInstance, NodeCategory, NodeKind, PinDefinition,
     RuntimeContext,
 };
 use storylet_engine::chrono_state::{
-    apply_passion_mutation, GameplayTagRegistry, MicroPassionDef, PassionBounds,
-    PassionMutation, PassionRegistry, RivalPassionLink, StarNpcDef, TagBitset, WorldStateTable,
+    GameplayTagRegistry, MicroPassionDef, PassionBounds, PassionMutation, PassionRegistry,
+    RivalPassionLink, StarNpcDef, TagBitset, WorldStateTable, apply_passion_mutation,
 };
 
 fn node(guid: u32, kind: NodeKind) -> storylet_engine::chrono_runtime::FlowNodeDef {

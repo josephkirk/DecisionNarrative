@@ -1,4 +1,3 @@
-
 use crate::chrono_participants::{FactIx, PartIx};
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +29,10 @@ impl ChronicleTable {
     }
 
     pub fn index_of(&self, key: &str) -> Option<ChronIx> {
-        self.entries.iter().position(|e| e.key == key).map(|i| i as ChronIx)
+        self.entries
+            .iter()
+            .position(|e| e.key == key)
+            .map(|i| i as ChronIx)
     }
 
     pub fn len(&self) -> usize {
@@ -64,11 +66,17 @@ impl TellingTable {
     }
 
     pub fn is_told(&self, holder: PartIx, entry: ChronIx) -> bool {
-        self.rows.iter().any(|r| r.holder == holder && r.entry == entry)
+        self.rows
+            .iter()
+            .any(|r| r.holder == holder && r.entry == entry)
     }
 
     pub fn order_for(&self, holder: PartIx) -> Vec<ChronIx> {
-        self.rows.iter().filter(|r| r.holder == holder).map(|r| r.entry).collect()
+        self.rows
+            .iter()
+            .filter(|r| r.holder == holder)
+            .map(|r| r.entry)
+            .collect()
     }
 
     pub fn told_number(&self, holder: PartIx, entry: ChronIx) -> Option<u32> {
@@ -80,7 +88,10 @@ impl TellingTable {
     }
 
     pub fn forget(&mut self, holder: PartIx, entry: ChronIx) -> Option<TellingRow> {
-        let at = self.rows.iter().rposition(|r| r.holder == holder && r.entry == entry)?;
+        let at = self
+            .rows
+            .iter()
+            .rposition(|r| r.holder == holder && r.entry == entry)?;
         Some(self.rows.remove(at))
     }
 }

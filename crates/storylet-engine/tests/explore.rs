@@ -253,17 +253,29 @@ fn stranding_detected_without_on_close_replays_the_recorded_actions() {
         .find(|v| matches!(v.invariant, Invariant::OccupantBeyondClosedEdge))
         .expect("expected a stranding trace");
     assert!(!violation.actions.is_empty());
-    let (replayed, divergence) = RunKernel::replay(
-        &content,
-        RunStart::Beginning,
-        violation.seed,
-        &violation.actions,
-    );
-    assert_eq!(divergence, None);
+    let proposals = violation
+        .actions
+        .iter()
+        .enumerate()
+        .map(|(i, (actor, action))| {
+            (
+                storylet_engine::Authority::Human { seat: 0 },
+                storylet_engine::ActionProposal {
+                    schema_version: 1,
+                    actor: *actor,
+                    action: action.clone(),
+                    expected_revision: i as u64,
+                    idempotency_key: format!("trace-{i}"),
+                    provenance: None,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let replayed =
+        RunKernel::replay(&content, RunStart::Beginning, violation.seed, &proposals).unwrap();
     assert!(
         replayed
-            .unwrap()
-            .world
+            .world()
             .participants
             .location
             .iter()
@@ -290,10 +302,30 @@ fn weirs_crossing_has_no_invariant_violations() {
 #[test]
 #[cfg_attr(debug_assertions, ignore)]
 fn bluff_fills_probe_in_coop() {
-    use storylet_engine::chrono_explore::{explore, ExploreConfig, IntentProbe, ParticipantConfig, Persona};
+    use storylet_engine::chrono_explore::{
+        ExploreConfig, IntentProbe, ParticipantConfig, Persona, explore,
+    };
     let content = weirs_crossing::content_all_humans();
-    let config = ExploreConfig { runs: 2000, max_steps: 500, personas: vec![Persona::Investigator { epsilon_permille: 150 }], configs: vec![ParticipantConfig::AllHumans], probes: vec![IntentProbe { name: "suspects_and_faces_benedek".into(), holder_knows: vec![content.registry.id("fact.benedek_suspected").unwrap()], colocated_with: Some(12), expected_routes: vec![weirs_crossing::BLUFF_BENEDEK] }], ..Default::default() };
+    let config = ExploreConfig {
+        runs: 2000,
+        max_steps: 500,
+        personas: vec![Persona::Investigator {
+            epsilon_permille: 150,
+        }],
+        configs: vec![ParticipantConfig::AllHumans],
+        probes: vec![IntentProbe {
+            name: "suspects_and_faces_benedek".into(),
+            holder_knows: vec![content.registry.id("fact.benedek_suspected").unwrap()],
+            colocated_with: Some(12),
+            expected_routes: vec![weirs_crossing::BLUFF_BENEDEK],
+        }],
+        ..Default::default()
+    };
     let report = explore(&content, &config);
     assert_eq!(report.error_count, 0, "{:?}", report.errors);
-    assert!(report.cells[0].probe_hits[0].2 > 0, "{:?}", report.cells[0].probe_hits);
+    assert!(
+        report.cells[0].probe_hits[0].2 > 0,
+        "{:?}",
+        report.cells[0].probe_hits
+    );
 }

@@ -1,4 +1,3 @@
-
 use crate::chrono_participants::{FactIx, PartIx};
 use crate::chrono_state::{BijectiveDelta, WorldStateTable};
 use crate::run::RunContent;
@@ -37,12 +36,19 @@ pub struct ClockState {
 
 impl ClockState {
     pub fn new(clock: &Clock, participants: usize) -> Self {
-        Self { slot: 0, actions_left: vec![clock.actions_per_slot; participants] }
+        Self {
+            slot: 0,
+            actions_left: vec![clock.actions_per_slot; participants],
+        }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum MoveBlock {
     ClosedUntil { slot_label: String },
     NeedsFact { fact: String },
@@ -66,16 +72,26 @@ pub struct OccupancyEvent {
 }
 
 fn is_open(connection: &Connection, content: &RunContent, world: &WorldStateTable) -> bool {
-    match (connection.open_slots, content.clock.as_ref(), world.clock.as_ref()) {
+    match (
+        connection.open_slots,
+        content.clock.as_ref(),
+        world.clock.as_ref(),
+    ) {
         (Some(mask), Some(_), Some(state)) => state.slot < 64 && mask & (1u64 << state.slot) != 0,
         _ => true,
     }
 }
 
-fn next_open_label(connection: &Connection, content: &RunContent, world: &WorldStateTable) -> String {
-    let (Some(mask), Some(clock), Some(state)) =
-        (connection.open_slots, content.clock.as_ref(), world.clock.as_ref())
-    else {
+fn next_open_label(
+    connection: &Connection,
+    content: &RunContent,
+    world: &WorldStateTable,
+) -> String {
+    let (Some(mask), Some(clock), Some(state)) = (
+        connection.open_slots,
+        content.clock.as_ref(),
+        world.clock.as_ref(),
+    ) else {
         return String::new();
     };
     ((state.slot + 1)..clock.slot_labels.len() as u32)
@@ -85,7 +101,11 @@ fn next_open_label(connection: &Connection, content: &RunContent, world: &WorldS
 }
 
 fn place_name(content: &RunContent, id: u16) -> String {
-    content.entity_names.get(&id).cloned().unwrap_or_else(|| id.to_string())
+    content
+        .entity_names
+        .get(&id)
+        .cloned()
+        .unwrap_or_else(|| id.to_string())
 }
 
 pub fn moves_for(world: &WorldStateTable, content: &RunContent, p: PartIx) -> Vec<MoveOption> {
@@ -98,14 +118,29 @@ pub fn moves_for(world: &WorldStateTable, content: &RunContent, p: PartIx) -> Ve
         .filter(|c| c.from == here)
         .map(|c| {
             let block = if !is_open(c, content, world) {
-                Some(MoveBlock::ClosedUntil { slot_label: next_open_label(c, content, world) })
-            } else if c.requires_fact.is_some_and(|fact| world.knowledge.knows(p, fact).is_none()) {
-                let fact = c.requires_fact.and_then(|f| content.registry.tag(f)).unwrap_or("unknown");
-                Some(MoveBlock::NeedsFact { fact: fact.to_string() })
+                Some(MoveBlock::ClosedUntil {
+                    slot_label: next_open_label(c, content, world),
+                })
+            } else if c
+                .requires_fact
+                .is_some_and(|fact| world.knowledge.knows(p, fact).is_none())
+            {
+                let fact = c
+                    .requires_fact
+                    .and_then(|f| content.registry.tag(f))
+                    .unwrap_or("unknown");
+                Some(MoveBlock::NeedsFact {
+                    fact: fact.to_string(),
+                })
             } else {
                 None
             };
-            MoveOption { to: c.to, name: place_name(content, c.to), enabled: block.is_none(), block }
+            MoveOption {
+                to: c.to,
+                name: place_name(content, c.to),
+                enabled: block.is_none(),
+                block,
+            }
         })
         .collect()
 }
@@ -127,17 +162,32 @@ pub fn advance_slot(
     }
     let mut events = Vec::new();
     for p in 0..world.participants.len() as PartIx {
-        let Some(at) = world.active_location(p) else { continue };
-        let closing = content.connections.iter().find(|c| {
-            c.to == at && c.on_close.is_some() && !is_open(c, content, world)
-        });
-        let Some(rule) = closing.and_then(|c| c.on_close) else { continue };
+        let Some(at) = world.active_location(p) else {
+            continue;
+        };
+        let closing = content
+            .connections
+            .iter()
+            .find(|c| c.to == at && c.on_close.is_some() && !is_open(c, content, world));
+        let Some(rule) = closing.and_then(|c| c.on_close) else {
+            continue;
+        };
         match rule {
             OnClose::Return { to } => {
                 world.apply_move(p, Some(to), delta);
-                events.push(OccupancyEvent { participant: p, from: at, to: Some(to), rule });
+                events.push(OccupancyEvent {
+                    participant: p,
+                    from: at,
+                    to: Some(to),
+                    rule,
+                });
             }
-            OnClose::Strand => events.push(OccupancyEvent { participant: p, from: at, to: None, rule }),
+            OnClose::Strand => events.push(OccupancyEvent {
+                participant: p,
+                from: at,
+                to: None,
+                rule,
+            }),
         }
     }
     events

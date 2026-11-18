@@ -1,4 +1,3 @@
-
 use serde::{Deserialize, Serialize};
 
 pub type PartIx = u16;
@@ -105,6 +104,8 @@ pub struct KnowledgeRow {
     pub fact: FactIx,
     pub kind: KnowKind,
     pub source_event: u32,
+    #[serde(default)]
+    pub told_by: Option<PartIx>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -138,6 +139,7 @@ impl KnowledgeTable {
     }
 
     fn search(&self, holder: PartIx, fact: FactIx) -> Result<usize, usize> {
-        self.rows.binary_search_by_key(&(holder, fact), |r| (r.holder, r.fact))
+        self.rows
+            .binary_search_by_key(&(holder, fact), |r| (r.holder, r.fact))
     }
 }
