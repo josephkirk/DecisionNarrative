@@ -18,7 +18,7 @@ export type NodeType =
   | "compare"
   | "get_entity"
   | "get_entity_property"
-  | "apply_command"
+  | "set_entity_property"
   | "qbn_storylet_hub"
   | "salience_selector"
   | "waypoint_conversation"
@@ -99,8 +99,8 @@ export const GRAPH_PIN_COLORS: Record<GraphValueType | "flow", string> = {
   asset: "#ff375f",
   any: "#8e8e93",
 };
-export type ApplyCommandOperation = "set" | "add" | "subtract" | "toggle";
-export function applyCommandOperationsForType(valueType: string | undefined): Array<{ value: ApplyCommandOperation; label: string }> {
+export type SetEntityPropertyOperation = "set" | "add" | "subtract" | "toggle";
+export function applyCommandOperationsForType(valueType: string | undefined): Array<{ value: SetEntityPropertyOperation; label: string }> {
   if (valueType === "bool") return [{ value: "set", label: "Set" }, { value: "toggle", label: "Toggle" }];
   if (valueType === "int" || valueType === "float") {
     return [{ value: "set", label: "Set" }, { value: "add", label: "Add" }, { value: "subtract", label: "Subtract" }];
@@ -424,7 +424,7 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
   const issues: string[] = [];
   if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return ["Graph must contain node and edge arrays."];
   const allowedTypes = new Set<NodeType>([
-    "start", "dialog", "choice", "condition", "compare", "get_entity", "get_entity_property", "apply_command", "qbn_storylet_hub",
+    "start", "dialog", "choice", "condition", "compare", "get_entity", "get_entity_property", "set_entity_property", "qbn_storylet_hub",
     "salience_selector", "waypoint_conversation", "waiter", "and", "or",
     "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "learn", "reveal", "knows", "graph_transform", "passion_mutation",
     "add_entity_tag", "remove_entity_tag", "has_entity_tag", "inventory_add", "inventory_remove", "inventory_has", "plugin", "end",
@@ -443,7 +443,7 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
         issues.push(`Get Entity Property node ${node.title} must specify a supported value type.`);
       }
     }
-    if (node.type === "apply_command") {
+    if (node.type === "set_entity_property") {
       if (!node.property_key?.trim()) issues.push(`Apply Command node ${node.title} must specify a property key.`);
       if (!["set", "add", "subtract", "toggle"].includes(node.operation ?? "")) {
         issues.push(`Apply Command node ${node.title} must specify a supported operation.`);
@@ -672,7 +672,7 @@ export function validateNarrativeGraph(graph: NarrativeGraph): string[] {
     if (node.type === "get_entity_property" && dataEdges.filter((edge) => edge.to_node === node.id && edge.to_port === "entity").length !== 1) {
       issues.push(`Get Entity Property node ${node.title} must have exactly one Entity data input.`);
     }
-    if (node.type === "apply_command" && dataEdges.filter((edge) => edge.to_node === node.id && edge.to_port === "entity").length !== 1) {
+    if (node.type === "set_entity_property" && dataEdges.filter((edge) => edge.to_node === node.id && edge.to_port === "entity").length !== 1) {
       issues.push(`Apply Command node ${node.title} must have exactly one Entity data input.`);
     }
     if (["inventory_add", "inventory_remove", "inventory_has"].includes(node.type)) {
@@ -811,7 +811,7 @@ export function validatePreconditionGraph(graph: NarrativeGraph): string[] {
 export function graphNodeTypes(mode: "story" | "preconditions"): NodeType[] {
   const pure: NodeType[] = ["start", "get_entity", "get_entity_property", "compare", "condition", "and", "or", "has_entity_tag", "knows", "end"];
   if (mode === "preconditions") return pure;
-  return [...pure, "learn", "reveal", "dialog", "choice", "apply_command", "qbn_storylet_hub", "salience_selector", "waypoint_conversation", "waiter", "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "add_entity_tag", "remove_entity_tag"];
+  return [...pure, "learn", "reveal", "dialog", "choice", "set_entity_property", "qbn_storylet_hub", "salience_selector", "waypoint_conversation", "waiter", "scene_section", "mission_sub_graph", "poi", "image", "teleport", "go_to_location", "graph_transform", "passion_mutation", "add_entity_tag", "remove_entity_tag"];
 }
 
 export function learnNodeDefaults(visibility: "private" | "co_located" | undefined): { kind: "evidence"; visibility: "private" | "co_located" } {

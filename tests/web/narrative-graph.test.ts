@@ -318,7 +318,7 @@ test("Apply Command authors a typed literal and receives an Entity input", () =>
       { id: "start", type: "start", title: "Start", x: 0, y: 0, width: 100, height: 80 },
       { id: "entity", type: "get_entity", title: "World", entity_path: "world", x: 120, y: 100, width: 160, height: 100 },
       { id: "owner", type: "get_entity_property", title: "Owner", property_key: "owner", value_type: "entity", x: 300, y: 100, width: 180, height: 100 },
-      { id: "command", type: "apply_command", title: "Set Courage", property_key: "courage", operation: "set", value_type: "int", value: 4, x: 520, y: 0, width: 180, height: 120 },
+      { id: "command", type: "set_entity_property", title: "Set Courage", property_key: "courage", operation: "set", value_type: "int", value: 4, x: 520, y: 0, width: 180, height: 120 },
       { id: "end", type: "end", title: "End", x: 760, y: 0, width: 100, height: 80 },
     ],
     edges: [

@@ -129,8 +129,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         v-if="state.inspectOpen"
         :inspect="state.inspect"
         :tab="state.inspectTab"
+        :causal="state.causal"
         @tab="play.setInspectTab"
         @focus-step="highlightStep = $event"
+        @explain="play.explain"
         @close="play.toggleInspect()"
       />
       </div>

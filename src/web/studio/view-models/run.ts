@@ -1,7 +1,7 @@
 import { reactive } from "vue";
 import { StudioApi, type RunsApi } from "../api.ts";
 import type {
-  InspectView, NearMiss, RunAction, RunEnvelope, RunStartInput,
+  InspectView, NearMiss, RunAction, RunEnvelope, RunEventView, RunStartInput,
 } from "../contracts.ts";
 import { choiceForKey, hasClock, humanParticipants, moveForKey } from "../runModel.ts";
 
@@ -14,6 +14,7 @@ export interface PlayState {
   inspectOpen: boolean;
   inspectTab: "knows" | "world" | "story";
   inspect: InspectView | null;
+  causal: RunEventView[] | null;
   whyOpen: boolean;
   nearMisses: NearMiss[];
   busy: boolean;
@@ -28,7 +29,7 @@ function message(e: unknown): string {
 export function usePlay(api: RunsApi = StudioApi.runs) {
   const state = reactive<PlayState>({
     runId: null, envelope: null, activeParticipant: 0, inspectOpen: false, inspectTab: "knows",
-    inspect: null, whyOpen: false, nearMisses: [], busy: false, error: null, reloadNote: null,
+    inspect: null, causal: null, whyOpen: false, nearMisses: [], busy: false, error: null, reloadNote: null,
   });
   let awaitingMove = false;
 
@@ -144,6 +145,15 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
     }
   }
 
+  async function explain(event: number): Promise<void> {
+    if (!state.runId) return;
+    try {
+      state.causal = await api.explain(state.runId, event);
+    } catch (e) {
+      state.error = message(e);
+    }
+  }
+
   function setParticipant(id: number): void {
     const count = state.envelope?.view.participants.length ?? 0;
     if (!state.runId || id < 0 || id >= count) return;
@@ -196,6 +206,6 @@ export function usePlay(api: RunsApi = StudioApi.runs) {
   }
 
   return {
-    state, start, open, act, rewind, undo, reload, toggleWhy, toggleInspect, setInspectTab, setParticipant, nextParticipant, onKey,
+    state, start, open, act, rewind, undo, reload, toggleWhy, toggleInspect, setInspectTab, explain, setParticipant, nextParticipant, onKey,
   };
 }

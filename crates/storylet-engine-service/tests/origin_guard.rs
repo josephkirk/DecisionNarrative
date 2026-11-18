@@ -220,6 +220,8 @@ async fn mcp_tool_schema_advertises_no_playtest_operations() {
         "run.list",
         "run.start",
         "run.view",
+        "run.observe",
+        "run.explain",
         "run.act",
         "run.rewind",
         "run.why_not",

@@ -135,6 +135,8 @@ pub fn build_router_with_origins(
         .route("/api/v4/runs", get(crate::runs::list).post(crate::runs::start))
         .route("/api/v4/runs/{id}", get(crate::runs::view).delete(crate::runs::delete))
         .route("/api/v4/runs/{id}/act", post(crate::runs::act))
+        .route("/api/v4/runs/{id}/observe", get(crate::runs::observe))
+        .route("/api/v4/runs/{id}/explain", get(crate::runs::explain))
         .route("/api/v4/runs/{id}/rewind", post(crate::runs::rewind))
         .route("/api/v4/runs/{id}/why-not", get(crate::runs::why_not))
         .route("/api/v4/runs/{id}/inspect", get(crate::runs::inspect))

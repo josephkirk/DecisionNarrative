@@ -164,7 +164,7 @@ test("Modify Canvas lowers to valid core Apply Command nodes and raises back", (
   expect(validatePluginNodes(graph, entities)).toEqual([]);
   const lowered = lowerPluginGraph(graph, entities);
   expect(lowered.nodes.some((n) => n.type === "plugin")).toBe(false);
-  const commands = lowered.nodes.filter((n) => n.type === "apply_command");
+  const commands = lowered.nodes.filter((n) => n.type === "set_entity_property");
   expect(commands.map((n) => [n.property_key, n.value_type, n.value])).toEqual([
     [CANVAS_VERSION_KEY, "string", "cv_unlock"],
     ["map_s_gate_icon", "string", "door-open"], ["map_s_key_present", "bool", false], ["map_s_ghost_present", "bool", true],

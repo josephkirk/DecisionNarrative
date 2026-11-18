@@ -132,8 +132,8 @@ test("knowRowStatus labels unconfirmed rows in words, not colour alone", () => {
   expect(knowRowStatus({ fact: "fact.x", kind: "evidence", confirmed: true, sourceStep: null })).toBeNull();
 });
 
-test("changeText shows before to after", () => {
-  expect(changeText({ key: "mood", before: "1", after: "2" })).toBe("mood: 1 → 2");
+test("changeText summarizes kernel event deltas", () => {
+  expect(changeText({ eventId: 3, delta: { participantMoves: [[0, 1, 2]] } })).toBe("1 participant move");
 });
 
 test("toldMark uses circled numbers up to 20 and falls back to the number", () => {

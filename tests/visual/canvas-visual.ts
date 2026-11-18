@@ -248,7 +248,7 @@ try {
   const stored = await api("GET", "/api/v3/content/storylets/unlock");
   const types = stored.graph.nodes.map((x: { type: string }) => x.type);
   check("stored graph has no plugin nodes (lowered)", !types.includes("plugin"), types.join(","));
-  const commands = stored.graph.nodes.filter((x: { type: string }) => x.type === "apply_command");
+  const commands = stored.graph.nodes.filter((x: { type: string }) => x.type === "set_entity_property");
   check("lowered to version switch + four Apply Command nodes", commands.length === 5 && commands[0].property_key === "canvas_version", commands.map((c: { property_key: string }) => c.property_key).join(","));
   check("plugin metadata survives storage", stored.graph.nodes.some((x: { plugin?: { source?: unknown } }) => x.plugin?.source));
   const committedVersion = async () => (await cryptDoc()).revisions.find((r: { source?: unknown }) => r.source);
@@ -257,7 +257,7 @@ try {
   check("saving the storylet commits the version", !!committed && !committed.uncommitted && !committed.draft, JSON.stringify(committed ?? {}).slice(0, 120));
   await page.reload();
   await page.locator(".graph-node.plugin").waitFor();
-  check("reload raises one Modify Canvas node", (await page.locator(".graph-node.plugin").count()) === 1 && (await page.locator(".graph-node.apply_command").count()) === 0);
+  check("reload raises one Modify Canvas node", (await page.locator(".graph-node.plugin").count()) === 1 && (await page.locator(".graph-node.set_entity_property").count()) === 0);
   await shot(page, "canvas-04-graph");
 
   await page.goto(`${base}/#/entities/crypt`);

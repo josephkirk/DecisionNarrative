@@ -433,7 +433,7 @@ function addNode(type: NodeType, pluginType?: string) {
     baseNode.property_key = "";
     baseNode.value_type = "string";
     baseNode.height = 120;
-  } else if (type === "apply_command") {
+  } else if (type === "set_entity_property") {
     baseNode.property_key = "";
     baseNode.operation = "set";
     baseNode.value_type = "string";
@@ -584,8 +584,8 @@ const computedEdges = computed(() => {
     const startY = fromY;
     const endX = toNode.x;
     const inputOffset = edge.kind === "data"
-      ? edge.to_port === "item" ? 82 : ["apply_command", "condition", "get_entity_property", "add_entity_tag", "remove_entity_tag", "has_entity_tag"].includes(toNode.type) || (toNode.type === "plugin" && nodeTypeContribution(toNode.plugin_type)?.entityInput) ? 52 : 40
-      : toNode.type === "condition" || toNode.type === "apply_command" || (toNode.type === "plugin" && nodeTypeContribution(toNode.plugin_type)?.entityInput) ? 18 : 40;
+      ? edge.to_port === "item" ? 82 : ["set_entity_property", "condition", "get_entity_property", "add_entity_tag", "remove_entity_tag", "has_entity_tag"].includes(toNode.type) || (toNode.type === "plugin" && nodeTypeContribution(toNode.plugin_type)?.entityInput) ? 52 : 40
+      : toNode.type === "condition" || toNode.type === "set_entity_property" || (toNode.type === "plugin" && nodeTypeContribution(toNode.plugin_type)?.entityInput) ? 18 : 40;
     const endY = toNode.y + inputOffset;
     return {
       id: edge.id,
@@ -617,7 +617,7 @@ const computedEdges = computed(() => {
         <button class="node-tool-btn" @click="addNode('get_entity')">Get entity</button>
         <button class="node-tool-btn" @click="addNode('get_entity_property')">Get property</button>
         <button class="node-tool-btn" @click="addNode('compare')">Compare</button>
-        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('apply_command')">Apply command</button>
+        <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('set_entity_property')">Apply command</button>
         <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('dialog')">Dialog</button>
         <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('choice')">Choice</button>
         <button v-if="props.graphMode === 'story'" class="node-tool-btn" @click="addNode('qbn_storylet_hub')">QBN hub</button>
@@ -728,7 +728,7 @@ const computedEdges = computed(() => {
             <div class="field-label">Get Entity Property</div>
             <div style="font-size:11px;">{{ node.property_key || 'property key' }} · {{ node.value_type || 'typed value' }}</div>
           </div>
-          <div v-else-if="node.type === 'apply_command'">
+          <div v-else-if="node.type === 'set_entity_property'">
             <div class="field-label">Apply Command</div>
             <div style="font-size:11px;">{{ node.operation || 'set' }} {{ node.property_key || 'property key' }} = {{ node.value ?? '' }}</div>
           </div>
@@ -857,14 +857,14 @@ const computedEdges = computed(() => {
           </div>
         </div>
         <template v-if="node.type !== 'start'">
-          <div v-if="node.type === 'apply_command' || node.type === 'condition' || (node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.entityInput && !nodeTypeContribution(node.plugin_type)?.booleanOutput)" class="socket input-socket" style="top:18px" :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }" title="Flow input" @mouseup="completeConnection($event, node, 'input')"></div>
-          <div v-if="node.type === 'get_entity_property' || node.type === 'apply_command' || (node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.entityInput)" class="socket input-socket" style="top:52px" :style="{ backgroundColor: targetPinColor(node, 'entity') }" :title="node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.itemInput ? 'Inventory owner input' : 'Entity data input'" @mouseup="completeConnection($event, node, 'entity')"></div>
+          <div v-if="node.type === 'set_entity_property' || node.type === 'condition' || (node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.entityInput && !nodeTypeContribution(node.plugin_type)?.booleanOutput)" class="socket input-socket" style="top:18px" :style="{ backgroundColor: GRAPH_PIN_COLORS.flow }" title="Flow input" @mouseup="completeConnection($event, node, 'input')"></div>
+          <div v-if="node.type === 'get_entity_property' || node.type === 'set_entity_property' || (node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.entityInput)" class="socket input-socket" style="top:52px" :style="{ backgroundColor: targetPinColor(node, 'entity') }" :title="node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.itemInput ? 'Inventory owner input' : 'Entity data input'" @mouseup="completeConnection($event, node, 'entity')"></div>
           <div v-if="node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.itemInput" class="socket input-socket" style="top:82px" :style="{ backgroundColor: targetPinColor(node, 'item') }" title="Item data input" @mouseup="completeConnection($event, node, 'item')"></div>
           <div v-if="['add_entity_tag','remove_entity_tag','has_entity_tag'].includes(node.type)" class="socket input-socket" style="top:52px" :style="{ backgroundColor: targetPinColor(node, 'target') }" title="Optional target EntityRef input" @mouseup="completeConnection($event, node, 'target')"></div>
           <div v-if="node.type === 'condition'" class="socket input-socket" style="top:52px" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Boolean data input" @mouseup="completeConnection($event, node, 'input')"></div>
           <div v-if="node.type === 'and' || node.type === 'or'" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Boolean data input" @mouseup="completeConnection($event, node, 'input')"></div>
           <div v-if="node.type === 'compare'" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Value data input" @mouseup="completeConnection($event, node, 'input')"></div>
-          <div v-if="!['get_entity', 'get_entity_property', 'apply_command', 'condition', 'has_entity_tag', 'knows', 'compare', 'and', 'or'].includes(node.type) && !(node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.entityInput)" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Flow input" @mouseup="completeConnection($event, node, 'input')"></div>
+          <div v-if="!['get_entity', 'get_entity_property', 'set_entity_property', 'condition', 'has_entity_tag', 'knows', 'compare', 'and', 'or'].includes(node.type) && !(node.type === 'plugin' && nodeTypeContribution(node.plugin_type)?.entityInput)" class="socket input-socket" :style="{ backgroundColor: targetPinColor(node, 'input') }" title="Flow input" @mouseup="completeConnection($event, node, 'input')"></div>
         </template>
 
         <div

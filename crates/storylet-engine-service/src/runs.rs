@@ -11,7 +11,7 @@ use axum::{
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use storylet_engine::run::{RunAction, RunContent, RunError, RunKernel, RunStart};
+use storylet_engine::{actions::{ActionProposal, Authority, DecisionProvenance}, chrono_participants::Controller, run::{RunAction, RunContent, RunError, RunKernel, RunStart}};
 
 #[derive(Clone)]
 pub(crate) struct CachedRun {
@@ -34,7 +34,7 @@ struct StartConfig {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum RunOp {
-    Act { participant: u16, action: RunAction },
+    Act { authority: Authority, proposal: ActionProposal },
     Rewind { to_step: u32 },
 }
 #[derive(Clone)]
@@ -253,6 +253,16 @@ fn current_revision(inner: &StudioInner) -> Result<u64, RunApiError> {
         .map_err(RunApiError::internal)?
         .revision)
 }
+fn human_authority(kernel: &RunKernel, actor: u16) -> Result<Authority, RunApiError> {
+    match kernel.world().participants.controller.get(actor as usize) {
+        Some(Controller::Human { seat }) => Ok(Authority::Human { seat: *seat }),
+        Some(Controller::Rule) => Err(RunApiError::invalid("rule participants cannot be controlled by callers")),
+        None => Err(RunApiError::invalid("unknown participant")),
+    }
+}
+fn proposal(kernel: &RunKernel, actor: u16, action: RunAction, key: String) -> ActionProposal {
+    ActionProposal { schema_version: 1, actor, action, expected_revision: kernel.revision(), idempotency_key: key, provenance: Some(DecisionProvenance { policy_id: "human".into(), policy_version: "1".into(), model_id: String::new(), context_hash: String::new(), decision_seq: kernel.revision() }) }
+}
 fn rebuild(_inner: &StudioInner, row: &Row) -> Result<CachedRun, RunApiError> {
     let content = row.start.content.clone();
     let (mut kernel, mut stalled) =
@@ -260,17 +270,11 @@ fn rebuild(_inner: &StudioInner, row: &Row) -> Result<CachedRun, RunApiError> {
             .map_err(kernel_error)?;
     for op in &row.actions {
         match op {
-            RunOp::Act {
-                participant,
-                action,
-            } => {
-                stalled = kernel
-                    .act_preserving_stall(&content, *participant, action.clone())
-                    .map_err(kernel_error)?
-                    .1;
+            RunOp::Act { authority, proposal } => {
+                kernel.propose(&content, *authority, proposal.clone()).map_err(|e| RunApiError::invalid(e.reason))?;
             }
             RunOp::Rewind { to_step } => {
-                kernel.rewind(*to_step).map_err(kernel_error)?;
+                kernel.rewind(Authority::Architect, *to_step).map_err(kernel_error)?;
                 stalled = kernel.stalled();
             }
         }
@@ -293,7 +297,7 @@ fn cached(inner: &mut StudioInner, row: &Row) -> Result<CachedRun, RunApiError> 
     Ok(c)
 }
 fn envelope(row: &Row, c: &CachedRun, participant: u16, current: u64) -> Value {
-    let mut value = json!({"id":row.id,"revision":row.revision,"stale":row.project_revision != current,"contentRevision":row.project_revision,"view":c.kernel.view(&c.content,participant)});
+    let mut value = json!({"id":row.id,"revision":row.revision,"stale":row.project_revision != current,"contentRevision":row.project_revision,"view":c.kernel.architect_view(&c.content,participant)});
     if let Some(RunError::Stalled {
         storylet,
         node_guid,
@@ -304,7 +308,7 @@ fn envelope(row: &Row, c: &CachedRun, participant: u16, current: u64) -> Value {
     value
 }
 fn validate_participant(c: &CachedRun, participant: u16) -> Result<(), RunApiError> {
-    if participant as usize >= c.kernel.world.participants.len() {
+    if participant as usize >= c.kernel.world().participants.len() {
         Err(RunApiError::invalid("unknown participant"))
     } else {
         Ok(())
@@ -400,9 +404,11 @@ impl StudioService {
                 .map_err(kernel_error)?;
         let mut recorded = Vec::with_capacity(req.actions.len());
         for (participant, action) in &req.actions {
-            let (_, next_stalled) = kernel.act_preserving_stall(&content, *participant, action.clone()).map_err(kernel_error)?;
-            stalled = next_stalled;
-            recorded.push(RunOp::Act { participant: *participant, action: action.clone() });
+            let authority = human_authority(&kernel, *participant)?;
+            let p = proposal(&kernel, *participant, action.clone(), format!("start-{}", recorded.len()));
+            kernel.propose(&content, authority, p.clone()).map_err(|e| RunApiError::invalid(e.reason))?;
+            stalled = kernel.stalled();
+            recorded.push(RunOp::Act { authority, proposal: p });
         }        let now = chrono_now_ms();
         let row = Row {
             id: uuid::Uuid::new_v4().to_string(),
@@ -461,7 +467,7 @@ impl StudioService {
         for id in ids {
             let row = load(&inner, &id)?;
             let c = cached(&mut inner, &row)?;
-            let v = c.kernel.view(&c.content, 0);
+            let v = c.kernel.architect_view(&c.content, 0);
             out.push(json!({"id":id,"title":v.scene.as_ref().map(|s|s.storylet.title.clone()).unwrap_or_else(||"Run".into()),"steps":v.current_step,"ending":v.ending,"stale":row.project_revision!=rev,"updatedAt":row.updated_at}));
         }
         Ok(json!(out))
@@ -472,6 +478,19 @@ impl StudioService {
         let c = cached(&mut inner, &row)?;
         validate_participant(&c, participant)?;
         Ok(envelope(&row, &c, participant, current_revision(&inner)?))
+    }
+    pub async fn run_observe(&self, id: &str, participant: u16) -> Result<Value, RunApiError> {
+        let mut inner = self.inner.lock().await;
+        let row = load(&inner, id)?;
+        let c = cached(&mut inner, &row)?;
+        validate_participant(&c, participant)?;
+        Ok(json!(c.kernel.observe(&c.content, participant)))
+    }
+    pub async fn run_explain(&self, id: &str, event: u32) -> Result<Value, RunApiError> {
+        let mut inner = self.inner.lock().await;
+        let row = load(&inner, id)?;
+        let c = cached(&mut inner, &row)?;
+        c.kernel.explain(event).map(|events| json!(events)).ok_or_else(RunApiError::missing)
     }
     pub async fn run_act(&self, id: &str, req: ActRequest) -> Result<Value, RunApiError> {
         require_key(&req.idempotency_key)?;
@@ -517,15 +536,11 @@ impl StudioService {
             return Err(RunApiError::conflict("run is stale; reload required"));
         }
         let mut c = cached(&mut inner, &row)?;
-        c.stalled = c
-            .kernel
-            .act_preserving_stall(&c.content, req.participant, req.action.clone())
-            .map_err(kernel_error)?
-            .1;
-        row.actions.push(RunOp::Act {
-            participant: req.participant,
-            action: req.action,
-        });
+        let authority = human_authority(&c.kernel, req.participant)?;
+        let p = proposal(&c.kernel, req.participant, req.action, req.idempotency_key.clone());
+        c.kernel.propose(&c.content, authority, p.clone()).map_err(|e| RunApiError::invalid(e.reason))?;
+        c.stalled = c.kernel.stalled();
+        row.actions.push(RunOp::Act { authority, proposal: p });
         row.revision += 1;
         row.updated_at = chrono_now_ms();
         row.last_key = req.idempotency_key.clone();
@@ -584,7 +599,7 @@ impl StudioService {
             return Err(RunApiError::conflict("run is stale; reload required"));
         }
         let mut c = cached(&mut inner, &row)?;
-        c.kernel.rewind(req.to_step).map_err(kernel_error)?;
+        c.kernel.rewind(Authority::Architect, req.to_step).map_err(kernel_error)?;
         c.stalled = c.kernel.stalled();
         row.actions.push(RunOp::Rewind {
             to_step: req.to_step,
@@ -693,15 +708,10 @@ impl StudioService {
         let mut diverged = None;
         for op in &row.actions {
             let result = match op {
-                RunOp::Act {
-                    participant,
-                    action,
-                } => kernel
-                    .act_preserving_stall(&content, *participant, action.clone())
-                    .map(|(_, s)| {
-                        stalled = s;
-                    }),
-                RunOp::Rewind { to_step } => kernel.rewind(*to_step).map(|_| {
+                RunOp::Act { authority, proposal } => kernel.propose(&content, *authority, proposal.clone()).map(|_| {
+                    stalled = kernel.stalled();
+                }).map_err(|_| RunError::InvalidAction("replay proposal rejected".into())),
+                RunOp::Rewind { to_step } => kernel.rewind(Authority::Architect, *to_step).map(|_| {
                     stalled = kernel.stalled();
                 }),
             };
@@ -807,6 +817,14 @@ pub async fn view(
         Ok(v) => Json(v).into_response(),
         Err(e) => e.into_response(),
     }
+}
+#[derive(Default, Deserialize)]
+pub struct EventQuery { event: Option<u32> }
+pub async fn observe(State(s): State<StudioService>, Path(id): Path<String>, Query(q): Query<ParticipantQuery>) -> Response {
+    match q.participant { Some(participant) => match s.run_observe(&id, participant).await { Ok(v) => Json(v).into_response(), Err(e) => e.into_response() }, None => RunApiError::invalid("participant is required").into_response() }
+}
+pub async fn explain(State(s): State<StudioService>, Path(id): Path<String>, Query(q): Query<EventQuery>) -> Response {
+    match q.event { Some(event) => match s.run_explain(&id, event).await { Ok(v) => Json(v).into_response(), Err(e) => e.into_response() }, None => RunApiError::invalid("event is required").into_response() }
 }
 pub async fn why_not(
     State(s): State<StudioService>,

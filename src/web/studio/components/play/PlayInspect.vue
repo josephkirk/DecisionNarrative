@@ -4,10 +4,11 @@ import type { InspectView } from "../../contracts.ts";
 import { changeText, chronicleRows, knowKindLabel, knowRowStatus, toldMark } from "../../runModel.ts";
 import type { PlayState } from "../../view-models/run.ts";
 
-const props = defineProps<{ inspect: InspectView | null; tab: PlayState["inspectTab"] }>();
+const props = defineProps<{ inspect: InspectView | null; tab: PlayState["inspectTab"]; causal: PlayState["causal"] }>();
 const emit = defineEmits<{
   (e: "tab", tab: PlayState["inspectTab"]): void;
   (e: "focus-step", step: number | null): void;
+  (e: "explain", event: number): void;
   (e: "close"): void;
 }>();
 
@@ -61,6 +62,7 @@ const story = computed(() => chronicleRows(props.inspect?.chronicle ?? []));
             @blur="emit('focus-step', null)"
             @click="emit('focus-step', row.sourceStep)"
           >step {{ row.sourceStep }}</button>
+          <button type="button" class="play-source" @click="emit('explain', row.sourceEvent)">Why?</button>
         </li>
       </ul>
     </section>
@@ -69,8 +71,14 @@ const story = computed(() => chronicleRows(props.inspect?.chronicle ?? []));
       <h3 class="play-eyebrow">Changed in the last step</h3>
       <p v-if="!inspect.worldChanges.length" class="play-muted">Nothing changed in the last step.</p>
       <ul class="play-changes">
-        <li v-for="c in inspect.worldChanges" :key="c.key">{{ changeText(c) }}</li>
+        <li v-for="c in inspect.worldChanges" :key="c.eventId">
+          <span>{{ changeText(c) }}</span>
+          <button type="button" class="play-source" @click="emit('explain', c.eventId)">Why?</button>
+        </li>
       </ul>
+      <ol v-if="causal" class="play-chronicle" aria-label="Causal event chain">
+        <li v-for="event in causal" :key="event.id">Event {{ event.id }} · step {{ event.step }} · {{ event.action.kind }}</li>
+      </ol>
       <details class="play-advanced">
         <summary>Advanced</summary>
         <dl>

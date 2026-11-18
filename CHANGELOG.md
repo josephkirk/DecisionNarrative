@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Consolidated autonomous runs on the RunKernel proposal boundary, preserving authority and provenance in replay logs; added actor observations, causal event explanations, transfer and tell actions, and causal links in the Play inspector.
+
 - Custom thumbnails for editable traits, using the entity image picker; saved
   images appear in the trait editor, project tree, and folder views. Existing
   traits without images remain compatible.

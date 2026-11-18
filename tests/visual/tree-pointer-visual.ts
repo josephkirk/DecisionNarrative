@@ -45,7 +45,7 @@ try {
   const n = (id: string, type: string, x: number, extra: object = {}) => ({ id, type, title: id, x, y: 150, width: 180, height: 100, ...extra });
   await api("POST", "/api/v3/content/storylets", { id: "pointer-story", title: "Tree pointer", content: { text_template: "x" }, created_at: 1, graph: { nodes: [
     n("start", "start", 30, { text: "Start" }), n("owner", "get_entity", 40, { entity_path: "pointer-tree" }),
-    n("pointer__position", "apply_command", 300, { property_key: "__tree_position", operation: "set", value_type: "string", value: "pointer-root", plugin: { group: "pointer", source, exit: "pointer__position", inputs: [input] } }),
+    n("pointer__position", "set_entity_property", 300, { property_key: "__tree_position", operation: "set", value_type: "string", value: "pointer-root", plugin: { group: "pointer", source, exit: "pointer__position", inputs: [input] } }),
     n("end", "end", 600, { is_terminal: true })
   ], edges: [
     { id: "flow-1", kind: "flow", from_node: "start", from_port: "output", to_node: "pointer__position", to_port: "input" },
@@ -132,7 +132,7 @@ try {
   fake.id = "impostor-story";
   fake.title = "Impostor";
   fake.graph.nodes.find((node: { type: string }) => node.type === "get_entity").entity_path = "impostor";
-  fake.graph.nodes.find((node: { type: string }) => node.type === "apply_command").value = "pointer-root";
+  fake.graph.nodes.find((node: { type: string }) => node.type === "set_entity_property").value = "pointer-root";
   let spoofError = "";
   try { await api("POST", "/api/v3/content/storylets", fake); } catch (error) { spoofError = String(error); }
   assert(spoofError.includes("TreeGraph"), "authored properties cannot impersonate the TreeGraph trait");

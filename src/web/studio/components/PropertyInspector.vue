@@ -109,7 +109,7 @@ function propertiesForEntitySource(node: NarrativeNode): EntityProperty[] {
 }
 
 const entityPropertyOptions = computed<GraphPropertyOption[]>(() => {
-  if (!props.selectedNode || !["get_entity_property", "apply_command"].includes(props.selectedNode.type)) return [];
+  if (!props.selectedNode || !["get_entity_property", "set_entity_property"].includes(props.selectedNode.type)) return [];
   const seen = new Set<string>();
   return propertiesForEntitySource(props.selectedNode)
     .filter(isGraphProperty)
@@ -119,7 +119,7 @@ const entityPropertyOptions = computed<GraphPropertyOption[]>(() => {
 
 const entityPropertyUnavailableReason = computed(() => {
   const node = props.selectedNode;
-  if (!node || !["get_entity_property", "apply_command"].includes(node.type) || entityPropertyOptions.value.length) return "";
+  if (!node || !["get_entity_property", "set_entity_property"].includes(node.type) || entityPropertyOptions.value.length) return "";
   const source = incomingEntityNode(node);
   if (!source) return "Connect an Entity source to choose a property.";
   if (source.type === "get_entity") {
@@ -146,7 +146,7 @@ function selectEntityProperty(node: NarrativeNode, key: string) {
     : property?.type === "int" || property?.type === "float"
       ? 0
       : "";
-  if (node.type === "apply_command") {
+  if (node.type === "set_entity_property") {
     const operation = node.operation;
     const validOperation = property?.type === "bool"
       ? operation === "set" || operation === "toggle"
@@ -158,7 +158,7 @@ function selectEntityProperty(node: NarrativeNode, key: string) {
   emitGraphUpdate(node);
 }
 const applyCommandOperations = computed(() => {
-  const type = props.selectedNode?.type === "apply_command"
+  const type = props.selectedNode?.type === "set_entity_property"
     ? props.selectedNode.value_type
     : undefined;
   return applyCommandOperationsForType(type);
@@ -168,7 +168,7 @@ watch(
   () => [props.selectedNode?.type, props.selectedNode?.value_type] as const,
   () => {
     const node = props.selectedNode;
-    if (!node || node.type !== "apply_command") return;
+    if (!node || node.type !== "set_entity_property") return;
     const valid = applyCommandOperations.value.some((option) => option.value === node.operation);
     if (!valid) {
       node.operation = "set";
@@ -948,7 +948,7 @@ function setNodeJsonArray(node: NarrativeNode, field: "topic_nodes" | "topic_edg
           <small v-if="entityPropertyUnavailableReason" class="field-sublabel">{{ entityPropertyUnavailableReason }}</small>
         </div>
       </div>
-      <div v-else-if="selectedNode.type === 'apply_command'">
+      <div v-else-if="selectedNode.type === 'set_entity_property'">
         <div class="form-group">
           <label class="field-label">Property</label>
           <select :value="selectedNode.property_key || ''" class="form-select" :disabled="!entityPropertyOptions.length" @change="selectEntityProperty(selectedNode, eventValue($event))">

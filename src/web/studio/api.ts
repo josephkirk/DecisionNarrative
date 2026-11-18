@@ -3,6 +3,7 @@ import type {
   ContentReference,
   CoverageReport,
   InspectView,
+  RunEventView,
   LibraryPageResult,
   NearMiss,
   ProjectMetadata,
@@ -52,6 +53,7 @@ export interface RunsApi {
   rewind(id: string, toStep: number, expectedRevision: number, idempotencyKey: string): Promise<RunEnvelope>;
   whyNot(id: string, participant: number): Promise<{ nearMisses: NearMiss[] }>;
   inspect(id: string, participant: number): Promise<InspectView>;
+  explain(id: string, event: number): Promise<RunEventView[]>;
   reload(id: string, expectedRevision: number, idempotencyKey: string): Promise<RunReloadResult>;
 }
 
@@ -78,6 +80,7 @@ const runs: RunsApi & {
     post<RunEnvelope>(`${runPath(id)}/rewind`, { toStep, expectedRevision, idempotencyKey }),
   whyNot: (id, participant) => request<{ nearMisses: NearMiss[] }>(`${runPath(id)}/why-not?participant=${participant}`),
   inspect: (id, participant) => request<InspectView>(`${runPath(id)}/inspect?participant=${participant}`),
+  explain: (id, event) => request<RunEventView[]>(`${runPath(id)}/explain?event=${event}`),
   reload: (id, expectedRevision, idempotencyKey) =>
     post<RunReloadResult>(`${runPath(id)}/reload`, { expectedRevision, idempotencyKey }),
   remove: (id, expectedRevision, idempotencyKey) =>

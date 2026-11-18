@@ -86,7 +86,14 @@ export function knowRowStatus(row: KnowRowView): string | null {
 }
 
 export function changeText(change: ChangeView): string {
-  return `${change.key}: ${change.before} → ${change.after}`;
+  const delta = change.delta;
+  const pieces = [
+    Array.isArray(delta.graphDiffs) && delta.graphDiffs.length ? `${delta.graphDiffs.length} world graph change${delta.graphDiffs.length === 1 ? "" : "s"}` : "",
+    Array.isArray(delta.participantMoves) && delta.participantMoves.length ? `${delta.participantMoves.length} participant move${delta.participantMoves.length === 1 ? "" : "s"}` : "",
+    Array.isArray(delta.knowledgeAdded) && delta.knowledgeAdded.length ? `${delta.knowledgeAdded.length} knowledge change${delta.knowledgeAdded.length === 1 ? "" : "s"}` : "",
+    Array.isArray(delta.tellingsAdded) && delta.tellingsAdded.length ? `${delta.tellingsAdded.length} information transfer${delta.tellingsAdded.length === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  return pieces.join(" · ") || "World state updated";
 }
 
 const CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";

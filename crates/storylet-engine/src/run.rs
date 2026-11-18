@@ -1970,6 +1970,7 @@ pub struct KnowRowView {
     pub kind: crate::chrono_participants::KnowKind,
     pub confirmed: bool,
     pub source_step: Option<u32>,
+    pub source_event: u32,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2016,6 +2017,7 @@ impl RunKernel {
                 kind: r.kind,
                 confirmed: r.kind.is_confirmed(),
                 source_step: self.step_of_event(r.source_event),
+                source_event: r.source_event,
             })
             .collect();
         let chronicle = content

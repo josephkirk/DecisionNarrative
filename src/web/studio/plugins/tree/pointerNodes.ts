@@ -40,7 +40,7 @@ function pointerNode(check: boolean): Omit<NodeTypeContribution<TreePointerConfi
       if (problems.length) throw new Error(problems.join(" "));
       const id = ctx.id("position");
       if (!check) {
-        const node: NarrativeNode = { id, type: "apply_command", title: label, x: 0, y: 0, width: 220, height: 120,
+        const node: NarrativeNode = { id, type: "set_entity_property", title: label, x: 0, y: 0, width: 220, height: 120,
           property_key: TREE_POSITION_KEY, operation: "set", value_type: "string", value: config.target_id };
         return { nodes: [node], edges: [], entry: id, exit: id, inputs: { entity: [{ node: id, port: "entity" }] } };
       }

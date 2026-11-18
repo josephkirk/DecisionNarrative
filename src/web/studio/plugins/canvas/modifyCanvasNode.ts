@@ -50,7 +50,7 @@ export const modifyCanvasNode: Omit<NodeTypeContribution<ModifyCanvasConfig>, "i
     ];
     commands.forEach((command, index) => {
       const id = lower.id(`op${index}`);
-      nodes.push({ id, type: "apply_command", title: command.title, x: 0, y: 0, width: 220, height: 120, property_key: command.key, operation: "set", value_type: command.type, value: command.value });
+      nodes.push({ id, type: "set_entity_property", title: command.title, x: 0, y: 0, width: 220, height: 120, property_key: command.key, operation: "set", value_type: command.type, value: command.value });
       if (index > 0) {
         const previous = lower.id(`op${index - 1}`);
         edges.push({ id: `${previous}__next`, kind: "flow", from_node: previous, from_port: "output", to_node: id, to_port: "input" });

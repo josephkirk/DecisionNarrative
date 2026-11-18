@@ -7,7 +7,7 @@ pub fn is_reserved_key(key: &str) -> bool { matches!(key, POSITION | NODES) }
 
 pub fn uses_pointer(graph: &crate::narrative_graph::NarrativeGraph) -> bool {
     graph.nodes.iter().any(|node| match &node.data {
-        crate::narrative_graph::NarrativeNodeData::ApplyCommand { property_key, .. }
+        crate::narrative_graph::NarrativeNodeData::SetEntityProperty { property_key, .. }
         | crate::narrative_graph::NarrativeNodeData::GetEntityProperty { property_key, .. } => property_key == POSITION,
         _ => false,
     })
@@ -17,7 +17,7 @@ pub fn validate_pointer_graph(graph: &crate::narrative_graph::NarrativeGraph, en
     use crate::narrative_graph::{NarrativeEdgeKind, NarrativeNodeData};
     for node in &graph.nodes {
         let (value_type, command) = match &node.data {
-            NarrativeNodeData::ApplyCommand { property_key, value_type, operation, value } if property_key == POSITION => {
+            NarrativeNodeData::SetEntityProperty { property_key, value_type, operation, value } if property_key == POSITION => {
                 if operation != "set" { return Err(format!("node '{}' must set the tree position", node.id)); }
                 (value_type, Some(value))
             }
@@ -64,7 +64,7 @@ pub fn validate_owner_references(
         for graph in [storylet.graph.as_ref(), storylet.precondition_graph.as_ref()].into_iter().flatten() {
             for node in &graph.nodes {
                 let target = match &node.data {
-                    NarrativeNodeData::ApplyCommand { property_key, value, .. } if property_key == POSITION => Some(value),
+                    NarrativeNodeData::SetEntityProperty { property_key, value, .. } if property_key == POSITION => Some(value),
                     NarrativeNodeData::GetEntityProperty { property_key, .. } if property_key == POSITION => None,
                     _ => continue,
                 };
@@ -135,7 +135,7 @@ mod tests {
             "nodes": [
                 {"id":"start","type":"start","title":"start","text":"Start","x":0,"y":0,"width":100,"height":100},
                 {"id":"owner","type":"get_entity","title":"owner","entity_path":"tree","x":0,"y":0,"width":100,"height":100},
-                {"id":"set","type":"apply_command","title":"set","property_key":POSITION,"operation":"set","value_type":"string","value":target,"x":0,"y":0,"width":100,"height":100},
+                {"id":"set","type":"set_entity_property","title":"set","property_key":POSITION,"operation":"set","value_type":"string","value":target,"x":0,"y":0,"width":100,"height":100},
                 {"id":"get","type":"get_entity_property","title":"get","property_key":POSITION,"value_type":"string","x":0,"y":0,"width":100,"height":100},
                 {"id":"compare","type":"compare","title":"compare","operator":"eq","value_type":"string","value":target,"x":0,"y":0,"width":100,"height":100},
                 {"id":"condition","type":"condition","title":"condition","x":0,"y":0,"width":100,"height":100},

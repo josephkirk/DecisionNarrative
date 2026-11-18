@@ -85,7 +85,7 @@ pub enum NarrativeNodeData {
         #[serde(default = "default_property_type")]
         value_type: String,
     },
-    ApplyCommand {
+    SetEntityProperty {
         property_key: String,
         #[serde(default = "default_property_operation")]
         operation: String,
@@ -450,7 +450,7 @@ fn node_type_name(data: &NarrativeNodeData) -> &'static str {
         NarrativeNodeData::HasEntityTag { .. } => "Has Entity Tag",
         NarrativeNodeData::GetEntity { .. } => "Get Entity",
         NarrativeNodeData::GetEntityProperty { .. } => "Get Entity Property",
-        NarrativeNodeData::ApplyCommand { .. } => "Apply Command",
+        NarrativeNodeData::SetEntityProperty { .. } => "Apply Command",
         NarrativeNodeData::InventoryAdd {} => "Add Item",
         NarrativeNodeData::InventoryRemove {} => "Remove Item",
         NarrativeNodeData::InventoryHas {} => "Has Item",
@@ -665,7 +665,7 @@ impl NarrativeGraph {
                     };
                     let target_type = match &target.data {
                         NarrativeNodeData::GetEntityProperty { .. } => Some(("entity", "entity_ref")),
-                        NarrativeNodeData::ApplyCommand { .. } => match edge.to_port.as_str() {
+                        NarrativeNodeData::SetEntityProperty { .. } => match edge.to_port.as_str() {
                             "entity" => Some(("entity", "entity_ref")),
                             _ => None,
                         },
@@ -749,7 +749,7 @@ impl NarrativeGraph {
                         &node.data,
                         NarrativeNodeData::Condition {}
                             | NarrativeNodeData::GetEntityProperty { .. }
-                            | NarrativeNodeData::ApplyCommand { .. }
+                            | NarrativeNodeData::SetEntityProperty { .. }
                             | NarrativeNodeData::And {}
                             | NarrativeNodeData::Or {}
                             | NarrativeNodeData::Compare { .. }
@@ -779,7 +779,7 @@ impl NarrativeGraph {
                     &node.data,
                     NarrativeNodeData::Condition {}
                         | NarrativeNodeData::GetEntityProperty { .. }
-                        | NarrativeNodeData::ApplyCommand { .. }
+                        | NarrativeNodeData::SetEntityProperty { .. }
                         | NarrativeNodeData::And {}
                         | NarrativeNodeData::Or {}
                         | NarrativeNodeData::Compare { .. }
@@ -996,7 +996,7 @@ impl NarrativeGraph {
                         issues.push(format!("Get Entity Property node {} must not have outgoing Flow edges.", node.title));
                     }
                 }
-                NarrativeNodeData::ApplyCommand { property_key, operation, value_type, value } => {
+                NarrativeNodeData::SetEntityProperty { property_key, operation, value_type, value } => {
                     if property_key.trim().is_empty() {
                         issues.push(format!("Apply Command node {} must specify a property key.", node.title));
                     }

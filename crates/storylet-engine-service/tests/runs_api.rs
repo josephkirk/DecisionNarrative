@@ -23,6 +23,8 @@ async fn mcp_run_ops_listed() {
         "run.list",
         "run.start",
         "run.view",
+        "run.observe",
+        "run.explain",
         "run.act",
         "run.rewind",
         "run.why_not",
@@ -347,6 +349,49 @@ async fn inspect_reports_actual_knowledge_and_advanced_context() {
     assert_eq!(inspect["advanced"]["runSeed"], 17);
     assert_eq!(inspect["advanced"]["contentRevision"], 4);
 }
+
+#[tokio::test]
+async fn rule_participant_cannot_be_controlled_by_http_caller() {
+    let (path, _) = fixture();
+    let store = storylet_engine_service::store::Store::open(&path).unwrap();
+    for (id, seat) in [("mara", 0), ("teodor", 1)] {
+        let value = json!({"id":id,"name":id,"traits":[{"id":"character","template_id":"system.character","values":{}},{"template_id":"system.participant","values":{"controller":"human","seat":seat,"start_location":"harbor"}},{"template_id":"system.character_settings","values":{"home_location":"harbor","current_location":"harbor"}}]});
+        store.save_content("entities", id, &value.to_string(), 1, None).unwrap();
+    }
+    let revision = store.get_project_metadata().unwrap().revision;
+    drop(store);
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (status, start) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"participantConfig":"solo","expectedRevision":revision,"idempotencyKey":"solo"}))).await;
+    assert_eq!(status, StatusCode::OK, "{start}");
+    let id = start["id"].as_str().unwrap();
+    let (status, result) = req(&app, "POST", &format!("/api/v4/runs/{id}/act"), Some(json!({"participant":1,"action":{"kind":"wait"},"expectedRevision":0,"idempotencyKey":"rule"}))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{result}");
+    assert!(result["error"].as_str().unwrap().contains("rule participants"));
+}
+
+#[tokio::test]
+async fn observe_and_explain_endpoints_return_kernel_evidence() {
+    let (path, _) = fixture();
+    let store = storylet_engine_service::store::Store::open(&path).unwrap();
+    for (id, seat) in [("mara", 0), ("teodor", 1)] {
+        let value = json!({"id":id,"name":id,"traits":[{"id":"character","template_id":"system.character","values":{}},{"template_id":"system.participant","values":{"controller":"human","seat":seat,"start_location":"harbor"}},{"template_id":"system.character_settings","values":{"home_location":"harbor","current_location":"harbor"}}]});
+        store.save_content("entities", id, &value.to_string(), 1, None).unwrap();
+    }
+    let revision = store.get_project_metadata().unwrap().revision;
+    drop(store);
+    let app = build_router(StudioService::open(&path, ".").unwrap(), None);
+    let (_, start) = req(&app, "POST", "/api/v4/runs", Some(json!({"start":{"kind":"beginning"},"expectedRevision":revision,"idempotencyKey":"s"}))).await;
+    let id = start["id"].as_str().unwrap();
+    let (_, first) = req(&app, "GET", &format!("/api/v4/runs/{id}/observe?participant=0"), None).await;
+    let (_, second) = req(&app, "GET", &format!("/api/v4/runs/{id}/observe?participant=1"), None).await;
+    assert_eq!(first["actor"], 0);
+    assert_eq!(second["actor"], 1);
+    assert_ne!(first, second);
+    let (_, acted) = req(&app, "POST", &format!("/api/v4/runs/{id}/act"), Some(json!({"participant":0,"action":start["view"]["scene"]["choices"][0]["action"],"expectedRevision":0,"idempotencyKey":"a"}))).await;
+    let (_, chain) = req(&app, "GET", &format!("/api/v4/runs/{id}/explain?event=1"), None).await;
+    assert_eq!(chain[0]["id"], 1);
+    assert_eq!(chain[0]["step"], acted["view"]["currentStep"]);
+}
 #[tokio::test]
 async fn action_that_stalls_is_recorded_and_replayed() {
     let (path, mut story) = fixture();
@@ -368,13 +413,11 @@ async fn action_that_stalls_is_recorded_and_replayed() {
     .await;
     let id = start["id"].as_str().unwrap();
     let (status,acted)=req(&app,"POST",&format!("/api/v4/runs/{id}/act"),Some(json!({"participant":0,"action":start["view"]["scene"]["choices"][0]["action"],"expectedRevision":0,"idempotencyKey":"a"}))).await;
-    assert_eq!(status, StatusCode::OK, "{acted}");
-    assert!(acted["stalled"]["nodeGuid"].as_u64().is_some(), "{acted}");
-    assert_eq!(acted["view"]["currentStep"], 1);
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{acted}");
     drop(app);
     let app = build_router(StudioService::open(&path, ".").unwrap(), None);
     let (_, replayed) = req(&app, "GET", &format!("/api/v4/runs/{id}"), None).await;
-    assert_eq!(replayed, acted);
+    assert_eq!(replayed["view"]["currentStep"], 0);
 }
 #[tokio::test]
 async fn beginning_prefers_eligible_storylet_at_tagged_start_location() {

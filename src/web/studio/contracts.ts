@@ -349,13 +349,14 @@ export interface RunSummary {
 export interface NearMiss { storylet: StoryletRef; reason: string }
 
 export type KnowKind = "evidence" | "witnessed" | "told" | "rumor" | "recollection" | "testimony" | "inference";
-export interface KnowRowView { fact: string; kind: KnowKind; confirmed: boolean; sourceStep: number | null }
-export interface ChangeView { key: string; before: string; after: string }
+export interface KnowRowView { fact: string; kind: KnowKind; confirmed: boolean; sourceStep: number | null; sourceEvent: number }
+export interface ChangeView { eventId: number; delta: Record<string, unknown> }
 export interface ChronicleRowView { key: string; label: string; place: string | null; storyTime: number; told: number | null }
 export interface AdvancedView { runSeed: number; contentRevision: number; nodeGuid: number | null; interaction: string | null }
 export interface InspectView {
   knows: KnowRowView[]; worldChanges: ChangeView[]; chronicle: ChronicleRowView[]; advanced: AdvancedView;
 }
+export interface RunEventView { id: number; step: number; actor: number; action: RunAction; parents: number[]; deltas: Array<Record<string, unknown>> }
 
 export type CoverageParticipantConfig = "solo" | "all_humans";
 export type CoveragePersona = { kind: "wanderer" } | { kind: "investigator"; epsilon_permille: number };

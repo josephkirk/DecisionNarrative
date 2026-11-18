@@ -286,7 +286,7 @@ pub enum NodeKind {
         property_key: String,
         value_type: String,
     },
-    ApplyCommand {
+    SetEntityProperty {
         property_key: String,
         operation: PropertyOperation,
         value: DataValue,
@@ -2231,7 +2231,7 @@ impl FlowGraphInstance {
                 plan.record = true;
                 plan.output_pin = Some(chosen.unwrap_or_else(|| default_output(def)));
             }
-            NodeKind::ApplyCommand {
+            NodeKind::SetEntityProperty {
                 property_key,
                 operation,
                 value,

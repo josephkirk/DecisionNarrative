@@ -135,7 +135,7 @@ pub async fn handle_mcp_message(service: &StudioService, msg: &Value) -> Option<
 fn get_tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "narrative_platform",
-        "description": "Operate the local DecisionNarrative platform: inspect workspace context and authored entities, gameplay tags, and other content, and run deterministic Rust storylet runs.",
+            "description": "Operate the local DecisionNarrative platform. run.view and run.inspect return the Architect's global run view; use run.observe for an actor-specific observation and run.explain for an event's causal chain.",
         "inputSchema": {
             "type": "object",
             "required": ["operation"],
@@ -143,7 +143,7 @@ fn get_tool_definitions() -> Vec<Value> {
                 "operation": {
                     "type": "string",
                     "enum": [
-                        "run.list", "run.start", "run.view", "run.act", "run.rewind", "run.why_not", "run.inspect", "run.reload", "run.delete",
+                        "run.list", "run.start", "run.view", "run.observe", "run.explain", "run.act", "run.rewind", "run.why_not", "run.inspect", "run.reload", "run.delete",
                         "platform.health", "workspace.context", "workspace.inspect", "workspace.validate", "workspace.replace", "workspace.coverage",
                         "content.list", "content.get", "content.save", "content.delete", "content.move", "content.references", "storylet.approve",
                         "scenarios.list", "scenarios.get", "scenarios.create", "scenarios.save", "scenarios.delete", "scenarios.preview"
@@ -158,6 +158,7 @@ fn get_tool_definitions() -> Vec<Value> {
                 "action": { "type": "object" },
                 "participant": { "type": "integer", "minimum": 0 },
                 "toStep": { "type": "integer", "minimum": 0 },
+                "event": { "type": "integer", "minimum": 0 },
                 "payload": { "type": "object" },
                 "bundle": { "type": "object" },
                 "confirmReplace": { "type": "boolean" },
@@ -284,6 +285,8 @@ async fn dispatch_narrative_platform_op(
     match op {
         "run.list" => service.run_list().await.map_err(|e|e.to_string()),
         "run.start" => service.run_start(serde_json::from_value(args.clone()).map_err(|e|e.to_string())?).await.map_err(|e|e.to_string()),
+        "run.observe" => { let id=args.get("id").and_then(Value::as_str).ok_or("Missing id")?; let participant=u16::try_from(args.get("participant").and_then(Value::as_u64).ok_or("Missing participant")?).map_err(|e|e.to_string())?; service.run_observe(id, participant).await.map_err(|e|e.to_string()) },
+        "run.explain" => { let id=args.get("id").and_then(Value::as_str).ok_or("Missing id")?; let event=u32::try_from(args.get("event").and_then(Value::as_u64).ok_or("Missing event")?).map_err(|e|e.to_string())?; service.run_explain(id, event).await.map_err(|e|e.to_string()) },
         "run.view" | "run.why_not" | "run.inspect" => {
             let id=args.get("id").and_then(Value::as_str).ok_or("Missing id")?;
             let participant=args.get("participant").and_then(Value::as_u64).unwrap_or(0);
