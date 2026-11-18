@@ -115,6 +115,7 @@ async fn legacy_and_unversioned_api_routes_are_not_registered() {
     ] {
         paths.push(format!("{v3}/playtests{suffix}"));
     }
+    let chrono = format!("{v3}/chrono");
     for suffix in [
         "",
         "/session-1",
@@ -127,7 +128,7 @@ async fn legacy_and_unversioned_api_routes_are_not_registered() {
         "/session-1/scrub",
         "/session-1/reconcile",
     ] {
-        paths.push(format!("{v3}/chrono/playtests{suffix}"));
+        paths.push(format!("{chrono}/playtests{suffix}"));
     }
     for path in &paths {
         let (status, _) = request(&app, "GET", path, None).await;

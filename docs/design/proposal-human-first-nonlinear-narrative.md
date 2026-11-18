@@ -48,7 +48,7 @@ The Rust tests pass on this branch: about 127 engine tests and 41 service tests.
 | Rule-authored NPC actions: priority-ordered, bounded, at most one action per actor per pass, atomic batch | `simulation.rs:9-80` | NPC agency on the world clock. |
 | Storylets with location tags, roles, repeatability and cluster type (Emily Short's cluster types) | `storylets.rs:97-137` | Content attached to places, with pacing metadata. |
 | Chrono flow graphs: tokens, time budgets, QBN hub, salience, waypoint conversations | `chrono_runtime.rs` (5.8k lines) | Scene-level non-linearity. |
-| Timeline scene sections with scrubbing over `[t0,t1)` | `chrono_runtime.rs`, `chrono_playtest.rs:2218` | Intra-scene time. Already reversible. |
+| Timeline scene sections with scrubbing over `[t0,t1)` | `chrono_runtime.rs` | Intra-scene time. Already reversible. |
 | Persistent history as a DAG, `checkout`, `reconcile_history`, `invoke_story_to_poi` | `chrono_runtime.rs:4710,4751,4813` | Forks, counterfactuals and jump-to-point-of-interest: the hardest part of "time" is already present. |
 | Write-set conflict detection | `chrono_transactions.rs` | The primitive needed when several participants act at once. **Contract only.** |
 | Trigger table with a CSR cursor `process_tick` | `chrono_triggers.rs` | World-clock events. **Contract only; not used by the live scheduler.** |
