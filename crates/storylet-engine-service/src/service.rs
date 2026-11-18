@@ -1,4 +1,3 @@
-
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -21,10 +20,10 @@ impl std::fmt::Display for ContentDeleteError {
 
 use crate::chrono_adapter::compile_chrono_dispatch_for_storylet_validation;
 use crate::contracts::{
-    AssetRecord, AuthoringOptions, CharacterRecord, ContentReference, EntityRecord,
-    FolderRecord, GameplayTagRecord, LibraryPageResult, LibraryQuery,
-    ProjectBundle, ProjectBundleContent, ProjectMetadata, ScenarioRecord, StoryletRecord,
-    TraitTemplateRecord, CONTENT_KINDS, FOLDER_ROOTS, PROJECT_BUNDLE_SCHEMA_VERSION,
+    AssetRecord, AuthoringOptions, CONTENT_KINDS, CharacterRecord, ContentReference, EntityRecord,
+    FOLDER_ROOTS, FolderRecord, GameplayTagRecord, LibraryPageResult, LibraryQuery,
+    PROJECT_BUNDLE_SCHEMA_VERSION, ProjectBundle, ProjectBundleContent, ProjectMetadata,
+    ScenarioRecord, StoryletRecord, TraitTemplateRecord,
 };
 use crate::entities::{self, WorkspaceIndex};
 use crate::narrative_graph::NarrativeGraph;
@@ -32,11 +31,20 @@ use crate::references::{self, ReferenceContext};
 use crate::scenario::resolve_scenario_start;
 use crate::store::Store;
 
-fn persisted_runtime(store: &Store, templates: &[TraitTemplateRecord], entities: &[EntityRecord]) -> Result<entities::RuntimeRecords, String> {
-    let world = store.list_entities().map_err(|e| e.to_string())?
-        .into_iter().find(|entity| entity.id == entities::WORLD_ENTITY_ID)
+fn persisted_runtime(
+    store: &Store,
+    templates: &[TraitTemplateRecord],
+    entities: &[EntityRecord],
+) -> Result<entities::RuntimeRecords, String> {
+    let world = store
+        .list_entities()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|entity| entity.id == entities::WORLD_ENTITY_ID)
         .ok_or_else(|| "Intrinsic World entity is missing from persisted entities".to_string())?;
-    Ok(entities::runtime_records_with_world(&world, entities, templates))
+    Ok(entities::runtime_records_with_world(
+        &world, entities, templates,
+    ))
 }
 
 #[derive(Clone)]
@@ -84,14 +92,24 @@ fn normalize_storylet_ending(value: &mut Value) {
 
 fn shared_coverage_guard(store: &Store) -> Arc<std::sync::atomic::AtomicBool> {
     use std::sync::{Mutex as StdMutex, OnceLock, Weak};
-    static GUARDS: OnceLock<StdMutex<BTreeMap<PathBuf, Weak<std::sync::atomic::AtomicBool>>>> = OnceLock::new();
-    let Some(path) = store.conn.path().filter(|path| !path.is_empty() && *path != ":memory:") else {
+    static GUARDS: OnceLock<StdMutex<BTreeMap<PathBuf, Weak<std::sync::atomic::AtomicBool>>>> =
+        OnceLock::new();
+    let Some(path) = store
+        .conn
+        .path()
+        .filter(|path| !path.is_empty() && *path != ":memory:")
+    else {
         return Arc::new(std::sync::atomic::AtomicBool::new(false));
     };
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
-    let mut guards = GUARDS.get_or_init(|| StdMutex::new(BTreeMap::new())).lock().unwrap_or_else(|error| error.into_inner());
+    let mut guards = GUARDS
+        .get_or_init(|| StdMutex::new(BTreeMap::new()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     guards.retain(|_, guard| guard.strong_count() > 0);
-    if let Some(guard) = guards.get(&path).and_then(Weak::upgrade) { return guard; }
+    if let Some(guard) = guards.get(&path).and_then(Weak::upgrade) {
+        return guard;
+    }
     let guard = Arc::new(std::sync::atomic::AtomicBool::new(false));
     guards.insert(path, Arc::downgrade(&guard));
     guard
@@ -129,7 +147,6 @@ impl StudioService {
         })
     }
 
-
     pub async fn get_project_metadata(&self) -> Result<ProjectMetadata, String> {
         let inner = self.inner.lock().await;
         inner
@@ -165,7 +182,10 @@ impl StudioService {
             .map_err(|e| e.to_string())?;
 
         let entities = inner.store.list_entities().map_err(|e| e.to_string())?;
-        let gameplay_tags = inner.store.list_gameplay_tags().map_err(|e| e.to_string())?;
+        let gameplay_tags = inner
+            .store
+            .list_gameplay_tags()
+            .map_err(|e| e.to_string())?;
         let folders = inner.store.list_folders().map_err(|e| e.to_string())?;
         let trait_templates = inner
             .store
@@ -229,13 +249,17 @@ impl StudioService {
             .map_err(|e| e.to_string())
     }
 
-
     pub async fn list_content(&self, entity: &str) -> Result<Value, String> {
         ensure_content_kind(entity)?;
         let inner = self.inner.lock().await;
         if entity == "entities" {
-            return serde_json::to_value(inner.store.list_entities().map_err(|error| error.to_string())?)
-                .map_err(|error| error.to_string());
+            return serde_json::to_value(
+                inner
+                    .store
+                    .list_entities()
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string());
         }
         let list = inner
             .store
@@ -257,8 +281,12 @@ impl StudioService {
         ensure_content_kind(entity)?;
         let inner = self.inner.lock().await;
         if entity == "entities" {
-            let record = inner.store.list_entities().map_err(|error| error.to_string())?
-                .into_iter().find(|record| record.id == id)
+            let record = inner
+                .store
+                .list_entities()
+                .map_err(|error| error.to_string())?
+                .into_iter()
+                .find(|record| record.id == id)
                 .ok_or_else(|| format!("entities item '{id}' not found"))?;
             return serde_json::to_value(record).map_err(|error| error.to_string());
         }
@@ -276,10 +304,16 @@ impl StudioService {
     }
 
     pub async fn save_content_item(&self, entity: &str, payload: &Value) -> Result<Value, String> {
-        self.save_content_item_with_origin(entity, payload, "human").await
+        self.save_content_item_with_origin(entity, payload, "human")
+            .await
     }
 
-    pub(crate) async fn save_content_item_with_origin(&self, entity: &str, payload: &Value, created_origin: &str) -> Result<Value, String> {
+    pub(crate) async fn save_content_item_with_origin(
+        &self,
+        entity: &str,
+        payload: &Value,
+        created_origin: &str,
+    ) -> Result<Value, String> {
         ensure_content_kind(entity)?;
         let inner = self.inner.lock().await;
         let index = build_workspace_index(&inner.store)?;
@@ -293,16 +327,42 @@ impl StudioService {
                 let stored: Option<EntityRecord> =
                     load_stored_record(&inner.store, "entities", stored_id)?;
                 let prepared = entities::prepare_entity(payload, stored.as_ref(), &index)?;
-                if prepared.id == entities::WORLD_ENTITY_ID && index.templates.iter().any(|template|
-                    template.key == crate::tree_graph::TREE_GRAPH_KEY && prepared.traits.iter().any(|instance| instance.template_id == template.id))
+                if prepared.id == entities::WORLD_ENTITY_ID
+                    && index.templates.iter().any(|template| {
+                        template.key == crate::tree_graph::TREE_GRAPH_KEY
+                            && prepared
+                                .traits
+                                .iter()
+                                .any(|instance| instance.template_id == template.id)
+                    })
                 {
                     return Err("The intrinsic World cannot have a TreeGraph trait".into());
                 }
-                if crate::tree_graph::requires_validation(&index, stored.as_ref().map_or(&[], |record| record.traits.as_slice()), &prepared.traits) {
-                    let issues = crate::tree_graph::validate_tree_graphs(&index, Some((&prepared.id, &prepared.name, &prepared.traits)), None);
-                    if !issues.is_empty() { return Err(issues.join("; ")); }
-                    let storylets = inner.store.list_storylets().map_err(|error| error.to_string())?;
-                    crate::tree_pointer::validate_owner_references(&prepared.id, Some(&prepared.traits), &index.templates, &storylets)?;
+                if crate::tree_graph::requires_validation(
+                    &index,
+                    stored
+                        .as_ref()
+                        .map_or(&[], |record| record.traits.as_slice()),
+                    &prepared.traits,
+                ) {
+                    let issues = crate::tree_graph::validate_tree_graphs(
+                        &index,
+                        Some((&prepared.id, &prepared.name, &prepared.traits)),
+                        None,
+                    );
+                    if !issues.is_empty() {
+                        return Err(issues.join("; "));
+                    }
+                    let storylets = inner
+                        .store
+                        .list_storylets()
+                        .map_err(|error| error.to_string())?;
+                    crate::tree_pointer::validate_owner_references(
+                        &prepared.id,
+                        Some(&prepared.traits),
+                        &index.templates,
+                        &storylets,
+                    )?;
                 }
                 serde_json::to_value(prepared).map_err(|e| e.to_string())?
             }
@@ -312,35 +372,66 @@ impl StudioService {
                 if stored.as_ref().is_some_and(|template| template.system) {
                     return Err("System traits cannot be modified".into());
                 }
-                let prepared =
-                    entities::prepare_trait_template(payload, stored.as_ref(), &index)?;
+                let prepared = entities::prepare_trait_template(payload, stored.as_ref(), &index)?;
                 if let Some(previous) = stored.as_ref() {
                     let is_tree_trait = matches!(previous.key.as_str(), "tree_graph" | "tree_item");
                     let schema_changed = previous.key != prepared.key
                         || (previous.key == "tree_graph"
-                            && previous.properties.iter().any(|property| !prepared.properties.contains(property)));
-                    if is_tree_trait && schema_changed
-                        && index.entities.iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == previous.id))
+                            && previous
+                                .properties
+                                .iter()
+                                .any(|property| !prepared.properties.contains(property)));
+                    if is_tree_trait
+                        && schema_changed
+                        && index.entities.iter().any(|record| {
+                            record
+                                .traits
+                                .iter()
+                                .any(|trait_| trait_.template_id == previous.id)
+                        })
                     {
                         return Err("TreeGraph and TreeItem trait keys and active graph schemas cannot be changed while in use".into());
                     }
                 }
-                if stored.as_ref().is_some_and(|previous|
-                    previous.unique != prepared.unique || previous.allow_multiple != prepared.allow_multiple
-                ) {
-                    let mut templates = inner.store.list_trait_templates().map_err(|error| error.to_string())?;
+                if stored.as_ref().is_some_and(|previous| {
+                    previous.unique != prepared.unique
+                        || previous.allow_multiple != prepared.allow_multiple
+                }) {
+                    let mut templates = inner
+                        .store
+                        .list_trait_templates()
+                        .map_err(|error| error.to_string())?;
                     templates.retain(|template| template.id != prepared.id);
                     templates.push(prepared.clone());
-                    for record in inner.store.list_entities().map_err(|error| error.to_string())? {
-                        entities::validate_unique_traits(&record.traits, &templates, &format!("entity '{}'", record.name))?;
+                    for record in inner
+                        .store
+                        .list_entities()
+                        .map_err(|error| error.to_string())?
+                    {
+                        entities::validate_unique_traits(
+                            &record.traits,
+                            &templates,
+                            &format!("entity '{}'", record.name),
+                        )?;
                     }
                 }
                 if prepared.key == crate::tree_graph::TREE_ITEM_KEY {
-                    let mut templates = inner.store.list_trait_templates().map_err(|error| error.to_string())?;
+                    let mut templates = inner
+                        .store
+                        .list_trait_templates()
+                        .map_err(|error| error.to_string())?;
                     templates.retain(|template| template.id != prepared.id);
                     templates.push(prepared.clone());
-                    for record in inner.store.list_entities().map_err(|error| error.to_string())? {
-                        crate::tree_graph::validate_tree_item_traits(&record.traits, &templates, &format!("entity '{}'", record.name))?;
+                    for record in inner
+                        .store
+                        .list_entities()
+                        .map_err(|error| error.to_string())?
+                    {
+                        crate::tree_graph::validate_tree_item_traits(
+                            &record.traits,
+                            &templates,
+                            &format!("entity '{}'", record.name),
+                        )?;
                     }
                 }
                 serde_json::to_value(prepared).map_err(|e| e.to_string())?
@@ -373,18 +464,29 @@ impl StudioService {
             .and_then(Value::as_str)
             .ok_or("Item must have an 'id' field")?
             .to_string();
-        if entity == "scenarios" && final_payload.get("initial_properties").and_then(Value::as_object)
-            .is_some_and(|owners| owners.values().filter_map(Value::as_object)
-                .any(|properties| properties.keys().any(|key| crate::tree_pointer::is_reserved_key(key))))
+        if entity == "scenarios"
+            && final_payload
+                .get("initial_properties")
+                .and_then(Value::as_object)
+                .is_some_and(|owners| {
+                    owners
+                        .values()
+                        .filter_map(Value::as_object)
+                        .any(|properties| {
+                            properties
+                                .keys()
+                                .any(|key| crate::tree_pointer::is_reserved_key(key))
+                        })
+                })
         {
             return Err("Scenario initial properties cannot override internal tree state".into());
         }
 
         if entity == "storylets" {
-            if let Some(value) = final_payload.get("default_learn_visibility") {
-                if !matches!(value.as_str(), Some("private" | "co_located")) {
-                    return Err("Default Learn visibility must be private or co_located".into());
-                }
+            if let Some(value) = final_payload.get("default_learn_visibility")
+                && !matches!(value.as_str(), Some("private" | "co_located"))
+            {
+                return Err("Default Learn visibility must be private or co_located".into());
             }
             let settings = match final_payload.get("chrono") {
                 None | Some(Value::Null) => crate::contracts::ChronoStoryletSettings::default(),
@@ -404,12 +506,15 @@ impl StudioService {
         let (revision, approved_rev) = if entity == "storylets" {
             let next_rev = match inner.store.get_storylet(&id).map_err(|e| e.to_string())? {
                 Some(previous) => previous.revision + 1,
-                None => payload
-                    .get("revision")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(1),
+                None => payload.get("revision").and_then(Value::as_u64).unwrap_or(1),
             };
-            let origin = inner.store.get_storylet(&id).map_err(|e| e.to_string())?.map(|story| story.origin).unwrap_or_else(|| created_origin.to_string());            if let Some(object) = final_payload.as_object_mut() {
+            let origin = inner
+                .store
+                .get_storylet(&id)
+                .map_err(|e| e.to_string())?
+                .map(|story| story.origin)
+                .unwrap_or_else(|| created_origin.to_string());
+            if let Some(object) = final_payload.as_object_mut() {
                 object.insert("origin".into(), Value::String(origin));
                 object.insert("revision".into(), Value::from(next_rev));
                 object.insert("approved_revision".into(), Value::Null);
@@ -417,10 +522,7 @@ impl StudioService {
             (next_rev, None)
         } else {
             (
-                payload
-                    .get("revision")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(1),
+                payload.get("revision").and_then(Value::as_u64).unwrap_or(1),
                 payload.get("approved_revision").and_then(Value::as_u64),
             )
         };
@@ -454,7 +556,10 @@ impl StudioService {
             let mut storylet: StoryletRecord = serde_json::from_value(final_payload.clone())
                 .map_err(|error| format!("Storylet validation failed: {error}"))?;
             if !crate::contracts::STORYLET_CLUSTER_TYPES.contains(&storylet.cluster_type.as_str()) {
-                return Err(format!("Storylet validation failed: unsupported cluster_type '{}'", storylet.cluster_type));
+                return Err(format!(
+                    "Storylet validation failed: unsupported cluster_type '{}'",
+                    storylet.cluster_type
+                ));
             }
             let graph = match storylet.graph.clone() {
                 Some(graph) => graph,
@@ -463,26 +568,51 @@ impl StudioService {
             graph.validate().map_err(|issues| {
                 format!("Storylet graph validation failed: {}", issues.join("; "))
             })?;
-            if graph.nodes.iter().any(|node| matches!(&node.data,
-                crate::narrative_graph::NarrativeNodeData::InventoryAdd {}
-                | crate::narrative_graph::NarrativeNodeData::InventoryRemove {}
-                | crate::narrative_graph::NarrativeNodeData::InventoryHas {}))
-            {
+            if graph.nodes.iter().any(|node| {
+                matches!(
+                    &node.data,
+                    crate::narrative_graph::NarrativeNodeData::InventoryAdd {}
+                        | crate::narrative_graph::NarrativeNodeData::InventoryRemove {}
+                        | crate::narrative_graph::NarrativeNodeData::InventoryHas {}
+                )
+            }) {
                 let mut runtime_entities = entities::runtime_entities(&index.entities);
-                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.templates)
-                    .map_err(|error| format!("Inventory validation failed: {error}"))?;
+                crate::inventory::project_inventory_entities(
+                    &mut runtime_entities,
+                    &index.templates,
+                )
+                .map_err(|error| format!("Inventory validation failed: {error}"))?;
                 crate::inventory::validate_inventory_graph(&graph, &runtime_entities)
                     .map_err(|error| format!("Inventory validation failed: {error}"))?;
             }
-            if crate::tree_pointer::uses_pointer(&graph) || storylet.precondition_graph.as_ref().is_some_and(crate::tree_pointer::uses_pointer) {
+            if crate::tree_pointer::uses_pointer(&graph)
+                || storylet
+                    .precondition_graph
+                    .as_ref()
+                    .is_some_and(crate::tree_pointer::uses_pointer)
+            {
                 let mut runtime_entities = entities::runtime_entities(&index.entities);
-                crate::inventory::project_inventory_entities(&mut runtime_entities, &index.templates)?;
-                crate::tree_pointer::project_tree_entities(&mut runtime_entities, &index.templates)?;
-                crate::tree_pointer::validate_pointer_graph(&graph, &runtime_entities, &index.templates)
-                    .map_err(|error| format!("Tree position validation failed: {error}"))?;
+                crate::inventory::project_inventory_entities(
+                    &mut runtime_entities,
+                    &index.templates,
+                )?;
+                crate::tree_pointer::project_tree_entities(
+                    &mut runtime_entities,
+                    &index.templates,
+                )?;
+                crate::tree_pointer::validate_pointer_graph(
+                    &graph,
+                    &runtime_entities,
+                    &index.templates,
+                )
+                .map_err(|error| format!("Tree position validation failed: {error}"))?;
                 if let Some(precondition) = &storylet.precondition_graph {
-                    crate::tree_pointer::validate_pointer_graph(precondition, &runtime_entities, &index.templates)
-                        .map_err(|error| format!("Tree position validation failed: {error}"))?;
+                    crate::tree_pointer::validate_pointer_graph(
+                        precondition,
+                        &runtime_entities,
+                        &index.templates,
+                    )
+                    .map_err(|error| format!("Tree position validation failed: {error}"))?;
                 }
             }
             storylet.ending = graph.ending_from_graph();
@@ -540,14 +670,25 @@ impl StudioService {
         }
         let inner = self.inner.lock().await;
         if entity == "entities" {
-            let index = build_workspace_index(&inner.store).map_err(ContentDeleteError::Persistence)?;
+            let index =
+                build_workspace_index(&inner.store).map_err(ContentDeleteError::Persistence)?;
             let issues = crate::tree_graph::validate_tree_graphs(&index, None, Some(id));
-            if !issues.is_empty() { return Err(ContentDeleteError::Conflict(issues.join("; "))); }
+            if !issues.is_empty() {
+                return Err(ContentDeleteError::Conflict(issues.join("; ")));
+            }
             let exists = index.entities.iter().any(|record| record.id == id);
             if exists {
-                let storylets = inner.store.list_storylets().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
-                crate::tree_pointer::validate_owner_references(id, None, &index.templates, &storylets)
-                    .map_err(ContentDeleteError::Conflict)?;
+                let storylets = inner
+                    .store
+                    .list_storylets()
+                    .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
+                crate::tree_pointer::validate_owner_references(
+                    id,
+                    None,
+                    &index.templates,
+                    &storylets,
+                )
+                .map_err(ContentDeleteError::Conflict)?;
             }
         }
         if entity == "storylets" {
@@ -585,8 +726,8 @@ impl StudioService {
                 .iter()
                 .filter(|candidate| candidate.parent_id.as_deref() == Some(id))
                 .count();
-            let items = count_items_in_folder(&inner.store, id)
-                .map_err(ContentDeleteError::Persistence)?;
+            let items =
+                count_items_in_folder(&inner.store, id).map_err(ContentDeleteError::Persistence)?;
             if subfolders > 0 || items > 0 {
                 return Err(ContentDeleteError::Conflict(format!(
                     "Folder '{}' is not empty ({subfolders} subfolders, {items} items)",
@@ -619,11 +760,18 @@ impl StudioService {
                         "System traits cannot be deleted".into(),
                     ));
                 }
-                if template.as_ref().is_some_and(|template| matches!(template.key.as_str(), "tree_graph" | "tree_item"))
-                    && inner.store.list_entities().map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
-                        .iter().any(|record| record.traits.iter().any(|trait_| trait_.template_id == id))
+                if template.as_ref().is_some_and(|template| {
+                    matches!(template.key.as_str(), "tree_graph" | "tree_item")
+                }) && inner
+                    .store
+                    .list_entities()
+                    .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?
+                    .iter()
+                    .any(|record| record.traits.iter().any(|trait_| trait_.template_id == id))
                 {
-                    return Err(ContentDeleteError::Conflict("Cannot delete a tree trait used by an entity".into()));
+                    return Err(ContentDeleteError::Conflict(
+                        "Cannot delete a tree trait used by an entity".into(),
+                    ));
                 }
             }
             if entity == "gameplay_tags" {
@@ -631,20 +779,19 @@ impl StudioService {
                     .store
                     .list_gameplay_tags()
                     .map_err(|error| ContentDeleteError::Persistence(error.to_string()))?;
-                let tag = tags
-                    .iter()
-                    .find(|tag| tag.id == id)
-                    .ok_or_else(|| ContentDeleteError::Conflict(format!("Gameplay tag '{id}' not found")))?;
+                let tag = tags.iter().find(|tag| tag.id == id).ok_or_else(|| {
+                    ContentDeleteError::Conflict(format!("Gameplay tag '{id}' not found"))
+                })?;
                 if tag.protected {
-                    return Err(ContentDeleteError::Conflict(format!("Cannot delete protected gameplay tag '{}'", tag.name)));
+                    return Err(ContentDeleteError::Conflict(format!(
+                        "Cannot delete protected gameplay tag '{}'",
+                        tag.name
+                    )));
                 }
                 if tags.iter().any(|child| {
-                    child
-                        .name
-                        .get(..tag.name.len() + 1)
-                        .is_some_and(|prefix| {
-                            prefix.eq_ignore_ascii_case(&format!("{}.", tag.name))
-                        })
+                    child.name.get(..tag.name.len() + 1).is_some_and(|prefix| {
+                        prefix.eq_ignore_ascii_case(&format!("{}.", tag.name))
+                    })
                 }) {
                     return Err(ContentDeleteError::Conflict(format!(
                         "Cannot delete gameplay tag '{}': child tags still exist",
@@ -652,13 +799,12 @@ impl StudioService {
                     )));
                 }
             }
-            let references = collect_references(&inner, entity, id)
-                .map_err(ContentDeleteError::Persistence)?;
+            let references =
+                collect_references(&inner, entity, id).map_err(ContentDeleteError::Persistence)?;
             let direct: Vec<&ContentReference> = references
                 .iter()
                 .filter(|reference| {
-                    entity == "gameplay_tags"
-                        || reference.via == crate::contracts::ReferenceVia::Id
+                    entity == "gameplay_tags" || reference.via == crate::contracts::ReferenceVia::Id
                 })
                 .collect();
             if !direct.is_empty() {
@@ -730,10 +876,7 @@ impl StudioService {
             if let Some(object) = candidate.as_object_mut() {
                 object.insert(
                     "parent_id".into(),
-                    target
-                        .clone()
-                        .map(Value::String)
-                        .unwrap_or(Value::Null),
+                    target.clone().map(Value::String).unwrap_or(Value::Null),
                 );
             }
             let prepared = entities::prepare_folder(&candidate, Some(&stored), &index)?;
@@ -743,10 +886,7 @@ impl StudioService {
             if let Some(object) = value.as_object_mut() {
                 object.insert(
                     "folder_id".into(),
-                    target
-                        .clone()
-                        .map(Value::String)
-                        .unwrap_or(Value::Null),
+                    target.clone().map(Value::String).unwrap_or(Value::Null),
                 );
             }
         }
@@ -774,11 +914,12 @@ impl StudioService {
             return Err("Unsupported reference kind".into());
         }
         let inner = self.inner.lock().await;
-        if kind != "storylets" && inner
-            .store
-            .get_content_json(kind, id)
-            .map_err(|error| error.to_string())?
-            .is_none()
+        if kind != "storylets"
+            && inner
+                .store
+                .get_content_json(kind, id)
+                .map_err(|error| error.to_string())?
+                .is_none()
         {
             return Err(format!("{kind} item '{id}' not found"));
         }
@@ -807,17 +948,13 @@ impl StudioService {
             .map_err(|e| format!("Invalid scenario format: {e}"))?;
 
         let inner = self.inner.lock().await;
-        let all_entities = inner
-            .store
-            .list_entities()
-            .map_err(|e| e.to_string())?;
+        let all_entities = inner.store.list_entities().map_err(|e| e.to_string())?;
         let trait_templates = inner
             .store
             .list_trait_templates()
             .map_err(|e| e.to_string())?;
         let runtime = persisted_runtime(&inner.store, &trait_templates, &all_entities)?;
-        let resolved =
-            resolve_scenario_start(&scenario, &runtime.locations, &runtime.characters);
+        let resolved = resolve_scenario_start(&scenario, &runtime.locations, &runtime.characters);
         serde_json::to_value(&resolved).map_err(|e| e.to_string())
     }
 
@@ -839,7 +976,6 @@ impl StudioService {
             event_types: vec!["canon".into(), "world".into()],
         }
     }
-
 
     pub async fn save_interaction_context(&self, context: &Value) -> Result<(), String> {
         let inner = self.inner.lock().await;
@@ -954,10 +1090,15 @@ fn prepare_gameplay_tag(
 ) -> Result<GameplayTagRecord, String> {
     let name = tag.name.trim().to_owned();
     let segments: Vec<&str> = name.split('.').collect();
-    if segments.iter().any(|segment| !entities::is_identifier(segment)) {
+    if segments
+        .iter()
+        .any(|segment| !entities::is_identifier(segment))
+    {
         return Err("Gameplay tag name must be a dot-separated identifier path".into());
     }
-    let tags = store.list_gameplay_tags().map_err(|error| error.to_string())?;
+    let tags = store
+        .list_gameplay_tags()
+        .map_err(|error| error.to_string())?;
     if tags.iter().any(|existing| {
         Some(existing.id.as_str()) != stored.map(|record| record.id.as_str())
             && existing.name.eq_ignore_ascii_case(&name)
@@ -965,7 +1106,9 @@ fn prepare_gameplay_tag(
         return Err(format!("Gameplay tag '{name}' already exists"));
     }
     if let Some((parent, _)) = name.rsplit_once('.')
-        && !tags.iter().any(|existing| existing.name.eq_ignore_ascii_case(parent))
+        && !tags
+            .iter()
+            .any(|existing| existing.name.eq_ignore_ascii_case(parent))
     {
         return Err(format!(
             "Gameplay tag parent '{parent}' must exist before creating '{name}'"
@@ -974,15 +1117,16 @@ fn prepare_gameplay_tag(
     if let Some(stored) = stored {
         if stored.name != name {
             if stored.protected {
-                return Err(format!("Protected gameplay tag '{}' cannot be renamed", stored.name));
+                return Err(format!(
+                    "Protected gameplay tag '{}' cannot be renamed",
+                    stored.name
+                ));
             }
             if tags.iter().any(|candidate| {
                 candidate
                     .name
                     .get(..stored.name.len() + 1)
-                    .is_some_and(|prefix| {
-                        prefix.eq_ignore_ascii_case(&format!("{}.", stored.name))
-                    })
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(&format!("{}.", stored.name)))
             }) {
                 return Err(format!(
                     "Gameplay tag '{}' cannot be renamed while child tags exist",
@@ -1019,16 +1163,16 @@ fn gameplay_tag_references_for_store(
     store: &Store,
     target: &GameplayTagRecord,
 ) -> Result<Vec<ContentReference>, String> {
-    let entities = store
-        .list_entities()
-        .map_err(|error| error.to_string())?;
+    let entities = store.list_entities().map_err(|error| error.to_string())?;
     let templates = store
         .list_trait_templates()
         .map_err(|error| error.to_string())?;
     let assets = store.list_assets().map_err(|error| error.to_string())?;
     let storylets = store.list_storylets().map_err(|error| error.to_string())?;
     let scenarios = store.list_scenarios().map_err(|error| error.to_string())?;
-    let gameplay_tags = store.list_gameplay_tags().map_err(|error| error.to_string())?;
+    let gameplay_tags = store
+        .list_gameplay_tags()
+        .map_err(|error| error.to_string())?;
     let context = ReferenceContext {
         entities: &entities,
         templates: &templates,
@@ -1045,7 +1189,9 @@ fn validate_storylet_gameplay_tags(
     storylet: &StoryletRecord,
     graph: &NarrativeGraph,
 ) -> Result<(), String> {
-    let tags = store.list_gameplay_tags().map_err(|error| error.to_string())?;
+    let tags = store
+        .list_gameplay_tags()
+        .map_err(|error| error.to_string())?;
     let is_registered = |name: &str| tags.iter().any(|tag| tag.name == name);
     for name in &storylet.location_tags {
         if !is_registered(name) {
@@ -1061,13 +1207,19 @@ fn validate_storylet_gameplay_tags(
                 parameter.param_name
             ));
         };
-        if !is_registered(&role) { return Err(format!("Storylet validation failed: gameplay tag '{role}' is not registered")); }
+        if !is_registered(&role) {
+            return Err(format!(
+                "Storylet validation failed: gameplay tag '{role}' is not registered"
+            ));
+        }
     }
 
     let events = store.list_events().map_err(|error| error.to_string())?;
     for node in &graph.nodes {
         if let crate::narrative_graph::NarrativeNodeData::Reveal { event_id, .. } = &node.data
-            && !events.iter().any(|event| event.id == *event_id && event.is_chronicle_entry())
+            && !events
+                .iter()
+                .any(|event| event.id == *event_id && event.is_chronicle_entry())
         {
             return Err(format!(
                 "Storylet validation failed: Reveal node \"{}\": event \"{event_id}\" is not a canon event with a story time",
@@ -1092,14 +1244,18 @@ fn validate_storylet_gameplay_tags(
                     "speaker_role" | "target_role" | "actor_role" | "action_target"
                 ) || (key == "target"
                     && object.get("kind").and_then(Value::as_str) == Some("idle_action"));
-                let tag_key = matches!(
-                    key.as_str(),
-                    "tag" | "emotion_tag" | "action_tag" | "emote"
-                );
+                let tag_key =
+                    matches!(key.as_str(), "tag" | "emotion_tag" | "action_tag" | "emote");
                 if role_key && name != "player" {
-                    if !tags.iter().any(|tag| tag.name == name) { return Err(format!("Storylet validation failed: gameplay tag '{name}' is not registered")); }
-                } else if tag_key {
-                    if !tags.iter().any(|tag| tag.name == name) { return Err(format!("Storylet validation failed: gameplay tag '{name}' is not registered")); }
+                    if !tags.iter().any(|tag| tag.name == name) {
+                        return Err(format!(
+                            "Storylet validation failed: gameplay tag '{name}' is not registered"
+                        ));
+                    }
+                } else if tag_key && !tags.iter().any(|tag| tag.name == name) {
+                    return Err(format!(
+                        "Storylet validation failed: gameplay tag '{name}' is not registered"
+                    ));
                 }
             }
             check_graph_tags(value, tags)?;

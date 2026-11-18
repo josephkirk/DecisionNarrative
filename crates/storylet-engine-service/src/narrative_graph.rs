@@ -1,4 +1,3 @@
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -154,9 +153,22 @@ pub enum NarrativeNodeData {
     Teleport {
         destination_storylet: String,
     },
-    Learn { fact_tag: String, kind: storylet_engine::chrono_participants::KnowKind, visibility: storylet_engine::chrono_runtime::Visibility },
-    Knows { holder: String, fact_tag: String, #[serde(default)] confirmed_only: bool },
-    Reveal { event_id: String, kind: storylet_engine::chrono_participants::KnowKind, visibility: storylet_engine::chrono_runtime::Visibility },
+    Learn {
+        fact_tag: String,
+        kind: storylet_engine::chrono_participants::KnowKind,
+        visibility: storylet_engine::chrono_runtime::Visibility,
+    },
+    Knows {
+        holder: String,
+        fact_tag: String,
+        #[serde(default)]
+        confirmed_only: bool,
+    },
+    Reveal {
+        event_id: String,
+        kind: storylet_engine::chrono_participants::KnowKind,
+        visibility: storylet_engine::chrono_runtime::Visibility,
+    },
     GoToLocation {
         location_id: String,
     },
@@ -221,9 +233,6 @@ fn default_property_operation() -> String {
     "set".into()
 }
 
-
-
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChoiceOption {
     pub id: String,
@@ -233,10 +242,6 @@ pub struct ChoiceOption {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Value>,
 }
-
-
-
-
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -609,15 +614,25 @@ impl NarrativeGraph {
                 issues.push(format!("Edge {} references a missing node.", edge.id));
                 continue;
             }
-            let source = self.nodes.iter().find(|node| node.id == edge.from_node).unwrap();
-            let target = self.nodes.iter().find(|node| node.id == edge.to_node).unwrap();
+            let source = self
+                .nodes
+                .iter()
+                .find(|node| node.id == edge.from_node)
+                .unwrap();
+            let target = self
+                .nodes
+                .iter()
+                .find(|node| node.id == edge.to_node)
+                .unwrap();
             match edge.kind {
                 NarrativeEdgeKind::Flow => {
                     let valid_target = !matches!(
                         &target.data,
                         NarrativeNodeData::GetEntity { .. }
                             | NarrativeNodeData::GetEntityProperty { .. }
-                            | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::InventoryHas {}
+                            | NarrativeNodeData::HasEntityTag { .. }
+                            | NarrativeNodeData::Knows { .. }
+                            | NarrativeNodeData::InventoryHas {}
                             | NarrativeNodeData::And {}
                             | NarrativeNodeData::Or {}
                             | NarrativeNodeData::Compare { .. }
@@ -625,7 +640,9 @@ impl NarrativeGraph {
                     let valid_source = match &source.data {
                         NarrativeNodeData::GetEntity { .. }
                         | NarrativeNodeData::GetEntityProperty { .. }
-                        | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::InventoryHas {}
+                        | NarrativeNodeData::HasEntityTag { .. }
+                        | NarrativeNodeData::Knows { .. }
+                        | NarrativeNodeData::InventoryHas {}
                         | NarrativeNodeData::And {}
                         | NarrativeNodeData::Or {}
                         | NarrativeNodeData::Compare { .. } => false,
@@ -638,38 +655,61 @@ impl NarrativeGraph {
                         }
                         NarrativeNodeData::WaypointConversation { topic_nodes, .. } => {
                             topic_nodes.iter().any(|topic| {
-                                topic.get("triggers_scene_exit").and_then(Value::as_bool) == Some(true)
-                                    && topic.get("exit_output_pin").and_then(Value::as_str) == Some(edge.from_port.as_str())
+                                topic.get("triggers_scene_exit").and_then(Value::as_bool)
+                                    == Some(true)
+                                    && topic.get("exit_output_pin").and_then(Value::as_str)
+                                        == Some(edge.from_port.as_str())
                             })
                         }
                         _ => edge.from_port == "output",
                     };
                     if !valid_target || !valid_source {
-                        issues.push(format!("Flow edge {} uses an invalid source or target port.", edge.id));
+                        issues.push(format!(
+                            "Flow edge {} uses an invalid source or target port.",
+                            edge.id
+                        ));
                     }
-                    outgoing.entry(edge.from_node.clone()).or_default().push(edge.to_node.clone());
-                    incoming.entry(edge.to_node.clone()).or_default().push(edge.from_node.clone());
+                    outgoing
+                        .entry(edge.from_node.clone())
+                        .or_default()
+                        .push(edge.to_node.clone());
+                    incoming
+                        .entry(edge.to_node.clone())
+                        .or_default()
+                        .push(edge.from_node.clone());
                 }
                 NarrativeEdgeKind::Data => {
                     let source_type = match &source.data {
                         NarrativeNodeData::GetEntity { .. } => Some(("output", "entity_ref")),
                         NarrativeNodeData::GetEntityProperty { value_type, .. } => Some((
                             "output",
-                            if value_type == "entity" { "entity_ref" } else { value_type.as_str() },
+                            if value_type == "entity" {
+                                "entity_ref"
+                            } else {
+                                value_type.as_str()
+                            },
                         )),
-                        NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. } | NarrativeNodeData::InventoryHas {}
+                        NarrativeNodeData::HasEntityTag { .. }
+                        | NarrativeNodeData::Knows { .. }
+                        | NarrativeNodeData::InventoryHas {}
                         | NarrativeNodeData::And {}
                         | NarrativeNodeData::Or {}
                         | NarrativeNodeData::Compare { .. } => Some(("output", "bool")),
                         _ => None,
                     };
                     let target_type = match &target.data {
-                        NarrativeNodeData::GetEntityProperty { .. } => Some(("entity", "entity_ref")),
-                        NarrativeNodeData::SetEntityProperty { .. } => match edge.to_port.as_str() {
-                            "entity" => Some(("entity", "entity_ref")),
-                            _ => None,
-                        },
-                        NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {} => match edge.to_port.as_str() {
+                        NarrativeNodeData::GetEntityProperty { .. } => {
+                            Some(("entity", "entity_ref"))
+                        }
+                        NarrativeNodeData::SetEntityProperty { .. } => {
+                            match edge.to_port.as_str() {
+                                "entity" => Some(("entity", "entity_ref")),
+                                _ => None,
+                            }
+                        }
+                        NarrativeNodeData::InventoryAdd {}
+                        | NarrativeNodeData::InventoryRemove {}
+                        | NarrativeNodeData::InventoryHas {} => match edge.to_port.as_str() {
                             "entity" => Some(("entity", "entity_ref")),
                             "item" => Some(("item", "entity_ref")),
                             _ => None,
@@ -680,28 +720,42 @@ impl NarrativeGraph {
                             "target" => Some(("target", "entity_ref")),
                             _ => None,
                         },
-                        NarrativeNodeData::Condition {} | NarrativeNodeData::And {} | NarrativeNodeData::Or {} => Some(("input", "bool")),
+                        NarrativeNodeData::Condition {}
+                        | NarrativeNodeData::And {}
+                        | NarrativeNodeData::Or {} => Some(("input", "bool")),
                         NarrativeNodeData::Compare { .. } => Some(("input", "any")),
                         _ => None,
                     };
                     if source_type.is_none_or(|(port, _)| edge.from_port != port)
                         || target_type.is_none_or(|(port, _)| edge.to_port != port)
-                        || source_type.zip(target_type).is_some_and(|((_, actual), (_, expected))| {
-                            expected != "any" && actual != expected
-                        })
+                        || source_type.zip(target_type).is_some_and(
+                            |((_, actual), (_, expected))| expected != "any" && actual != expected,
+                        )
                     {
-                        issues.push(format!("Data edge {} uses an invalid port or incompatible type.", edge.id));
+                        issues.push(format!(
+                            "Data edge {} uses an invalid port or incompatible type.",
+                            edge.id
+                        ));
                     }
                     if let (
-                        NarrativeNodeData::GetEntityProperty { value_type: source_type, .. },
-                        NarrativeNodeData::Compare { operator, value_type, value },
+                        NarrativeNodeData::GetEntityProperty {
+                            value_type: source_type,
+                            ..
+                        },
+                        NarrativeNodeData::Compare {
+                            operator,
+                            value_type,
+                            value,
+                        },
                     ) = (&source.data, &target.data)
                     {
                         let compatible = match value_type.as_str() {
                             "bool" | "boolean" => source_type == "bool" || source_type == "boolean",
                             "int" | "integer" => matches!(source_type.as_str(), "int" | "integer"),
                             "float" => matches!(source_type.as_str(), "float" | "number"),
-                            "string" | "asset" | "entity" | "entity_ref" => source_type == value_type,
+                            "string" | "asset" | "entity" | "entity_ref" => {
+                                source_type == value_type
+                            }
                             _ => true,
                         };
                         let ordered = matches!(operator.as_str(), "gt" | "gte" | "lt" | "lte");
@@ -744,23 +798,35 @@ impl NarrativeGraph {
                 if let Some(next) = outgoing.get(&id) {
                     queue.extend(next.iter().cloned());
                 }
-                let consumes_data = self.nodes.iter().find(|node| node.id == id).is_some_and(|node| {
-                    matches!(
-                        &node.data,
-                        NarrativeNodeData::Condition {}
-                            | NarrativeNodeData::GetEntityProperty { .. }
-                            | NarrativeNodeData::SetEntityProperty { .. }
-                            | NarrativeNodeData::And {}
-                            | NarrativeNodeData::Or {}
-                            | NarrativeNodeData::Compare { .. }
-                            | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
-                            | NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {}
-                    )
-                });
+                let consumes_data =
+                    self.nodes
+                        .iter()
+                        .find(|node| node.id == id)
+                        .is_some_and(|node| {
+                            matches!(
+                                &node.data,
+                                NarrativeNodeData::Condition {}
+                                    | NarrativeNodeData::GetEntityProperty { .. }
+                                    | NarrativeNodeData::SetEntityProperty { .. }
+                                    | NarrativeNodeData::And {}
+                                    | NarrativeNodeData::Or {}
+                                    | NarrativeNodeData::Compare { .. }
+                                    | NarrativeNodeData::HasEntityTag { .. }
+                                    | NarrativeNodeData::Knows { .. }
+                                    | NarrativeNodeData::InventoryAdd {}
+                                    | NarrativeNodeData::InventoryRemove {}
+                                    | NarrativeNodeData::InventoryHas {}
+                            )
+                        });
                 if consumes_data {
-                    queue.extend(self.edges.iter().filter(|edge| {
-                        edge.to_node == id && edge.kind == NarrativeEdgeKind::Data
-                    }).map(|edge| edge.from_node.clone()));
+                    queue.extend(
+                        self.edges
+                            .iter()
+                            .filter(|edge| {
+                                edge.to_node == id && edge.kind == NarrativeEdgeKind::Data
+                            })
+                            .map(|edge| edge.from_node.clone()),
+                    );
                 }
             }
             seen
@@ -774,23 +840,33 @@ impl NarrativeGraph {
             if let Some(sources) = incoming.get(&id) {
                 end_queue.extend(sources.iter().cloned());
             }
-            let consumes_data = self.nodes.iter().find(|node| node.id == id).is_some_and(|node| {
-                matches!(
-                    &node.data,
-                    NarrativeNodeData::Condition {}
-                        | NarrativeNodeData::GetEntityProperty { .. }
-                        | NarrativeNodeData::SetEntityProperty { .. }
-                        | NarrativeNodeData::And {}
-                        | NarrativeNodeData::Or {}
-                        | NarrativeNodeData::Compare { .. }
-                        | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
-                        | NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {}
-                )
-            });
+            let consumes_data = self
+                .nodes
+                .iter()
+                .find(|node| node.id == id)
+                .is_some_and(|node| {
+                    matches!(
+                        &node.data,
+                        NarrativeNodeData::Condition {}
+                            | NarrativeNodeData::GetEntityProperty { .. }
+                            | NarrativeNodeData::SetEntityProperty { .. }
+                            | NarrativeNodeData::And {}
+                            | NarrativeNodeData::Or {}
+                            | NarrativeNodeData::Compare { .. }
+                            | NarrativeNodeData::HasEntityTag { .. }
+                            | NarrativeNodeData::Knows { .. }
+                            | NarrativeNodeData::InventoryAdd {}
+                            | NarrativeNodeData::InventoryRemove {}
+                            | NarrativeNodeData::InventoryHas {}
+                    )
+                });
             if consumes_data {
-                end_queue.extend(self.edges.iter().filter(|edge| {
-                    edge.to_node == id && edge.kind == NarrativeEdgeKind::Data
-                }).map(|edge| edge.from_node.clone()));
+                end_queue.extend(
+                    self.edges
+                        .iter()
+                        .filter(|edge| edge.to_node == id && edge.kind == NarrativeEdgeKind::Data)
+                        .map(|edge| edge.from_node.clone()),
+                );
             }
         }
         if self.nodes.iter().any(|node| !reachable.contains(&node.id)) {
@@ -809,30 +885,46 @@ impl NarrativeGraph {
                 .iter()
                 .filter(|edge| edge.from_node == node.id && edge.kind == NarrativeEdgeKind::Flow)
                 .collect();
-            if let NarrativeNodeData::Image { image_url } = &node.data {
-                if image_url
+            if let NarrativeNodeData::Image { image_url } = &node.data
+                && image_url
                     .as_deref()
                     .is_none_or(|url| !is_safe_image_url(url))
-                {
-                    issues.push(format!(
-                        "Image node {} must have a safe HTTP(S) URL or project-relative path.",
-                        node.title
-                    ));
-                }
+            {
+                issues.push(format!(
+                    "Image node {} must have a safe HTTP(S) URL or project-relative path.",
+                    node.title
+                ));
             }
             match &node.data {
-                NarrativeNodeData::Learn { fact_tag, .. } | NarrativeNodeData::Knows { fact_tag, .. } => {
+                NarrativeNodeData::Learn { fact_tag, .. }
+                | NarrativeNodeData::Knows { fact_tag, .. } => {
                     if matches!(node.data, NarrativeNodeData::Knows { .. }) {
-                        let count = self.edges.iter().filter(|edge| edge.from_node == node.id && edge.kind == NarrativeEdgeKind::Data).count();
-                        if count != 1 { issues.push(format!("Knows node {} must have exactly one outgoing boolean data connection.", node.title)); }
+                        let count = self
+                            .edges
+                            .iter()
+                            .filter(|edge| {
+                                edge.from_node == node.id && edge.kind == NarrativeEdgeKind::Data
+                            })
+                            .count();
+                        if count != 1 {
+                            issues.push(format!("Knows node {} must have exactly one outgoing boolean data connection.", node.title));
+                        }
                     }
                     if !fact_tag.starts_with("fact.") || fact_tag.len() <= 5 {
-                        issues.push(format!("{} node \"{}\": fact tag \"{}\" must be under \"fact.\"", node_type_name(&node.data), node.title, fact_tag));
+                        issues.push(format!(
+                            "{} node \"{}\": fact tag \"{}\" must be under \"fact.\"",
+                            node_type_name(&node.data),
+                            node.title,
+                            fact_tag
+                        ));
                     }
                 }
                 NarrativeNodeData::Reveal { event_id, .. } => {
                     if event_id.trim().is_empty() {
-                        issues.push(format!("Reveal node \"{}\" must select a canon event.", node.title));
+                        issues.push(format!(
+                            "Reveal node \"{}\" must select a canon event.",
+                            node.title
+                        ));
                     }
                 }
                 NarrativeNodeData::GoToLocation { location_id } => {
@@ -973,35 +1065,77 @@ impl NarrativeGraph {
                 }
                 NarrativeNodeData::GetEntity { entity_path } => {
                     if entity_path.trim().is_empty() {
-                        issues.push(format!("Get Entity node {} must select an Entity.", node.title));
+                        issues.push(format!(
+                            "Get Entity node {} must select an Entity.",
+                            node.title
+                        ));
                     }
                     if !edges.is_empty() {
-                        issues.push(format!("Get Entity node {} must not have outgoing Flow edges.", node.title));
+                        issues.push(format!(
+                            "Get Entity node {} must not have outgoing Flow edges.",
+                            node.title
+                        ));
                     }
                 }
-                NarrativeNodeData::GetEntityProperty { property_key, value_type, .. } => {
+                NarrativeNodeData::GetEntityProperty {
+                    property_key,
+                    value_type,
+                    ..
+                } => {
                     if property_key.trim().is_empty() {
-                        issues.push(format!("Get Entity Property node {} must specify a property key.", node.title));
+                        issues.push(format!(
+                            "Get Entity Property node {} must specify a property key.",
+                            node.title
+                        ));
                     }
-                    if !matches!(value_type.as_str(), "bool" | "int" | "float" | "string" | "asset" | "entity") {
-                        issues.push(format!("Get Entity Property node {} has an unsupported value type.", node.title));
+                    if !matches!(
+                        value_type.as_str(),
+                        "bool" | "int" | "float" | "string" | "asset" | "entity"
+                    ) {
+                        issues.push(format!(
+                            "Get Entity Property node {} has an unsupported value type.",
+                            node.title
+                        ));
                     }
-                    let inputs = self.edges.iter().filter(|edge| {
-                        edge.to_node == node.id && edge.to_port == "entity" && edge.kind == NarrativeEdgeKind::Data
-                    }).count();
+                    let inputs = self
+                        .edges
+                        .iter()
+                        .filter(|edge| {
+                            edge.to_node == node.id
+                                && edge.to_port == "entity"
+                                && edge.kind == NarrativeEdgeKind::Data
+                        })
+                        .count();
                     if inputs != 1 {
-                        issues.push(format!("Get Entity Property node {} must have exactly one Entity data input.", node.title));
+                        issues.push(format!(
+                            "Get Entity Property node {} must have exactly one Entity data input.",
+                            node.title
+                        ));
                     }
                     if !edges.is_empty() {
-                        issues.push(format!("Get Entity Property node {} must not have outgoing Flow edges.", node.title));
+                        issues.push(format!(
+                            "Get Entity Property node {} must not have outgoing Flow edges.",
+                            node.title
+                        ));
                     }
                 }
-                NarrativeNodeData::SetEntityProperty { property_key, operation, value_type, value } => {
+                NarrativeNodeData::SetEntityProperty {
+                    property_key,
+                    operation,
+                    value_type,
+                    value,
+                } => {
                     if property_key.trim().is_empty() {
-                        issues.push(format!("Apply Command node {} must specify a property key.", node.title));
+                        issues.push(format!(
+                            "Apply Command node {} must specify a property key.",
+                            node.title
+                        ));
                     }
                     if !matches!(operation.as_str(), "set" | "add" | "subtract" | "toggle") {
-                        issues.push(format!("Apply Command node {} has an unsupported operation.", node.title));
+                        issues.push(format!(
+                            "Apply Command node {} has an unsupported operation.",
+                            node.title
+                        ));
                     }
                     let literal_ok = match value_type.as_str() {
                         "bool" => value.is_boolean(),
@@ -1011,32 +1145,75 @@ impl NarrativeGraph {
                         _ => false,
                     };
                     if !literal_ok {
-                        issues.push(format!("Apply Command node {} has an invalid literal for its value type.", node.title));
+                        issues.push(format!(
+                            "Apply Command node {} has an invalid literal for its value type.",
+                            node.title
+                        ));
                     }
                     if operation == "toggle" && value_type != "bool" {
-                        issues.push(format!("Apply Command node {} can only toggle boolean properties.", node.title));
+                        issues.push(format!(
+                            "Apply Command node {} can only toggle boolean properties.",
+                            node.title
+                        ));
                     }
                     if matches!(operation.as_str(), "add" | "subtract")
                         && !matches!(value_type.as_str(), "int" | "float")
                     {
-                        issues.push(format!("Apply Command node {} can only add or subtract numeric properties.", node.title));
+                        issues.push(format!(
+                            "Apply Command node {} can only add or subtract numeric properties.",
+                            node.title
+                        ));
                     }
-                    let inputs = self.edges.iter().filter(|edge| {
-                        edge.to_node == node.id && edge.to_port == "entity" && edge.kind == NarrativeEdgeKind::Data
-                    }).count();
+                    let inputs = self
+                        .edges
+                        .iter()
+                        .filter(|edge| {
+                            edge.to_node == node.id
+                                && edge.to_port == "entity"
+                                && edge.kind == NarrativeEdgeKind::Data
+                        })
+                        .count();
                     if inputs != 1 {
-                        issues.push(format!("Apply Command node {} must have exactly one Entity data input.", node.title));
+                        issues.push(format!(
+                            "Apply Command node {} must have exactly one Entity data input.",
+                            node.title
+                        ));
                     }
                     require_default_output(&mut issues, &node.title, &edges);
                 }
-                NarrativeNodeData::InventoryAdd {} | NarrativeNodeData::InventoryRemove {} | NarrativeNodeData::InventoryHas {} => {
+                NarrativeNodeData::InventoryAdd {}
+                | NarrativeNodeData::InventoryRemove {}
+                | NarrativeNodeData::InventoryHas {} => {
                     for port in ["entity", "item"] {
-                        let inputs = self.edges.iter().filter(|edge| edge.to_node == node.id && edge.to_port == port && edge.kind == NarrativeEdgeKind::Data).count();
-                        if inputs != 1 { issues.push(format!("Inventory node {} must have exactly one {port} entity input.", node.title)); }
+                        let inputs = self
+                            .edges
+                            .iter()
+                            .filter(|edge| {
+                                edge.to_node == node.id
+                                    && edge.to_port == port
+                                    && edge.kind == NarrativeEdgeKind::Data
+                            })
+                            .count();
+                        if inputs != 1 {
+                            issues.push(format!(
+                                "Inventory node {} must have exactly one {port} entity input.",
+                                node.title
+                            ));
+                        }
                     }
                     if matches!(&node.data, NarrativeNodeData::InventoryHas {}) {
-                        let outputs = self.edges.iter().filter(|edge| edge.from_node == node.id && edge.kind == NarrativeEdgeKind::Data && edge.from_port == "output").count();
-                        if outputs != 1 || !edges.is_empty() { issues.push(format!("Has Item node {} must have exactly one boolean output and no flow output.", node.title)); }
+                        let outputs = self
+                            .edges
+                            .iter()
+                            .filter(|edge| {
+                                edge.from_node == node.id
+                                    && edge.kind == NarrativeEdgeKind::Data
+                                    && edge.from_port == "output"
+                            })
+                            .count();
+                        if outputs != 1 || !edges.is_empty() {
+                            issues.push(format!("Has Item node {} must have exactly one boolean output and no flow output.", node.title));
+                        }
                     } else {
                         require_default_output(&mut issues, &node.title, &edges);
                     }
@@ -1052,8 +1229,14 @@ impl NarrativeGraph {
                             node.title
                         ));
                     }
-                    if !matches!(operator.as_str(), "eq" | "neq" | "gt" | "gte" | "lt" | "lte") {
-                        issues.push(format!("Compare node {} has an unsupported operator.", node.title));
+                    if !matches!(
+                        operator.as_str(),
+                        "eq" | "neq" | "gt" | "gte" | "lt" | "lte"
+                    ) {
+                        issues.push(format!(
+                            "Compare node {} has an unsupported operator.",
+                            node.title
+                        ));
                     }
                     if !typed_literal_matches(value_type, value) {
                         issues.push(format!(
@@ -1072,52 +1255,89 @@ impl NarrativeGraph {
                 }
                 NarrativeNodeData::HasEntityTag { tag, .. } => {
                     if tag.trim().is_empty() {
-                        issues.push(format!("Has Entity Tag node {} must specify a tag.", node.title));
+                        issues.push(format!(
+                            "Has Entity Tag node {} must specify a tag.",
+                            node.title
+                        ));
                     }
-                    let outputs = self.edges.iter().filter(|edge| {
-                        edge.from_node == node.id && edge.kind == NarrativeEdgeKind::Data
-                    }).count();
+                    let outputs = self
+                        .edges
+                        .iter()
+                        .filter(|edge| {
+                            edge.from_node == node.id && edge.kind == NarrativeEdgeKind::Data
+                        })
+                        .count();
                     if outputs != 1 {
                         issues.push(format!("Has Entity Tag node {} must have exactly one outgoing boolean data connection.", node.title));
                     }
                     if !edges.is_empty() {
-                        issues.push(format!("Has Entity Tag node {} must not have outgoing Flow edges.", node.title));
+                        issues.push(format!(
+                            "Has Entity Tag node {} must not have outgoing Flow edges.",
+                            node.title
+                        ));
                     }
                 }
                 NarrativeNodeData::Choice { choices } => {
                     for index in 0..choices.len() {
                         let port = format!("choice_{index}");
                         if edges.iter().filter(|edge| edge.from_port == port).count() != 1 {
-                            issues.push(format!("Choice node {} must have exactly one outgoing edge for branch {}.", node.title, index));
+                            issues.push(format!(
+                                "Choice node {} must have exactly one outgoing edge for branch {}.",
+                                node.title, index
+                            ));
                         }
                     }
                     if edges.iter().any(|edge| {
-                        !choices.iter().enumerate().any(|(index, _)| edge.from_port == format!("choice_{index}"))
+                        !choices
+                            .iter()
+                            .enumerate()
+                            .any(|(index, _)| edge.from_port == format!("choice_{index}"))
                     }) {
-                        issues.push(format!("Choice node {} has an unknown branch output.", node.title));
+                        issues.push(format!(
+                            "Choice node {} has an unknown branch output.",
+                            node.title
+                        ));
                     }
                 }
                 NarrativeNodeData::Condition {} => {
-                    let inputs = self.edges.iter().filter(|edge| {
-                        edge.to_node == node.id && edge.kind == NarrativeEdgeKind::Data
-                    }).count();
+                    let inputs = self
+                        .edges
+                        .iter()
+                        .filter(|edge| {
+                            edge.to_node == node.id && edge.kind == NarrativeEdgeKind::Data
+                        })
+                        .count();
                     if inputs != 1 {
-                        issues.push(format!("Condition node {} must have exactly one incoming boolean data input.", node.title));
+                        issues.push(format!(
+                            "Condition node {} must have exactly one incoming boolean data input.",
+                            node.title
+                        ));
                     }
                     for port in ["true", "false"] {
                         if edges.iter().filter(|edge| edge.from_port == port).count() != 1 {
-                            issues.push(format!("Condition node {} must have exactly one outgoing {} branch.", node.title, port));
+                            issues.push(format!(
+                                "Condition node {} must have exactly one outgoing {} branch.",
+                                node.title, port
+                            ));
                         }
                     }
-                    if edges.iter().any(|edge| !matches!(edge.from_port.as_str(), "true" | "false")) {
-                        issues.push(format!("Condition node {} has an unknown flow output pin.", node.title));
+                    if edges
+                        .iter()
+                        .any(|edge| !matches!(edge.from_port.as_str(), "true" | "false"))
+                    {
+                        issues.push(format!(
+                            "Condition node {} has an unknown flow output pin.",
+                            node.title
+                        ));
                     }
                 }
                 NarrativeNodeData::And {} | NarrativeNodeData::Or {} => {
                     let inputs = self
                         .edges
                         .iter()
-                        .filter(|edge| edge.to_node == node.id && edge.kind == NarrativeEdgeKind::Data)
+                        .filter(|edge| {
+                            edge.to_node == node.id && edge.kind == NarrativeEdgeKind::Data
+                        })
                         .count();
                     if inputs < 2 {
                         issues.push(format!(
@@ -1127,10 +1347,14 @@ impl NarrativeGraph {
                         ));
                     }
                     if !edges.is_empty() {
-                        issues.push(format!("{} node {} must not have outgoing Flow edges.", node_type_name(&node.data), node.title));
+                        issues.push(format!(
+                            "{} node {} must not have outgoing Flow edges.",
+                            node_type_name(&node.data),
+                            node.title
+                        ));
                     }
                 }
-                
+
                 NarrativeNodeData::SceneSection {
                     duration_ms,
                     events,
@@ -1167,7 +1391,7 @@ impl NarrativeGraph {
                     }
                     require_default_output(&mut issues, &node.title, &edges);
                 }
-                
+
                 NarrativeNodeData::End { .. } => {
                     if !edges.is_empty() {
                         issues.push("End cannot have outgoing edges.".into());
@@ -1238,13 +1462,19 @@ impl NarrativeGraph {
                 }
                 NarrativeNodeData::AddEntityTag { tag, .. } => {
                     if tag.trim().is_empty() {
-                        issues.push(format!("Add Entity Tag node {} must specify a tag.", node.title));
+                        issues.push(format!(
+                            "Add Entity Tag node {} must specify a tag.",
+                            node.title
+                        ));
                     }
                     require_default_output(&mut issues, &node.title, &edges);
                 }
                 NarrativeNodeData::RemoveEntityTag { tag, .. } => {
                     if tag.trim().is_empty() {
-                        issues.push(format!("Remove Entity Tag node {} must specify a tag.", node.title));
+                        issues.push(format!(
+                            "Remove Entity Tag node {} must specify a tag.",
+                            node.title
+                        ));
                     }
                     require_default_output(&mut issues, &node.title, &edges);
                 }
@@ -1281,7 +1511,8 @@ impl NarrativeGraph {
                     | NarrativeNodeData::GetEntity { .. }
                     | NarrativeNodeData::GetEntityProperty { .. }
                     | NarrativeNodeData::Compare { .. }
-                    | NarrativeNodeData::HasEntityTag { .. } | NarrativeNodeData::Knows { .. }
+                    | NarrativeNodeData::HasEntityTag { .. }
+                    | NarrativeNodeData::Knows { .. }
                     | NarrativeNodeData::And {}
                     | NarrativeNodeData::Or {}
                     | NarrativeNodeData::Condition {}
@@ -1295,14 +1526,19 @@ impl NarrativeGraph {
         if let Err(mut graph_issues) = self.validate_mode() {
             issues.append(&mut graph_issues);
         }
-        if issues.is_empty() { Ok(()) } else { Err(issues) }
+        if issues.is_empty() {
+            Ok(())
+        } else {
+            Err(issues)
+        }
     }
 
     pub fn from_storylet(st: &StoryletRecord) -> Self {
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
 
-        nodes.push(NarrativeNode { plugin: None,
+        nodes.push(NarrativeNode {
+            plugin: None,
             id: "node_start".into(),
             title: "Start".into(),
             x: 60,
@@ -1343,7 +1579,8 @@ impl NarrativeGraph {
             items: vec![opening_item],
         };
 
-        nodes.push(NarrativeNode { plugin: None,
+        nodes.push(NarrativeNode {
+            plugin: None,
             id: "node_dialog_1".into(),
             title: "Dialog".into(),
             x: 250,
@@ -1367,8 +1604,8 @@ impl NarrativeGraph {
             kind: NarrativeEdgeKind::Flow,
         });
 
-
-        nodes.push(NarrativeNode { plugin: None,
+        nodes.push(NarrativeNode {
+            plugin: None,
             id: "node_end".into(),
             title: "End".into(),
             x: 560,
@@ -1390,10 +1627,7 @@ impl NarrativeGraph {
             kind: NarrativeEdgeKind::Flow,
         });
 
-        Self {
-            nodes,
-            edges,
-        }
+        Self { nodes, edges }
     }
 
     pub fn ending_from_graph(&self) -> bool {
@@ -1462,13 +1696,13 @@ impl NarrativeGraph {
                                 }
                             }
                         }
-                    } else if let Some(t) = text {
-                        if !t.trim().is_empty() {
-                            prose_parts.push(t.trim().to_string());
-                        }
+                    } else if let Some(t) = text
+                        && !t.trim().is_empty()
+                    {
+                        prose_parts.push(t.trim().to_string());
                     }
                 }
-                
+
                 NarrativeNodeData::End { .. } => {}
                 _ => {}
             }
@@ -1479,11 +1713,8 @@ impl NarrativeGraph {
             st.content.scene_opening = Some(full_prose.clone());
             st.content.text_template = full_prose;
         }
-
-        
     }
 }
-
 
 #[cfg(test)]
 mod knowledge_authoring_tests {
@@ -1497,6 +1728,12 @@ mod knowledge_authoring_tests {
             {"id":"l","type":"learn","title":"Clue","fact_tag":"clue.x","kind":"evidence","visibility":"private","x":0,"y":0,"width":100,"height":100},
             {"id":"e","type":"end","title":"End","x":0,"y":0,"width":100,"height":100}
         ],"edges":[{"id":"a","from_node":"s","from_port":"output","to_node":"l","to_port":"input"},{"id":"b","from_node":"l","from_port":"output","to_node":"e","to_port":"input"}]})).unwrap();
-        assert!(graph.validate().unwrap_err().iter().any(|issue| issue.contains("must be under \"fact.\"")));
+        assert!(
+            graph
+                .validate()
+                .unwrap_err()
+                .iter()
+                .any(|issue| issue.contains("must be under \"fact.\""))
+        );
     }
 }

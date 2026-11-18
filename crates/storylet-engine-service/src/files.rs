@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 
 pub const MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
@@ -59,7 +58,11 @@ fn magic_matches(extension: &str, bytes: &[u8]) -> bool {
     }
 }
 
-pub fn store_thumbnail(root: &Path, original_name: &str, bytes: &[u8]) -> Result<String, FileError> {
+pub fn store_thumbnail(
+    root: &Path,
+    original_name: &str,
+    bytes: &[u8],
+) -> Result<String, FileError> {
     let extension = image_extension(original_name).ok_or_else(|| {
         FileError::Invalid("thumbnail must be a .png, .jpg, or .jpeg file".into())
     })?;

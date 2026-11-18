@@ -9,6 +9,7 @@ fn seeded_rng_repeats_the_prototype_sequence() {
     );
 }
 
+#[allow(dead_code)]
 #[path = "support/weirs_crossing.rs"]
 mod weirs_crossing;
 
@@ -278,8 +279,7 @@ fn stranding_detected_without_on_close_replays_the_recorded_actions() {
             .world()
             .participants
             .location
-            .iter()
-            .any(|place| *place == Some(weirs_crossing::ROCK))
+            .contains(&Some(weirs_crossing::ROCK))
     );
 }
 

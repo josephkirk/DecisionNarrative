@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 #[path = "support/weirs_crossing.rs"]
 mod weirs_crossing;
 
@@ -158,7 +159,6 @@ fn piece_together_requires_all_three_clues_from_the_actor() {
     );
     assert!(FlowGraphInstance::evaluate_precondition_graph_for(graph, &ctx, 0).unwrap());
     assert!(!FlowGraphInstance::evaluate_precondition_graph_for(graph, &ctx, 1).unwrap());
-    drop(ctx);
     world.knowledge.learn(KnowledgeRow {
         holder: 0,
         fact: content.registry.id("fact.benedek_identified").unwrap(),

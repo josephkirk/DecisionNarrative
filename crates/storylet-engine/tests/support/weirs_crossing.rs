@@ -15,7 +15,6 @@ use storylet_engine::run::RunContent;
 pub const WATCH_THE_WATER: u16 = 0;
 pub const LAMP_SOOT: u16 = 1;
 pub const ILSE_LOGBOOK: u16 = 2;
-pub const HARBOR_MASTER_TIDES: u16 = 3;
 pub const PRESS_TEODOR: u16 = 4;
 pub const TEODOR_LANTERN_MEMORY: u16 = 5;
 pub const CUSTOMS_LEDGER: u16 = 6;
@@ -26,8 +25,6 @@ pub const CONFRONT_BENEDEK: u16 = 10;
 pub const FIND_ILSE: u16 = 11;
 pub const BLUFF_BENEDEK: u16 = 12;
 pub const ENDING_LIGHT_RESTORED: u16 = 13;
-pub const ENDING_KEEPER_COMES_HOME: u16 = 14;
-pub const ENDING_LEDGER_WITH_A_NAME: u16 = 15;
 pub const ENDING_LOW_WATER: u16 = 16;
 
 pub const LIGHTHOUSE: u16 = 0;
@@ -35,10 +32,8 @@ pub const HARBOR: u16 = 1;
 pub const INN: u16 = 2;
 pub const CUSTOMS: u16 = 3;
 pub const ROCK: u16 = 4;
-pub const MARA: u16 = 0;
 pub const TEODOR: u16 = 1;
 pub const BENEDEK: u16 = 2;
-pub const ROSA: u16 = 3;
 
 const STORYLETS: [(&str, &str); 17] = [
     ("watch_the_water", "Watch the water"),
@@ -520,7 +515,7 @@ pub fn content() -> RunContent {
             .map(|(i, title)| (i as u16, (*title).to_string()))
             .collect(),
         entity_names: BTreeMap::from([(0, "Harbor".into()), (1, "Teodor".into())]),
-        storylet_location_tags: (0..5).map(|i| (i, harbor_mask.clone())).collect(),
+        storylet_location_tags: (0..5).map(|i| (i, harbor_mask)).collect(),
         start_storylet: WATCH_THE_WATER,
         initial_world: world,
         root_asset: FlowGraphAsset {

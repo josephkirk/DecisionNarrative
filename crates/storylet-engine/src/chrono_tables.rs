@@ -5,19 +5,14 @@ pub const INVALID_INDEX: u32 = u32::MAX;
 pub const MAX_INSTANCES: usize = 1024;
 pub const MAX_SCOPES: usize = 256;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum InstanceState {
+    #[default]
     Pending,
     Active,
     Suspended,
     Completed,
     Aborted,
-}
-
-impl Default for InstanceState {
-    fn default() -> Self {
-        Self::Pending
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,6 +88,10 @@ impl StoryletInstanceTable {
 
     pub fn len(&self) -> usize {
         self.storylet_index.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.storylet_index.is_empty()
     }
 
     pub fn live_count(&self) -> u32 {

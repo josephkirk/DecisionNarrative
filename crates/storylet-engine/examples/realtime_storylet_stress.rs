@@ -582,11 +582,11 @@ fn apply_effects(world: &mut World, instance: &mut Instance, effects: &[Effect])
                 counts.given += 1;
             }
             Effect::Take(item) => {
-                if let Some(count) = world.inventory.get_mut(item) {
-                    if *count > 0 {
-                        *count -= 1;
-                        counts.taken += 1;
-                    }
+                if let Some(count) = world.inventory.get_mut(item)
+                    && *count > 0
+                {
+                    *count -= 1;
+                    counts.taken += 1;
                 }
             }
         }

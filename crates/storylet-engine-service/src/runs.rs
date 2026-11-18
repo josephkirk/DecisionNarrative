@@ -11,7 +11,11 @@ use axum::{
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use storylet_engine::{actions::{ActionProposal, Authority, DecisionProvenance}, chrono_participants::Controller, run::{RunAction, RunContent, RunError, RunKernel, RunStart}};
+use storylet_engine::{
+    actions::{ActionProposal, Authority, DecisionProvenance},
+    chrono_participants::Controller,
+    run::{RunAction, RunContent, RunError, RunKernel, RunStart},
+};
 
 #[derive(Clone)]
 pub(crate) struct CachedRun {
@@ -34,8 +38,13 @@ struct StartConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum RunOp {
-    Act { authority: Authority, proposal: ActionProposal },
-    Rewind { to_step: u32 },
+    Act {
+        authority: Authority,
+        proposal: ActionProposal,
+    },
+    Rewind {
+        to_step: u32,
+    },
 }
 #[derive(Clone)]
 struct Row {
@@ -101,15 +110,8 @@ fn encode<T: Serialize + ?Sized>(v: &T) -> Result<String, RunApiError> {
 }
 fn load(inner: &StudioInner, id: &str) -> Result<Row, RunApiError> {
     let row:Option<(String,i64,i64,String,String,i64,i64)>=inner.store.conn.query_row("SELECT id, project_revision,seed,start_json,actions_json,created_at,updated_at FROM runs WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?))).optional().map_err(RunApiError::internal)?;
-    let (
-        id,
-        project_revision,
-        seed,
-        start,
-        actions,
-        created_at,
-        updated_at,
-    ) = row.ok_or_else(RunApiError::missing)?;
+    let (id, project_revision, seed, start, actions, created_at, updated_at) =
+        row.ok_or_else(RunApiError::missing)?;
     Ok(Row {
         id,
         project_revision: project_revision as u64,
@@ -174,7 +176,9 @@ fn check_precondition(
         )
         .optional()
     } else {
-        return Err(RunApiError::internal("run operations must validate against the kernel"));
+        return Err(RunApiError::internal(
+            "run operations must validate against the kernel",
+        ));
     }
     .map_err(RunApiError::internal)?;
     match actual {
@@ -216,7 +220,12 @@ fn save_atomic(
         return Err(RunApiError::conflict("stale revision"));
     }
     if scope != "__start__" {
-        let stored: Option<String> = tx.query_row("SELECT actions_json FROM runs WHERE id=?1", [scope], |r| r.get(0)).optional().map_err(RunApiError::internal)?;
+        let stored: Option<String> = tx
+            .query_row("SELECT actions_json FROM runs WHERE id=?1", [scope], |r| {
+                r.get(0)
+            })
+            .optional()
+            .map_err(RunApiError::internal)?;
         if stored.as_deref() != expected_actions.map(encode).transpose()?.as_deref() {
             return Err(RunApiError::conflict("stale revision"));
         }
@@ -230,13 +239,38 @@ fn save_atomic(
     tx.commit().map_err(RunApiError::internal)?;
     Ok(None)
 }
-fn save_kernel_action(inner: &StudioInner, row: &Row, expected_actions: &[RunOp]) -> Result<(), RunApiError> {
-    let tx = rusqlite::Transaction::new_unchecked(&inner.store.conn, rusqlite::TransactionBehavior::Immediate).map_err(RunApiError::internal)?;
-    let project_revision: u64 = tx.query_row("SELECT revision FROM project_metadata WHERE singleton=1", [], |r| r.get::<_, i64>(0)).map_err(RunApiError::internal)? as u64;
-    if project_revision != row.project_revision { return Err(RunApiError::conflict("stale revision")); }
-    let stored: Option<String> = tx.query_row("SELECT actions_json FROM runs WHERE id=?1", [&row.id], |r| r.get(0)).optional().map_err(RunApiError::internal)?;
+fn save_kernel_action(
+    inner: &StudioInner,
+    row: &Row,
+    expected_actions: &[RunOp],
+) -> Result<(), RunApiError> {
+    let tx = rusqlite::Transaction::new_unchecked(
+        &inner.store.conn,
+        rusqlite::TransactionBehavior::Immediate,
+    )
+    .map_err(RunApiError::internal)?;
+    let project_revision: u64 = tx
+        .query_row(
+            "SELECT revision FROM project_metadata WHERE singleton=1",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map_err(RunApiError::internal)? as u64;
+    if project_revision != row.project_revision {
+        return Err(RunApiError::conflict("stale revision"));
+    }
+    let stored: Option<String> = tx
+        .query_row(
+            "SELECT actions_json FROM runs WHERE id=?1",
+            [&row.id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(RunApiError::internal)?;
     let expected = encode(expected_actions)?;
-    if stored.as_deref() != Some(expected.as_str()) { return Err(RunApiError::conflict("stale revision")); }
+    if stored.as_deref() != Some(expected.as_str()) {
+        return Err(RunApiError::conflict("stale revision"));
+    }
     save(inner, row)?;
     tx.commit().map_err(RunApiError::internal)?;
     Ok(())
@@ -251,12 +285,27 @@ fn current_revision(inner: &StudioInner) -> Result<u64, RunApiError> {
 fn human_authority(kernel: &RunKernel, actor: u16) -> Result<Authority, RunApiError> {
     match kernel.world().participants.controller.get(actor as usize) {
         Some(Controller::Human { seat }) => Ok(Authority::Human { seat: *seat }),
-        Some(Controller::Rule) => Err(RunApiError::invalid("rule participants cannot be controlled by callers")),
+        Some(Controller::Rule) => Err(RunApiError::invalid(
+            "rule participants cannot be controlled by callers",
+        )),
         None => Err(RunApiError::invalid("unknown participant")),
     }
 }
-fn proposal(actor: u16, action: RunAction, expected_revision: u64, key: String, provenance: Option<DecisionProvenance>) -> ActionProposal {
-    ActionProposal { schema_version: 1, actor, action, expected_revision, idempotency_key: key, provenance }
+fn proposal(
+    actor: u16,
+    action: RunAction,
+    expected_revision: u64,
+    key: String,
+    provenance: Option<DecisionProvenance>,
+) -> ActionProposal {
+    ActionProposal {
+        schema_version: 1,
+        actor,
+        action,
+        expected_revision,
+        idempotency_key: key,
+        provenance,
+    }
 }
 fn rejection(e: storylet_engine::actions::ActionRejection) -> RunApiError {
     if e.reason.contains("stale revision") || e.reason.contains("idempotency key reused") {
@@ -272,11 +321,18 @@ fn rebuild(_inner: &StudioInner, row: &Row) -> Result<CachedRun, RunApiError> {
             .map_err(kernel_error)?;
     for op in &row.actions {
         match op {
-            RunOp::Act { authority, proposal } => {
-                kernel.propose(&content, *authority, proposal.clone()).map_err(|e| RunApiError::invalid(e.reason))?;
+            RunOp::Act {
+                authority,
+                proposal,
+            } => {
+                kernel
+                    .propose(&content, *authority, proposal.clone())
+                    .map_err(|e| RunApiError::invalid(e.reason))?;
             }
             RunOp::Rewind { to_step } => {
-                kernel.rewind(Authority::Architect, *to_step).map_err(kernel_error)?;
+                kernel
+                    .rewind(Authority::Architect, *to_step)
+                    .map_err(kernel_error)?;
                 stalled = kernel.stalled();
             }
         }
@@ -289,10 +345,10 @@ fn rebuild(_inner: &StudioInner, row: &Row) -> Result<CachedRun, RunApiError> {
     })
 }
 fn cached(inner: &mut StudioInner, row: &Row) -> Result<CachedRun, RunApiError> {
-    if let Some(c) = inner.runs.get(&row.id) {
-        if c.action_log == row.actions {
-            return Ok(c.clone());
-        }
+    if let Some(c) = inner.runs.get(&row.id)
+        && c.action_log == row.actions
+    {
+        return Ok(c.clone());
     }
     let c = rebuild(inner, row)?;
     inner.runs.insert(row.id.clone(), c.clone());
@@ -402,18 +458,32 @@ impl StudioService {
             Err(error) => return Err(RunApiError::invalid(error)),
         };
         let seed = req.seed.unwrap_or(default_seed);
-        let content = req.participant_config.map_or(content.clone(), |config| storylet_engine::chrono_explore::configured_content(&content, config));
+        let content = req.participant_config.map_or(content.clone(), |config| {
+            storylet_engine::chrono_explore::configured_content(&content, config)
+        });
         let (mut kernel, mut stalled) =
             RunKernel::start_preserving_stall(&content, req.start.clone(), seed)
                 .map_err(kernel_error)?;
         let mut recorded = Vec::with_capacity(req.actions.len());
         for (participant, action) in &req.actions {
             let authority = human_authority(&kernel, *participant)?;
-            let p = proposal(*participant, action.clone(), kernel.revision(), format!("start-{}", recorded.len()), None);
-            kernel.propose(&content, authority, p.clone()).map_err(rejection)?;
+            let p = proposal(
+                *participant,
+                action.clone(),
+                kernel.revision(),
+                format!("start-{}", recorded.len()),
+                None,
+            );
+            kernel
+                .propose(&content, authority, p.clone())
+                .map_err(rejection)?;
             stalled = kernel.stalled();
-            recorded.push(RunOp::Act { authority, proposal: p });
-        }        let now = chrono_now_ms();
+            recorded.push(RunOp::Act {
+                authority,
+                proposal: p,
+            });
+        }
+        let now = chrono_now_ms();
         let row = Row {
             id: uuid::Uuid::new_v4().to_string(),
             project_revision: content.content_revision,
@@ -492,7 +562,10 @@ impl StudioService {
         let mut inner = self.inner.lock().await;
         let row = load(&inner, id)?;
         let c = cached(&mut inner, &row)?;
-        c.kernel.explain(event).map(|events| json!(events)).ok_or_else(RunApiError::missing)
+        c.kernel
+            .explain(event)
+            .map(|events| json!(events))
+            .ok_or_else(RunApiError::missing)
     }
     pub async fn run_act(&self, id: &str, req: ActRequest) -> Result<Value, RunApiError> {
         require_key(&req.idempotency_key)?;
@@ -503,8 +576,17 @@ impl StudioService {
         }
         let mut c = cached(&mut inner, &row)?;
         let authority = human_authority(&c.kernel, req.participant)?;
-        let p = proposal(req.participant, req.action, req.expected_revision, req.idempotency_key, req.provenance);
-        let receipt = c.kernel.propose(&c.content, authority, p.clone()).map_err(rejection)?;
+        let p = proposal(
+            req.participant,
+            req.action,
+            req.expected_revision,
+            req.idempotency_key,
+            req.provenance,
+        );
+        let receipt = c
+            .kernel
+            .propose(&c.content, authority, p.clone())
+            .map_err(rejection)?;
         if receipt.duplicate {
             let mut result = envelope(&row, &c, req.participant, current_revision(&inner)?);
             result["receipt"] = json!(receipt);
@@ -512,19 +594,34 @@ impl StudioService {
         }
         let previous_actions = row.actions.clone();
         c.stalled = c.kernel.stalled();
-        row.actions.push(RunOp::Act { authority, proposal: p.clone() });
+        row.actions.push(RunOp::Act {
+            authority,
+            proposal: p.clone(),
+        });
         row.updated_at = chrono_now_ms();
         c.action_log = row.actions.clone();
         let result = envelope(&row, &c, req.participant, current_revision(&inner)?);
         let mut result = result;
         result["receipt"] = json!(receipt);
         if let Err(error) = save_kernel_action(&inner, &row, &previous_actions) {
-            if error.status != StatusCode::CONFLICT { return Err(error); }
+            if error.status != StatusCode::CONFLICT {
+                return Err(error);
+            }
             let latest = load(&inner, id)?;
             let mut latest_run = rebuild(&inner, &latest)?;
-            let duplicate = latest_run.kernel.propose(&latest_run.content, authority, p.clone()).map_err(rejection)?;
-            if !duplicate.duplicate { return Err(RunApiError::conflict("stale revision")); }
-            let mut duplicate_result = envelope(&latest, &latest_run, req.participant, current_revision(&inner)?);
+            let duplicate = latest_run
+                .kernel
+                .propose(&latest_run.content, authority, p.clone())
+                .map_err(rejection)?;
+            if !duplicate.duplicate {
+                return Err(RunApiError::conflict("stale revision"));
+            }
+            let mut duplicate_result = envelope(
+                &latest,
+                &latest_run,
+                req.participant,
+                current_revision(&inner)?,
+            );
             duplicate_result["receipt"] = json!(duplicate);
             return Ok(duplicate_result);
         }
@@ -540,12 +637,16 @@ impl StudioService {
         }
         let mut row = load(&inner, id)?;
         let mut c = cached(&mut inner, &row)?;
-        if c.kernel.revision() != req.expected_revision { return Err(RunApiError::conflict("stale revision")); }
+        if c.kernel.revision() != req.expected_revision {
+            return Err(RunApiError::conflict("stale revision"));
+        }
         if row.project_revision != current_revision(&inner)? {
             return Err(RunApiError::conflict("run is stale; reload required"));
         }
         let previous_actions = row.actions.clone();
-        c.kernel.rewind(Authority::Architect, req.to_step).map_err(kernel_error)?;
+        c.kernel
+            .rewind(Authority::Architect, req.to_step)
+            .map_err(kernel_error)?;
         c.stalled = c.kernel.stalled();
         row.actions.push(RunOp::Rewind {
             to_step: req.to_step,
@@ -553,9 +654,15 @@ impl StudioService {
         row.updated_at = chrono_now_ms();
         c.action_log = row.actions.clone();
         let result = envelope(&row, &c, 0, current_revision(&inner)?);
-        if let Some(existing) =
-            save_atomic(&inner, &row, id, &req.idempotency_key, &request, &result, Some(&previous_actions))?
-        {
+        if let Some(existing) = save_atomic(
+            &inner,
+            &row,
+            id,
+            &req.idempotency_key,
+            &request,
+            &result,
+            Some(&previous_actions),
+        )? {
             return Ok(existing);
         }
         inner.runs.insert(row.id.clone(), c);
@@ -584,12 +691,23 @@ impl StudioService {
         }
         let mut row = load(&inner, id)?;
         let c0 = cached(&mut inner, &row)?;
-        if c0.kernel.revision() != req.expected_revision { return Err(RunApiError::conflict("stale revision")); }
+        if c0.kernel.revision() != req.expected_revision {
+            return Err(RunApiError::conflict("stale revision"));
+        }
         let previous_actions = row.actions.clone();
-        let (content, _) =
-            compile_run_content(&inner.store, row.start.scenario_id.as_deref(), None, row.start.storylet_id.as_deref())
-                .map_err(RunApiError::invalid)?;
-        let content = row.start.participant_config.map_or(content.clone(), |config| storylet_engine::chrono_explore::configured_content(&content, config));
+        let (content, _) = compile_run_content(
+            &inner.store,
+            row.start.scenario_id.as_deref(),
+            None,
+            row.start.storylet_id.as_deref(),
+        )
+        .map_err(RunApiError::invalid)?;
+        let content = row
+            .start
+            .participant_config
+            .map_or(content.clone(), |config| {
+                storylet_engine::chrono_explore::configured_content(&content, config)
+            });
 
         if row.start.content.catalog.space() != content.catalog.space()
             || row.start.content.registry != content.registry
@@ -622,12 +740,20 @@ impl StudioService {
         let mut diverged = None;
         for op in &row.actions {
             let result = match op {
-                RunOp::Act { authority, proposal } => kernel.propose(&content, *authority, proposal.clone()).map(|_| {
-                    stalled = kernel.stalled();
-                }).map_err(|_| RunError::InvalidAction("replay proposal rejected".into())),
-                RunOp::Rewind { to_step } => kernel.rewind(Authority::Architect, *to_step).map(|_| {
-                    stalled = kernel.stalled();
-                }),
+                RunOp::Act {
+                    authority,
+                    proposal,
+                } => kernel
+                    .propose(&content, *authority, proposal.clone())
+                    .map(|_| {
+                        stalled = kernel.stalled();
+                    })
+                    .map_err(|_| RunError::InvalidAction("replay proposal rejected".into())),
+                RunOp::Rewind { to_step } => {
+                    kernel.rewind(Authority::Architect, *to_step).map(|_| {
+                        stalled = kernel.stalled();
+                    })
+                }
             };
             if result.is_err() {
                 diverged = Some((replayed + 1) as u32);
@@ -651,9 +777,15 @@ impl StudioService {
         let mut result = envelope(&row, &c, 0, current_revision(&inner)?);
         result["replayed"] = json!(replayed);
         result["divergedAt"] = json!(diverged);
-        if let Some(existing) =
-            save_atomic(&inner, &row, id, &req.idempotency_key, &request, &result, Some(&previous_actions))?
-        {
+        if let Some(existing) = save_atomic(
+            &inner,
+            &row,
+            id,
+            &req.idempotency_key,
+            &request,
+            &result,
+            Some(&previous_actions),
+        )? {
             return Ok(existing);
         }
         inner.runs.insert(row.id.clone(), c);
@@ -664,10 +796,14 @@ impl StudioService {
         let request = encode(&json!({"operation":"delete","body":req}))?;
         let mut inner = self.inner.lock().await;
         let result = json!({"ok":true});
-        if let Some(value) = prior(&inner, id, &req.idempotency_key, &request)? { return Ok(value); }
+        if let Some(value) = prior(&inner, id, &req.idempotency_key, &request)? {
+            return Ok(value);
+        }
         let row = load(&inner, id)?;
         let c = cached(&mut inner, &row)?;
-        if c.kernel.revision() != req.expected_revision { return Err(RunApiError::conflict("stale revision")); }
+        if c.kernel.revision() != req.expected_revision {
+            return Err(RunApiError::conflict("stale revision"));
+        }
         let tx = rusqlite::Transaction::new_unchecked(
             &inner.store.conn,
             rusqlite::TransactionBehavior::Immediate,
@@ -677,9 +813,18 @@ impl StudioService {
             tx.commit().map_err(RunApiError::internal)?;
             return Ok(v);
         }
-        let stored: Option<String> = tx.query_row("SELECT actions_json FROM runs WHERE id=?1", [id], |r| r.get(0)).optional().map_err(RunApiError::internal)?;
-        if stored.as_deref() != Some(&encode(&row.actions)?) { return Err(RunApiError::conflict("stale revision")); }
-        let n = tx.execute("DELETE FROM runs WHERE id=?1", [id]).map_err(RunApiError::internal)?;
+        let stored: Option<String> = tx
+            .query_row("SELECT actions_json FROM runs WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()
+            .map_err(RunApiError::internal)?;
+        if stored.as_deref() != Some(&encode(&row.actions)?) {
+            return Err(RunApiError::conflict("stale revision"));
+        }
+        let n = tx
+            .execute("DELETE FROM runs WHERE id=?1", [id])
+            .map_err(RunApiError::internal)?;
         if n != 1 {
             return Err(RunApiError::conflict("stale revision"));
         }
@@ -730,12 +875,34 @@ pub async fn view(
     }
 }
 #[derive(Default, Deserialize)]
-pub struct EventQuery { event: Option<u32> }
-pub async fn observe(State(s): State<StudioService>, Path(id): Path<String>, Query(q): Query<ParticipantQuery>) -> Response {
-    match q.participant { Some(participant) => match s.run_observe(&id, participant).await { Ok(v) => Json(v).into_response(), Err(e) => e.into_response() }, None => RunApiError::invalid("participant is required").into_response() }
+pub struct EventQuery {
+    event: Option<u32>,
 }
-pub async fn explain(State(s): State<StudioService>, Path(id): Path<String>, Query(q): Query<EventQuery>) -> Response {
-    match q.event { Some(event) => match s.run_explain(&id, event).await { Ok(v) => Json(v).into_response(), Err(e) => e.into_response() }, None => RunApiError::invalid("event is required").into_response() }
+pub async fn observe(
+    State(s): State<StudioService>,
+    Path(id): Path<String>,
+    Query(q): Query<ParticipantQuery>,
+) -> Response {
+    match q.participant {
+        Some(participant) => match s.run_observe(&id, participant).await {
+            Ok(v) => Json(v).into_response(),
+            Err(e) => e.into_response(),
+        },
+        None => RunApiError::invalid("participant is required").into_response(),
+    }
+}
+pub async fn explain(
+    State(s): State<StudioService>,
+    Path(id): Path<String>,
+    Query(q): Query<EventQuery>,
+) -> Response {
+    match q.event {
+        Some(event) => match s.run_explain(&id, event).await {
+            Ok(v) => Json(v).into_response(),
+            Err(e) => e.into_response(),
+        },
+        None => RunApiError::invalid("event is required").into_response(),
+    }
 }
 pub async fn why_not(
     State(s): State<StudioService>,
@@ -763,13 +930,23 @@ handler!(reload, run_reload, RevisionRequest);
 handler!(delete, run_delete, RevisionRequest);
 
 fn deserialize_optional_seed<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
-where D: serde::Deserializer<'de> {
+where
+    D: serde::Deserializer<'de>,
+{
     let value = Option::<Value>::deserialize(deserializer)?;
     match value {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::Number(number)) => number.as_u64().map(Some).ok_or_else(|| serde::de::Error::custom("seed must be an unsigned integer")),
-        Some(Value::String(text)) => text.parse::<u64>().map(Some).map_err(serde::de::Error::custom),
-        _ => Err(serde::de::Error::custom("seed must be an unsigned integer or decimal string")),
+        Some(Value::Number(number)) => number
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom("seed must be an unsigned integer")),
+        Some(Value::String(text)) => text
+            .parse::<u64>()
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        _ => Err(serde::de::Error::custom(
+            "seed must be an unsigned integer or decimal string",
+        )),
     }
 }
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -781,33 +958,123 @@ pub struct CoverageRequest {
 
 struct CoveragePermit(std::sync::Arc<std::sync::atomic::AtomicBool>);
 impl Drop for CoveragePermit {
-    fn drop(&mut self) { self.0.store(false, std::sync::atomic::Ordering::Release); }
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
-fn compile_coverage_config(world: &crate::contracts::EntityRecord, content: &RunContent, req: &CoverageRequest) -> Result<storylet_engine::chrono_explore::ExploreConfig, RunApiError> {
-    use storylet_engine::chrono_explore::{ExploreConfig, IntentProbe, Milestone, ParticipantConfig};
-    let mut cfg = ExploreConfig { runs: req.runs.unwrap_or(2000), seed: req.seed.unwrap_or(0), ..Default::default() };
-    let text = |v: &std::collections::BTreeMap<String, Value>, key: &str| v.get(key).and_then(Value::as_str).unwrap_or("").to_string();
-    let strings = |v: &std::collections::BTreeMap<String, Value>, key: &str| -> Result<Vec<String>, RunApiError> {
-        v.get(key).and_then(Value::as_array).map(|items| items.iter().map(|item| item.as_str().map(str::to_owned).ok_or_else(|| RunApiError::invalid(format!("{key} must contain strings")))).collect()).unwrap_or_else(|| Ok(Vec::new()))
+fn compile_coverage_config(
+    world: &crate::contracts::EntityRecord,
+    content: &RunContent,
+    req: &CoverageRequest,
+) -> Result<storylet_engine::chrono_explore::ExploreConfig, RunApiError> {
+    use storylet_engine::chrono_explore::{
+        ExploreConfig, IntentProbe, Milestone, ParticipantConfig,
+    };
+    let mut cfg = ExploreConfig {
+        runs: req.runs.unwrap_or(2000),
+        seed: req.seed.unwrap_or(0),
+        ..Default::default()
+    };
+    let text = |v: &std::collections::BTreeMap<String, Value>, key: &str| {
+        v.get(key).and_then(Value::as_str).unwrap_or("").to_string()
+    };
+    let strings = |v: &std::collections::BTreeMap<String, Value>,
+                   key: &str|
+     -> Result<Vec<String>, RunApiError> {
+        v.get(key)
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| {
+                        item.as_str().map(str::to_owned).ok_or_else(|| {
+                            RunApiError::invalid(format!("{key} must contain strings"))
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|| Ok(Vec::new()))
     };
     for trait_instance in &world.traits {
         let values = &trait_instance.values;
-        let routes = |key: &str| -> Result<Vec<u16>, RunApiError> { strings(values, key)?.iter().map(|id| content.storylet_index(id).ok_or_else(|| RunApiError::invalid(format!("unknown storylet {id}")))).collect() };
+        let routes = |key: &str| -> Result<Vec<u16>, RunApiError> {
+            strings(values, key)?
+                .iter()
+                .map(|id| {
+                    content
+                        .storylet_index(id)
+                        .ok_or_else(|| RunApiError::invalid(format!("unknown storylet {id}")))
+                })
+                .collect()
+        };
         match trait_instance.template_id.as_str() {
             "system.milestone" => {
-                let reachable_for = strings(values, "reachable_for")?.iter().map(|name| match name.as_str() { "solo" => Ok(ParticipantConfig::Solo), "coop" => Ok(ParticipantConfig::AllHumans), _ => Err(RunApiError::invalid(format!("unknown participant configuration {name}"))) }).collect::<Result<Vec<_>, _>>()?;
-                let raw_deadline = values.get("deadline_slot").and_then(Value::as_i64).unwrap_or(-1);
-                let deadline_slot = if raw_deadline == -1 { None } else { Some(u32::try_from(raw_deadline).map_err(|_| RunApiError::invalid("invalid milestone deadline"))?) };
-                cfg.milestones.push(Milestone { key: text(values, "key"), name: text(values, "name"), routes: routes("routes")?, reachable_for, deadline_slot });
+                let reachable_for = strings(values, "reachable_for")?
+                    .iter()
+                    .map(|name| match name.as_str() {
+                        "solo" => Ok(ParticipantConfig::Solo),
+                        "coop" => Ok(ParticipantConfig::AllHumans),
+                        _ => Err(RunApiError::invalid(format!(
+                            "unknown participant configuration {name}"
+                        ))),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let raw_deadline = values
+                    .get("deadline_slot")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(-1);
+                let deadline_slot = if raw_deadline == -1 {
+                    None
+                } else {
+                    Some(
+                        u32::try_from(raw_deadline)
+                            .map_err(|_| RunApiError::invalid("invalid milestone deadline"))?,
+                    )
+                };
+                cfg.milestones.push(Milestone {
+                    key: text(values, "key"),
+                    name: text(values, "name"),
+                    routes: routes("routes")?,
+                    reachable_for,
+                    deadline_slot,
+                });
             }
             "system.intent_probe" => {
-                let holder_knows = strings(values, "holder_knows")?.iter().map(|fact| content.registry.id(fact).ok_or_else(|| RunApiError::invalid(format!("unknown fact {fact}")))).collect::<Result<Vec<_>, _>>()?;
-                let colocated_with = values.get("colocated_with").and_then(Value::as_str).filter(|id| !id.is_empty()).map(|id| {
-                    let p = content.participant_indices.get(id).ok_or_else(|| RunApiError::invalid(format!("unknown participant {id}")))?;
-                    content.initial_world.participants.entity.get(*p as usize).copied().ok_or_else(|| RunApiError::invalid(format!("unknown participant {id}")))
-                }).transpose()?;
-                cfg.probes.push(IntentProbe { name: text(values, "name"), holder_knows, colocated_with, expected_routes: routes("expected_routes")? });
+                let holder_knows = strings(values, "holder_knows")?
+                    .iter()
+                    .map(|fact| {
+                        content
+                            .registry
+                            .id(fact)
+                            .ok_or_else(|| RunApiError::invalid(format!("unknown fact {fact}")))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let colocated_with = values
+                    .get("colocated_with")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .map(|id| {
+                        let p = content.participant_indices.get(id).ok_or_else(|| {
+                            RunApiError::invalid(format!("unknown participant {id}"))
+                        })?;
+                        content
+                            .initial_world
+                            .participants
+                            .entity
+                            .get(*p as usize)
+                            .copied()
+                            .ok_or_else(|| {
+                                RunApiError::invalid(format!("unknown participant {id}"))
+                            })
+                    })
+                    .transpose()?;
+                cfg.probes.push(IntentProbe {
+                    name: text(values, "name"),
+                    holder_knows,
+                    colocated_with,
+                    expected_routes: routes("expected_routes")?,
+                });
             }
             _ => {}
         }
@@ -817,39 +1084,102 @@ fn compile_coverage_config(world: &crate::contracts::EntityRecord, content: &Run
 
 impl StudioService {
     pub async fn run_coverage(&self, req: CoverageRequest) -> Result<Value, RunApiError> {
-        if req.runs.is_some_and(|runs| runs == 0 || runs > 50_000) { return Err(RunApiError::invalid("runs must be between 1 and 50000")); }
-        if self.coverage_running.compare_exchange(false, true, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire).is_err() { return Err(RunApiError::conflict("coverage already running")); }
+        if req.runs.is_some_and(|runs| runs == 0 || runs > 50_000) {
+            return Err(RunApiError::invalid("runs must be between 1 and 50000"));
+        }
+        if self
+            .coverage_running
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return Err(RunApiError::conflict("coverage already running"));
+        }
         let permit = CoveragePermit(self.coverage_running.clone());
         let (content, config) = {
             let inner = self.inner.lock().await;
-            let (content, scenario_seed) = compile_run_content(&inner.store, None, None, None).map_err(RunApiError::invalid)?;
-            let world = inner.store.list_entities().map_err(RunApiError::internal)?.into_iter().find(|e| e.id == crate::entities::WORLD_ENTITY_ID).ok_or_else(|| RunApiError::invalid("missing World entity"))?;
-            if inner.store.get_project_metadata().map_err(RunApiError::internal)?.revision != content.content_revision { return Err(RunApiError::conflict("project changed while compiling coverage")); }
+            let (content, scenario_seed) = compile_run_content(&inner.store, None, None, None)
+                .map_err(RunApiError::invalid)?;
+            let world = inner
+                .store
+                .list_entities()
+                .map_err(RunApiError::internal)?
+                .into_iter()
+                .find(|e| e.id == crate::entities::WORLD_ENTITY_ID)
+                .ok_or_else(|| RunApiError::invalid("missing World entity"))?;
+            if inner
+                .store
+                .get_project_metadata()
+                .map_err(RunApiError::internal)?
+                .revision
+                != content.content_revision
+            {
+                return Err(RunApiError::conflict(
+                    "project changed while compiling coverage",
+                ));
+            }
             let mut config = compile_coverage_config(&world, &content, &req)?;
-            if req.seed.is_none() { config.seed = scenario_seed; }
+            if req.seed.is_none() {
+                config.seed = scenario_seed;
+            }
             (content, config)
         };
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let mut report = serde_json::to_value(storylet_engine::chrono_explore::explore(&content, &config)).map_err(RunApiError::internal)?;
+            let mut report =
+                serde_json::to_value(storylet_engine::chrono_explore::explore(&content, &config))
+                    .map_err(RunApiError::internal)?;
             report["content_revision"] = json!(content.content_revision);
             report["runs"] = json!(config.runs);
             report["seed"] = json!(config.seed.to_string());
             for field in ["violations", "errors"] {
                 if let Some(rows) = report[field].as_array_mut() {
-                    for row in rows { if let Some(seed) = row["seed"].as_u64() { row["seed"] = json!(seed.to_string()); } }
+                    for row in rows {
+                        if let Some(seed) = row["seed"].as_u64() {
+                            row["seed"] = json!(seed.to_string());
+                        }
+                    }
                 }
             }
             report["milestones"] = json!(config.milestones);
             report["probes"] = json!(config.probes);
-            report["storylets"] = Value::Object(content.storylet_titles.iter().map(|(id, title)| (id.to_string(), json!({"title":title,"key":content.storylet_key(*id)}))).collect());
-            report["locations"] = Value::Object(content.entity_names.iter().map(|(id, name)| (id.to_string(), json!(name))).collect());
+            report["storylets"] = Value::Object(
+                content
+                    .storylet_titles
+                    .iter()
+                    .map(|(id, title)| {
+                        (
+                            id.to_string(),
+                            json!({"title":title,"key":content.storylet_key(*id)}),
+                        )
+                    })
+                    .collect(),
+            );
+            report["locations"] = Value::Object(
+                content
+                    .entity_names
+                    .iter()
+                    .map(|(id, name)| (id.to_string(), json!(name)))
+                    .collect(),
+            );
             Ok(report)
-        }).await.map_err(RunApiError::internal)?
+        })
+        .await
+        .map_err(RunApiError::internal)?
     }
 }
-pub async fn coverage(State(s): State<StudioService>, Json(req): Json<CoverageRequest>) -> Response {
-    match s.run_coverage(req).await { Ok(value) => Json(value).into_response(), Err(error) => error.into_response() }
+pub async fn coverage(
+    State(s): State<StudioService>,
+    Json(req): Json<CoverageRequest>,
+) -> Response {
+    match s.run_coverage(req).await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => error.into_response(),
+    }
 }
 
 pub async fn run_content(State(service): State<StudioService>) -> Response {

@@ -93,8 +93,7 @@ fn main() {
     let mut bucket_checksum = 0usize;
     for i in 0..100_000usize {
         let event = (i * 13) % 64;
-        for index in offsets[event]..offsets[event + 1] {
-            let subscription = &subscriptions[index];
+        for subscription in &subscriptions[offsets[event]..offsets[event + 1]] {
             fired += 1;
             bucket_checksum ^= subscription.1;
         }

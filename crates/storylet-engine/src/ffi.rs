@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::ptr;

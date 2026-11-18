@@ -1,10 +1,8 @@
-
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::contracts::{
-    CharacterRecord, LocationRecord, ResolvedScenarioStart, ScenarioRecord,
-    StartLocationPolicy,
+    CharacterRecord, LocationRecord, ResolvedScenarioStart, ScenarioRecord, StartLocationPolicy,
 };
 
 pub struct XorShift32 {
@@ -13,7 +11,7 @@ pub struct XorShift32 {
 
 impl XorShift32 {
     pub fn new(seed: u64) -> Self {
-        let mut s = (seed as u32) & 0xFFFF_FFFF;
+        let mut s = seed as u32;
         if s == 0 {
             s = 1;
         }
@@ -76,15 +74,15 @@ pub fn get_location_attribute(loc: &LocationRecord, key: &str) -> Option<Value> 
     if trimmed == "description" {
         return Some(Value::String(loc.description.clone()));
     }
-    if let Some(ref env) = loc.environmental_params {
-        if let Some(val) = env.get(trimmed) {
-            return Some(val.clone());
-        }
+    if let Some(ref env) = loc.environmental_params
+        && let Some(val) = env.get(trimmed)
+    {
+        return Some(val.clone());
     }
-    if let Some(ref devices) = loc.devices {
-        if let Some(val) = devices.get(trimmed) {
-            return Some(val.clone());
-        }
+    if let Some(ref devices) = loc.devices
+        && let Some(val) = devices.get(trimmed)
+    {
+        return Some(val.clone());
     }
     crate::entities::attribute_path(&loc.attributes, trimmed)
 }
@@ -123,10 +121,10 @@ pub fn get_character_attribute(char: &CharacterRecord, key: &str) -> Option<Valu
     if let Some(val) = char.needs.get(trimmed) {
         return Some(val.clone());
     }
-    if let Some(ref schedule) = char.schedule {
-        if let Some(val) = schedule.get(trimmed) {
-            return Some(Value::String(val.clone()));
-        }
+    if let Some(ref schedule) = char.schedule
+        && let Some(val) = schedule.get(trimmed)
+    {
+        return Some(Value::String(val.clone()));
     }
     crate::entities::attribute_path(&char.attributes, trimmed)
 }

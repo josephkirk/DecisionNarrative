@@ -1,4 +1,3 @@
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -9,7 +8,6 @@ pub struct ProjectMetadata {
     pub name: String,
     pub revision: u64,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MicroPassionRecord {
@@ -97,7 +95,6 @@ pub struct LocationRecord {
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub attributes: Value,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EventRecord {
@@ -202,7 +199,6 @@ pub struct ChronoStoryletSettings {
     pub salience_bonus_tags: Vec<String>,
 }
 
-
 impl Default for ChronoStoryletSettings {
     fn default() -> Self {
         Self {
@@ -281,8 +277,12 @@ pub struct StoryletRecord {
     pub created_at: i64,
 }
 
-fn default_learn_visibility() -> String { "private".into() }
-fn default_storylet_origin() -> String { "human".into() }
+fn default_learn_visibility() -> String {
+    "private".into()
+}
+fn default_storylet_origin() -> String {
+    "human".into()
+}
 fn default_revision() -> u64 {
     1
 }
@@ -452,12 +452,7 @@ pub const CONTENT_KINDS: [&str; 8] = [
     "scenarios",
 ];
 
-pub const FOLDER_ROOTS: [&str; 4] = [
-    "storylets",
-    "entities",
-    "trait_templates",
-    "assets",
-];
+pub const FOLDER_ROOTS: [&str; 4] = ["storylets", "entities", "trait_templates", "assets"];
 pub const STORYLET_CLUSTER_TYPES: [&str; 4] = [
     "player_passage",
     "linear_progression",
@@ -466,7 +461,6 @@ pub const STORYLET_CLUSTER_TYPES: [&str; 4] = [
 ];
 
 pub const PROJECT_BUNDLE_SCHEMA_VERSION: u32 = 7;
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FolderRecord {
@@ -479,7 +473,6 @@ pub struct FolderRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
 }
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -521,7 +514,9 @@ pub struct TraitPropertyEditor {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TraitPropertyOptionSource { GameplayTags }
+pub enum TraitPropertyOptionSource {
+    GameplayTags,
+}
 
 impl TraitPropertyDefinition {
     pub fn key(&self) -> &str {
@@ -571,70 +566,390 @@ pub struct SystemTraitPropertyEditorSpec {
     pub entity_trait_key: Option<&'static str>,
 }
 
-
 pub const SYSTEM_TRAIT_TEMPLATES: &[SystemTraitTemplateSpec] = &[
-    SystemTraitTemplateSpec { editors: &[], unique: true, key: "character", name: "Character", allow_multiple: false, properties: &[] },
-    SystemTraitTemplateSpec { editors: &[], unique: true, key: "location", name: "Location", allow_multiple: false, properties: &[] },
-    SystemTraitTemplateSpec { editors: &[], unique: true, key: "fact", name: "Fact", allow_multiple: false, properties: &[] },
-    SystemTraitTemplateSpec { editors: &[], unique: false, key: "participant", name: "Participant", allow_multiple: false, properties: &[
-        SystemTraitPropertySpec { key: "controller", name: "Controller", property_type: PropertyType::String, is_array: false, default_json: "\"human\"" },
-        SystemTraitPropertySpec { key: "seat", name: "Seat", property_type: PropertyType::Int, is_array: false, default_json: "0" },
-        SystemTraitPropertySpec { key: "start_location", name: "Start Location", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
-    ] },
-    SystemTraitTemplateSpec { editors: &[], unique: false, key: "connection", name: "Connection", allow_multiple: true, properties: &[
-        SystemTraitPropertySpec { key: "to", name: "To", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
-        SystemTraitPropertySpec { key: "open_slots", name: "Open Slots", property_type: PropertyType::Int, is_array: true, default_json: "[]" },
-        SystemTraitPropertySpec { key: "requires_fact", name: "Requires Fact", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "on_close", name: "On Close", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "return_to", name: "Return To", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
-    ] },
-    SystemTraitTemplateSpec { editors: &[], unique: false, key: "clock", name: "Clock", allow_multiple: false, properties: &[
-        SystemTraitPropertySpec { key: "slot_labels", name: "Slot Labels", property_type: PropertyType::String, is_array: true, default_json: "[]" },
-        SystemTraitPropertySpec { key: "actions_per_slot", name: "Actions Per Slot", property_type: PropertyType::Int, is_array: false, default_json: "2" },
-    ] },
-    SystemTraitTemplateSpec { editors: &[], unique: false, key: "milestone", name: "Milestone", allow_multiple: true, properties: &[
-        SystemTraitPropertySpec { key: "key", name: "Key", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "name", name: "Name", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "routes", name: "Routes", property_type: PropertyType::Storylet, is_array: true, default_json: "[]" },
-        SystemTraitPropertySpec { key: "reachable_for", name: "Reachable For", property_type: PropertyType::String, is_array: true, default_json: "[]" },
-        SystemTraitPropertySpec { key: "deadline_slot", name: "Deadline Slot", property_type: PropertyType::Int, is_array: false, default_json: "-1" },
-    ] },
-    SystemTraitTemplateSpec { editors: &[], unique: false, key: "intent_probe", name: "Intent Probe", allow_multiple: true, properties: &[
-        SystemTraitPropertySpec { key: "name", name: "Name", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "holder_knows", name: "Holder Knows", property_type: PropertyType::String, is_array: true, default_json: "[]" },
-        SystemTraitPropertySpec { key: "colocated_with", name: "Colocated With", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
-        SystemTraitPropertySpec { key: "expected_routes", name: "Expected Routes", property_type: PropertyType::Storylet, is_array: true, default_json: "[]" },
-    ] },    SystemTraitTemplateSpec { editors: &[
-        SystemTraitPropertyEditorSpec { property_key: "role", option_source: Some("gameplay_tags"), selection_only: true, entity_trait_key: None },
-        SystemTraitPropertyEditorSpec { property_key: "home_location", option_source: None, selection_only: false, entity_trait_key: Some("location") },
-        SystemTraitPropertyEditorSpec { property_key: "current_location", option_source: None, selection_only: false, entity_trait_key: Some("location") },
-    ], unique: false, key: "character_settings", name: "Character Settings", allow_multiple: false, properties: &[
-        SystemTraitPropertySpec { key: "role", name: "Role", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "home_location", name: "Home Location", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
-        SystemTraitPropertySpec { key: "current_location", name: "Current Location", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
-    ] },
-    SystemTraitTemplateSpec { editors: &[], unique: false, key: "location_settings", name: "Location Settings", allow_multiple: false, properties: &[
-        SystemTraitPropertySpec { key: "connected_zones", name: "Connected Zones", property_type: PropertyType::Entity, is_array: true, default_json: "[]" },
-    ] },
-    SystemTraitTemplateSpec { editors: &[], unique: false, key: "passion", name: "Passion", allow_multiple: true, properties: &[
-        SystemTraitPropertySpec { key: "passion_id", name: "Passion ID", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "current_value", name: "Current Value", property_type: PropertyType::Float, is_array: false, default_json: "0.0" },
-        SystemTraitPropertySpec { key: "weight", name: "Weight", property_type: PropertyType::Float, is_array: false, default_json: "1.0" },
-        SystemTraitPropertySpec { key: "is_hidden", name: "Hidden", property_type: PropertyType::Bool, is_array: false, default_json: "false" },
-    ] },
-    SystemTraitTemplateSpec { editors: &[], unique: false, key: "passion_threshold", name: "Passion Threshold", allow_multiple: true, properties: &[
-        SystemTraitPropertySpec { key: "threshold_id", name: "Threshold ID", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "trigger_value", name: "Trigger Value", property_type: PropertyType::Float, is_array: false, default_json: "0.0" },
-        SystemTraitPropertySpec { key: "direction", name: "Direction", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "linked_graph_asset_id", name: "Linked Graph", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "is_currently_active", name: "Active", property_type: PropertyType::Bool, is_array: false, default_json: "false" },
-    ] },
-    SystemTraitTemplateSpec { editors: &[], unique: false, key: "passion_link", name: "Passion Link", allow_multiple: true, properties: &[
-        SystemTraitPropertySpec { key: "target_character_id", name: "Target Character", property_type: PropertyType::Entity, is_array: false, default_json: "null" },
-        SystemTraitPropertySpec { key: "source_passion_id", name: "Source Passion", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "target_passion_id", name: "Target Passion", property_type: PropertyType::String, is_array: false, default_json: "\"\"" },
-        SystemTraitPropertySpec { key: "weight", name: "Weight", property_type: PropertyType::Float, is_array: false, default_json: "0.0" },
-    ] },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: true,
+        key: "character",
+        name: "Character",
+        allow_multiple: false,
+        properties: &[],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: true,
+        key: "location",
+        name: "Location",
+        allow_multiple: false,
+        properties: &[],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: true,
+        key: "fact",
+        name: "Fact",
+        allow_multiple: false,
+        properties: &[],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: false,
+        key: "participant",
+        name: "Participant",
+        allow_multiple: false,
+        properties: &[
+            SystemTraitPropertySpec {
+                key: "controller",
+                name: "Controller",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"human\"",
+            },
+            SystemTraitPropertySpec {
+                key: "seat",
+                name: "Seat",
+                property_type: PropertyType::Int,
+                is_array: false,
+                default_json: "0",
+            },
+            SystemTraitPropertySpec {
+                key: "start_location",
+                name: "Start Location",
+                property_type: PropertyType::Entity,
+                is_array: false,
+                default_json: "null",
+            },
+        ],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: false,
+        key: "connection",
+        name: "Connection",
+        allow_multiple: true,
+        properties: &[
+            SystemTraitPropertySpec {
+                key: "to",
+                name: "To",
+                property_type: PropertyType::Entity,
+                is_array: false,
+                default_json: "null",
+            },
+            SystemTraitPropertySpec {
+                key: "open_slots",
+                name: "Open Slots",
+                property_type: PropertyType::Int,
+                is_array: true,
+                default_json: "[]",
+            },
+            SystemTraitPropertySpec {
+                key: "requires_fact",
+                name: "Requires Fact",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "on_close",
+                name: "On Close",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "return_to",
+                name: "Return To",
+                property_type: PropertyType::Entity,
+                is_array: false,
+                default_json: "null",
+            },
+        ],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: false,
+        key: "clock",
+        name: "Clock",
+        allow_multiple: false,
+        properties: &[
+            SystemTraitPropertySpec {
+                key: "slot_labels",
+                name: "Slot Labels",
+                property_type: PropertyType::String,
+                is_array: true,
+                default_json: "[]",
+            },
+            SystemTraitPropertySpec {
+                key: "actions_per_slot",
+                name: "Actions Per Slot",
+                property_type: PropertyType::Int,
+                is_array: false,
+                default_json: "2",
+            },
+        ],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: false,
+        key: "milestone",
+        name: "Milestone",
+        allow_multiple: true,
+        properties: &[
+            SystemTraitPropertySpec {
+                key: "key",
+                name: "Key",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "name",
+                name: "Name",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "routes",
+                name: "Routes",
+                property_type: PropertyType::Storylet,
+                is_array: true,
+                default_json: "[]",
+            },
+            SystemTraitPropertySpec {
+                key: "reachable_for",
+                name: "Reachable For",
+                property_type: PropertyType::String,
+                is_array: true,
+                default_json: "[]",
+            },
+            SystemTraitPropertySpec {
+                key: "deadline_slot",
+                name: "Deadline Slot",
+                property_type: PropertyType::Int,
+                is_array: false,
+                default_json: "-1",
+            },
+        ],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: false,
+        key: "intent_probe",
+        name: "Intent Probe",
+        allow_multiple: true,
+        properties: &[
+            SystemTraitPropertySpec {
+                key: "name",
+                name: "Name",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "holder_knows",
+                name: "Holder Knows",
+                property_type: PropertyType::String,
+                is_array: true,
+                default_json: "[]",
+            },
+            SystemTraitPropertySpec {
+                key: "colocated_with",
+                name: "Colocated With",
+                property_type: PropertyType::Entity,
+                is_array: false,
+                default_json: "null",
+            },
+            SystemTraitPropertySpec {
+                key: "expected_routes",
+                name: "Expected Routes",
+                property_type: PropertyType::Storylet,
+                is_array: true,
+                default_json: "[]",
+            },
+        ],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[
+            SystemTraitPropertyEditorSpec {
+                property_key: "role",
+                option_source: Some("gameplay_tags"),
+                selection_only: true,
+                entity_trait_key: None,
+            },
+            SystemTraitPropertyEditorSpec {
+                property_key: "home_location",
+                option_source: None,
+                selection_only: false,
+                entity_trait_key: Some("location"),
+            },
+            SystemTraitPropertyEditorSpec {
+                property_key: "current_location",
+                option_source: None,
+                selection_only: false,
+                entity_trait_key: Some("location"),
+            },
+        ],
+        unique: false,
+        key: "character_settings",
+        name: "Character Settings",
+        allow_multiple: false,
+        properties: &[
+            SystemTraitPropertySpec {
+                key: "role",
+                name: "Role",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "home_location",
+                name: "Home Location",
+                property_type: PropertyType::Entity,
+                is_array: false,
+                default_json: "null",
+            },
+            SystemTraitPropertySpec {
+                key: "current_location",
+                name: "Current Location",
+                property_type: PropertyType::Entity,
+                is_array: false,
+                default_json: "null",
+            },
+        ],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: false,
+        key: "location_settings",
+        name: "Location Settings",
+        allow_multiple: false,
+        properties: &[SystemTraitPropertySpec {
+            key: "connected_zones",
+            name: "Connected Zones",
+            property_type: PropertyType::Entity,
+            is_array: true,
+            default_json: "[]",
+        }],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: false,
+        key: "passion",
+        name: "Passion",
+        allow_multiple: true,
+        properties: &[
+            SystemTraitPropertySpec {
+                key: "passion_id",
+                name: "Passion ID",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "current_value",
+                name: "Current Value",
+                property_type: PropertyType::Float,
+                is_array: false,
+                default_json: "0.0",
+            },
+            SystemTraitPropertySpec {
+                key: "weight",
+                name: "Weight",
+                property_type: PropertyType::Float,
+                is_array: false,
+                default_json: "1.0",
+            },
+            SystemTraitPropertySpec {
+                key: "is_hidden",
+                name: "Hidden",
+                property_type: PropertyType::Bool,
+                is_array: false,
+                default_json: "false",
+            },
+        ],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: false,
+        key: "passion_threshold",
+        name: "Passion Threshold",
+        allow_multiple: true,
+        properties: &[
+            SystemTraitPropertySpec {
+                key: "threshold_id",
+                name: "Threshold ID",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "trigger_value",
+                name: "Trigger Value",
+                property_type: PropertyType::Float,
+                is_array: false,
+                default_json: "0.0",
+            },
+            SystemTraitPropertySpec {
+                key: "direction",
+                name: "Direction",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "linked_graph_asset_id",
+                name: "Linked Graph",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "is_currently_active",
+                name: "Active",
+                property_type: PropertyType::Bool,
+                is_array: false,
+                default_json: "false",
+            },
+        ],
+    },
+    SystemTraitTemplateSpec {
+        editors: &[],
+        unique: false,
+        key: "passion_link",
+        name: "Passion Link",
+        allow_multiple: true,
+        properties: &[
+            SystemTraitPropertySpec {
+                key: "target_character_id",
+                name: "Target Character",
+                property_type: PropertyType::Entity,
+                is_array: false,
+                default_json: "null",
+            },
+            SystemTraitPropertySpec {
+                key: "source_passion_id",
+                name: "Source Passion",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "target_passion_id",
+                name: "Target Passion",
+                property_type: PropertyType::String,
+                is_array: false,
+                default_json: "\"\"",
+            },
+            SystemTraitPropertySpec {
+                key: "weight",
+                name: "Weight",
+                property_type: PropertyType::Float,
+                is_array: false,
+                default_json: "0.0",
+            },
+        ],
+    },
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -707,7 +1022,6 @@ pub struct EntityRecord {
     pub created_at: Option<i64>,
 }
 
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TraitTemplateRecord {
     #[serde(default)]
@@ -733,7 +1047,6 @@ pub struct TraitTemplateRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StorageLocationRecord {

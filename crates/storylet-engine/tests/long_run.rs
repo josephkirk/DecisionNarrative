@@ -12,7 +12,12 @@ fn wait_steps(steps: usize) -> Vec<Duration> {
     content.initial_world.clock = None;
     let mut run = RunKernel::start(&content, RunStart::Beginning, 3).unwrap();
     let actor = (0..run.world().participants.len() as u16)
-        .find(|p| matches!(run.world().participants.controller[*p as usize], Controller::Human { .. }))
+        .find(|p| {
+            matches!(
+                run.world().participants.controller[*p as usize],
+                Controller::Human { .. }
+            )
+        })
         .unwrap();
     let seat = match run.world().participants.controller[actor as usize] {
         Controller::Human { seat } => seat,
@@ -20,9 +25,11 @@ fn wait_steps(steps: usize) -> Vec<Duration> {
     };
     let mut timings = Vec::with_capacity(steps);
     for i in 0..steps {
-        let proposal = support::actions::proposal(&run, actor, RunAction::Wait, &format!("wait-{i}"));
+        let proposal =
+            support::actions::proposal(&run, actor, RunAction::Wait, &format!("wait-{i}"));
         let started = Instant::now();
-        run.propose(&content, Authority::Human { seat }, proposal).unwrap();
+        run.propose(&content, Authority::Human { seat }, proposal)
+            .unwrap();
         timings.push(started.elapsed());
     }
     timings
@@ -38,5 +45,8 @@ fn per_step_cost_stays_flat_over_a_long_run() {
     let timings = wait_steps(2_000);
     let early = mean(&timings[100..300]);
     let late = mean(&timings[1_800..2_000]);
-    println!("early mean {early:?}, late mean {late:?}, ratio {:.2}", late.as_secs_f64() / early.as_secs_f64());
+    println!(
+        "early mean {early:?}, late mean {late:?}, ratio {:.2}",
+        late.as_secs_f64() / early.as_secs_f64()
+    );
 }

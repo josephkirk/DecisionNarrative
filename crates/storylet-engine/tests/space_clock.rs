@@ -175,7 +175,7 @@ fn choose_left() -> RunAction {
 fn closed_edge_blocks_with_until_label() {
     let content = content();
     let run = started_at(&content, 2);
-    let moves = moves_for(&run.world(), &content, 0);
+    let moves = moves_for(run.world(), &content, 0);
     let rock = moves.iter().find(|m| m.to == ROCK).unwrap();
     assert!(!rock.enabled);
     assert_eq!(rock.name, "Rock");
@@ -189,7 +189,7 @@ fn closed_edge_blocks_with_until_label() {
     assert!(harbor.enabled && harbor.block.is_none());
     let run = started_at(&content, 3);
     assert!(
-        moves_for(&run.world(), &content, 0)
+        moves_for(run.world(), &content, 0)
             .iter()
             .find(|m| m.to == ROCK)
             .unwrap()
@@ -203,7 +203,7 @@ fn edge_requires_fact() {
     content.connections[0].requires_fact = Some(1);
     let run = started(&content);
     let harbor = |run: &RunKernel| {
-        moves_for(&run.world(), &content, 0)
+        moves_for(run.world(), &content, 0)
             .into_iter()
             .find(|m| m.to == HARBOR)
             .unwrap()
@@ -215,7 +215,6 @@ fn edge_requires_fact() {
         })
     );
     assert!(!harbor(&run).enabled);
-    drop(harbor);
     content.initial_world.knowledge.learn(KnowledgeRow {
         holder: 0,
         fact: 1,
@@ -359,7 +358,7 @@ fn timeless_project_spends_nothing() {
     assert_eq!(place.actions_left, None);
     assert_eq!(place.clock_label, None);
     assert!(
-        moves_for(&run.world(), &content, 0)
+        moves_for(run.world(), &content, 0)
             .iter()
             .all(|m| m.enabled)
     );

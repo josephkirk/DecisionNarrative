@@ -705,7 +705,7 @@ fn explore_chunk(
                                 }
                             }
                         }
-                        let travel = first_move_toward(&run.world(), &configured, p, &destinations)
+                        let travel = first_move_toward(run.world(), &configured, p, &destinations)
                             .and_then(|to| candidates.iter().find(|a| matches!(a, RunAction::Move { to: destination } if *destination == to)));
                         ranked
                             .or(choice)
@@ -748,33 +748,32 @@ fn explore_chunk(
                             reached.insert(i);
                         }
                     }
-                    if let Some(other) = &mut replay {
-                        if propose_action(other, &configured, p, action.clone()).is_err()
-                            || !equal_serialized_views(&run, other, &configured)
-                        {
-                            mismatch = true;
-                            replay = None;
-                        }
+                    if let Some(other) = &mut replay
+                        && (propose_action(other, &configured, p, action.clone()).is_err()
+                            || !equal_serialized_views(&run, other, &configured))
+                    {
+                        mismatch = true;
+                        replay = None;
                     }
                     actions.push((p, action));
-                    if report.violations.len() < 20 {
-                        if let Some((left, right)) = contradictory_pair(
-                            &run.world(),
+                    if report.violations.len() < 20
+                        && let Some((left, right)) = contradictory_pair(
+                            run.world(),
                             &configured.registry,
                             &cfg.contradictory_props,
-                        ) {
-                            report.violations.push(Violation {
-                                invariant: Invariant::ContradictoryProps(left, right),
-                                seed,
-                                persona: persona.clone(),
-                                config,
-                                step: actions.len() as u32,
-                                actions: actions.clone(),
-                            });
-                            break;
-                        }
+                        )
+                    {
+                        report.violations.push(Violation {
+                            invariant: Invariant::ContradictoryProps(left, right),
+                            seed,
+                            persona: persona.clone(),
+                            config,
+                            step: actions.len() as u32,
+                            actions: actions.clone(),
+                        });
+                        break;
                     }
-                    if report.violations.len() < 20 && has_untold_past(&run.world(), &configured) {
+                    if report.violations.len() < 20 && has_untold_past(run.world(), &configured) {
                         report.violations.push(Violation {
                             invariant: Invariant::PastWithoutTelling,
                             seed,
@@ -787,7 +786,7 @@ fn explore_chunk(
                     }
                     if report.violations.len() < 20
                         && has_unsourced_knowledge(
-                            &run.world(),
+                            run.world(),
                             &configured.initial_world,
                             |event| run.step_of_event(event).is_some(),
                         )
@@ -803,7 +802,7 @@ fn explore_chunk(
                         break;
                     }
                     if report.violations.len() < 20
-                        && has_unhandled_closed_occupant(&run.world(), &configured)
+                        && has_unhandled_closed_occupant(run.world(), &configured)
                     {
                         report.violations.push(Violation {
                             invariant: Invariant::OccupantBeyondClosedEdge,

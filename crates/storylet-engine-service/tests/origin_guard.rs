@@ -38,7 +38,11 @@ async fn send(
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(data).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(data).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let headers = response.headers().clone();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -175,7 +179,8 @@ async fn mcp_request_with_disallowed_origin_is_refused() {
 #[tokio::test]
 async fn safe_reads_with_disallowed_origin_still_work() {
     let app = test_app();
-    let (status, _, body) = send(&app, "GET", "/api/v3/project", Some(EVIL_ORIGIN), &[], None).await;
+    let (status, _, body) =
+        send(&app, "GET", "/api/v3/project", Some(EVIL_ORIGIN), &[], None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }
 
@@ -208,10 +213,10 @@ async fn mcp_tool_schema_advertises_no_playtest_operations() {
     )
     .await
     .unwrap();
-    let operations = response["result"]["tools"][0]["inputSchema"]["properties"]["operation"]
-        ["enum"]
-        .as_array()
-        .unwrap();
+    let operations =
+        response["result"]["tools"][0]["inputSchema"]["properties"]["operation"]["enum"]
+            .as_array()
+            .unwrap();
     let advertised: std::collections::BTreeSet<&str> = operations
         .iter()
         .map(|operation| operation.as_str().unwrap())

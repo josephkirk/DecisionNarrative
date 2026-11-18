@@ -1,4 +1,3 @@
-
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
@@ -293,27 +292,93 @@ async fn dispatch_narrative_platform_op(
     args: &Value,
 ) -> Result<Value, String> {
     match op {
-        "run.list" => service.run_list().await.map_err(|e|e.to_string()),
-        "run.start" => service.run_start(serde_json::from_value(args.clone()).map_err(|e|e.to_string())?).await.map_err(|e|e.to_string()),
-        "run.observe" => { let id=args.get("id").and_then(Value::as_str).ok_or("Missing id")?; let participant=u16::try_from(args.get("participant").and_then(Value::as_u64).ok_or("Missing participant")?).map_err(|e|e.to_string())?; service.run_observe(id, participant).await.map_err(|e|e.to_string()) },
-        "run.explain" => { let id=args.get("id").and_then(Value::as_str).ok_or("Missing id")?; let event=u32::try_from(args.get("event").and_then(Value::as_u64).ok_or("Missing event")?).map_err(|e|e.to_string())?; service.run_explain(id, event).await.map_err(|e|e.to_string()) },
+        "run.list" => service.run_list().await.map_err(|e| e.to_string()),
+        "run.start" => service
+            .run_start(serde_json::from_value(args.clone()).map_err(|e| e.to_string())?)
+            .await
+            .map_err(|e| e.to_string()),
+        "run.observe" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            let participant = u16::try_from(
+                args.get("participant")
+                    .and_then(Value::as_u64)
+                    .ok_or("Missing participant")?,
+            )
+            .map_err(|e| e.to_string())?;
+            service
+                .run_observe(id, participant)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "run.explain" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            let event = u32::try_from(
+                args.get("event")
+                    .and_then(Value::as_u64)
+                    .ok_or("Missing event")?,
+            )
+            .map_err(|e| e.to_string())?;
+            service
+                .run_explain(id, event)
+                .await
+                .map_err(|e| e.to_string())
+        }
         "run.view" | "run.why_not" | "run.inspect" => {
-            let id=args.get("id").and_then(Value::as_str).ok_or("Missing id")?;
-            let participant=args.get("participant").and_then(Value::as_u64).unwrap_or(0);
-            let participant=u16::try_from(participant).map_err(|e|e.to_string())?;
-            match op { "run.view"=>service.run_view(id,participant).await, "run.why_not"=>service.run_why_not(id,participant).await, _=>service.run_inspect(id,participant).await }.map_err(|e|e.to_string())
-        },
+            let id = args.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            let participant = args.get("participant").and_then(Value::as_u64).unwrap_or(0);
+            let participant = u16::try_from(participant).map_err(|e| e.to_string())?;
+            match op {
+                "run.view" => service.run_view(id, participant).await,
+                "run.why_not" => service.run_why_not(id, participant).await,
+                _ => service.run_inspect(id, participant).await,
+            }
+            .map_err(|e| e.to_string())
+        }
         "run.act" | "run.rewind" | "run.reload" | "run.delete" => {
-            let id=args.get("id").and_then(Value::as_str).ok_or("Missing id")?;
-            match op { "run.act"=>service.run_act(id,serde_json::from_value(args.clone()).map_err(|e|e.to_string())?).await,
-                "run.rewind"=>service.run_rewind(id,serde_json::from_value(args.clone()).map_err(|e|e.to_string())?).await,
-                "run.reload"=>service.run_reload(id,serde_json::from_value(args.clone()).map_err(|e|e.to_string())?).await,
-                _=>service.run_delete(id,serde_json::from_value(args.clone()).map_err(|e|e.to_string())?).await }.map_err(|e|e.to_string())
-        },
+            let id = args.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            match op {
+                "run.act" => {
+                    service
+                        .run_act(
+                            id,
+                            serde_json::from_value(args.clone()).map_err(|e| e.to_string())?,
+                        )
+                        .await
+                }
+                "run.rewind" => {
+                    service
+                        .run_rewind(
+                            id,
+                            serde_json::from_value(args.clone()).map_err(|e| e.to_string())?,
+                        )
+                        .await
+                }
+                "run.reload" => {
+                    service
+                        .run_reload(
+                            id,
+                            serde_json::from_value(args.clone()).map_err(|e| e.to_string())?,
+                        )
+                        .await
+                }
+                _ => {
+                    service
+                        .run_delete(
+                            id,
+                            serde_json::from_value(args.clone()).map_err(|e| e.to_string())?,
+                        )
+                        .await
+                }
+            }
+            .map_err(|e| e.to_string())
+        }
         "platform.health" => {
             Ok(json!({ "status": "ok", "service": "decisionnarrative_studio_rust" }))
         }
-        "workspace.coverage" => service.run_coverage(serde_json::from_value(args.clone()).map_err(|e| e.to_string())?).await.map_err(|e| e.to_string()),
+        "workspace.coverage" => service
+            .run_coverage(serde_json::from_value(args.clone()).map_err(|e| e.to_string())?)
+            .await
+            .map_err(|e| e.to_string()),
         "workspace.context" => service.get_interaction_context().await,
         "workspace.inspect" => {
             let bundle = service.export_project_bundle().await?;
@@ -362,7 +427,9 @@ async fn dispatch_narrative_platform_op(
             let payload = args
                 .get("payload")
                 .ok_or_else(|| "Missing payload".to_string())?;
-            let res = service.save_content_item_with_origin(entity, payload, "agent").await?;
+            let res = service
+                .save_content_item_with_origin(entity, payload, "agent")
+                .await?;
             if let Err(e) = service.mark_interaction_context_stale().await {
                 eprintln!(
                     "Warning: failed to mark interaction context stale after content save: {e}"

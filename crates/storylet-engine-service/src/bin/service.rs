@@ -41,17 +41,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         "data/storylet_studio_v8.db"
     };
-    let db_path = env::var("STORYLET_STUDIO_DB_PATH")
-        .unwrap_or_else(|_| default_db_path.into());
+    let db_path = env::var("STORYLET_STUDIO_DB_PATH").unwrap_or_else(|_| default_db_path.into());
 
     let resource_root = env::var("STORYLET_RESOURCE_ROOT").unwrap_or_else(|_| ".".into());
 
-    if db_path != ":memory:" {
-        if let Some(parent) = PathBuf::from(&db_path).parent() {
-            if !parent.as_os_str().is_empty() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-        }
+    if db_path != ":memory:"
+        && let Some(parent) = PathBuf::from(&db_path).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        let _ = std::fs::create_dir_all(parent);
     }
 
     let service = if db_path == ":memory:" {

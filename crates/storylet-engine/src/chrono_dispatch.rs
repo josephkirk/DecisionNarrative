@@ -287,10 +287,10 @@ impl UnifiedDispatcher {
     pub fn storylet(&self, storylet_id: u16) -> Option<&StoryletDef> {
         if !self.index_by_id.is_empty() && self.indexed_count == self.storylets.len() {
             if let Some(Some(row)) = self.index_by_id.get(storylet_id as usize) {
-                if let Some(def) = self.storylets.get(*row as usize) {
-                    if def.storylet_id == storylet_id {
-                        return Some(def);
-                    }
+                if let Some(def) = self.storylets.get(*row as usize)
+                    && def.storylet_id == storylet_id
+                {
+                    return Some(def);
                 }
             } else {
                 return None;
@@ -489,11 +489,11 @@ impl UnifiedDispatcher {
             }
         }
         let mut bindings = Vec::with_capacity(candidates.len());
-        for role in 0..candidates.len() {
+        for (role, candidate) in candidates.iter().enumerate() {
             for (row, assigned_role) in owner.iter().enumerate() {
                 if *assigned_role == role {
                     bindings.push(RoleBinding {
-                        role_index: candidates[role].0,
+                        role_index: candidate.0,
                         entity_index: row,
                     });
                     break;

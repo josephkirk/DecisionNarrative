@@ -2,20 +2,15 @@ use std::collections::BTreeMap;
 
 use crate::chrono_catalog::StoryletIndex;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SelectionPool {
+    #[default]
     Deck,
     Qbn,
     Salience,
     Ending,
     CatalogQuery,
     Custom,
-}
-
-impl Default for SelectionPool {
-    fn default() -> Self {
-        Self::Deck
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -118,25 +113,13 @@ impl SelectionProfile {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct GateCounters {
     pub completed: u32,
     pub elapsed_millis: u64,
     pub flags: BTreeMap<String, bool>,
     pub metrics: BTreeMap<String, f32>,
     pub tags: BTreeMap<String, bool>,
-}
-
-impl Default for GateCounters {
-    fn default() -> Self {
-        Self {
-            completed: 0,
-            elapsed_millis: 0,
-            flags: BTreeMap::new(),
-            metrics: BTreeMap::new(),
-            tags: BTreeMap::new(),
-        }
-    }
 }
 
 impl SelectionGate {
@@ -223,16 +206,10 @@ pub struct SelectionProfile {
     pub fallback: FallbackPolicy,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct SelectionRng {
     pub seed: u64,
     pub cursor: u64,
-}
-
-impl Default for SelectionRng {
-    fn default() -> Self {
-        Self { seed: 0, cursor: 0 }
-    }
 }
 
 impl SelectionRng {

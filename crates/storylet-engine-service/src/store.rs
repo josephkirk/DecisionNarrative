@@ -1,15 +1,14 @@
-
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::path::Path;
 
 use crate::narrative_graph::NarrativeGraph;
 
 use crate::contracts::{
-    AssetRecord, EntityRecord, EventRecord, FolderRecord, GameplayTagRecord,
-    LibraryPageResult, LibraryQuery, LibrarySummaryItem, ProjectBundleContent, ProjectMetadata,
-    ScenarioRecord, StoryletRecord, TraitTemplateRecord, SYSTEM_TRAIT_TEMPLATES,
+    AssetRecord, EntityRecord, EventRecord, FolderRecord, GameplayTagRecord, LibraryPageResult,
+    LibraryQuery, LibrarySummaryItem, ProjectBundleContent, ProjectMetadata,
+    SYSTEM_TRAIT_TEMPLATES, ScenarioRecord, StoryletRecord, TraitTemplateRecord,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 fn normalize_storylet_ending(mut storylet: StoryletRecord) -> StoryletRecord {
     if let Some(graph) = storylet.graph.clone() {
         storylet.ending = graph.ending_from_graph();
@@ -47,22 +46,43 @@ impl Store {
             "SELECT count(*) FROM sqlite_master WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%'",
             [], |row| row.get(0))?;
         if object_count > 0 {
-            let marker: Option<String> = self.conn.query_row(
-                "SELECT value FROM store_metadata WHERE key = 'schema_version'", [],
-                |row| row.get(0)).optional()?;
-            if marker.as_deref() != Some("8") { return Err(rusqlite::Error::InvalidQuery); }
-            for table in ["project_metadata", "content_records", "interaction_context",
-                "store_metadata", "run_idempotency", "runs"] {
+            let marker: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT value FROM store_metadata WHERE key = 'schema_version'",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if marker.as_deref() != Some("8") {
+                return Err(rusqlite::Error::InvalidQuery);
+            }
+            for table in [
+                "project_metadata",
+                "content_records",
+                "interaction_context",
+                "store_metadata",
+                "run_idempotency",
+                "runs",
+            ] {
                 let present: bool = self.conn.query_row(
                     "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-                    [table], |row| row.get(0))?;
-                if !present { return Err(rusqlite::Error::InvalidQuery); }
+                    [table],
+                    |row| row.get(0),
+                )?;
+                if !present {
+                    return Err(rusqlite::Error::InvalidQuery);
+                }
             }
             let has_legacy_records: bool = self.conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM content_records WHERE
                     entity IN ('qualities','npc_behaviors'))",
-                [], |row| row.get(0))?;
-            if has_legacy_records { return Err(rusqlite::Error::InvalidQuery); }
+                [],
+                |row| row.get(0),
+            )?;
+            if has_legacy_records {
+                return Err(rusqlite::Error::InvalidQuery);
+            }
             let canonical_capabilities: i64 = self.conn.query_row("SELECT count(*) FROM content_records WHERE entity='trait_templates' AND id IN ('system.character','system.location','system.fact')", [], |row| row.get(0))?;
             let has_world: bool = self.conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM content_records WHERE entity='entities' AND id='world')",
@@ -89,14 +109,24 @@ impl Store {
              CREATE TABLE IF NOT EXISTS run_idempotency (run_id TEXT NOT NULL, key TEXT NOT NULL, request TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(run_id,key));
              CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, project_revision INTEGER NOT NULL, seed INTEGER NOT NULL, start_json TEXT NOT NULL, actions_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);")?;
         self.conn.execute(
-            "INSERT OR IGNORE INTO store_metadata (key, value) VALUES ('schema_version', '8')", [])?;
-        let exists: bool = self.conn.query_row(
-            "SELECT 1 FROM project_metadata WHERE singleton = 1", [], |_| Ok(true))
-            .optional()?.is_some();
+            "INSERT OR IGNORE INTO store_metadata (key, value) VALUES ('schema_version', '8')",
+            [],
+        )?;
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM project_metadata WHERE singleton = 1",
+                [],
+                |_| Ok(true),
+            )
+            .optional()?
+            .is_some();
         if !exists {
             self.conn.execute(
                 "INSERT INTO project_metadata (singleton, project_id, name, revision)
-                 VALUES (1, 'workspace-project', 'Workspace', 0)", [])?;
+                 VALUES (1, 'workspace-project', 'Workspace', 0)",
+                [],
+            )?;
             seed_system_records(&self.conn)?;
         } else {
             sync_system_trait_uniqueness(&self.conn)?;
@@ -104,7 +134,6 @@ impl Store {
         ensure_world_entity(&self.conn)?;
         Ok(())
     }
-
 
     pub fn get_project_metadata(&self) -> Result<ProjectMetadata, rusqlite::Error> {
         self.conn.query_row(
@@ -141,16 +170,18 @@ impl Store {
         Ok(rev)
     }
 
-
     pub fn get_content_json(
         &self,
         entity: &str,
         id: &str,
     ) -> Result<Option<String>, rusqlite::Error> {
-        self.conn.query_row(
-            "SELECT data_json FROM content_records WHERE entity = ?1 AND id = ?2",
-            params![entity, id], |row| row.get(0),
-        ).optional()
+        self.conn
+            .query_row(
+                "SELECT data_json FROM content_records WHERE entity = ?1 AND id = ?2",
+                params![entity, id],
+                |row| row.get(0),
+            )
+            .optional()
     }
 
     pub fn list_content_json(&self, entity: &str) -> Result<Vec<String>, rusqlite::Error> {
@@ -200,15 +231,20 @@ impl Store {
     }
 
     pub fn list_entities(&self) -> Result<Vec<EntityRecord>, rusqlite::Error> {
-        Ok(self.list_content_json("entities")?.into_iter()
-            .filter_map(|s| serde_json::from_str(&s).ok()).collect())
+        Ok(self
+            .list_content_json("entities")?
+            .into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect())
     }
 
     pub fn list_gameplay_tags(&self) -> Result<Vec<GameplayTagRecord>, rusqlite::Error> {
-        Ok(self.list_content_json("gameplay_tags")?.into_iter()
-            .filter_map(|s| serde_json::from_str(&s).ok()).collect())
+        Ok(self
+            .list_content_json("gameplay_tags")?
+            .into_iter()
+            .filter_map(|s| serde_json::from_str(&s).ok())
+            .collect())
     }
-
 
     pub fn list_trait_templates(&self) -> Result<Vec<TraitTemplateRecord>, rusqlite::Error> {
         let json_list = self.list_content_json("trait_templates")?;
@@ -234,7 +270,6 @@ impl Store {
             .collect())
     }
 
-
     pub fn update_content_json(
         &self,
         entity: &str,
@@ -252,7 +287,6 @@ impl Store {
         tx.commit()?;
         Ok(count > 0)
     }
-
 
     pub fn list_events(&self) -> Result<Vec<EventRecord>, rusqlite::Error> {
         let json_list = self.list_content_json("events")?;
@@ -334,7 +368,6 @@ impl Store {
         Ok(Some(st))
     }
 
-
     pub fn query_library(
         &self,
         query: &LibraryQuery,
@@ -390,28 +423,24 @@ impl Store {
                     if st.approved_revision != Some(st.revision) {
                         return false;
                     }
-                } else if status_filter == "draft" {
-                    if st.approved_revision == Some(st.revision) {
-                        return false;
-                    }
+                } else if status_filter == "draft" && st.approved_revision == Some(st.revision) {
+                    return false;
                 }
-                if !location_tag_filter.is_empty() && location_tag_filter != "all" {
-                    if !st
+                if !location_tag_filter.is_empty()
+                    && location_tag_filter != "all"
+                    && !st
                         .location_tags
                         .iter()
                         .any(|tag| tag == location_tag_filter)
-                    {
-                        return false;
-                    }
+                {
+                    return false;
                 }
                 if ending_filter == "ending" {
                     if !st.ending {
                         return false;
                     }
-                } else if ending_filter == "non-ending" {
-                    if st.ending {
-                        return false;
-                    }
+                } else if ending_filter == "non-ending" && st.ending {
+                    return false;
                 }
                 true
             })
@@ -438,7 +467,7 @@ impl Store {
         let total_pages = if total == 0 {
             1
         } else {
-            (total + page_size - 1) / page_size
+            total.div_ceil(page_size)
         };
         let page = query.page.unwrap_or(1).clamp(1, total_pages);
         let start = (page - 1) * page_size;
@@ -487,7 +516,6 @@ impl Store {
             available_location_tags,
         })
     }
-
 
     pub fn save_interaction_context(
         &self,
@@ -539,7 +567,6 @@ impl Store {
         }
         Ok(None)
     }
-
 
     pub fn replace_project_content(
         &mut self,
@@ -719,7 +746,6 @@ fn chrono_now_ms() -> i64 {
         .as_millis() as i64
 }
 
-
 fn sync_system_trait_uniqueness(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
     let tx = conn.unchecked_transaction()?;
     let mut changed = 0;
@@ -730,31 +756,44 @@ fn sync_system_trait_uniqueness(conn: &rusqlite::Connection) -> Result<(), rusql
             params![if template.unique { "true" } else { "false" }, id, template.unique],
         )?;
     }
-    if changed > 0 { tx.execute("UPDATE project_metadata SET revision = revision + 1 WHERE singleton = 1", [])?; }
+    if changed > 0 {
+        tx.execute(
+            "UPDATE project_metadata SET revision = revision + 1 WHERE singleton = 1",
+            [],
+        )?;
+    }
     tx.commit()?;
     Ok(())
 }
 
 fn seed_system_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
     for template in SYSTEM_TRAIT_TEMPLATES {
-        let properties: Vec<Value> = template.properties.iter().map(|spec| {
-            let mut property = json!({
-            "key": spec.key,
-            "name": spec.name,
-            "type": spec.property_type,
-            "is_array": spec.is_array,
-            "default": serde_json::from_str::<Value>(spec.default_json)
-                .expect("system trait default JSON must be valid"),
-            });
-            if let Some(editor) = template.editors.iter().find(|editor| editor.property_key == spec.key) {
-                property["editor"] = json!({
-                    "option_source": editor.option_source,
-                    "selection_only": editor.selection_only,
-                    "entity_trait_key": editor.entity_trait_key,
+        let properties: Vec<Value> = template
+            .properties
+            .iter()
+            .map(|spec| {
+                let mut property = json!({
+                "key": spec.key,
+                "name": spec.name,
+                "type": spec.property_type,
+                "is_array": spec.is_array,
+                "default": serde_json::from_str::<Value>(spec.default_json)
+                    .expect("system trait default JSON must be valid"),
                 });
-            }
-            property
-        }).collect();
+                if let Some(editor) = template
+                    .editors
+                    .iter()
+                    .find(|editor| editor.property_key == spec.key)
+                {
+                    property["editor"] = json!({
+                        "option_source": editor.option_source,
+                        "selection_only": editor.selection_only,
+                        "entity_trait_key": editor.entity_trait_key,
+                    });
+                }
+                property
+            })
+            .collect();
         let id = format!("system.{}", template.key);
         let record = json!({
             "id": id,
@@ -776,14 +815,22 @@ fn seed_system_records(conn: &rusqlite::Connection) -> Result<(), rusqlite::Erro
 }
 
 pub fn ensure_world_entity(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
-    let exists: bool = conn.query_row(
-        "SELECT 1 FROM content_records WHERE entity='entities' AND id='world'",
-        [], |_| Ok(true)).optional()?.unwrap_or(false);
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM content_records WHERE entity='entities' AND id='world'",
+            [],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
     if !exists {
-        let world = serde_json::to_value(crate::entities::default_world_entity()).expect("world entity serializes");
+        let world = serde_json::to_value(crate::entities::default_world_entity())
+            .expect("world entity serializes");
         conn.execute(
             "INSERT INTO content_records (entity,id,data_json,revision,updated_at)
-             VALUES ('entities','world',?1,1,0)", params![world.to_string()])?;
+             VALUES ('entities','world',?1,1,0)",
+            params![world.to_string()],
+        )?;
     }
     Ok(())
 }

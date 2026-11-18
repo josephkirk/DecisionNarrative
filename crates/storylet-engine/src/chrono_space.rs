@@ -157,9 +157,7 @@ pub fn advance_slot(
         return Vec::new();
     }
     state.slot += 1;
-    for left in &mut state.actions_left {
-        *left = clock.actions_per_slot;
-    }
+    state.actions_left.fill(clock.actions_per_slot);
     let mut events = Vec::new();
     for p in 0..world.participants.len() as PartIx {
         let Some(at) = world.active_location(p) else {

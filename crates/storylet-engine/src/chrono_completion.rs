@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::chrono_catalog::{MAX_STORYLETS, StoryletIndex};
 
 pub const STORYLET_WORDS: usize = MAX_STORYLETS / 64;
-const _: () = assert!(MAX_STORYLETS % 64 == 0);
+const _: () = assert!(MAX_STORYLETS.is_multiple_of(64));
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompletionError {

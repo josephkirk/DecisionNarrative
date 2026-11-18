@@ -37,8 +37,10 @@ async fn reject_disallowed_origins(
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
-    let state_changing =
-        !matches!(*request.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+    let state_changing = !matches!(
+        *request.method(),
+        Method::GET | Method::HEAD | Method::OPTIONS
+    );
     if (state_changing || request.uri().path() == "/mcp")
         && *request.method() != Method::OPTIONS
         && let Some(origin) = request.headers().get(header::ORIGIN)
@@ -134,8 +136,14 @@ pub fn build_router_with_origins(
         .route("/api/v3/audio/inspect", get(inspect_audio_file))
         .route("/api/v4/run-content", get(crate::runs::run_content))
         .route("/api/v4/coverage", post(crate::runs::coverage))
-        .route("/api/v4/runs", get(crate::runs::list).post(crate::runs::start))
-        .route("/api/v4/runs/{id}", get(crate::runs::view).delete(crate::runs::delete))
+        .route(
+            "/api/v4/runs",
+            get(crate::runs::list).post(crate::runs::start),
+        )
+        .route(
+            "/api/v4/runs/{id}",
+            get(crate::runs::view).delete(crate::runs::delete),
+        )
         .route("/api/v4/runs/{id}/act", post(crate::runs::act))
         .route("/api/v4/runs/{id}/observe", get(crate::runs::observe))
         .route("/api/v4/runs/{id}/explain", get(crate::runs::explain))
@@ -151,11 +159,11 @@ pub fn build_router_with_origins(
         ))
         .with_state(service);
 
-    if let Some(dir) = static_dir {
-        if dir.exists() {
-            let serve_dir = ServeDir::new(&dir).fallback(ServeDir::new(&dir));
-            router = router.fallback_service(serve_dir);
-        }
+    if let Some(dir) = static_dir
+        && dir.exists()
+    {
+        let serve_dir = ServeDir::new(&dir).fallback(ServeDir::new(&dir));
+        router = router.fallback_service(serve_dir);
     }
 
     router
@@ -453,7 +461,10 @@ async fn move_content(
     Path((entity, id)): Path<(String, String)>,
     Json(body): Json<MoveBody>,
 ) -> Response {
-    match service.move_content_item(&entity, &id, body.folder_id).await {
+    match service
+        .move_content_item(&entity, &id, body.folder_id)
+        .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(error) if error.contains("not found") => {
             (StatusCode::NOT_FOUND, Json(json!({ "error": error }))).into_response()
@@ -500,9 +511,11 @@ async fn upload_file(
         Err(crate::files::FileError::Invalid(error)) => {
             (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
         }
-        Err(crate::files::FileError::NotFound) => {
-            (StatusCode::NOT_FOUND, Json(json!({ "error": "File not found" }))).into_response()
-        }
+        Err(crate::files::FileError::NotFound) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "File not found" })),
+        )
+            .into_response(),
         Err(crate::files::FileError::Io(error)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": error })),
@@ -521,7 +534,10 @@ async fn get_project_file(
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response();
         }
         Err(crate::files::FileError::NotFound) => {
-            return (StatusCode::NOT_FOUND, Json(json!({ "error": "File not found" })))
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "File not found" })),
+            )
                 .into_response();
         }
         Err(crate::files::FileError::Io(error)) => {
@@ -535,7 +551,10 @@ async fn get_project_file(
     let bytes = match tokio::fs::read(&resolved).await {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return (StatusCode::NOT_FOUND, Json(json!({ "error": "File not found" })))
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "File not found" })),
+            )
                 .into_response();
         }
         Err(error) => {
@@ -552,10 +571,9 @@ async fn get_project_file(
         "image/jpeg"
     };
     let mut response = Response::new(Body::from(bytes));
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        content_type.parse().unwrap(),
-    );
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, content_type.parse().unwrap());
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, "no-cache".parse().unwrap());
@@ -578,8 +596,6 @@ async fn approve_storylet(
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e }))).into_response(),
     }
 }
-
-
 
 async fn list_scenarios(State(s): State<StudioService>) -> Response {
     list_content(State(s), Path("scenarios".into())).await
@@ -679,6 +695,42 @@ fn inspect_wav_duration(path: &std::path::Path) -> Option<f64> {
     Some(((data_size? as f64 / rate as f64) * 10.0).round() / 10.0)
 }
 
+async fn inspect_audio_file(Query(q): Query<AudioInspectQuery>) -> impl IntoResponse {
+    let clean_path = q.path.trim();
+    let p = std::path::Path::new(clean_path);
+    if p.exists() && p.is_file() {
+        let size = std::fs::metadata(p).ok().map(|meta| meta.len());
+        let duration = inspect_wav_duration(p);
+        (
+            StatusCode::OK,
+            Json(AudioInspectResponse {
+                path: clean_path.to_string(),
+                exists: true,
+                size,
+                duration,
+            }),
+        )
+    } else {
+        (
+            StatusCode::OK,
+            Json(AudioInspectResponse {
+                path: clean_path.to_string(),
+                exists: false,
+                size: None,
+                duration: None,
+            }),
+        )
+    }
+}
+
+async fn handle_http_mcp(State(s): State<StudioService>, Json(msg): Json<Value>) -> Response {
+    if let Some(resp) = crate::mcp::handle_mcp_message(&s, &msg).await {
+        (StatusCode::OK, Json(resp)).into_response()
+    } else {
+        (StatusCode::NO_CONTENT, Json(Value::Null)).into_response()
+    }
+}
+
 #[cfg(test)]
 mod audio_inspect_tests {
     use super::inspect_wav_duration;
@@ -718,41 +770,5 @@ mod audio_inspect_tests {
         std::fs::write(&path, b"not a wave file").unwrap();
         assert_eq!(inspect_wav_duration(&path), None);
         std::fs::remove_file(path).unwrap();
-    }
-}
-
-async fn inspect_audio_file(Query(q): Query<AudioInspectQuery>) -> impl IntoResponse {
-    let clean_path = q.path.trim();
-    let p = std::path::Path::new(clean_path);
-    if p.exists() && p.is_file() {
-        let size = std::fs::metadata(p).ok().map(|meta| meta.len());
-        let duration = inspect_wav_duration(p);
-        (
-            StatusCode::OK,
-            Json(AudioInspectResponse {
-                path: clean_path.to_string(),
-                exists: true,
-                size,
-                duration,
-            }),
-        )
-    } else {
-        (
-            StatusCode::OK,
-            Json(AudioInspectResponse {
-                path: clean_path.to_string(),
-                exists: false,
-                size: None,
-                duration: None,
-            }),
-        )
-    }
-}
-
-async fn handle_http_mcp(State(s): State<StudioService>, Json(msg): Json<Value>) -> Response {
-    if let Some(resp) = crate::mcp::handle_mcp_message(&s, &msg).await {
-        (StatusCode::OK, Json(resp)).into_response()
-    } else {
-        (StatusCode::NO_CONTENT, Json(Value::Null)).into_response()
     }
 }

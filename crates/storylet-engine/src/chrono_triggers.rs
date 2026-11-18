@@ -93,6 +93,7 @@ impl TriggerTable {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_keyed(
         &mut self,
         stable_key: impl Into<String>,
@@ -114,6 +115,7 @@ impl TriggerTable {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn insert_inner(
         &mut self,
         event_kind: EventKind,
@@ -127,10 +129,10 @@ impl TriggerTable {
         if self.rows.len() >= MAX_TRIGGER_SUBSCRIPTIONS {
             return Err(TriggerError::CapacityExceeded);
         }
-        if let Some(key) = &stable_key {
-            if self.stable_keys.contains_key(key) {
-                return Err(TriggerError::CapacityExceeded);
-            }
+        if let Some(key) = &stable_key
+            && self.stable_keys.contains_key(key)
+        {
+            return Err(TriggerError::CapacityExceeded);
         }
         let subscription_index = self.rows.len() as u32;
         if let Some(key) = &stable_key {
@@ -380,10 +382,10 @@ impl TriggerFireTable {
     pub fn rebuild_history(entries: &[CallHistoryEntry], scope: u64) -> Self {
         let mut table = Self::new();
         for entry in entries {
-            if entry.scope_index == scope {
-                if let Some(subscription) = entry.trigger_subscription {
-                    table.mark(scope, subscription);
-                }
+            if entry.scope_index == scope
+                && let Some(subscription) = entry.trigger_subscription
+            {
+                table.mark(scope, subscription);
             }
         }
         table

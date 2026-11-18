@@ -1,5 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet};
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const TREE_GRAPH_KEY: &str = "tree_graph";
 pub const TREE_ITEM_KEY: &str = "tree_item";
@@ -10,14 +10,26 @@ pub fn requires_validation(
     before: &[crate::contracts::TraitInstance],
     after: &[crate::contracts::TraitInstance],
 ) -> bool {
-    let graph = index.templates.iter().find(|template| template.key == TREE_GRAPH_KEY);
-    let item = index.templates.iter().find(|template| template.key == TREE_ITEM_KEY);
+    let graph = index
+        .templates
+        .iter()
+        .find(|template| template.key == TREE_GRAPH_KEY);
+    let item = index
+        .templates
+        .iter()
+        .find(|template| template.key == TREE_ITEM_KEY);
     let graph_changed = graph.is_some_and(|template| {
-        before.iter().find(|trait_| trait_.template_id == template.id)
-            != after.iter().find(|trait_| trait_.template_id == template.id)
+        before
+            .iter()
+            .find(|trait_| trait_.template_id == template.id)
+            != after
+                .iter()
+                .find(|trait_| trait_.template_id == template.id)
     });
     let item_removed = item.is_some_and(|template| {
-        before.iter().any(|trait_| trait_.template_id == template.id)
+        before
+            .iter()
+            .any(|trait_| trait_.template_id == template.id)
             && !after.iter().any(|trait_| trait_.template_id == template.id)
     });
     graph_changed || item_removed
@@ -73,27 +85,24 @@ pub fn validate_tree_item_template(
 
     for prop in &template.properties {
         let key = prop.key();
-        if key == "level" || key == "cost" {
-            if prop.property.property_type == crate::contracts::PropertyType::Int
-                && !prop.property.is_array
-            {
-                if !prop.property.default.is_null() {
-                    let is_nonnegative_int = prop.property.default.as_i64().is_some_and(|i| i >= 0);
+        if (key == "level" || key == "cost")
+            && prop.property.property_type == crate::contracts::PropertyType::Int
+            && !prop.property.is_array
+            && !prop.property.default.is_null()
+        {
+            let is_nonnegative_int = prop.property.default.as_i64().is_some_and(|i| i >= 0);
 
-                    if !is_nonnegative_int {
-                        return Err(format!(
-                            "{prefix}: TreeItem '{key}' default must be a nonnegative integer, got {}",
-                            prop.property.default
-                        ));
-                    }
-                }
+            if !is_nonnegative_int {
+                return Err(format!(
+                    "{prefix}: TreeItem '{key}' default must be a nonnegative integer, got {}",
+                    prop.property.default
+                ));
             }
         }
     }
 
     Ok(())
 }
-
 
 pub fn validate_tree_graphs(
     index: &crate::entities::WorkspaceIndex,
@@ -111,25 +120,32 @@ pub fn validate_tree_graphs(
         .find(|t| t.key == TREE_ITEM_KEY)
         .map(|t| &t.id);
 
-    let mut effective_entities: BTreeMap<&str, (&str, &[crate::contracts::TraitInstance])> = BTreeMap::new();
+    let mut effective_entities: BTreeMap<&str, (&str, &[crate::contracts::TraitInstance])> =
+        BTreeMap::new();
 
     for entity in &index.entities {
         if Some(entity.id.as_str()) == removed_id {
             continue;
         }
-        effective_entities.insert(entity.id.as_str(), (entity.name.as_str(), entity.traits.as_slice()));
+        effective_entities.insert(
+            entity.id.as_str(),
+            (entity.name.as_str(), entity.traits.as_slice()),
+        );
     }
 
-    if let Some((rep_id, rep_name, rep_traits)) = replacement {
-        if Some(rep_id) != removed_id {
-            effective_entities.insert(rep_id, (rep_name, rep_traits));
-        }
+    if let Some((rep_id, rep_name, rep_traits)) = replacement
+        && Some(rep_id) != removed_id
+    {
+        effective_entities.insert(rep_id, (rep_name, rep_traits));
     }
 
     let mut tree_items: BTreeSet<&str> = BTreeSet::new();
     if let Some(item_tid) = tree_item_template_id {
         for (&id, (_, traits)) in &effective_entities {
-            if traits.iter().any(|instance| instance.template_id == *item_tid) {
+            if traits
+                .iter()
+                .any(|instance| instance.template_id == *item_tid)
+            {
                 tree_items.insert(id);
             }
         }
@@ -143,16 +159,26 @@ pub fn validate_tree_graphs(
         if Some(entity.id.as_str()) == removed_id || rep_id_opt == Some(entity.id.as_str()) {
             continue;
         }
-        if entity.traits.iter().any(|t| t.template_id == *tree_graph_template_id) {
-            owners.push((entity.id.as_str(), entity.name.as_str(), entity.traits.as_slice()));
+        if entity
+            .traits
+            .iter()
+            .any(|t| t.template_id == *tree_graph_template_id)
+        {
+            owners.push((
+                entity.id.as_str(),
+                entity.name.as_str(),
+                entity.traits.as_slice(),
+            ));
         }
     }
 
-
-    if let Some((rep_id, rep_name, rep_traits)) = replacement {
-        if Some(rep_id) != removed_id && rep_traits.iter().any(|t| t.template_id == *tree_graph_template_id) {
-            owners.push((rep_id, rep_name, rep_traits));
-        }
+    if let Some((rep_id, rep_name, rep_traits)) = replacement
+        && Some(rep_id) != removed_id
+        && rep_traits
+            .iter()
+            .any(|t| t.template_id == *tree_graph_template_id)
+    {
+        owners.push((rep_id, rep_name, rep_traits));
     }
 
     owners.sort_by_key(|owner| owner.0);
@@ -160,9 +186,16 @@ pub fn validate_tree_graphs(
     let mut issues = Vec::new();
 
     for (owner_id, owner_name, traits) in owners {
-        let display_name = if owner_name.is_empty() { owner_id } else { owner_name };
+        let display_name = if owner_name.is_empty() {
+            owner_id
+        } else {
+            owner_name
+        };
 
-        for instance in traits.iter().filter(|t| t.template_id == *tree_graph_template_id) {
+        for instance in traits
+            .iter()
+            .filter(|t| t.template_id == *tree_graph_template_id)
+        {
             let mut valid_nodes: BTreeSet<&str> = BTreeSet::new();
             let mut valid_edges: BTreeSet<(&str, &str)> = BTreeSet::new();
 
@@ -306,7 +339,12 @@ pub fn validate_tree_graphs(
                     if !trimmed.is_empty() {
                         match serde_json::from_str::<Value>(trimmed) {
                             Ok(Value::Object(map)) => {
-                                validate_positions_map(&map, display_name, &valid_nodes, &mut issues);
+                                validate_positions_map(
+                                    &map,
+                                    display_name,
+                                    &valid_nodes,
+                                    &mut issues,
+                                );
                             }
                             Ok(_) => {
                                 issues.push(format!(
@@ -334,15 +372,21 @@ pub fn validate_tree_graphs(
                     Ok(Value::Object(shapes)) => {
                         for (id, shape) in &shapes {
                             if !valid_nodes.contains(id.as_str())
-                                || !shape.as_str().is_some_and(|value| ["card", "rounded", "ellipse", "diamond"].contains(&value))
+                                || !shape.as_str().is_some_and(|value| {
+                                    ["card", "rounded", "ellipse", "diamond"].contains(&value)
+                                })
                             {
                                 issues.push(format!("owner '{display_name}': tree_graph invalid shape for node '{id}'"));
                             }
                         }
                     }
-                    _ => issues.push(format!("owner '{display_name}': tree_graph shapes must be a JSON object")),
+                    _ => issues.push(format!(
+                        "owner '{display_name}': tree_graph shapes must be a JSON object"
+                    )),
                 },
-                Some(_) => issues.push(format!("owner '{display_name}': tree_graph shapes must be a JSON string")),
+                Some(_) => issues.push(format!(
+                    "owner '{display_name}': tree_graph shapes must be a JSON string"
+                )),
             }
             match instance.values.get("appearance") {
                 None => {}
@@ -412,20 +456,14 @@ fn validate_positions_map(
                 }
             }
 
-            let x_valid = match pos_obj.get("x") {
-                Some(Value::Number(n)) if n.as_f64().is_some_and(f64::is_finite) => true,
-                _ => false,
-            };
+            let x_valid = matches!(pos_obj.get("x"), Some(Value::Number(n)) if n.as_f64().is_some_and(f64::is_finite));
             if !x_valid {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph position for '{node_id}' in direction '{dir_key}' has invalid x coordinate, must be a finite number"
                 ));
             }
 
-            let y_valid = match pos_obj.get("y") {
-                Some(Value::Number(n)) if n.as_f64().is_some_and(f64::is_finite) => true,
-                _ => false,
-            };
+            let y_valid = matches!(pos_obj.get("y"), Some(Value::Number(n)) if n.as_f64().is_some_and(f64::is_finite));
             if !y_valid {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph position for '{node_id}' in direction '{dir_key}' has invalid y coordinate, must be a finite number"
@@ -448,7 +486,12 @@ fn validate_appearance_map(
     issues: &mut Vec<String>,
 ) {
     for key in map.keys() {
-        if key != "nodes" && key != "edges" && key != "canvasBackground" && key != "defaults" && key != "images" {
+        if key != "nodes"
+            && key != "edges"
+            && key != "canvasBackground"
+            && key != "defaults"
+            && key != "images"
+        {
             issues.push(format!(
                 "owner '{display_name}': tree_graph appearance contains unknown key '{key}'"
             ));
@@ -538,7 +581,16 @@ fn validate_appearance_nodes(
         };
 
         for key in node_obj.keys() {
-            if !["background", "outline", "outlineWidth", "width", "height", "locked"].contains(&key.as_str()) {
+            if ![
+                "background",
+                "outline",
+                "outlineWidth",
+                "width",
+                "height",
+                "locked",
+            ]
+            .contains(&key.as_str())
+            {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph appearance for node '{node_id}' contains unknown key '{key}'"
                 ));
@@ -564,7 +616,9 @@ fn validate_appearance_nodes(
         }
 
         if let Some(ow_val) = node_obj.get("outlineWidth") {
-            let valid = ow_val.as_f64().is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
+            let valid = ow_val
+                .as_f64()
+                .is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
             if !valid {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph appearance for node '{node_id}' has invalid outlineWidth, must be a finite number between 1 and 12"
@@ -573,7 +627,9 @@ fn validate_appearance_nodes(
         }
 
         if let Some(w_val) = node_obj.get("width") {
-            let valid = w_val.as_f64().is_some_and(|w| w.is_finite() && (100.0..=600.0).contains(&w));
+            let valid = w_val
+                .as_f64()
+                .is_some_and(|w| w.is_finite() && (100.0..=600.0).contains(&w));
             if !valid {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph appearance for node '{node_id}' has invalid width, must be a finite number between 100 and 600"
@@ -582,7 +638,9 @@ fn validate_appearance_nodes(
         }
 
         if let Some(h_val) = node_obj.get("height") {
-            let valid = h_val.as_f64().is_some_and(|h| h.is_finite() && (60.0..=400.0).contains(&h));
+            let valid = h_val
+                .as_f64()
+                .is_some_and(|h| h.is_finite() && (60.0..=400.0).contains(&h));
             if !valid {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph appearance for node '{node_id}' has invalid height, must be a finite number between 60 and 400"
@@ -590,21 +648,17 @@ fn validate_appearance_nodes(
             }
         }
 
-        if let Some(locked_val) = node_obj.get("locked") {
-            if locked_val.as_bool().is_none() {
-                issues.push(format!(
+        if let Some(locked_val) = node_obj.get("locked")
+            && locked_val.as_bool().is_none()
+        {
+            issues.push(format!(
                     "owner '{display_name}': tree_graph appearance for node '{node_id}' has invalid locked, must be a boolean"
                 ));
-            }
         }
     }
 }
 
-fn validate_appearance_images(
-    images_arr: &[Value],
-    display_name: &str,
-    issues: &mut Vec<String>,
-) {
+fn validate_appearance_images(images_arr: &[Value], display_name: &str, issues: &mut Vec<String>) {
     let mut seen_ids: BTreeSet<&str> = BTreeSet::new();
 
     for (idx, img_val) in images_arr.iter().enumerate() {
@@ -759,7 +813,8 @@ fn validate_appearance_edges(
         match parsed_pair {
             Ok([from, to]) => {
                 if serde_json::to_string(&[&from, &to]).ok().as_deref() != Some(edge_key.as_str())
-                    || !valid_edges.contains(&(from.as_str(), to.as_str())) {
+                    || !valid_edges.contains(&(from.as_str(), to.as_str()))
+                {
                     issues.push(format!(
                         "owner '{display_name}': tree_graph appearance edge '{edge_key}' is not in edges"
                     ));
@@ -797,7 +852,9 @@ fn validate_appearance_edges(
         }
 
         if let Some(w_val) = edge_obj.get("width") {
-            let valid = w_val.as_f64().is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
+            let valid = w_val
+                .as_f64()
+                .is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
             if !valid {
                 issues.push(format!(
                     "owner '{display_name}': tree_graph appearance for edge '{edge_key}' has invalid width, must be a finite number between 1 and 12"
@@ -857,12 +914,12 @@ fn validate_appearance_defaults(
         }
     }
 
-    if let Some(css_val) = defaults_map.get("customCss") {
-        if !css_val.is_string() {
-            issues.push(format!(
+    if let Some(css_val) = defaults_map.get("customCss")
+        && !css_val.is_string()
+    {
+        issues.push(format!(
                 "owner '{display_name}': tree_graph appearance defaults 'customCss' must be a string, got {css_val}"
             ));
-        }
     }
 }
 
@@ -872,7 +929,16 @@ fn validate_appearance_default_node(
     issues: &mut Vec<String>,
 ) {
     for key in node_obj.keys() {
-        if !["background", "outline", "outlineWidth", "width", "height", "shape"].contains(&key.as_str()) {
+        if ![
+            "background",
+            "outline",
+            "outlineWidth",
+            "width",
+            "height",
+            "shape",
+        ]
+        .contains(&key.as_str())
+        {
             issues.push(format!(
                 "owner '{display_name}': tree_graph appearance default node contains unknown key '{key}'"
             ));
@@ -898,7 +964,9 @@ fn validate_appearance_default_node(
     }
 
     if let Some(ow_val) = node_obj.get("outlineWidth") {
-        let valid = ow_val.as_f64().is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
+        let valid = ow_val
+            .as_f64()
+            .is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
         if !valid {
             issues.push(format!(
                 "owner '{display_name}': tree_graph appearance default node has invalid outlineWidth, must be a finite number between 1 and 12"
@@ -907,7 +975,9 @@ fn validate_appearance_default_node(
     }
 
     if let Some(w_val) = node_obj.get("width") {
-        let valid = w_val.as_f64().is_some_and(|w| w.is_finite() && (100.0..=600.0).contains(&w));
+        let valid = w_val
+            .as_f64()
+            .is_some_and(|w| w.is_finite() && (100.0..=600.0).contains(&w));
         if !valid {
             issues.push(format!(
                 "owner '{display_name}': tree_graph appearance default node has invalid width, must be a finite number between 100 and 600"
@@ -916,7 +986,9 @@ fn validate_appearance_default_node(
     }
 
     if let Some(h_val) = node_obj.get("height") {
-        let valid = h_val.as_f64().is_some_and(|h| h.is_finite() && (60.0..=400.0).contains(&h));
+        let valid = h_val
+            .as_f64()
+            .is_some_and(|h| h.is_finite() && (60.0..=400.0).contains(&h));
         if !valid {
             issues.push(format!(
                 "owner '{display_name}': tree_graph appearance default node has invalid height, must be a finite number between 60 and 400"
@@ -959,7 +1031,9 @@ fn validate_appearance_default_edge(
     }
 
     if let Some(w_val) = edge_obj.get("width") {
-        let valid = w_val.as_f64().is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
+        let valid = w_val
+            .as_f64()
+            .is_some_and(|w| w.is_finite() && (1.0..=12.0).contains(&w));
         if !valid {
             issues.push(format!(
                 "owner '{display_name}': tree_graph appearance default edge has invalid width, must be a finite number between 1 and 12"
@@ -978,7 +1052,6 @@ fn validate_appearance_default_edge(
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1015,7 +1088,8 @@ mod tests {
                 "name": "TreeItem",
                 "properties": []
             }
-        ])).unwrap()
+        ]))
+        .unwrap()
     }
 
     #[test]
@@ -1081,11 +1155,15 @@ mod tests {
                     "values": {}
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
 
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.is_empty(), "Expected defaults to pass, got: {issues:?}");
+        assert!(
+            issues.is_empty(),
+            "Expected defaults to pass, got: {issues:?}"
+        );
     }
 
     #[test]
@@ -1107,13 +1185,22 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
 
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert_eq!(issues.len(), 2);
-        assert!(issues[0].contains("Graph Owner") && issues[0].contains("plain-entity") && issues[0].contains("TreeItem"));
-        assert!(issues[1].contains("Graph Owner") && issues[1].contains("non-existent-id") && issues[1].contains("missing"));
+        assert!(
+            issues[0].contains("Graph Owner")
+                && issues[0].contains("plain-entity")
+                && issues[0].contains("TreeItem")
+        );
+        assert!(
+            issues[1].contains("Graph Owner")
+                && issues[1].contains("non-existent-id")
+                && issues[1].contains("missing")
+        );
     }
 
     #[test]
@@ -1144,7 +1231,8 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
 
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
@@ -1177,7 +1265,8 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
 
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
@@ -1201,7 +1290,8 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
 
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
@@ -1233,7 +1323,8 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
 
         let index = make_test_index(templates, entities);
 
@@ -1260,7 +1351,8 @@ mod tests {
                 "name": "Item 1",
                 "traits": [{ "template_id": "tid-tree-item", "values": {} }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
 
         let index = make_test_index(templates, entities);
 
@@ -1271,7 +1363,8 @@ mod tests {
                     "nodes": ["item-1", "missing-item"]
                 }
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
 
         let issues = validate_tree_graphs(
             &index,
@@ -1307,9 +1400,22 @@ mod tests {
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
         assert_eq!(issues.len(), 4);
-        assert!(issues.iter().any(|i| i.contains("invalid direction key 'diagonal'")));
-        assert!(issues.iter().any(|i| i.contains("positions direction 'right' key 'missing-node' is not in nodes")));
-        assert!(issues.iter().any(|i| i.contains("contains unknown key 'unknown_key'")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("invalid direction key 'diagonal'"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i
+                    .contains("positions direction 'right' key 'missing-node' is not in nodes"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("contains unknown key 'unknown_key'"))
+        );
         assert!(issues.iter().any(|i| i.contains("invalid x coordinate")));
     }
 
@@ -1381,7 +1487,8 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
 
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
@@ -1432,25 +1539,62 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
 
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.iter().any(|i| i.contains("appearance contains unknown key 'unknown_root'")));
-        assert!(issues.iter().any(|i| i.contains("invalid canvasBackground color")));
-        assert!(issues.iter().any(|i| i.contains("invalid background color")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance contains unknown key 'unknown_root'"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("invalid canvasBackground color"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("invalid background color"))
+        );
         assert!(issues.iter().any(|i| i.contains("invalid outline color")));
         assert!(issues.iter().any(|i| i.contains("invalid outlineWidth")));
         assert!(issues.iter().any(|i| i.contains("invalid width")));
         assert!(issues.iter().any(|i| i.contains("invalid height")));
         assert!(issues.iter().any(|i| i.contains("unknown key 'extra'")));
-        assert!(issues.iter().any(|i| i.contains("appearance node 'stale-node' is not in nodes")));
-        assert!(issues.iter().any(|i| i.contains("malformed edge key 'malformed-edge-key'")));
-        assert!(issues.iter().any(|i| i.contains("appearance edge '[\"item-1\",\"item-1\"]' is not in edges")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance node 'stale-node' is not in nodes"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("malformed edge key 'malformed-edge-key'"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance edge '[\"item-1\",\"item-1\"]' is not in edges"))
+        );
         assert!(issues.iter().any(|i| i.contains("invalid color")));
-        assert!(issues.iter().any(|i| i.contains("invalid width, must be a finite number between 1 and 12")));
-        assert!(issues.iter().any(|i| i.contains("unknown key 'extra_edge'")));
-        assert!(issues.iter().any(|i| i.contains("invalid pattern, expected solid, dash, dot, or brush")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("invalid width, must be a finite number between 1 and 12"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("unknown key 'extra_edge'"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("invalid pattern, expected solid, dash, dot, or brush"))
+        );
     }
 
     #[test]
@@ -1486,13 +1630,23 @@ mod tests {
                         }
                     }]
                 }
-            ])).unwrap();
+            ]))
+            .unwrap();
             let index = make_test_index(templates.clone(), entities);
             let issues = validate_tree_graphs(&index, None, None);
-            assert!(issues.is_empty(), "pattern {valid_pat} produced issues: {issues:?}");
+            assert!(
+                issues.is_empty(),
+                "pattern {valid_pat} produced issues: {issues:?}"
+            );
         }
 
-        for invalid_pat in [json!("wave"), json!(123), json!(true), json!(null), json!(["solid"])] {
+        for invalid_pat in [
+            json!("wave"),
+            json!(123),
+            json!(true),
+            json!(null),
+            json!(["solid"]),
+        ] {
             let entities: Vec<EntityRecord> = serde_json::from_value(json!([
                 {
                     "id": "item-1",
@@ -1522,11 +1676,14 @@ mod tests {
                         }
                     }]
                 }
-            ])).unwrap();
+            ]))
+            .unwrap();
             let index = make_test_index(templates.clone(), entities);
             let issues = validate_tree_graphs(&index, None, None);
             assert!(
-                issues.iter().any(|i| i.contains("invalid pattern, expected solid, dash, dot, or brush")),
+                issues
+                    .iter()
+                    .any(|i| i.contains("invalid pattern, expected solid, dash, dot, or brush")),
                 "expected rejection for pattern {invalid_pat}, got {issues:?}"
             );
         }
@@ -1576,10 +1733,14 @@ mod tests {
                         }
                     }]
                 }
-            ])).unwrap();
+            ]))
+            .unwrap();
             let index = make_test_index(templates.clone(), entities);
             let issues = validate_tree_graphs(&index, None, None);
-            assert!(issues.is_empty(), "shape {shape} produced issues: {issues:?}");
+            assert!(
+                issues.is_empty(),
+                "shape {shape} produced issues: {issues:?}"
+            );
         }
 
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
@@ -1602,10 +1763,14 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.is_empty(), "empty defaults produced issues: {issues:?}");
+        assert!(
+            issues.is_empty(),
+            "empty defaults produced issues: {issues:?}"
+        );
     }
 
     #[test]
@@ -1637,13 +1802,28 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.iter().any(|i| i.contains("appearance defaults contains unknown key 'unknown_defaults_key'")));
-        assert!(issues.iter().any(|i| i.contains("appearance defaults 'node' must be an object")));
-        assert!(issues.iter().any(|i| i.contains("appearance defaults 'edge' must be an object")));
-        assert!(issues.iter().any(|i| i.contains("appearance defaults 'customCss' must be a string")));
+        assert!(issues.iter().any(|i| {
+            i.contains("appearance defaults contains unknown key 'unknown_defaults_key'")
+        }));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance defaults 'node' must be an object"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance defaults 'edge' must be an object"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance defaults 'customCss' must be a string"))
+        );
 
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             {
@@ -1665,10 +1845,15 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.iter().any(|i| i.contains("appearance 'defaults' must be an object")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance 'defaults' must be an object"))
+        );
 
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             {
@@ -1706,20 +1891,61 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.iter().any(|i| i.contains("appearance default node contains unknown key 'extra_node_key'")));
-        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid background color")));
-        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid outline color")));
-        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid outlineWidth")));
-        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid width")));
-        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid height")));
-        assert!(issues.iter().any(|i| i.contains("appearance default node has invalid shape, expected card, rounded, ellipse, or diamond")));
-        assert!(issues.iter().any(|i| i.contains("appearance default edge contains unknown key 'extra_edge_key'")));
-        assert!(issues.iter().any(|i| i.contains("appearance default edge has invalid color")));
-        assert!(issues.iter().any(|i| i.contains("appearance default edge has invalid width")));
-        assert!(issues.iter().any(|i| i.contains("appearance default edge has invalid pattern, expected solid, dash, dot, or brush")));
+        assert!(
+            issues.iter().any(
+                |i| i.contains("appearance default node contains unknown key 'extra_node_key'")
+            )
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance default node has invalid background color"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance default node has invalid outline color"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance default node has invalid outlineWidth"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance default node has invalid width"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance default node has invalid height"))
+        );
+        assert!(issues.iter().any(|i| i.contains(
+            "appearance default node has invalid shape, expected card, rounded, ellipse, or diamond"
+        )));
+        assert!(
+            issues.iter().any(
+                |i| i.contains("appearance default edge contains unknown key 'extra_edge_key'")
+            )
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance default edge has invalid color"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance default edge has invalid width"))
+        );
+        assert!(issues.iter().any(|i| i.contains(
+            "appearance default edge has invalid pattern, expected solid, dash, dot, or brush"
+        )));
     }
 
     #[test]
@@ -1749,7 +1975,10 @@ mod tests {
         ])).unwrap();
         let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.is_empty(), "expected valid node locked, got: {issues:?}");
+        assert!(
+            issues.is_empty(),
+            "expected valid node locked, got: {issues:?}"
+        );
 
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
@@ -1772,7 +2001,9 @@ mod tests {
         ])).unwrap();
         let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.iter().any(|i| i.contains("appearance for node 'item-1' has invalid locked, must be a boolean")));
+        assert!(issues.iter().any(|i| {
+            i.contains("appearance for node 'item-1' has invalid locked, must be a boolean")
+        }));
 
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
@@ -1795,7 +2026,11 @@ mod tests {
         ])).unwrap();
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.iter().any(|i| i.contains("appearance default node contains unknown key 'locked'")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance default node contains unknown key 'locked'"))
+        );
     }
 
     #[test]
@@ -1821,7 +2056,10 @@ mod tests {
         ])).unwrap();
         let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.is_empty(), "expected empty images to be valid, got: {issues:?}");
+        assert!(
+            issues.is_empty(),
+            "expected empty images to be valid, got: {issues:?}"
+        );
 
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
@@ -1888,7 +2126,10 @@ mod tests {
         ])).unwrap();
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.is_empty(), "expected valid images to pass, got: {issues:?}");
+        assert!(
+            issues.is_empty(),
+            "expected valid images to pass, got: {issues:?}"
+        );
     }
 
     #[test]
@@ -1914,7 +2155,11 @@ mod tests {
         ])).unwrap();
         let index = make_test_index(templates.clone(), entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.iter().any(|i| i.contains("appearance 'images' must be an array")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance 'images' must be an array"))
+        );
 
         let entities: Vec<EntityRecord> = serde_json::from_value(json!([
             { "id": "item-1", "name": "Item 1", "traits": [{ "template_id": "tid-tree-item", "values": {} }] },
@@ -1980,21 +2225,79 @@ mod tests {
         ])).unwrap();
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 0 must be an object")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 1 contains unknown key 'unknown_image_prop'")));
-        assert!(issues.iter().any(|i| i.contains("appearance duplicate image id 'img-dup'")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has empty id")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has empty src")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has invalid x")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 missing 'y'")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has invalid width")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has invalid height")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 3 has invalid locked")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 4 missing 'id'")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 4 has invalid src")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 4 missing 'locked'")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 5 'id' must be a string")));
-        assert!(issues.iter().any(|i| i.contains("appearance image at index 5 has invalid src")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 0 must be an object"))
+        );
+        assert!(issues.iter().any(|i| {
+            i.contains("appearance image at index 1 contains unknown key 'unknown_image_prop'")
+        }));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance duplicate image id 'img-dup'"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 3 has empty id"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 3 has empty src"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 3 has invalid x"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 3 missing 'y'"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 3 has invalid width"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 3 has invalid height"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 3 has invalid locked"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 4 missing 'id'"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 4 has invalid src"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 4 missing 'locked'"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 5 'id' must be a string"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("appearance image at index 5 has invalid src"))
+        );
     }
 
     #[test]
@@ -2065,20 +2368,27 @@ mod tests {
                     }
                 }]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
 
         let index = make_test_index(templates, entities);
         let issues = validate_tree_graphs(&index, None, None);
 
         assert!(!issues.iter().any(|i| i.contains("Graph Valid")));
 
-        let invalid_issues: Vec<&String> = issues.iter().filter(|i| i.contains("Graph Invalid")).collect();
+        let invalid_issues: Vec<&String> = issues
+            .iter()
+            .filter(|i| i.contains("Graph Invalid"))
+            .collect();
         assert_eq!(invalid_issues.len(), 8);
         for issue in &invalid_issues {
             assert!(issue.contains("tree_graph malformed edge"));
         }
 
-        let dup_issues: Vec<&String> = issues.iter().filter(|i| i.contains("Graph Duplicate")).collect();
+        let dup_issues: Vec<&String> = issues
+            .iter()
+            .filter(|i| i.contains("Graph Duplicate"))
+            .collect();
         assert_eq!(dup_issues.len(), 1);
         assert!(dup_issues[0].contains("duplicate edge from 'item-1' to 'item-2'"));
     }
@@ -2104,7 +2414,8 @@ mod tests {
                 "template_id": "tree-item-id",
                 "values": { "level": 0, "cost": 100, "rank": "Gold" }
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         assert!(validate_tree_item_traits(&valid_traits, &templates, "owner").is_ok());
 
         let absent_traits: Vec<TraitInstance> = serde_json::from_value(json!([
@@ -2113,7 +2424,8 @@ mod tests {
                 "template_id": "tree-item-id",
                 "values": { "rank": "Silver" }
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         assert!(validate_tree_item_traits(&absent_traits, &templates, "owner").is_ok());
 
         let neg_level: Vec<TraitInstance> = serde_json::from_value(json!([
@@ -2122,9 +2434,13 @@ mod tests {
                 "template_id": "tree-item-id",
                 "values": { "level": -1, "cost": 0 }
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         let err = validate_tree_item_traits(&neg_level, &templates, "owner").unwrap_err();
-        assert!(err.contains("TreeItem 'level' must be a nonnegative integer"), "got {err}");
+        assert!(
+            err.contains("TreeItem 'level' must be a nonnegative integer"),
+            "got {err}"
+        );
 
         let neg_cost: Vec<TraitInstance> = serde_json::from_value(json!([
             {
@@ -2132,9 +2448,13 @@ mod tests {
                 "template_id": "tree-item-id",
                 "values": { "level": 1, "cost": -5 }
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         let err = validate_tree_item_traits(&neg_cost, &templates, "owner").unwrap_err();
-        assert!(err.contains("TreeItem 'cost' must be a nonnegative integer"), "got {err}");
+        assert!(
+            err.contains("TreeItem 'cost' must be a nonnegative integer"),
+            "got {err}"
+        );
 
         let float_level: Vec<TraitInstance> = serde_json::from_value(json!([
             {
@@ -2142,9 +2462,13 @@ mod tests {
                 "template_id": "tree-item-id",
                 "values": { "level": 2.5 }
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         let err = validate_tree_item_traits(&float_level, &templates, "owner").unwrap_err();
-        assert!(err.contains("TreeItem 'level' must be a nonnegative integer"), "got {err}");
+        assert!(
+            err.contains("TreeItem 'level' must be a nonnegative integer"),
+            "got {err}"
+        );
 
         let string_templates: Vec<TraitTemplateRecord> = serde_json::from_value(json!([
             {
@@ -2155,14 +2479,16 @@ mod tests {
                     { "key": "level", "name": "Level", "type": "string", "is_array": false }
                 ]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         let string_level: Vec<TraitInstance> = serde_json::from_value(json!([
             {
                 "id": "t1",
                 "template_id": "tree-item-id",
                 "values": { "level": "advanced" }
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         assert!(validate_tree_item_traits(&string_level, &string_templates, "owner").is_ok());
 
         let array_templates: Vec<TraitTemplateRecord> = serde_json::from_value(json!([
@@ -2174,14 +2500,16 @@ mod tests {
                     { "key": "cost", "name": "Cost", "type": "int", "is_array": true }
                 ]
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         let array_cost: Vec<TraitInstance> = serde_json::from_value(json!([
             {
                 "id": "t1",
                 "template_id": "tree-item-id",
                 "values": { "cost": [-1, 2] }
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         assert!(validate_tree_item_traits(&array_cost, &array_templates, "owner").is_ok());
 
         let empty_templates: Vec<TraitTemplateRecord> = serde_json::from_value(json!([
@@ -2191,14 +2519,16 @@ mod tests {
                 "name": "TreeItem",
                 "properties": []
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         let empty_instance: Vec<TraitInstance> = serde_json::from_value(json!([
             {
                 "id": "t1",
                 "template_id": "tree-item-id",
                 "values": {}
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         assert!(validate_tree_item_traits(&empty_instance, &empty_templates, "owner").is_ok());
 
         let out_of_range: Vec<TraitInstance> = serde_json::from_value(json!([
@@ -2207,9 +2537,13 @@ mod tests {
                 "template_id": "tree-item-id",
                 "values": { "level": 18446744073709551615u64 }
             }
-        ])).unwrap();
+        ]))
+        .unwrap();
         let err = validate_tree_item_traits(&out_of_range, &templates, "owner").unwrap_err();
-        assert!(err.contains("TreeItem 'level' must be a nonnegative integer"), "got {err}");
+        assert!(
+            err.contains("TreeItem 'level' must be a nonnegative integer"),
+            "got {err}"
+        );
     }
 
     #[test]
@@ -2222,7 +2556,8 @@ mod tests {
                 { "key": "level", "name": "Level", "type": "int", "is_array": false, "default": 0 },
                 { "key": "cost", "name": "Cost", "type": "int", "is_array": false, "default": 10 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(validate_tree_item_template(&valid_tpl, "prefix").is_ok());
 
         let neg_level_tpl: TraitTemplateRecord = serde_json::from_value(json!({
@@ -2232,9 +2567,13 @@ mod tests {
             "properties": [
                 { "key": "level", "name": "Level", "type": "int", "is_array": false, "default": -1 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         let err = validate_tree_item_template(&neg_level_tpl, "prefix").unwrap_err();
-        assert!(err.contains("TreeItem 'level' default must be a nonnegative integer"), "got {err}");
+        assert!(
+            err.contains("TreeItem 'level' default must be a nonnegative integer"),
+            "got {err}"
+        );
 
         let neg_cost_tpl: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "tree-item-id",
@@ -2243,9 +2582,13 @@ mod tests {
             "properties": [
                 { "key": "cost", "name": "Cost", "type": "int", "is_array": false, "default": -5 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         let err = validate_tree_item_template(&neg_cost_tpl, "prefix").unwrap_err();
-        assert!(err.contains("TreeItem 'cost' default must be a nonnegative integer"), "got {err}");
+        assert!(
+            err.contains("TreeItem 'cost' default must be a nonnegative integer"),
+            "got {err}"
+        );
 
         let null_default_tpl: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "tree-item-id",
@@ -2266,7 +2609,10 @@ mod tests {
             ]
         })).unwrap();
         let err = validate_tree_item_template(&frac_default_tpl, "prefix").unwrap_err();
-        assert!(err.contains("TreeItem 'level' default must be a nonnegative integer"), "got {err}");
+        assert!(
+            err.contains("TreeItem 'level' default must be a nonnegative integer"),
+            "got {err}"
+        );
 
         let str_default_tpl: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "tree-item-id",
@@ -2277,7 +2623,10 @@ mod tests {
             ]
         })).unwrap();
         let err = validate_tree_item_template(&str_default_tpl, "prefix").unwrap_err();
-        assert!(err.contains("TreeItem 'level' default must be a nonnegative integer"), "got {err}");
+        assert!(
+            err.contains("TreeItem 'level' default must be a nonnegative integer"),
+            "got {err}"
+        );
 
         let obj_default_tpl: TraitTemplateRecord = serde_json::from_value(json!({
             "id": "tree-item-id",
@@ -2286,8 +2635,12 @@ mod tests {
             "properties": [
                 { "key": "cost", "name": "Cost", "type": "int", "is_array": false, "default": {} }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         let err = validate_tree_item_template(&obj_default_tpl, "prefix").unwrap_err();
-        assert!(err.contains("TreeItem 'cost' default must be a nonnegative integer"), "got {err}");
+        assert!(
+            err.contains("TreeItem 'cost' default must be a nonnegative integer"),
+            "got {err}"
+        );
     }
 }
