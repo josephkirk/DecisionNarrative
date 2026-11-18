@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const MAX_AUTO_ADVANCE_MS: i64 = 600_000;
+pub const START_EVENT: u32 = 0;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -758,6 +759,12 @@ impl RunKernel {
             Err(e) => return Err(e),
         };
         run.stalled = stalled.clone();
+        for row in &mut run.world.knowledge.rows {
+            row.source_event = START_EVENT;
+        }
+        for row in &mut run.world.telling.rows {
+            row.source_event = START_EVENT;
+        }
         let initial = run.snapshot();
         run.snapshots[0].push(initial);
         Ok((run, stalled))
@@ -1097,6 +1104,9 @@ impl RunKernel {
         Ok(receipt)
     }
     pub fn explain(&self, event_id: u32) -> Option<Vec<RunEvent>> {
+        if event_id == START_EVENT {
+            return Some(Vec::new());
+        }
         let mut pending = vec![event_id];
         let mut ids = Vec::new();
         while let Some(id) = pending.pop() {
@@ -1996,6 +2006,9 @@ pub struct AdvancedView {
 }
 impl RunKernel {
     pub fn step_of_event(&self, event: u32) -> Option<u32> {
+        if event == START_EVENT {
+            return Some(0);
+        }
         self.event_log
             .iter()
             .find(|row| row.id == event)
